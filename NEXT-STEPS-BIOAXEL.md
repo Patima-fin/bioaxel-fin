@@ -1,5 +1,12 @@
 # BIOAXEL Financial Console — ขั้นตอนที่เหลือ (สำหรับคุณ)
 
+> ## ✅ STEP 1–4 เสร็จแล้ว (2026-06-18) — เว็บ LIVE: https://patima-fin.github.io/bioaxel-fin/
+> - Supabase project `tfcxbcekxwnncdqiqzav` · รัน `schema.sql` + `pnl-budget.sql` ครบ · `config.js` กรอก URL + publishable key แล้ว
+> - โลโก้ BIOAXEL ใหม่ (แนวตั้ง ครอบตัด พื้นโปร่งใส) · push ขึ้น repo `Patima-fin/bioaxel-fin` (`master`) + เปิด GitHub Pages แล้ว
+> - login (bootstrap): **admin / bioaxel-setup-2026**
+> ### ⬜ เหลือ STEP 5 (ทำก่อนเปิดใช้จริง/ก่อนใส่ข้อมูลจริง) — ตอนนี้ RLS ปิด + ยังไม่ใช้ Supabase Auth = ใครมีลิงก์ก็เข้า/แก้ DB ได้
+> (รายละเอียดอยู่ STEP 5 ด้านล่าง · และ `#investor` ยังเป็นเนื้อหา Water POG)
+
 เว็บนี้ถูก **scaffold เสร็จแล้ว** จากโค้ด Water POG (rebrand เป็น BIOAXEL, แยกโฟลเดอร์/ฐานข้อมูล/โดเมน
 ออกจากกันหมด) เหลือ 5 ขั้นตอนที่ต้องใช้ "บัญชีของคุณ" (Supabase + GitHub) ที่ผมทำแทนไม่ได้
 
