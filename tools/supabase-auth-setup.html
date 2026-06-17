@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BIOAXEL — ตั้งค่า Supabase Auth (สร้าง/เพิ่มผู้ใช้ + ตั้งรหัสเอง)</title>
+<script>document.write('<scr' + 'ipt src="../app/config.js?_=' + Date.now() + '"><\/scr' + 'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  body { font: 15px/1.6 "IBM Plex Sans Thai", system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; color: #1f2733; background: #f4f7fb; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #5a6478; margin: 0 0 16px; }
+  .card { background: #fff; border: 1px solid #e2e8f2; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,40,80,.05); }
+  .danger { background: #fff0f0; border: 1px solid #ffc9c9; border-radius: 10px; padding: 12px 14px; font-size: 13.5px; color: #a01818; margin-bottom: 14px; }
+  label.f { display:block; font-weight:600; font-size:13px; margin-bottom:6px; }
+  input, select { box-sizing:border-box; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:8px; font:14px ui-monospace,monospace; }
+  input[readonly] { background:#f6f8fb; color:#5a6478; }
+  #srk { width:100%; }
+  button { font: 600 14px "IBM Plex Sans Thai", system-ui; border: 0; border-radius: 9px; padding: 9px 16px; cursor: pointer; }
+  .btn-go { background: linear-gradient(90deg,#2a6fdb,#36a9e1); color:#fff; padding:11px 22px; font-size:15px; }
+  .btn-sm { background:#eef2f8; color:#2a4a7a; }
+  .btn-add { background:#e8f6ee; color:#0a7d3c; }
+  .btn-x { background:#fff0f0; color:#c0392b; padding:4px 9px; }
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  table { width:100%; border-collapse:collapse; font-size:13.5px; margin-top:8px; }
+  th,td { text-align:left; padding:5px 7px; border-bottom:1px solid #eef2f8; vertical-align:middle; }
+  th { color:#5a6478; font-weight:500; }
+  .u-name{width:130px} .u-disp{width:150px} .u-pw{width:160px} .u-role{font-family:inherit}
+  .st-ok{color:#0a7d3c;font-weight:600;} .st-err{color:#c0392b;font-weight:600;}
+  #log { background:#0f1722; color:#c8e1ff; font:12px/1.5 ui-monospace,monospace; border-radius:10px; padding:12px; height:150px; overflow:auto; white-space:pre-wrap; }
+  textarea { width:100%; box-sizing:border-box; height:120px; font:12px ui-monospace,monospace; border:1px solid #e2e8f0; border-radius:9px; padding:10px; }
+  .quick { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; }
+</style>
+</head>
+<body>
+  <h1>ตั้งค่า Supabase Auth — สร้าง / เพิ่มผู้ใช้ + ตั้งรหัสเอง</h1>
+  <p class="sub">สร้าง/อัปเดต/เพิ่มบัญชี Supabase Auth — พิมพ์รหัสเองได้ · เพิ่มคนใหม่ได้ในตัว · ฝัง role ใน app_metadata (ใช้กับ RLS)</p>
+
+  <div class="danger">
+    🔐 <b>service_role key คือกุญแจระดับสูงสุด</b> — วางในหน้านี้ใช้ครั้งเดียวในเครื่องคุณเท่านั้น (อยู่ในหน่วยความจำ ไม่บันทึก ไม่ขึ้น repo).
+    เอาจาก Supabase → Project Settings → API → <b>service_role · secret</b> (กด Reveal). ทำเสร็จแนะนำหมุน (regenerate) key ได้ (แอปใช้แค่ anon key).
+  </div>
+
+  <div class="card" id="cfgCard"></div>
+
+  <div class="card">
+    <label class="f">1) service_role key (secret)</label>
+    <input type="password" id="srk" placeholder="eyJ... (service_role)" autocomplete="off" />
+    <p style="margin:10px 0 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn-sm" id="loadSb" disabled>↻ โหลดผู้ใช้ที่มีอยู่จาก Supabase</button>
+      <span style="color:#5a6478;font-size:12.5px">ดึงรายชื่อจริงทั้งหมด รวม <b>คนที่เพิ่มไปก่อนหน้า</b> ที่ยังไม่อยู่ใน config.js (ไม่งั้นจะแก้รหัสเขาไม่ได้)</span>
+    </p>
+  </div>
+
+  <div class="card">
+    <label class="f">2) ผู้ใช้ + รหัสผ่าน — <b>ติ๊กช่อง "ทำ" เฉพาะคนที่จะตั้งรหัส/เพิ่ม</b> (คนที่ไม่ติ๊ก = ไม่ถูกแตะเลย) · รหัสขั้นต่ำ 6 ตัว</label>
+    <div class="quick">
+      <button class="btn-sm" id="selAll">☑ เลือกทั้งหมด</button>
+      <button class="btn-sm" id="selNone">☐ ไม่เลือก</button>
+      <input type="text" id="bulk" placeholder="พิมพ์รหัสเดียว…" style="width:170px" />
+      <button class="btn-sm" id="applyBulk">เติมรหัส (ที่เลือก)</button>
+      <button class="btn-sm" id="rand">สุ่มรหัส (ที่เลือก)</button>
+      <button class="btn-add" id="addRow">+ เพิ่มผู้ใช้ใหม่</button>
+      <span style="color:#5a6478;font-size:12.5px;margin-left:auto">domain: <b id="dom"></b></span>
+    </div>
+    <table id="utbl"><thead><tr><th style="width:34px;text-align:center">ทำ</th><th>ชื่อผู้ใช้ (username)</th><th>role</th><th>ชื่อแสดง</th><th>รหัสผ่าน</th><th>สถานะ</th></tr></thead><tbody></tbody></table>
+    <p style="margin:14px 0 0"><button class="btn-go" id="go" disabled>สร้าง / อัปเดต เฉพาะที่เลือก</button></p>
+  </div>
+
+  <div class="card" id="resCard" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px">
+      <b>สรุปรหัส — ก็อป/ดาวน์โหลดเก็บก่อนปิดแท็บ (ดูย้อนหลังไม่ได้)</b>
+      <button class="btn-sm" id="dl">⬇ ดาวน์โหลด .txt</button>
+    </div>
+    <textarea id="dump" readonly></textarea>
+  </div>
+
+  <div class="card"><div id="log"></div></div>
+
+<script>
+(function(){
+  'use strict';
+  var cfg = window.WTP_CONFIG || {};
+  var URL_ = cfg.SUPABASE_URL || '';
+  var DOMAIN = cfg.AUTH_EMAIL_DOMAIN || 'waterpog.app';
+  var USERS = (cfg.USERS || []).slice();
+  var ROLES = ['viewer','staff','manager','owner'];
+  document.getElementById('dom').textContent = '@' + DOMAIN;
+
+  var logEl = document.getElementById('log');
+  function log(m){ logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+  var libOk = !!(window.supabase && window.supabase.createClient);
+  document.getElementById('cfgCard').innerHTML =
+    '<div style="font-size:14px"><b>SUPABASE_URL:</b> <span style="color:'+(URL_?'#0a7d3c':'#c0392b')+'">'+(URL_||'✗ ยังไม่ตั้งใน config.js')+'</span>'+
+    '<br><b>ผู้ใช้จาก config:</b> '+USERS.length+' (เพิ่มคนใหม่ได้ด้วยปุ่ม "+ เพิ่มผู้ใช้ใหม่")'+
+    '<br><b>supabase-js:</b> <span style="color:'+(libOk?'#0a7d3c':'#c0392b')+'">'+(libOk?'พร้อม':'✗ ไม่โหลด')+'</span></div>';
+
+  function genPw(){ var cs='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; var a=new Uint32Array(10); crypto.getRandomValues(a); var s=''; for(var i=0;i<10;i++) s+=cs[a[i]%cs.length]; return s; }
+  function esc(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); }
+
+  var tbody = document.querySelector('#utbl tbody');
+  function roleSelect(sel){ return '<select class="u-role">'+ROLES.map(function(r){return '<option'+(r===sel?' selected':'')+'>'+r+'</option>';}).join('')+'</select>'; }
+  // isNew=false → username readonly (จาก config); isNew=true → แก้ได้ + ปุ่มลบ
+  function addRow(username, role, displayName, isNew){
+    var tr=document.createElement('tr');
+    tr.innerHTML =
+      '<td style="text-align:center"><input type="checkbox" class="u-do"'+(isNew?' checked':'')+'></td>'+
+      '<td><input class="u-name" value="'+esc(username)+'"'+(isNew?'':' readonly')+'></td>'+
+      '<td>'+roleSelect(role||'staff')+'</td>'+
+      '<td><input class="u-disp" value="'+esc(displayName||username)+'"></td>'+
+      '<td><input class="u-pw" value="'+genPw()+'"></td>'+
+      '<td class="st">'+(isNew?'<button class="btn-x" title="ลบแถวนี้">✕</button>':'—')+'</td>';
+    tbody.appendChild(tr);
+    if(isNew){ tr.querySelector('.btn-x').onclick=function(){ tr.remove(); }; tr.querySelector('.u-name').focus(); }
+  }
+  USERS.forEach(function(u){ addRow(u.username, u.role, u.displayName, false); });
+
+  // เฉพาะแถวที่ติ๊ก "ทำ" — ปุ่มเติม/สุ่มรหัส + การ submit ทำเฉพาะแถวเหล่านี้
+  function allTrs(){ return [].slice.call(document.querySelectorAll('#utbl tbody tr')); }
+  function checkedTrs(){ return allTrs().filter(function(tr){ var c=tr.querySelector('.u-do'); return c && c.checked; }); }
+  function pwInputs(){ return checkedTrs().map(function(tr){ return tr.querySelector('.u-pw'); }); }
+  document.getElementById('selAll').onclick  = function(){ allTrs().forEach(function(tr){ var c=tr.querySelector('.u-do'); if(c) c.checked=true; }); };
+  document.getElementById('selNone').onclick = function(){ allTrs().forEach(function(tr){ var c=tr.querySelector('.u-do'); if(c) c.checked=false; }); };
+  document.getElementById('applyBulk').onclick = function(){ var v=document.getElementById('bulk').value; var t=pwInputs(); if(!t.length){ alert('ยังไม่ได้ติ๊กเลือกใคร'); return; } t.forEach(function(i){ i.value=v; }); };
+  document.getElementById('rand').onclick = function(){ var t=pwInputs(); if(!t.length){ alert('ยังไม่ได้ติ๊กเลือกใคร'); return; } t.forEach(function(i){ i.value=genPw(); }); };
+  document.getElementById('addRow').onclick = function(){ addRow('', 'staff', '', true); };
+  document.getElementById('dl').onclick = function(){ var txt=document.getElementById('dump').value; if(!txt){ alert('ยังไม่มีรหัส'); return; } var blob=new Blob([txt],{type:'text/plain;charset=utf-8'}); var a=document.createElement('a'); a.href=window.URL.createObjectURL(blob); a.download='waterpog-passwords-'+new Date().toISOString().slice(0,10)+'.txt'; a.click(); window.URL.revokeObjectURL(a.href); };
+
+  var srk = document.getElementById('srk');
+  var go = document.getElementById('go');
+  var loadSb = document.getElementById('loadSb');
+  function refresh(){ var ok = !!(URL_ && libOk && srk.value.trim().length > 20); go.disabled = !ok; if(loadSb) loadSb.disabled = !ok; }
+  srk.addEventListener('input', refresh); refresh();
+
+  // โหลดผู้ใช้ที่มีอยู่จริงใน Supabase Auth — รวมคนที่เพิ่มไปก่อนหน้าแต่ไม่อยู่ใน config.js
+  // (ไม่งั้นเปิด tool มาจะเห็นแค่คนใน config → แก้รหัสคนที่เพิ่งสร้างไม่ได้)
+  if(loadSb) loadSb.onclick = function(){
+    if(!srk.value.trim()){ alert('วาง service_role key ก่อน'); return; }
+    var admin = window.supabase.createClient(URL_, srk.value.trim(), { auth:{ persistSession:false, autoRefreshToken:false } });
+    loadSb.disabled = true; log('กำลังโหลดผู้ใช้จาก Supabase…');
+    admin.auth.admin.listUsers({ page:1, perPage:1000 }).then(function(r){
+      var have = {};
+      allTrs().forEach(function(tr){ have[(tr.querySelector('.u-name').value||'').trim().toLowerCase()] = true; });
+      var added = 0;
+      ((r.data && r.data.users) || []).forEach(function(u){
+        var meta = u.app_metadata || {};
+        var uname = (meta.username || (u.email||'').split('@')[0] || '').trim().toLowerCase();
+        if(!uname || have[uname]) return;
+        addRow(uname, meta.role || 'viewer', meta.displayName || uname, false);  // มีอยู่แล้ว → username readonly
+        have[uname] = true; added++;
+      });
+      log(added ? ('โหลดเพิ่ม '+added+' คนจาก Supabase → ตอนนี้ตารางมี '+allTrs().length+' คน (ติ๊กคนที่จะแก้รหัสได้เลย)')
+                : 'ไม่มีคนใหม่นอกเหนือจากในตารางแล้ว');
+      loadSb.disabled = false;
+    }, function(e){ log('✗ โหลดล้มเหลว — service_role ถูกไหม? '+(e&&e.message)); loadSb.disabled = false; });
+  };
+
+  // อ่านทุกแถวในตาราง → [{username, role, displayName, password, tr}]
+  function readRows(){
+    return checkedTrs().map(function(tr){
+      return {
+        username: (tr.querySelector('.u-name').value||'').trim().toLowerCase(),
+        role: tr.querySelector('.u-role').value,
+        displayName: (tr.querySelector('.u-disp').value||'').trim(),
+        password: tr.querySelector('.u-pw').value,
+        tr: tr,
+      };
+    }).filter(function(r){ return r.username; });
+  }
+  function setSt(tr, txt, ok){ var td=tr.querySelector('.st'); if(td){ td.innerHTML='<span class="'+(ok?'st-ok':'st-err')+'">'+txt+'</span>'; } }
+
+  go.onclick = function(){
+    var rows = readRows();
+    if(!rows.length){ alert('ยังไม่ได้เลือกใคร — ติ๊กช่อง "ทำ" ของคนที่จะตั้งรหัส/เพิ่มก่อน'); return; }
+    var bad = rows.filter(function(r){ return !r.password || r.password.length < 6; });
+    if(bad.length){ alert('รหัสของ "'+bad[0].username+'" สั้นไป (ขั้นต่ำ 6 ตัว)'); return; }
+    var names={}, dup=null; rows.forEach(function(r){ if(names[r.username]) dup=r.username; names[r.username]=1; });
+    if(dup){ alert('username ซ้ำ: '+dup); return; }
+    if(!confirm('ดำเนินการ '+rows.length+' คนที่เลือก?\n• คนเดิม = ตั้งรหัสใหม่ทับ\n• คนใหม่ = สร้างบัญชี\n• คนที่ไม่ติ๊ก = ไม่ถูกแตะ')) return;
+    go.disabled = true;
+    var admin = window.supabase.createClient(URL_, srk.value.trim(), { auth:{ persistSession:false, autoRefreshToken:false } });
+    document.getElementById('resCard').style.display='block';
+    var dump=[]; log('=== เริ่ม '+new Date().toLocaleString('th-TH')+' ===');
+
+    admin.auth.admin.listUsers({ page:1, perPage:1000 }).then(function(r){
+      var byEmail = {};
+      ((r.data && r.data.users) || []).forEach(function(u){ byEmail[(u.email||'').toLowerCase()] = u; });
+      var i=0;
+      function nx(){
+        if(i>=rows.length){ log('=== เสร็จ ==='); document.getElementById('dump').value = dump.join('\n'); go.disabled=false; return; }
+        var u=rows[i++]; var email=u.username+'@'+DOMAIN;
+        var meta={ role:u.role||'viewer', username:u.username, displayName:u.displayName||u.username };
+        var existing = byEmail[email];
+        var p = existing
+          ? admin.auth.admin.updateUserById(existing.id, { password:u.password, app_metadata:meta, email_confirm:true })
+          : admin.auth.admin.createUser({ email:email, password:u.password, email_confirm:true, app_metadata:meta });
+        p.then(function(res){
+          var err = res && res.error;
+          setSt(u.tr, err ? ('✗ '+err.message) : (existing?'อัปเดต ✓':'สร้างใหม่ ✓'), !err);
+          if(!err) dump.push(u.username + '  ' + u.password + '  (' + meta.role + ')');
+          log((err?'✗ ':'✓ ')+u.username+(err?' — '+err.message:''));
+          nx();
+        }, function(e){ setSt(u.tr,'✗ '+(e&&e.message),false); log('✗ '+u.username+': '+(e&&e.message)); nx(); });
+      }
+      nx();
+    }, function(e){ log('✗ listUsers ล้มเหลว — service_role ถูกไหม? '+(e&&e.message)); go.disabled=false; });
+  };
+
+  if(!URL_) log('⚠ ตั้ง SUPABASE_URL ใน config.js ก่อน');
+  else log('ติ๊กช่อง "ทำ" เฉพาะคนที่จะตั้งรหัส/เพิ่ม (คนอื่นไม่ถูกแตะ) → ตั้งรหัส → วาง service_role → กดปุ่ม');
+})();
+</script>
+</body>
+</html>

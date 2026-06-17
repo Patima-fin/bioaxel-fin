@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BIOAXEL — ย้ายข้อมูล Google Sheets → Supabase (ครั้งเดียว)</title>
+<!-- ใช้ค่า SHEET_ID + SUPABASE_URL/KEY จาก config.js เดิม (โหลดสดเสมอ — cache-bust) -->
+<script>document.write('<scr' + 'ipt src="../app/config.js?_=' + Date.now() + '"><\/scr' + 'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  body { font: 15px/1.6 "IBM Plex Sans Thai", system-ui, sans-serif; max-width: 980px; margin: 24px auto; padding: 0 16px; color: #1f2733; background: #f4f7fb; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #5a6478; margin: 0 0 20px; }
+  .card { background: #fff; border: 1px solid #e2e8f2; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,40,80,.05); }
+  .cfg { display: grid; grid-template-columns: 200px 1fr; gap: 6px 12px; font-size: 14px; }
+  .cfg b { color: #5a6478; font-weight: 500; }
+  .ok { color: #0a7d3c; } .bad { color: #c0392b; font-weight: 600; }
+  button { font: 600 15px "IBM Plex Sans Thai", system-ui; border: 0; border-radius: 10px; padding: 11px 20px; cursor: pointer; }
+  .btn-go { background: linear-gradient(90deg,#2a6fdb,#36a9e1); color: #fff; }
+  .btn-go:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eef2f8; }
+  th { color: #5a6478; font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .st-wait { color: #9aa3b2; } .st-run { color: #2a6fdb; } .st-done { color: #0a7d3c; font-weight: 600; } .st-err { color: #c0392b; font-weight: 600; }
+  #log { background: #0f1722; color: #c8e1ff; font: 12px/1.5 ui-monospace, monospace; border-radius: 10px; padding: 12px; height: 220px; overflow: auto; white-space: pre-wrap; }
+  .warn { background: #fff7e6; border: 1px solid #ffe1a8; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: #7a5b00; }
+</style>
+</head>
+<body>
+  <h1>ย้ายข้อมูล Google Sheets → Supabase</h1>
+  <p class="sub">เครื่องมือนี้อ่านทุกตารางจาก Google Sheet (gviz CSV) แล้ว upsert เข้า Supabase ครั้งเดียว — ปลอดภัยต่อการรันซ้ำ (upsert by id).</p>
+
+  <div class="warn">
+    ⚠ ทำ <b>ก่อน</b> เปลี่ยน <code>BACKEND</code> เป็น <code>'supabase'</code>: (1) สร้าง project + รัน <code>supabase/schema.sql</code> แล้ว
+    (2) กรอก <code>SUPABASE_URL</code> + <code>SUPABASE_ANON_KEY</code> ใน <code>app/config.js</code> (RLS ปิดอยู่ → anon key เขียนได้)
+  </div>
+
+  <div class="card">
+    <div class="cfg" id="cfg"></div>
+    <p style="margin:14px 0 0"><button class="btn-go" id="go" disabled>เริ่มย้ายข้อมูล</button>
+       <button id="verify" style="background:#eef2f8;color:#2a6fdb;margin-left:8px" disabled>ตรวจนับ Supabase อีกครั้ง</button></p>
+  </div>
+
+  <div class="card">
+    <table id="tbl">
+      <thead><tr><th>ตาราง (entity)</th><th class="num">ในชีต</th><th class="num">อัปโหลด</th><th class="num">ใน Supabase</th><th>สถานะ</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card"><div id="log"></div></div>
+
+<script>
+(function () {
+  'use strict';
+  var cfg = window.WTP_CONFIG || {};
+  var SHEET_ID = cfg.SHEET_ID || '';
+  var URL_ = cfg.SUPABASE_URL || '';
+  var KEY_ = cfg.SUPABASE_ANON_KEY || '';
+
+  // 23 entity เท่ากับ CRUD_KEYS ใน data.js / sheetOrder ใน data_sync.js
+  var ENTITIES = ['projects','invoices','forecastEntries','bankAccounts','pvVouchers','payables',
+    'debtLedger','receipts','bankEntries','checks','debtMaster','bankTransfers',
+    'stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents','users',
+    'cashflowSnapshots','followUpsLog','manualOverrides','bankReconLines','bankReconState','presence'];
+  // JSON fields (ตรงกับ server JSON_FIELDS) — field อื่นเป็น scalar
+  var JSON_FIELDS = { invoices: ['followUps','actualReceive'], stsCalcResult: ['debtIds'] };
+
+  var BASE = SHEET_ID ? 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&sheet=' : '';
+  var idSeq = 0;
+  function newId() { return 'mig_' + Date.now().toString(36) + '_' + (idSeq++).toString(36); }
+
+  var logEl = document.getElementById('log');
+  function log(msg) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+  // ── config panel ──
+  function row(k, v, good) { return '<b>' + k + '</b><span class="' + (good ? 'ok' : 'bad') + '">' + v + '</span>'; }
+  var cfgOk = !!(SHEET_ID && URL_ && KEY_ && window.supabase && window.supabase.createClient);
+  document.getElementById('cfg').innerHTML =
+    row('SHEET_ID', SHEET_ID ? (SHEET_ID.slice(0, 8) + '…') : '✗ ไม่พบ', !!SHEET_ID) +
+    row('SUPABASE_URL', URL_ || '✗ ยังไม่กรอกใน config.js', !!URL_) +
+    row('SUPABASE_ANON_KEY', KEY_ ? (KEY_.slice(0, 12) + '… (' + KEY_.length + ' ตัว)') : '✗ ยังไม่กรอก', !!KEY_) +
+    row('supabase-js', (window.supabase && window.supabase.createClient) ? 'โหลดแล้ว' : '✗ ไม่โหลด', !!(window.supabase && window.supabase.createClient)) +
+    row('BACKEND (ปัจจุบัน)', cfg.BACKEND || 'sheets', true);
+
+  var sb = cfgOk ? window.supabase.createClient(URL_, KEY_, { auth: { persistSession: false } }) : null;
+
+  // ── gviz reader ──
+  function parseCSV(text) {
+    var rows = [], r = [], f = '', q = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (q) { if (c === '"' && text[i+1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+      else { if (c === '"') q = true; else if (c === ',') { r.push(f); f = ''; } else if (c === '\r') {} else if (c === '\n') { r.push(f); rows.push(r); r = []; f = ''; } else f += c; }
+    }
+    if (f !== '' || r.length) { r.push(f); rows.push(r); }
+    return rows;
+  }
+  function rowsToObjects(rows, jf) {
+    if (!rows || rows.length < 2) return [];
+    var headers = (rows[0] || []).map(function (h) { return h == null ? h : String(h).replace(/[​-‍﻿]/g, '').trim(); });
+    var out = [];
+    for (var i = 1; i < rows.length; i++) {
+      var rr = rows[i];
+      if (!rr || rr.every(function (c) { return !c; })) continue;
+      var obj = {};
+      headers.forEach(function (h, j) {
+        if (!h) return;
+        var v = rr[j];
+        if (v === '' || v === undefined) v = null;
+        if (jf && jf.indexOf(h) >= 0 && typeof v === 'string' && v.length > 1) { try { v = JSON.parse(v); } catch (e) {} }
+        var ex = obj[h];
+        if (ex != null && ex !== '' && (v == null || v === '')) return;
+        obj[h] = v;
+      });
+      out.push(obj);
+    }
+    return out;
+  }
+  function fetchSheet(name) {
+    return fetch(BASE + encodeURIComponent(name) + '&_t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(parseCSV);
+  }
+
+  // ── table rows ──
+  var tb = document.querySelector('#tbl tbody');
+  var cells = {};
+  ENTITIES.forEach(function (e) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + e + '</td><td class="num sheet">—</td><td class="num up">—</td><td class="num db">—</td><td class="st st-wait">รอ</td>';
+    tb.appendChild(tr);
+    cells[e] = { sheet: tr.querySelector('.sheet'), up: tr.querySelector('.up'), db: tr.querySelector('.db'), st: tr.querySelector('.st') };
+  });
+  function setSt(e, cls, txt) { cells[e].st.className = 'st ' + cls; cells[e].st.textContent = txt; }
+
+  // ── upsert in batches ──
+  var BATCH = 500;
+  function upsertAll(entity, recs) {
+    var done = 0;
+    function next(i) {
+      if (i >= recs.length) return Promise.resolve(done);
+      var chunk = recs.slice(i, i + BATCH);
+      return sb.from(entity).upsert(chunk).then(function (res) {
+        if (res.error) throw res.error;
+        done += chunk.length; cells[entity].up.textContent = done;
+        return next(i + BATCH);
+      });
+    }
+    return next(0);
+  }
+  function countDb(entity) {
+    return sb.from(entity).select('id', { count: 'exact', head: true }).then(function (res) {
+      if (res.error) throw res.error; return res.count;
+    });
+  }
+
+  // ── migrate one entity ──
+  function migrateOne(entity) {
+    setSt(entity, 'st-run', 'อ่านชีต…');
+    return fetchSheet(entity).then(function (rows) {
+      var objs = rowsToObjects(rows, JSON_FIELDS[entity] || null);
+      cells[entity].sheet.textContent = objs.length;
+      if (entity === 'presence') objs = objs.filter(function (r) { return r && r.username; });
+      var seen = {}, recs = [];
+      objs.forEach(function (r) {
+        var rid = (r.id != null && r.id !== '') ? String(r.id) : newId();
+        if (r.id == null || r.id === '') r.id = rid;
+        if (seen[rid]) { log('  ⚠ ' + entity + ': id ซ้ำ ' + rid + ' — ข้าม'); return; }
+        seen[rid] = 1; recs.push({ id: rid, data: r });
+      });
+      if (!recs.length) { setSt(entity, 'st-done', 'ว่าง (0)'); cells[entity].db.textContent = 0; return; }
+      setSt(entity, 'st-run', 'อัปโหลด…');
+      return upsertAll(entity, recs).then(function (n) {
+        return countDb(entity).then(function (cnt) {
+          cells[entity].db.textContent = cnt;
+          var match = cnt >= recs.length;
+          setSt(entity, match ? 'st-done' : 'st-err', match ? 'เสร็จ ✓' : 'ตรวจ! (' + cnt + '/' + recs.length + ')');
+          log('✓ ' + entity + ': ชีต ' + objs.length + ' → อัปโหลด ' + n + ' → Supabase ' + cnt);
+        });
+      });
+    }).catch(function (err) {
+      setSt(entity, 'st-err', 'ผิดพลาด'); log('✗ ' + entity + ': ' + (err && err.message));
+    });
+  }
+
+  // ── run all (sequential) ──
+  function run() {
+    if (!confirm('ยืนยันย้ายข้อมูลทั้งหมดเข้า Supabase?\n(upsert by id — รันซ้ำได้ ไม่สร้างซ้ำ)')) return;
+    document.getElementById('go').disabled = true;
+    log('=== เริ่มย้าย ' + new Date().toLocaleString('th-TH') + ' ===');
+    var i = 0;
+    function next() {
+      if (i >= ENTITIES.length) { log('=== เสร็จสิ้น ==='); document.getElementById('go').disabled = false; document.getElementById('verify').disabled = false; return; }
+      migrateOne(ENTITIES[i++]).then(next);
+    }
+    next();
+  }
+  function verifyAll() {
+    log('--- ตรวจนับ Supabase ---');
+    ENTITIES.forEach(function (e) {
+      countDb(e).then(function (c) { cells[e].db.textContent = c; log('  ' + e + ': ' + c); },
+                       function (err) { log('  ' + e + ': ✗ ' + (err && err.message)); });
+    });
+  }
+
+  document.getElementById('go').disabled = !cfgOk;
+  document.getElementById('verify').disabled = !cfgOk;
+  document.getElementById('go').onclick = run;
+  document.getElementById('verify').onclick = verifyAll;
+  if (!cfgOk) log('⚠ ตั้งค่ายังไม่ครบ — กรอก SUPABASE_URL / SUPABASE_ANON_KEY ใน app/config.js ก่อน แล้วรีเฟรชหน้านี้');
+  else log('พร้อมย้าย — กดปุ่ม "เริ่มย้ายข้อมูล"');
+})();
+</script>
+</body>
+</html>

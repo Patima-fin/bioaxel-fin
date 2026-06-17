@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BIOAXEL — สำรอง / กู้คืนข้อมูล Supabase</title>
+<script>document.write('<scr' + 'ipt src="../app/config.js?_=' + Date.now() + '"><\/scr' + 'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  body { font: 15px/1.6 "IBM Plex Sans Thai", system-ui, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; color: #1f2733; background: #f4f7fb; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .sub { color: #5a6478; margin: 0 0 18px; }
+  .card { background: #fff; border: 1px solid #e2e8f2; border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(20,40,80,.05); }
+  .cfg { display: grid; grid-template-columns: 180px 1fr; gap: 4px 12px; font-size: 14px; } .cfg b { color: #5a6478; font-weight: 500; }
+  .ok { color: #0a7d3c; } .bad { color: #c0392b; font-weight: 600; }
+  button { font: 600 15px "IBM Plex Sans Thai", system-ui; border: 0; border-radius: 10px; padding: 11px 20px; cursor: pointer; }
+  .btn-dl { background: linear-gradient(90deg,#0a7d3c,#23a455); color: #fff; }
+  .btn-rs { background: #eef2f8; color: #c0392b; margin-left: 8px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #log { background: #0f1722; color: #c8e1ff; font: 12px/1.5 ui-monospace, monospace; border-radius: 10px; padding: 12px; height: 240px; overflow: auto; white-space: pre-wrap; }
+  .warn { background: #fff7e6; border: 1px solid #ffe1a8; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; color: #7a5b00; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+  <h1>สำรอง / กู้คืนข้อมูล Supabase</h1>
+  <p class="sub">ดาวน์โหลดข้อมูลทุกตารางเป็นไฟล์ JSON เก็บไว้ (แทน version history ของ Google Sheet เดิม) — และกู้คืนจากไฟล์ได้</p>
+
+  <div class="warn">💡 แนะนำดาวน์โหลด backup สม่ำเสมอ (เช่น สัปดาห์ละครั้ง) เก็บไฟล์ไว้นอกเครื่อง — เป็นตาข่ายกันข้อมูลหาย (Supabase free tier ไม่มี auto-backup)</div>
+
+  <div class="card">
+    <div class="cfg" id="cfg"></div>
+    <div id="loginBox" style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="u" placeholder="ชื่อผู้ใช้" style="padding:9px 11px;border:1.5px solid #e2e8f0;border-radius:9px;font-size:14px">
+      <input type="password" id="p" placeholder="รหัสผ่าน" style="padding:9px 11px;border:1.5px solid #e2e8f0;border-radius:9px;font-size:14px">
+      <button class="btn-dl" id="login" style="padding:9px 18px">เข้าสู่ระบบ</button>
+      <span id="who" style="color:#5a6478;font-size:13px"></span>
+    </div>
+    <p style="margin:14px 0 0">
+      <button class="btn-dl" id="dl" disabled>⬇ ดาวน์โหลด Backup (JSON)</button>
+      <label class="btn-rs" id="rsLabel" style="display:inline-block;padding:11px 20px;border-radius:10px;opacity:.45;pointer-events:none">↩ กู้คืนจากไฟล์…<input type="file" id="file" accept=".json" style="display:none"></label>
+    </p>
+  </div>
+
+  <div class="card"><div id="log"></div></div>
+
+<script>
+(function () {
+  'use strict';
+  var cfg = window.WTP_CONFIG || {};
+  var URL_ = cfg.SUPABASE_URL || '', KEY_ = cfg.SUPABASE_ANON_KEY || '';
+  var ENTITIES = ['projects','invoices','forecastEntries','bankAccounts','pvVouchers','payables',
+    'debtLedger','receipts','bankEntries','checks','debtMaster','bankTransfers',
+    'stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents','users',
+    'cashflowSnapshots','followUpsLog','manualOverrides','bankReconLines','bankReconState','presence'];
+
+  var logEl = document.getElementById('log');
+  function log(m){ logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+  function row(k,v,g){ return '<b>'+k+'</b><span class="'+(g?'ok':'bad')+'">'+v+'</span>'; }
+
+  var ok = !!(URL_ && KEY_ && window.supabase && window.supabase.createClient);
+  document.getElementById('cfg').innerHTML =
+    row('SUPABASE_URL', URL_ || '✗ ยังไม่ตั้งใน config.js', !!URL_) +
+    row('anon key', KEY_ ? (KEY_.slice(0,12)+'…') : '✗', !!KEY_) +
+    row('supabase-js', ok ? 'พร้อม' : '✗', ok);
+  var sb = ok ? window.supabase.createClient(URL_, KEY_, { auth:{ persistSession:false } }) : null;
+
+  var PAGE = 1000;
+  function selectAll(t){ var all=[],from=0; function nx(){ return sb.from(t).select('id,data').range(from,from+PAGE-1).then(function(r){ if(r.error) throw r.error; all=all.concat(r.data||[]); if((r.data||[]).length<PAGE) return all; from+=PAGE; return nx(); }); } return nx(); }
+
+  // ── DOWNLOAD ──
+  function pad(n){ return (n<10?'0':'')+n; }
+  function stamp(){ var d=new Date(); return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes()); }
+  function download(){
+    document.getElementById('dl').disabled = true;
+    log('=== ดาวน์โหลด backup '+new Date().toLocaleString('th-TH')+' ===');
+    var out = { app:'waterpog-fin', exportedAt:new Date().toISOString(), tables:{} };
+    var i=0;
+    function nx(){
+      if(i>=ENTITIES.length){
+        var blob=new Blob([JSON.stringify(out)],{type:'application/json'});
+        var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download='waterpog-backup-'+stamp()+'.json'; a.click();
+        var total=Object.keys(out.tables).reduce(function(s,k){return s+out.tables[k].length;},0);
+        log('=== เสร็จ: '+Object.keys(out.tables).length+' ตาราง รวม '+total+' แถว → ไฟล์ดาวน์โหลดแล้ว ===');
+        document.getElementById('dl').disabled=false; return;
+      }
+      var t=ENTITIES[i++];
+      selectAll(t).then(function(recs){ out.tables[t]=recs.map(function(r){return r.data;}); log('  '+t+': '+recs.length); nx(); },
+                        function(e){ log('  ✗ '+t+': '+(e&&e.message)); out.tables[t]=[]; nx(); });
+    }
+    nx();
+  }
+
+  // ── RESTORE (upsert, non-destructive: ไม่ลบแถวที่มีใน DB แต่ไม่มีในไฟล์) ──
+  var BATCH=500;
+  function upsertAll(t, recs){ var i=0; function nx(){ if(i>=recs.length) return Promise.resolve(); var c=recs.slice(i,i+BATCH); return sb.from(t).upsert(c).then(function(r){ if(r.error) throw r.error; i+=BATCH; return nx(); }); } return nx(); }
+  function restore(file){
+    if(!confirm('กู้คืนจากไฟล์ "'+file.name+'"?\nจะ upsert (เขียนทับ/เพิ่ม) แถวตาม id — ไม่ลบแถวที่มีอยู่ใน Supabase\nเหมาะกับ "กู้ข้อมูลที่หาย" ไม่ใช่ rollback ทั้งระบบ')) return;
+    var rd=new FileReader();
+    rd.onload=function(){
+      var data; try{ data=JSON.parse(rd.result); }catch(e){ log('✗ ไฟล์ไม่ใช่ JSON'); return; }
+      var tables=data.tables||{};
+      log('=== กู้คืนจาก '+file.name+' (exported '+(data.exportedAt||'?')+') ===');
+      var keys=Object.keys(tables), i=0;
+      function nx(){
+        if(i>=keys.length){ log('=== กู้คืนเสร็จ ==='); return; }
+        var t=keys[i++]; var rows=tables[t]||[];
+        if(ENTITIES.indexOf(t)<0){ log('  ข้าม '+t+' (ไม่ใช่ตารางที่รู้จัก)'); return nx(); }
+        if(!rows.length){ log('  '+t+': 0 (ข้าม)'); return nx(); }
+        var recs=rows.filter(function(r){return r&&r.id!=null;}).map(function(r){return {id:String(r.id),data:r};});
+        upsertAll(t,recs).then(function(){ log('  ✓ '+t+': กู้ '+recs.length+' แถว'); nx(); },
+                               function(e){ log('  ✗ '+t+': '+(e&&e.message)); nx(); });
+      }
+      nx();
+    };
+    rd.readAsText(file);
+  }
+
+  // ── login ก่อนใช้ (หลังเปิด RLS, anon อ่าน/เขียนไม่ได้แล้ว — ต้อง login เป็น staff/manager) ──
+  var DOMAIN = cfg.AUTH_EMAIL_DOMAIN || 'waterpog.app';
+  var loggedIn = false;
+  function setEnabled(on){
+    loggedIn = on;
+    document.getElementById('dl').disabled = !on;
+    var rs = document.getElementById('rsLabel');
+    rs.style.opacity = on ? '1' : '.45';
+    rs.style.pointerEvents = on ? 'auto' : 'none';
+  }
+  document.getElementById('login').onclick = function(){
+    if(!ok){ log('⚠ ตั้งค่า config ก่อน'); return; }
+    var u = document.getElementById('u').value, p = document.getElementById('p').value;
+    if(!u || !p){ log('กรอกชื่อผู้ใช้ + รหัสผ่าน'); return; }
+    var email = String(u).trim().toLowerCase() + '@' + DOMAIN;
+    sb.auth.signInWithPassword({ email: email, password: p }).then(function(res){
+      if(res.error){ log('✗ login ไม่ได้: '+res.error.message); return; }
+      var meta = (res.data && res.data.user && res.data.user.app_metadata) || {};
+      document.getElementById('who').textContent = '✓ เข้าระบบ: '+(meta.username||u)+' ('+(meta.role||'?')+')';
+      setEnabled(true);
+      log('เข้าระบบแล้ว — กด "ดาวน์โหลด Backup" ได้เลย');
+    }, function(e){ log('✗ login error: '+(e&&e.message)); });
+  };
+
+  document.getElementById('dl').onclick = function(){ if(loggedIn) download(); };
+  document.getElementById('file').onchange = function(e){ if(loggedIn && e.target.files[0]) restore(e.target.files[0]); };
+  setEnabled(false);
+  if(!ok) log('⚠ ตั้งค่า SUPABASE_URL/ANON_KEY ใน config.js ก่อน'); else log('เปิด RLS แล้ว — login (staff/manager) ก่อนดาวน์โหลด/กู้คืน');
+})();
+</script>
+</body>
+</html>
