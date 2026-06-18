@@ -57,7 +57,7 @@ window.WTP_CONFIG = {
 
   SESSION_TTL_MS: 8 * 60 * 60 * 1000,   // 8 ชั่วโมง
   IDLE_LOGOUT_MS: 30 * 60 * 1000,       // 30 นาที — เด้งออกเมื่อไม่ได้ใช้งาน
-  FORCE_LOGOUT_BEFORE: 0,               // เว็บใหม่ ยังไม่ต้องบังคับ re-login (ใส่ epoch ตอน deploy ถ้าต้องการ)
+  FORCE_LOGOUT_BEFORE: 1781773499469,   // 2026-06-18 — บังคับทุกคน re-login รอบล้างข้อมูล POG ออกจากฐาน (ดู CLAUDE.md)
   PRESENCE_HEARTBEAT_MS: 5 * 60 * 1000, // 5 นาที — "ใครออนไลน์"
 
   // auto-push เฉพาะตอนผู้ใช้แก้จริง (กันแท็บค้างดันข้อมูลหาย) — ปุ่มบันทึก (forceSyncNow) ข้าม gate นี้เสมอ

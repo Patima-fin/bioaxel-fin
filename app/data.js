@@ -602,15 +602,19 @@
     ],
   });
 
-  // CRUD entities ที่ sync กับ Sheet — ใน "online mode" (ตั้ง SHEET_ID แล้ว) ห้ามใช้
-  // seed mock เป็นค่าตั้งต้น เพราะ mock อาจหลุดขึ้น push ทับข้อมูลจริงบนชีต (seed-wipe).
-  // ปล่อยเป็น [] แล้วรอ data_sync ดึงของจริงมาแทน. (offline = ไม่มี SHEET_ID → ใช้ mock ได้)
+  // CRUD entities ที่ sync กับ backend — ใน "online mode" ห้ามใช้ seed mock เป็นค่าตั้งต้น
+  // เพราะ mock อาจหลุดขึ้น push ทับข้อมูลจริง (seed-wipe / seed-leak). ปล่อยเป็น [] แล้วรอ
+  // layer sync (data_sync ↔ Sheets / data_supabase ↔ Postgres) ดึงของจริงมาแทน.
+  //   ★ online = ตั้ง SHEET_ID (Sheets) "หรือ" BACKEND==='supabase' (Postgres).
+  //     ⚠️ ห้ามเช็คแค่ SHEET_ID — Supabase ไม่ตั้ง SHEET_ID (= '') → ถ้าเช็คแค่นั้นจะกลายเป็น
+  //     offline → seed mock เต็มหลุดเข้า React state → push ขึ้น Supabase = ข้อมูล mock ปน
+  //     (เคยเกิดกับ BIOAXEL: seed Water POG หลุดเข้า DB — ดู CLAUDE.md 2026-06-18).
   const CRUD_KEYS = ['projects','invoices','forecastEntries','bankAccounts','pvVouchers',
     'payables','debtLedger','receipts','bankEntries','checks','debtMaster','bankTransfers',
     'stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents','users',
     'cashflowSnapshots','followUpsLog','manualOverrides',
     'bankReconLines','bankReconState','presence'];
-  const isOnline = () => !!(window.WTP_CONFIG && window.WTP_CONFIG.SHEET_ID);
+  const isOnline = () => !!(window.WTP_CONFIG && (window.WTP_CONFIG.SHEET_ID || window.WTP_CONFIG.BACKEND === 'supabase'));
   // ค่าตั้งต้นเมื่อ localStorage ว่าง:
   //   offline → seed mock เต็ม (โหมดสาธิต)
   //   online  → โครงสร้าง seed แต่ CRUD ทุกตัว = [] (กัน mock ขึ้น push ทับชีต)
