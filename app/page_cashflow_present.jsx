@@ -1,23 +1,31 @@
 /* =====================================================================
  * Cash Flow Presentation (#cashflow_present) — BIOAXEL
  * ---------------------------------------------------------------------
- *  หน้าพรีเซนต์งบกระแสเงินสด: อัปโหลด 2 ไฟล์ Excel
- *   1) STM (รายการเดินบัญชีดิบ) — เครื่องคำนวณ + drill-down รายการจริง
- *   2) งบกระแสเงินสดรายเดือน (สรุปที่ผู้ใช้ทำ) — แสดงเป็น "ตารางงบ" (รายการ×เดือน×รวม)
- *      + กดแถว/ช่อง → โชว์รายการ STM ที่จับคู่กัน (รายละเอียดเหมือนไฟล์ STM)
- *  Self-contained: พึ่งแค่ window.React + window.XLSX. identifier prefix `cfp`/`Cfp`
- *  เก็บใน localStorage `wtp-cfpresent-v1` (ต่อเครื่อง) — ยังไม่ sync ทีม (Phase ต่อไป)
+ *  Executive Cash Flow Dashboard (tabbed) — สไตล์อิงตัวอย่าง "Executive
+ *  Cash Flow Dashboard" ที่ผู้ใช้ชอบ. 3 แท็บ:
+ *    1) ภาพรวม (Executive Summary)  — KPI + waterfall + รายเดือน + insights
+ *    2) งบกระแสเงินสด               — ตารางงบจากไฟล์สรุป (กดแถว → รายการ STM)
+ *    3) รายการ (Transaction Explorer) — ตารางรายการ STM + ค้นหา/กรอง/sort
+ *  อัปโหลด 2 ไฟล์: STM (รายการเดินบัญชี) + งบกระแสเงินสดรายเดือน (สรุป)
+ *  Self-contained: พึ่ง window.React + window.XLSX. prefix `cfp`/`Cfp`.
+ *  เก็บ localStorage `wtp-cfpresent-v1` (ต่อเครื่อง) — ยังไม่ sync ทีม.
  * ===================================================================== */
 (function () {
   const { useState, useEffect, useMemo, useRef } = React;
   const CFP_LS = 'wtp-cfpresent-v1';
-
   const CFP_MONTHS = { 1: 'ม.ค.', 2: 'ก.พ.', 3: 'มี.ค.', 4: 'เม.ย.', 5: 'พ.ค.', 6: 'มิ.ย.', 7: 'ก.ค.', 8: 'ส.ค.', 9: 'ก.ย.', 10: 'ต.ค.', 11: 'พ.ย.', 12: 'ธ.ค.' };
+
+  // palette (อิงตัวอย่าง Executive Cash Flow Dashboard)
   const C = {
-    ink: '#1f2a37', mut: '#6b7280', faint: '#9ca3af', line: '#e5e7eb', soft: '#f3f5f8',
-    card: '#ffffff', pos: '#2e7d32', posBg: '#e8f3e9', neg: '#c0392b', negBg: '#fbecea',
-    gray: '#9aa3af', brand: '#2e7d32', brandBg: '#eaf3de', netBg: '#eef5ee', blue: '#185fa5', amber: '#b8860b',
+    primary: '#4F8AF7', primaryD: '#3a6fe0', teal: '#36c5d8', purple: '#9b7bff',
+    ink: '#243b63', mut: '#6f8bb3', faint: '#9fb3d4', line: '#e0ecfc',
+    pos: '#15c486', posBg: '#e2faf0', neg: '#fb5e6d', negBg: '#ffe9ec',
+    card: 'rgba(255,255,255,.82)', cardSolid: '#ffffff', soft: '#eef5ff',
+    shadow: '0 10px 30px rgba(79,138,247,.16)',
   };
+  const ACT_COLOR = { op: '#4F8AF7', inv: '#e08a3c', fin: '#9b7bff', transfer: '#6f8bb3', other: '#6f8bb3' };
+  const ACT_TAGBG = { op: '#e8f0ff', inv: '#fff0e6', fin: '#efe8ff', transfer: '#eef2f8', other: '#eef2f8' };
+  const ACT_TAGFG = { op: '#3f6fd0', inv: '#d98032', fin: '#7a5fd0', transfer: '#6f8bb3', other: '#6f8bb3' };
 
   /* ---------- helpers ---------- */
   function cfpNum(v) {
@@ -44,8 +52,7 @@
     const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
     if (m) {
       let d = +m[1], mo = +m[2], y = +m[3];
-      if (y < 100) y += 2000;
-      if (y > 2400) y -= 543;
+      if (y < 100) y += 2000; if (y > 2400) y -= 543;
       if (d > 31 && y <= 31) { const t = d; d = y; y = t; }
       if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }
       return String(y).padStart(4, '0') + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
@@ -56,6 +63,12 @@
   function cfpFmtB(v) { const n = Math.round(Math.abs(v || 0)); return (v < 0 ? '-' : '') + '฿' + n.toLocaleString('en-US'); }
   function cfpFmtM(v) { return (v < 0 ? '-' : '') + '฿' + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
   function cfpFmtSigned(v) { return (v < 0 ? '-' : '+') + '฿' + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
+  function cfpFmtPlain(v) { return Math.round(Math.abs(v || 0)).toLocaleString('en-US'); }
+  function cfpThaiDate(iso) {
+    if (!iso || iso.length < 10) return iso || '';
+    const y = +iso.slice(0, 4), m = +iso.slice(5, 7), d = +iso.slice(8, 10);
+    return d + ' ' + (CFP_MONTHS[m] || m) + ' ' + (y + 543 - 2500);
+  }
 
   function cfpActKey(activity, category) {
     const a = String(activity || ''); const c = String(category || '');
@@ -65,7 +78,8 @@
     if (/จัดหาเงิน|จัดหาทุน/.test(a)) return 'fin';
     return 'other';
   }
-  const CFP_ACT_NAME = { op: 'กิจกรรมดำเนินงาน', inv: 'กิจกรรมลงทุน', fin: 'กิจกรรมจัดหาเงิน' };
+  const CFP_ACT_NAME = { op: 'กิจกรรมดำเนินงาน', inv: 'กิจกรรมลงทุน', fin: 'กิจกรรมจัดหาเงิน', transfer: 'โอนระหว่างบัญชี', other: 'อื่นๆ' };
+  const CFP_ACT_SHORT = { op: 'ดำเนินงาน', inv: 'ลงทุน', fin: 'จัดหาเงิน', transfer: 'โอน', other: 'อื่นๆ' };
 
   function cfpAccountLabel(raw) {
     const s = String(raw || '');
@@ -78,41 +92,37 @@
     }
     return s.trim();
   }
+  function cfpBankCode(acctLabel) { const m = String(acctLabel || '').match(/^([A-Za-z]{2,4})/); return m ? m[1].toUpperCase() : ''; }
+  const BANK_PILL = { BBL: { bg: '#e0f0ff', fg: '#1f6fb8' }, SCB: { bg: '#efe6ff', fg: '#6a3fc0' }, KBANK: { bg: '#e8f7e9', fg: '#2e7d32' }, KTB: { bg: '#e0f2ff', fg: '#1565c0' }, KKP: { bg: '#fbeee0', fg: '#b8730b' }, BAY: { bg: '#fff0e6', fg: '#d98032' } };
 
   /* ---------- statement-line ↔ STM category matcher ---------- */
   function cfpStripCat(s) {
     return String(s || '')
-      .replace(/^เงินสดรับจากการขาย\s*-?\s*/, '')
-      .replace(/^เงินสดรับ\s*-?\s*/, '')
-      .replace(/^เงินสดจ่ายเกี่ยวกับ\s*-?\s*/, '')
-      .replace(/^รวม\s*/, '').replace(/^รายได้\s*/, '').replace(/^ค่า/, '')
+      .replace(/^เงินสดรับจากการขาย\s*-?\s*/, '').replace(/^เงินสดรับ\s*-?\s*/, '')
+      .replace(/^เงินสดจ่ายเกี่ยวกับ\s*-?\s*/, '').replace(/^รวม\s*/, '').replace(/^รายได้\s*/, '').replace(/^ค่า/, '')
       .replace(/[^0-9A-Za-zก-๙]/g, '');
   }
   function cfpLatin(s) { return (String(s || '').match(/[A-Za-z]{3,}/g) || []).map(x => x.toLowerCase()); }
   function cfpLCS(a, b) {
     if (!a || !b) return 0;
     const m = a.length, n = b.length; let best = 0, prev = new Array(n + 1).fill(0);
-    for (let i = 1; i <= m; i++) {
-      const cur = new Array(n + 1).fill(0);
-      for (let j = 1; j <= n; j++) { if (a[i - 1] === b[j - 1]) { cur[j] = prev[j - 1] + 1; if (cur[j] > best) best = cur[j]; } }
-      prev = cur;
-    }
+    for (let i = 1; i <= m; i++) { const cur = new Array(n + 1).fill(0);
+      for (let j = 1; j <= n; j++) { if (a[i - 1] === b[j - 1]) { cur[j] = prev[j - 1] + 1; if (cur[j] > best) best = cur[j]; } } prev = cur; }
     return best;
   }
   function cfpStmtMatch(catName, leafLabel) {
     const a = cfpStripCat(catName), b = cfpStripCat(leafLabel);
     if (!a || !b) return false;
     const mn = Math.min(a.length, b.length);
-    if (mn >= 5 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return true;       // one contains the other
+    if (mn >= 5 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return true;
     const la = cfpLatin(catName), lb = cfpLatin(leafLabel);
-    if (la.length && la.some(t => lb.indexOf(t) >= 0)) return true;             // shared distinctive latin token (BIO/Axel/ERP…)
+    if (la.length && la.some(t => lb.indexOf(t) >= 0)) return true;
     const lcs = cfpLCS(a, b);
-    if (lcs >= 8 && lcs >= 0.7 * mn) return true;                              // strong fuzzy overlap (tolerates typos/spelling)
+    if (lcs >= 8 && lcs >= 0.7 * mn) return true;
     return false;
   }
   function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir) {
-    const act = model.acts[actKey];
-    if (!act) return { txns: [], matched: false, cats: [] };
+    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
     const sameDir = c => !dir || ((c.net >= 0 ? 1 : -1) === dir);
     let cats = act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c));
     const matched = cats.length > 0;
@@ -124,40 +134,33 @@
 
   /* ---------- parse STM ---------- */
   function cfpParseStm(aoa) {
-    const txns = [];
-    const openingByAcct = {};
-    let curAcct = '';
+    const txns = []; const openingByAcct = {}; let curAcct = '';
     for (let i = 0; i < aoa.length; i++) {
-      const row = aoa[i] || [];
-      const cells = row.map(x => (x == null ? '' : x));
+      const row = aoa[i] || []; const cells = row.map(x => (x == null ? '' : x));
       const joined = cells.map(String).join(' ');
       const acctHit = joined.match(/[SC]\/A#\s*[A-Za-z]*\s*[\d-]+[^\d]*/);
       if (acctHit) curAcct = cfpAccountLabel(acctHit[0]);
       if (cells.some(x => String(x).trim() === 'ยอดยกมา')) {
-        let bal = 0;
-        for (let k = cells.length - 1; k >= 0; k--) { const n = cfpNum(cells[k]); if (n !== 0) { bal = n; break; } }
+        let bal = 0; for (let k = cells.length - 1; k >= 0; k--) { const n = cfpNum(cells[k]); if (n !== 0) { bal = n; break; } }
         if (curAcct) openingByAcct[curAcct] = (openingByAcct[curAcct] || 0) + bal;
         continue;
       }
-      const iso = cfpToISO(cells[0]);
-      if (!iso) continue;
-      const withdraw = cfpNum(cells[3]);
-      const deposit = cfpNum(cells[4]);
+      const iso = cfpToISO(cells[0]); if (!iso) continue;
+      const withdraw = cfpNum(cells[3]), deposit = cfpNum(cells[4]);
       if (withdraw === 0 && deposit === 0) continue;
-      const category = String(cells[8] || '').trim();
-      const activity = String(cells[9] || '').trim();
+      const category = String(cells[8] || '').trim(), activity = String(cells[9] || '').trim();
       txns.push({
         account: curAcct || '(ไม่ระบุบัญชี)', iso, month: cfpMonth(iso),
         docNo: String(cells[2] || '').trim(), note: String(cells[7] || '').trim(),
         category: category || '(ไม่ระบุหมวด)', actKey: cfpActKey(activity, category),
-        flow: deposit - withdraw,
+        withdraw, deposit, balance: cfpNum(cells[5]), flow: deposit - withdraw,
       });
     }
     let opening = 0; Object.keys(openingByAcct).forEach(k => { opening += openingByAcct[k]; });
     return { txns, opening, openingByAcct };
   }
 
-  /* ---------- parse summary statement (full table) ---------- */
+  /* ---------- parse summary statement ---------- */
   function cfpParseSummary(aoa) {
     const out = { net: null, opening: null, ending: null, periodLabel: '', monthLabels: [], rows: [], actNet: {} };
     let headerIdx = -1, nCols = 0;
@@ -174,25 +177,16 @@
         if (/เงินสด.*ปลายงวด/.test(l)) out.ending = lastNum(row); }
       return out;
     }
-    const nMonths = out.monthLabels.length;
-    let curAct = null;
+    const nMonths = out.monthLabels.length; let curAct = null;
     for (let i = headerIdx + 1; i < aoa.length; i++) {
-      const row = aoa[i] || []; const label = String(row[0] || '').trim();
-      if (!label) continue;
+      const row = aoa[i] || []; const label = String(row[0] || '').trim(); if (!label) continue;
       const vals = []; let hasVal = false;
       for (let k = 1; k <= nMonths; k++) { const n = cfpNum(row[k]); vals.push(n); if (n !== 0) hasVal = true; }
-      const total = cfpNum(row[nMonths + 1]);
-      if (total !== 0) hasVal = true;
+      const total = cfpNum(row[nMonths + 1]); if (total !== 0) hasVal = true;
       let type = 'leaf', actKey = curAct;
-      if (/^กระแสเงินสดจากกิจกรรม/.test(label)) {
-        type = 'section';
-        actKey = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null;
-        curAct = actKey;
-      } else if (/^กระแสเงินสดสุทธิจากกิจกรรม/.test(label)) {
-        type = 'net';
-        const k = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null;
-        if (k) out.actNet[k] = total;
-      } else if (/เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(label)) { type = 'grand'; out.net = total; }
+      if (/^กระแสเงินสดจากกิจกรรม/.test(label)) { type = 'section'; actKey = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null; curAct = actKey; }
+      else if (/^กระแสเงินสดสุทธิจากกิจกรรม/.test(label)) { type = 'net'; const k = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null; if (k) out.actNet[k] = total; }
+      else if (/เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(label)) { type = 'grand'; out.net = total; }
       else if (/เงินสด.*ต้นงวด/.test(label)) { type = 'grand'; out.opening = total; }
       else if (/เงินสด.*ปลายงวด/.test(label)) { type = 'grand'; out.ending = total; }
       else if (/^รวม/.test(label)) type = 'subtotal';
@@ -209,38 +203,31 @@
     const monthsSet = {};
     txns.forEach(t => { if (t.month && t.actKey !== 'transfer' && t.actKey !== 'other') monthsSet[t.month] = true; });
     const months = Object.keys(monthsSet).map(Number).sort((a, b) => a - b);
-
     const mkAct = key => ({ key, name: CFP_ACT_NAME[key], net: 0, byMonth: {}, cats: {} });
     const acts = { op: mkAct('op'), inv: mkAct('inv'), fin: mkAct('fin') };
     months.forEach(m => { ['op', 'inv', 'fin'].forEach(k => { acts[k].byMonth[m] = 0; }); });
-
     let transferNet = 0, otherNet = 0;
     txns.forEach(t => {
       if (t.actKey === 'transfer') { transferNet += t.flow; return; }
       if (t.actKey === 'other') { otherNet += t.flow; return; }
       const a = acts[t.actKey]; if (!a) return;
-      a.net += t.flow;
-      a.byMonth[t.month] = (a.byMonth[t.month] || 0) + t.flow;
+      a.net += t.flow; a.byMonth[t.month] = (a.byMonth[t.month] || 0) + t.flow;
       if (!a.cats[t.category]) a.cats[t.category] = { name: t.category, net: 0, count: 0, txns: [] };
-      const cat = a.cats[t.category];
-      cat.net += t.flow; cat.count++; cat.txns.push(t);
+      const cat = a.cats[t.category]; cat.net += t.flow; cat.count++; cat.txns.push(t);
     });
     ['op', 'inv', 'fin'].forEach(k => {
       acts[k].catList = Object.keys(acts[k].cats).map(n => acts[k].cats[n]).sort((x, y) => Math.abs(y.net) - Math.abs(x.net));
       acts[k].catList.forEach(c => c.txns.sort((x, y) => Math.abs(y.flow) - Math.abs(x.flow)));
     });
-
     const opening = stm.opening || 0;
     const net = acts.op.net + acts.inv.net + acts.fin.net;
     const ending = opening + net;
-
     let run = opening;
     const monthly = months.map(m => {
       const o = acts.op.byMonth[m] || 0, iv = acts.inv.byMonth[m] || 0, f = acts.fin.byMonth[m] || 0;
       const mnet = o + iv + f; run += mnet;
       return { m, label: CFP_MONTHS[m] || ('เดือน ' + m), op: o, inv: iv, fin: f, net: mnet, end: run };
     });
-
     let interest = 0, payroll = 0, inflowTotal = 0; const inflowByCat = {};
     txns.forEach(t => {
       if (t.actKey === 'transfer' || t.actKey === 'other') return;
@@ -250,43 +237,94 @@
     });
     let topInflow = { name: '', amt: 0 };
     Object.keys(inflowByCat).forEach(n => { if (inflowByCat[n] > topInflow.amt) topInflow = { name: n, amt: inflowByCat[n] }; });
-
     const accounts = {}; txns.forEach(t => { accounts[t.account] = true; });
-
     return {
       months, monthly, acts, opening, ending, net, transferNet, otherNet,
-      txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
+      allTxns: txns, txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
       accounts: Object.keys(accounts), interest, payroll, inflowTotal, topInflow,
-      summary: summary || null,
-      stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
+      summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
       monthLabels: (summary && summary.monthLabels) || [],
-      periodLabel: (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]]) : ''),
+      periodLabel: (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + (new Date().getFullYear() + 543 - 2500)) : ''),
     };
   }
 
-  /* ---------- shared txn table ---------- */
+  /* ---------- shared bits ---------- */
+  function CfpTag({ k }) { return <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: ACT_TAGBG[k] || C.soft, color: ACT_TAGFG[k] || C.mut, whiteSpace: 'nowrap' }}>{CFP_ACT_SHORT[k] || k}</span>; }
+  function CfpBankPill({ acct }) { const code = cfpBankCode(acct); const p = BANK_PILL[code] || { bg: C.soft, fg: C.primaryD }; return <span title={acct} style={{ fontWeight: 700, fontSize: 11, padding: '2px 8px', borderRadius: 6, background: p.bg, color: p.fg, whiteSpace: 'nowrap' }}>{code || 'บัญชี'}</span>; }
   function cfpTxnRows(txns) {
     return txns.map((t, i) => (
       <tr key={i}>
-        <td style={{ padding: '5px 6px', color: C.mut, borderTop: '1px solid ' + C.line, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
-        <td style={{ padding: '5px 6px', color: C.ink, borderTop: '1px solid ' + C.line, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || t.category}</td>
-        <td style={{ padding: '5px 6px', color: C.mut, borderTop: '1px solid ' + C.line, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.account}</td>
-        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 600, color: t.flow < 0 ? C.neg : C.pos, borderTop: '1px solid ' + C.line, whiteSpace: 'nowrap' }}>{cfpFmtB(t.flow)}</td>
+        <td style={{ padding: '6px 8px', color: C.mut, borderBottom: '1px solid ' + C.line, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
+        <td style={{ padding: '6px 8px', color: C.ink, borderBottom: '1px solid ' + C.line, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || t.category}</td>
+        <td style={{ padding: '6px 8px', borderBottom: '1px solid ' + C.line }}><CfpBankPill acct={t.account} /></td>
+        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: t.flow < 0 ? C.neg : C.pos, borderBottom: '1px solid ' + C.line, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{cfpFmtB(t.flow)}</td>
       </tr>
     ));
   }
   function CfpTxnTable({ txns }) {
+    const totIn = txns.filter(t => t.flow > 0).reduce((s, t) => s + t.flow, 0);
+    const totOut = txns.filter(t => t.flow < 0).reduce((s, t) => s + Math.abs(t.flow), 0);
     return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ color: C.mut, textAlign: 'left' }}>
-            <th style={{ padding: '4px 6px', fontWeight: 500, width: 92 }}>วันที่</th>
-            <th style={{ padding: '4px 6px', fontWeight: 500 }}>รายการ</th>
-            <th style={{ padding: '4px 6px', fontWeight: 500, width: 140 }}>บัญชี</th>
-            <th style={{ padding: '4px 6px', fontWeight: 500, width: 100, textAlign: 'right' }}>จำนวน</th>
-          </tr></thead>
-          <tbody>{cfpTxnRows(txns)}</tbody>
-        </table>
+      <div>
+        <div style={{ display: 'flex', gap: 16, fontSize: 12, color: C.mut, marginBottom: 6 }}>
+          <span>รับ <b style={{ color: C.pos }}>{cfpFmtB(totIn)}</b></span>
+          <span>จ่าย <b style={{ color: C.neg }}>{cfpFmtB(totOut)}</b></span>
+          <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
+        </div>
+        <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <thead><tr style={{ color: C.mut, textAlign: 'left' }}>
+              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff', width: 96 }}>วันที่</th>
+              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff' }}>รายการ</th>
+              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff', width: 70 }}>บัญชี</th>
+              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff', width: 110, textAlign: 'right' }}>จำนวน</th>
+            </tr></thead>
+            <tbody>{cfpTxnRows(txns)}</tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------- drill modal ---------- */
+  function CfpModal({ title, subtitle, txns, onClose }) {
+    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
+    return (
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 900, width: '100%', maxHeight: '86vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
+          <div style={{ padding: '16px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+              {subtitle && <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>{subtitle}</div>}
+            </div>
+            <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
+          </div>
+          <div style={{ padding: '12px 22px 22px', overflow: 'auto' }}>
+            {txns.length ? <CfpTxnTable txns={txns} /> : <div style={{ fontSize: 13, color: C.faint, padding: '10px 0' }}>ไม่พบรายการ</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------- KPI cards ---------- */
+  function CfpKpiHero({ label, value, sub, color }) {
+    return (
+      <div style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow }}>
+        <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 4px', color: color || C.ink, letterSpacing: '-.5px' }}>{value}</div>
+        {sub && <div style={{ fontSize: 11.5, color: C.mut }}>{sub}</div>}
+      </div>
+    );
+  }
+  function CfpKpiAct({ k, value, sub, onClick }) {
+    const col = ACT_COLOR[k];
+    return (
+      <div onClick={onClick} style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ height: 5, margin: '-16px -20px 12px', background: col }} />
+        <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{CFP_ACT_NAME[k]} <span style={{ color: C.faint, fontSize: 11 }}>กดดู ›</span></div>
+        <div style={{ fontSize: 23, fontWeight: 800, margin: '7px 0 2px', color: value < 0 ? C.neg : C.pos, letterSpacing: '-.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtM(value)}</div>
+        {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
       </div>
     );
   }
@@ -295,35 +333,28 @@
   function CfpWaterfall({ model, onPick }) {
     const W = 720, H = 300, padX = 46, top = 30, baseY = 250;
     const cols = [
-      { key: null, name: 'ต้นงวด', delta: model.opening, abs: true },
-      { key: 'op', name: 'ดำเนินงาน', delta: model.acts.op.net },
-      { key: 'inv', name: 'ลงทุน', delta: model.acts.inv.net },
-      { key: 'fin', name: 'จัดหาเงิน', delta: model.acts.fin.net },
+      { key: null, name: 'ต้นงวด', delta: model.opening, abs: true }, { key: 'op', name: 'ดำเนินงาน', delta: model.acts.op.net },
+      { key: 'inv', name: 'ลงทุน', delta: model.acts.inv.net }, { key: 'fin', name: 'จัดหาเงิน', delta: model.acts.fin.net },
       { key: null, name: 'ปลายงวด', delta: model.ending, abs: true },
     ];
-    const segs = [{ from: 0, to: model.opening }];
-    let cum = model.opening;
+    const segs = [{ from: 0, to: model.opening }]; let cum = model.opening;
     [model.acts.op.net, model.acts.inv.net, model.acts.fin.net].forEach(d => { const from = cum; cum += d; segs.push({ from, to: cum }); });
     segs.push({ from: 0, to: model.ending });
     const peak = Math.max(model.opening, model.ending, ...segs.map(s => Math.max(s.from, s.to))) * 1.1 || 1;
     const y = v => baseY - (v / peak) * (baseY - top);
-    const slot = (W - padX * 2) / cols.length;
-    const bw = Math.min(72, slot * 0.5);
+    const slot = (W - padX * 2) / cols.length, bw = Math.min(74, slot * 0.5);
     return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="แผนภูมิ waterfall กระแสเงินสด">
+      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="waterfall กระแสเงินสด">
         <line x1={padX - 8} y1={baseY} x2={W - padX + 8} y2={baseY} stroke={C.line} />
         {cols.map((c, i) => {
-          const cx = padX + slot * i + slot / 2;
-          const s = segs[i];
-          const yTop = y(Math.max(s.from, s.to)), yBot = y(Math.min(s.from, s.to));
-          const h = Math.max(2, yBot - yTop);
-          const fill = c.abs ? C.gray : (c.delta >= 0 ? C.pos : C.neg);
-          const clickable = !!c.key;
+          const cx = padX + slot * i + slot / 2, s = segs[i];
+          const yTop = y(Math.max(s.from, s.to)), h = Math.max(2, y(Math.min(s.from, s.to)) - yTop);
+          const fill = c.abs ? C.primary : (c.delta >= 0 ? C.pos : C.neg), clickable = !!c.key;
           return (
             <g key={i} style={{ cursor: clickable ? 'pointer' : 'default' }} onClick={() => clickable && onPick && onPick(c.key)}>
               {i > 0 && <line x1={padX + slot * (i - 1) + slot / 2 + bw / 2} y1={y(segs[i - 1].to)} x2={cx - bw / 2} y2={y(c.abs ? c.delta : s.from)} stroke={C.faint} strokeDasharray="3 3" />}
-              <rect x={cx - bw / 2} y={yTop} width={bw} height={h} rx="4" fill={fill} opacity={c.abs ? 0.85 : 0.95} />
-              <text x={cx} y={yTop - 7} textAnchor="middle" fontSize="12.5" fontWeight="600" fill={c.abs ? C.ink : fill}>{c.abs ? cfpFmtM(c.delta) : cfpFmtSigned(c.delta)}</text>
+              <rect x={cx - bw / 2} y={yTop} width={bw} height={h} rx="5" fill={fill} opacity={c.abs ? 0.92 : 0.96} />
+              <text x={cx} y={yTop - 7} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.abs ? C.primaryD : fill}>{c.abs ? cfpFmtM(c.delta) : cfpFmtSigned(c.delta)}</text>
               <text x={cx} y={baseY + 18} textAnchor="middle" fontSize="12" fill={C.mut}>{c.name}</text>
               {clickable && <text x={cx} y={baseY + 33} textAnchor="middle" fontSize="10" fill={C.faint}>กดดู ›</text>}
             </g>
@@ -333,98 +364,70 @@
     );
   }
 
-  /* ---------- SVG: monthly ---------- */
+  /* ---------- SVG: monthly stacked (net by activity) ---------- */
   function CfpMonthly({ model, onPick }) {
-    const W = 720, H = 320, padX = 46;
+    const W = 720, H = 320, padX = 46, top = 24, botAxis = 250;
     const mo = model.monthly; if (!mo.length) return null;
-    const lineTop = 26, lineBot = 150;
+    const maxAbs = Math.max(...mo.map(d => Math.max(Math.abs(d.op) + Math.abs(d.fin > 0 ? d.fin : 0), Math.abs(d.net), Math.abs(d.end)))) || 1;
     const ends = mo.map(d => d.end); const eMin = Math.min(...ends), eMax = Math.max(...ends);
-    const eLo = eMin - (eMax - eMin) * 0.25 - 1, eHi = eMax + (eMax - eMin) * 0.2 + 1;
-    const ly = v => lineBot - ((v - eLo) / (eHi - eLo)) * (lineBot - lineTop);
-    const base = 250, span = 56;
-    const maxAbs = Math.max(...mo.map(d => Math.abs(d.net))) || 1;
-    const by = v => base - (v / maxAbs) * span;
-    const slot = (W - padX * 2) / mo.length;
-    const cx = i => padX + slot * i + slot / 2;
+    const eLo = eMin - (eMax - eMin) * 0.3 - 1, eHi = eMax + (eMax - eMin) * 0.2 + 1;
+    const ly = v => top + 8 + (1 - (v - eLo) / (eHi - eLo)) * (130);
+    const base = botAxis, span = 60;
+    const sc = Math.max(...mo.map(d => Math.abs(d.op) + Math.abs(d.inv) + Math.abs(d.fin)), 1);
+    const slot = (W - padX * 2) / mo.length, cx = i => padX + slot * i + slot / 2;
     const pts = mo.map((d, i) => cx(i) + ',' + ly(d.end)).join(' ');
+    const bw = Math.min(40, slot * 0.42);
+    function seg(val, accPos, accNeg) { const h = Math.abs(val) / sc * span; let yy; if (val >= 0) { yy = base - accPos - h; } else { yy = base + accNeg; } return { h, yy }; }
     return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน">
-        <text x={padX - 8} y={lineTop - 8} fontSize="11" fill={C.faint}>เงินสดคงเหลือปลายเดือน</text>
-        <polyline points={pts} fill="none" stroke={C.blue} strokeWidth="2.5" />
-        {mo.map((d, i) => (
-          <g key={'e' + i}>
-            <circle cx={cx(i)} cy={ly(d.end)} r="4.5" fill={C.blue} />
-            <text x={cx(i)} y={ly(d.end) - 9} textAnchor="middle" fontSize="11" fill={C.blue} fontWeight="600">{cfpFmtM(d.end)}</text>
-          </g>
-        ))}
+      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือนแยกกิจกรรม">
+        <text x={padX - 8} y={top} fontSize="11" fill={C.faint}>เงินสดคงเหลือปลายเดือน</text>
+        <polyline points={pts} fill="none" stroke={C.primaryD} strokeWidth="2.5" />
+        {mo.map((d, i) => (<g key={'e' + i}><circle cx={cx(i)} cy={ly(d.end)} r="4.5" fill={C.primaryD} /><text x={cx(i)} y={ly(d.end) - 9} textAnchor="middle" fontSize="11" fontWeight="700" fill={C.primaryD}>{cfpFmtM(d.end)}</text></g>))}
         <line x1={padX - 8} y1={base} x2={W - padX + 8} y2={base} stroke={C.line} />
-        <text x={padX - 8} y={base - span - 8} fontSize="11" fill={C.faint}>เปลี่ยนแปลงสุทธิ</text>
         {mo.map((d, i) => {
-          const bw = Math.min(46, slot * 0.46);
-          const yT = d.net >= 0 ? by(d.net) : base; const h = Math.max(2, Math.abs(by(d.net) - base));
-          return (
-            <g key={'b' + i} style={{ cursor: 'pointer' }} onClick={() => onPick && onPick(d.m)}>
-              <rect x={cx(i) - bw / 2} y={yT} width={bw} height={h} rx="3" fill={d.net >= 0 ? C.pos : C.neg} opacity="0.92" />
-              <text x={cx(i)} y={d.net >= 0 ? yT - 6 : yT + h + 14} textAnchor="middle" fontSize="11" fontWeight="600" fill={d.net >= 0 ? C.pos : C.neg}>{cfpFmtSigned(d.net)}</text>
-              <text x={cx(i)} y={H - 8} textAnchor="middle" fontSize="12" fill={C.mut}>{d.label}</text>
-            </g>
-          );
+          let accP = 0, accN = 0; const parts = [];
+          [['op', d.op], ['inv', d.inv], ['fin', d.fin]].forEach(([k, v]) => { if (!v) return; const s = seg(v, accP, accN); if (v >= 0) accP += s.h; else accN += s.h; parts.push(<rect key={k} x={cx(i) - bw / 2} y={s.yy} width={bw} height={Math.max(1, s.h)} fill={ACT_COLOR[k]} opacity="0.9" />); });
+          return (<g key={'b' + i} style={{ cursor: 'pointer' }} onClick={() => onPick && onPick(d.m)}>{parts}<text x={cx(i)} y={H - 8} textAnchor="middle" fontSize="12" fill={C.mut}>{d.label}</text><text x={cx(i)} y={base + accN + 16} textAnchor="middle" fontSize="10" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>{cfpFmtSigned(d.net)}</text></g>);
         })}
       </svg>
     );
   }
 
-  function CfpBar({ amt, max }) {
-    const w = Math.max(2, Math.round(Math.abs(amt) / (max || 1) * 100));
-    return <span style={{ display: 'inline-block', height: 7, width: w + '%', background: amt < 0 ? C.neg : C.pos, borderRadius: 2, verticalAlign: 'middle' }} />;
-  }
+  function CfpBar({ amt, max }) { const w = Math.max(2, Math.round(Math.abs(amt) / (max || 1) * 100)); return <span style={{ display: 'inline-block', height: 7, width: w + '%', background: amt < 0 ? C.neg : C.pos, borderRadius: 2, verticalAlign: 'middle' }} />; }
 
-  /* ---------- statement table (like the user's summary file) ---------- */
+  /* ---------- statement table ---------- */
   function CfpStatementTable({ model, onPick }) {
     const rows = model.stmt;
-    if (!rows || !rows.length) return (
-      <div style={{ fontSize: 13, color: C.faint, padding: '6px 0' }}>อัปโหลดไฟล์ “งบกระแสเงินสดรายเดือน” เพิ่ม เพื่อแสดงตารางงบ (ตอนนี้มีแต่ STM)</div>
-    );
+    if (!rows || !rows.length) return <div style={{ fontSize: 13, color: C.faint, padding: '6px 0' }}>อัปโหลดไฟล์ “งบกระแสเงินสดรายเดือน” เพิ่ม เพื่อแสดงตารางงบ</div>;
     const months = (model.monthLabels && model.monthLabels.length) ? model.monthLabels : model.months.map(m => CFP_MONTHS[m]);
-    const nM = months.length;
     const monthNumByIdx = i => model.months[i] || (i + 1);
-    const acct = v => {
-      if (!v) return <span style={{ color: C.faint }}>-</span>;
-      const neg = v < 0;
-      return <span style={{ color: neg ? C.neg : C.ink }}>{neg ? '(' + Math.round(Math.abs(v)).toLocaleString('en-US') + ')' : Math.round(v).toLocaleString('en-US')}</span>;
-    };
-    const th = { padding: '7px 8px', fontWeight: 600, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line };
+    const acct = v => { if (!v) return <span style={{ color: C.faint }}>-</span>; const neg = v < 0; return <span style={{ color: neg ? C.neg : C.ink }}>{neg ? '(' + cfpFmtPlain(v) + ')' : cfpFmtPlain(v)}</span>; };
+    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 11.5, position: 'sticky', top: 0, background: '#fbfdff' };
     return (
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 660 }}>
+      <div style={{ overflowX: 'auto', maxHeight: 620, overflowY: 'auto', borderRadius: 12, border: '1px solid ' + C.line }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 680 }}>
           <thead><tr>
-            <th style={{ ...th, textAlign: 'left', position: 'sticky', left: 0, background: C.card }}>รายการ</th>
+            <th style={{ ...th, textAlign: 'left', left: 0, zIndex: 3 }}>รายการ</th>
             {months.map((m, i) => <th key={i} style={{ ...th, textAlign: 'right' }}>{m}</th>)}
             <th style={{ ...th, textAlign: 'right' }}>รวม</th>
           </tr></thead>
           <tbody>
             {rows.map((r, ri) => {
-              const isLeaf = r.type === 'leaf', isSection = r.type === 'section';
-              const isNet = r.type === 'net' || r.type === 'grand', isSub = r.type === 'subtotal', isGroup = r.type === 'group';
-              const rowBg = isSection ? C.brandBg : (isNet ? C.netBg : 'transparent');
-              const fw = (isSection || isNet || isSub) ? 700 : (isGroup ? 600 : 400);
-              const indent = isSection ? 0 : (isGroup ? 14 : (isSub || isNet ? 14 : 26));
-              const clickable = isLeaf || isNet || isSub;
-              const stickyBg = rowBg === 'transparent' ? C.card : rowBg;
-              const emptyVals = isSection || isGroup;
+              const isLeaf = r.type === 'leaf', isSection = r.type === 'section', isNet = r.type === 'net', isGrand = r.type === 'grand', isSub = r.type === 'subtotal', isGroup = r.type === 'group';
+              const rowBg = isSection ? '#dfecff' : isNet ? '#e3f8ee' : isGrand ? '#dceaff' : isSub ? '#f4f9ff' : 'transparent';
+              const fw = (isSection || isNet || isSub || isGrand) ? 800 : (isGroup ? 700 : 400);
+              const indent = isSection ? 0 : (isGroup ? 14 : (isSub || isNet || isGrand ? 14 : 26));
+              const clickable = isLeaf || isNet || isSub; const emptyVals = isSection || isGroup;
+              const col = isSection ? C.primaryD : isNet ? '#0f9b6c' : isGrand ? C.primaryD : C.ink;
               return (
-                <tr key={ri} style={{ background: rowBg, borderTop: (isNet || isSub) ? '1px solid ' + C.line : 'none' }}>
-                  <td onClick={() => clickable && onPick && onPick(r, null)}
-                    style={{ padding: '5px 8px', paddingLeft: 8 + indent, fontWeight: fw, color: isSection ? C.brand : C.ink, cursor: clickable ? 'pointer' : 'default', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: stickyBg }}>
+                <tr key={ri} style={{ background: rowBg }}>
+                  <td onClick={() => clickable && onPick && onPick(r, null)} style={{ padding: '6px 8px', paddingLeft: 8 + indent, fontWeight: fw, color: col, cursor: clickable ? 'pointer' : 'default', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: rowBg === 'transparent' ? '#fff' : rowBg, borderBottom: '1px solid ' + C.line }}>
                     {r.label}{clickable && <span style={{ color: C.faint, fontWeight: 400 }}> ›</span>}
                   </td>
                   {months.map((m, ci) => (
-                    <td key={ci} onClick={() => clickable && !emptyVals && onPick && onPick(r, monthNumByIdx(ci))}
-                      style={{ padding: '5px 8px', textAlign: 'right', fontWeight: (isNet || isSub) ? 700 : 400, cursor: (clickable && !emptyVals) ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
-                      {emptyVals ? '' : acct(r.vals[ci])}
-                    </td>
+                    <td key={ci} onClick={() => clickable && !emptyVals && onPick && onPick(r, monthNumByIdx(ci))} style={{ padding: '6px 8px', textAlign: 'right', fontWeight: (isNet || isSub || isGrand) ? 800 : 400, cursor: (clickable && !emptyVals) ? 'pointer' : 'default', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid ' + C.line }}>{emptyVals ? '' : acct(r.vals[ci])}</td>
                   ))}
-                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{emptyVals ? '' : acct(r.total)}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', background: '#eef5ff', borderBottom: '1px solid ' + C.line }}>{emptyVals ? '' : acct(r.total)}</td>
                 </tr>
               );
             })}
@@ -434,88 +437,77 @@
     );
   }
 
-  /* ---------- drill panel ---------- */
-  function CfpDrill({ model, drill, catFilter, setCatFilter }) {
-    if (!drill) return <div style={{ fontSize: 13, color: C.faint }}>กดแถวในตารางงบ (หรือการ์ด/กราฟด้านบน) เพื่อดูรายการจริงจาก STM</div>;
-
-    if (drill.type === 'stmt') {
-      const res = cfpFindStmtTxns(model, drill.label, drill.actKey, drill.monthNum, drill.dir);
-      const txns = res.txns.slice().sort((a, b) => (a.iso < b.iso ? 1 : -1));
-      const shown = txns.slice(0, 80);
-      const sum = txns.reduce((s, t) => s + t.flow, 0);
-      return (
-        <div>
-          <div style={{ fontSize: 12, color: C.mut, marginBottom: 6 }}>
-            {res.matched ? ('จับคู่หมวด STM: ' + res.cats.join(', ')) : 'จับคู่อัตโนมัติไม่ได้ — แสดงรายการทั้ง' + (CFP_ACT_NAME[drill.actKey] || 'กิจกรรม')}
-            {drill.monthNum ? (' · เดือน ' + (CFP_MONTHS[drill.monthNum] || drill.monthNum)) : ''} · {txns.length} รายการ · รวม <b style={{ color: sum < 0 ? C.neg : C.pos }}>{cfpFmtB(sum)}</b>
-          </div>
-          {txns.length ? <CfpTxnTable txns={shown} /> : <div style={{ fontSize: 13, color: C.faint }}>ไม่พบรายการ</div>}
-          {txns.length > shown.length && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 6 }}>แสดง {shown.length} จาก {txns.length} รายการ</div>}
-        </div>
-      );
+  /* ---------- Transaction Explorer ---------- */
+  function CfpExplorer({ model, toast }) {
+    const [q, setQ] = useState('');
+    const [fAct, setFAct] = useState(''); const [fBank, setFBank] = useState(''); const [fMonth, setFMonth] = useState(''); const [fType, setFType] = useState('');
+    const [sortKey, setSortKey] = useState('iso'); const [sortDir, setSortDir] = useState(-1);
+    const banks = useMemo(() => Array.from(new Set(model.allTxns.map(t => t.account))).sort(), [model]);
+    const sel = { padding: '8px 11px', border: '1px solid ' + C.line, borderRadius: 11, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink };
+    const rows = useMemo(() => {
+      const ql = q.trim().toLowerCase();
+      let r = model.allTxns.filter(t => {
+        if (fAct && t.actKey !== fAct) return false;
+        if (fBank && t.account !== fBank) return false;
+        if (fMonth && String(t.month) !== fMonth) return false;
+        if (fType === 'in' && t.flow <= 0) return false;
+        if (fType === 'out' && t.flow >= 0) return false;
+        if (ql) { const s = (t.note + ' ' + t.category + ' ' + t.docNo + ' ' + t.account).toLowerCase(); if (s.indexOf(ql) < 0) return false; }
+        return true;
+      });
+      r = r.slice().sort((a, b) => { let x = a[sortKey], y = b[sortKey]; if (x < y) return -sortDir; if (x > y) return sortDir; return 0; });
+      return r;
+    }, [model, q, fAct, fBank, fMonth, fType, sortKey, sortDir]);
+    const totIn = rows.filter(t => t.flow > 0).reduce((s, t) => s + t.flow, 0);
+    const totOut = rows.filter(t => t.flow < 0).reduce((s, t) => s + Math.abs(t.flow), 0);
+    const shown = rows.slice(0, 500);
+    function sortBy(k) { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(k === 'iso' ? -1 : 1); } }
+    function arrow(k) { return sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''; }
+    function exportCSV() {
+      const head = ['วันที่', 'เลขที่', 'รายการ', 'บัญชี', 'หมวด', 'กิจกรรม', 'รับ', 'จ่าย', 'คงเหลือ'];
+      const lines = [head.join(',')].concat(rows.map(t => [cfpThaiDate(t.iso), t.docNo, '"' + (t.note || '').replace(/"/g, '""') + '"', '"' + t.account + '"', '"' + t.category + '"', CFP_ACT_SHORT[t.actKey] || '', t.deposit || '', t.withdraw || '', t.balance || ''].join(',')));
+      const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'transactions.csv'; a.click();
+      toast && toast('ดาวน์โหลด CSV · ' + rows.length + ' รายการ');
     }
-
-    if (drill.type === 'month') {
-      const d = model.monthly.find(x => x.m === drill.m); if (!d) return null;
-      const rows = [['กิจกรรมดำเนินงาน', d.op], ['กิจกรรมลงทุน', d.inv], ['กิจกรรมจัดหาเงิน', d.fin]];
-      const max = Math.max(...rows.map(r => Math.abs(r[1])), 1);
-      return (
-        <div>
-          <div style={{ fontSize: 12, color: C.mut, marginBottom: 6 }}>แยกตามกิจกรรม</div>
-          {rows.map((r, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr auto', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid ' + C.line }}>
-              <span style={{ fontSize: 13, color: C.ink }}>{r[0]}</span>
-              <span><CfpBar amt={r[1]} max={max} /></span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: r[1] < 0 ? C.neg : C.pos, textAlign: 'right' }}>{cfpFmtB(r[1])}</span>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTop: '1px solid ' + C.line }}>
-            <span style={{ fontSize: 13, color: C.mut }}>เงินสดคงเหลือปลายเดือน</span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: C.ink }}>{cfpFmtB(d.end)}</span>
-          </div>
-        </div>
-      );
-    }
-
-    const a = model.acts[drill.key]; if (!a) return null;
-    const maxCat = Math.max(...a.catList.map(c => Math.abs(c.net)), 1);
-    let txns = [];
-    a.catList.forEach(c => { if (!catFilter || c.name === catFilter) txns = txns.concat(c.txns); });
-    txns.sort((x, y) => (x.iso < y.iso ? 1 : -1));
-    const shown = txns.slice(0, 60);
+    const th = (label, k, align) => <th onClick={k ? () => sortBy(k) : undefined} style={{ padding: '8px 9px', fontWeight: 700, fontSize: 11.5, color: C.mut, cursor: k ? 'pointer' : 'default', whiteSpace: 'nowrap', textAlign: align || 'left', position: 'sticky', top: 0, background: '#fbfdff', userSelect: 'none' }}>{label}{k ? arrow(k) : ''}</th>;
     return (
       <div>
-        <div style={{ fontSize: 12, color: C.mut, marginBottom: 4 }}>หมวด (กดเพื่อกรอง) · รวม {model.periodLabel}</div>
-        <div style={{ marginBottom: 12 }}>
-          {a.catList.map((c, i) => {
-            const on = catFilter === c.name;
-            return (
-              <div key={i} onClick={() => setCatFilter(on ? null : c.name)}
-                style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr auto', alignItems: 'center', gap: 10, padding: '5px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', background: on ? C.brandBg : 'transparent', borderRadius: 6 }}>
-                <span style={{ fontSize: 12.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{on ? '✓ ' : ''}{c.name} <span style={{ color: C.faint }}>({c.count})</span></span>
-                <span><CfpBar amt={c.net} max={maxCat} /></span>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
-              </div>
-            );
-          })}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา รายการ / หมวด / เลขที่…" style={{ ...sel, minWidth: 230, flex: '1 1 230px' }} />
+          <select value={fAct} onChange={e => setFAct(e.target.value)} style={sel}><option value="">ทุกกิจกรรม</option><option value="op">ดำเนินงาน</option><option value="inv">ลงทุน</option><option value="fin">จัดหาเงิน</option><option value="transfer">โอนระหว่างบัญชี</option></select>
+          <select value={fBank} onChange={e => setFBank(e.target.value)} style={sel}><option value="">ทุกบัญชี</option>{banks.map(b => <option key={b} value={b}>{b}</option>)}</select>
+          <select value={fMonth} onChange={e => setFMonth(e.target.value)} style={sel}><option value="">ทุกเดือน</option>{model.months.map(m => <option key={m} value={String(m)}>{CFP_MONTHS[m]}</option>)}</select>
+          <select value={fType} onChange={e => setFType(e.target.value)} style={sel}><option value="">รับ+จ่าย</option><option value="in">รับเข้า</option><option value="out">จ่ายออก</option></select>
+          <button onClick={exportCSV} style={{ ...sel, cursor: 'pointer', fontWeight: 600 }}>⬇ CSV</button>
         </div>
-        <div style={{ fontSize: 12, color: C.mut, margin: '4px 0 6px' }}>รายการจริงจาก STM {catFilter ? ('· ' + catFilter) : ''} {txns.length > shown.length ? ('· แสดง ' + shown.length + ' จาก ' + txns.length) : ('· ' + txns.length + ' รายการ')}</div>
-        <CfpTxnTable txns={shown} />
-      </div>
-    );
-  }
-  function cfpThaiDate(iso) {
-    if (!iso || iso.length < 10) return iso || '';
-    const y = +iso.slice(0, 4), m = +iso.slice(5, 7), d = +iso.slice(8, 10);
-    return d + ' ' + (CFP_MONTHS[m] || m) + ' ' + (y + 543 - 2500);
-  }
-
-  function CfpKpi({ label, value, sub, color, onClick }) {
-    return (
-      <div onClick={onClick} style={{ background: C.soft, borderRadius: 10, padding: '14px 16px', cursor: onClick ? 'pointer' : 'default', border: '1px solid ' + C.line }}>
-        <div style={{ fontSize: 13, color: C.mut, marginBottom: 4 }}>{label}{onClick && <span style={{ color: C.faint, fontSize: 11 }}> ›</span>}</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: color || C.ink }}>{value}</div>
-        {sub && <div style={{ fontSize: 12, color: C.mut, marginTop: 3 }}>{sub}</div>}
+        <div style={{ display: 'flex', gap: 18, fontSize: 12.5, color: C.mut, marginBottom: 10 }}>
+          <span><b style={{ color: C.ink }}>{rows.length.toLocaleString('en-US')}</b> รายการ</span>
+          <span>รับ <b style={{ color: C.pos }}>{cfpFmtB(totIn)}</b></span>
+          <span>จ่าย <b style={{ color: C.neg }}>{cfpFmtB(totOut)}</b></span>
+          <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
+        </div>
+        <div style={{ overflowX: 'auto', maxHeight: 600, overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 820 }}>
+            <thead><tr>{th('วันที่', 'iso')}{th('เลขที่', 'docNo')}{th('รายการ', 'note')}{th('บัญชี', 'account')}{th('หมวด', 'category')}{th('กิจกรรม', 'actKey')}{th('รับ', 'flow', 'right')}{th('จ่าย', null, 'right')}{th('คงเหลือ', 'balance', 'right')}</tr></thead>
+            <tbody>
+              {shown.map((t, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid ' + C.line }}>
+                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
+                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap', fontSize: 11.5 }}>{t.docNo}</td>
+                  <td style={{ padding: '6px 9px', color: C.ink, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || '-'}</td>
+                  <td style={{ padding: '6px 9px' }}><CfpBankPill acct={t.account} /></td>
+                  <td style={{ padding: '6px 9px', color: C.mut, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5 }} title={t.category}>{t.category}</td>
+                  <td style={{ padding: '6px 9px' }}><CfpTag k={t.actKey} /></td>
+                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.pos, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.deposit ? cfpFmtPlain(t.deposit) : ''}</td>
+                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.neg, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.withdraw ? cfpFmtPlain(t.withdraw) : ''}</td>
+                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.mut, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.balance ? cfpFmtPlain(t.balance) : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > shown.length && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>แสดง {shown.length} จาก {rows.length.toLocaleString('en-US')} รายการ — ใช้ตัวกรอง/ค้นหาเพื่อแคบลง</div>}
       </div>
     );
   }
@@ -524,52 +516,41 @@
   function CashFlowPresentPage({ data, setData, toast }) {
     const [stored, setStored] = useState(() => { try { return JSON.parse(localStorage.getItem(CFP_LS) || 'null'); } catch (e) { return null; } });
     const [uploading, setUploading] = useState(false);
-    const [drill, setDrill] = useState(null);
-    const [catFilter, setCatFilter] = useState(null);
+    const [tab, setTab] = useState('overview');
+    const [modal, setModal] = useState(null);
     const fileRef = useRef(null);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
 
-    const model = useMemo(() => {
-      if (!stored || !stored.stm) return null;
-      try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; }
-    }, [stored]);
+    const model = useMemo(() => { if (!stored || !stored.stm) return null; try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; } }, [stored]);
 
-    function flash() { const el = document.getElementById('cfp-drill'); if (el) { el.style.boxShadow = '0 0 0 2px ' + C.brand; if (el.scrollIntoView) try { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} setTimeout(() => { el.style.boxShadow = 'none'; }, 700); } }
-    function pickAct(k) { setDrill({ type: 'act', key: k }); setCatFilter(null); flash(); }
-    function pickMonth(m) { setDrill({ type: 'month', m }); setCatFilter(null); flash(); }
-    function pickStmt(row, monthNum) {
+    function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
+    function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }
+    function openStmt(row, monthNum) {
       if (!row.actKey) return;
-      if (row.type === 'net') { setDrill({ type: 'act', key: row.actKey }); setCatFilter(null); flash(); return; }
+      if (row.type === 'net') { openAct(row.actKey); return; }
       const dir = row.total > 0 ? 1 : row.total < 0 ? -1 : 0;
-      setDrill({ type: 'stmt', label: row.label, actKey: row.actKey, monthNum: monthNum || null, dir }); flash();
+      const res = cfpFindStmtTxns(model, row.label, row.actKey, monthNum, dir);
+      const txns = res.txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
+      setModal({ title: row.label, subtitle: (res.matched ? 'จับคู่หมวด STM: ' + res.cats.join(', ') : 'แสดงรายการทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม')) + (monthNum ? ' · เดือน ' + (CFP_MONTHS[monthNum] || monthNum) : ''), txns });
     }
 
     async function readAoa(file) {
       return new Promise((resolve, reject) => {
         if (!window.XLSX) { reject(new Error('ไม่พบ SheetJS — รีเฟรชหน้า')); return; }
         const r = new FileReader();
-        r.onload = e => { try { const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false }); const ws = wb.Sheets[wb.SheetNames[0]]; resolve(window.XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' })); } catch (err) { reject(err); } };
-        r.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
-        r.readAsArrayBuffer(file);
+        r.onload = e => { try { const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false }); resolve(window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false, defval: '' })); } catch (err) { reject(err); } };
+        r.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ')); r.readAsArrayBuffer(file);
       });
     }
-    function detectKind(aoa) {
-      const flat = aoa.slice(0, 12).map(r => (r || []).join(' ')).join(' ');
-      if (/ประเภทกิจกรรมทางการเงิน|ยอดถอน|ยอดฝาก/.test(flat)) return 'stm';
-      if (/งบกระแสเงินสด|กระแสเงินสดจากกิจกรรม/.test(flat)) return 'summary';
-      return 'unknown';
-    }
+    function detectKind(aoa) { const flat = aoa.slice(0, 12).map(r => (r || []).join(' ')).join(' '); if (/ประเภทกิจกรรมทางการเงิน|ยอดถอน|ยอดฝาก/.test(flat)) return 'stm'; if (/งบกระแสเงินสด|กระแสเงินสดจากกิจกรรม/.test(flat)) return 'summary'; return 'unknown'; }
     async function onUpload(files) {
       setUploading(true);
       try {
         let stm = null, summary = null, sawStm = false;
-        for (const f of files) {
-          const aoa = await readAoa(f);
-          const kind = detectKind(aoa);
+        for (const f of files) { const aoa = await readAoa(f); const kind = detectKind(aoa);
           if (kind === 'stm') { stm = cfpParseStm(aoa); sawStm = true; }
           else if (kind === 'summary') { summary = cfpParseSummary(aoa); }
-          else if (!sawStm) { const guess = cfpParseStm(aoa); if (guess.txns.length) { stm = guess; sawStm = true; } }
-        }
+          else if (!sawStm) { const guess = cfpParseStm(aoa); if (guess.txns.length) { stm = guess; sawStm = true; } } }
         if (!stm || !stm.txns.length) {
           if (summary && stored && stored.stm) { persist({ stm: stored.stm, summary }); toast && toast('อัปเดตตารางงบสรุปแล้ว'); }
           else { toast && toast('ต้องมีไฟล์ STM (รายการเดินบัญชี)', 'error'); }
@@ -577,122 +558,86 @@
         }
         persist({ stm, summary: summary || (stored && stored.summary) || null });
         toast && toast('อ่านข้อมูลสำเร็จ · ' + stm.txns.length + ' รายการ' + (summary ? ' + งบสรุป' : ''));
-        setDrill(null); setCatFilter(null);
       } catch (e) { console.error(e); toast && toast('อ่านไฟล์ไม่สำเร็จ: ' + (e.message || e), 'error'); }
       setUploading(false);
     }
     function persist(obj) { const payload = Object.assign({ uploadedAt: Date.now() }, obj); try { localStorage.setItem(CFP_LS, JSON.stringify(payload)); } catch (e) { console.error('[cfp] save', e); } setStored(payload); }
-    function clearData() { if (!confirm('ล้างข้อมูล Cash Flow ในเครื่องนี้?')) return; localStorage.removeItem(CFP_LS); setStored(null); setDrill(null); }
+    function clearData() { if (!confirm('ล้างข้อมูล Cash Flow ในเครื่องนี้?')) return; localStorage.removeItem(CFP_LS); setStored(null); }
 
-    const cardStyle = { background: C.card, border: '1px solid ' + C.line, borderRadius: 12, padding: '16px 18px', marginBottom: 18 };
-    const secHdr = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 8 };
-    const drillTitle = drill && drill.type === 'act' ? ('· ' + model.acts[drill.key].name)
-      : drill && drill.type === 'month' ? ('· เดือน ' + (CFP_MONTHS[drill.m] || drill.m))
-      : drill && drill.type === 'stmt' ? ('· ' + drill.label) : '';
+    const pageWrap = { background: 'linear-gradient(155deg,#eef5ff 0%,#f0f7ff 55%,#e9f6f8 100%)', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
+    const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
+    const secTitle = { fontSize: 15, fontWeight: 700, margin: '0 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' };
+    const tabs = [['overview', '📊 ภาพรวม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
 
     return (
-      <div className="cfp-page" style={{ maxWidth: 1080, margin: '0 auto', color: C.ink }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', margin: '4px 0 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 36, height: 36, borderRadius: 9, background: C.brandBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🌊</span>
-            <div>
-              <div style={{ fontSize: 19, fontWeight: 700 }}>งบกระแสเงินสด · BIOAXEL</div>
-              <div style={{ fontSize: 13, color: C.mut }}>{model ? ('งวด ' + model.periodLabel + ' · ' + model.txnCount + ' รายการ · ' + model.accounts.length + ' บัญชี') : 'อัปโหลดไฟล์เพื่อเริ่ม'}</div>
-            </div>
+      <div className="cfp-page" style={pageWrap}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-.4px' }}>Executive Cash Flow Dashboard</div>
+            <div style={{ fontSize: 13, color: C.mut, marginTop: 3 }}>BIOAXEL{model ? ' · งวด ' + model.periodLabel + ' · ' + model.txnCount + ' รายการ · ' + model.accounts.length + ' บัญชี' : ' · อัปโหลดไฟล์เพื่อเริ่ม'}</div>
           </div>
           {canEdit && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading}
-                style={{ background: C.brand, color: '#fff', border: 0, borderRadius: 8, padding: '9px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-                {uploading ? '⏳ กำลังอ่าน…' : (model ? '⬆️ อัปเดตไฟล์' : '⬆️ อัปโหลด STM + งบสรุป')}
-              </button>
-              {model && <button onClick={clearData} style={{ background: '#fff', color: C.mut, border: '1px solid ' + C.line, borderRadius: 8, padding: '9px 12px', fontSize: 14, cursor: 'pointer' }}>ล้าง</button>}
-              <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }}
-                onChange={e => { if (e.target.files.length) onUpload(Array.from(e.target.files)); e.target.value = ''; }} />
+              <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '9px 16px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: C.shadow }}>{uploading ? '⏳ กำลังอ่าน…' : (model ? '⬆️ อัปเดตไฟล์' : '⬆️ อัปโหลด STM + งบสรุป')}</button>
+              {model && <button onClick={clearData} style={{ background: '#fff', color: C.mut, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, cursor: 'pointer' }}>ล้าง</button>}
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={e => { if (e.target.files.length) onUpload(Array.from(e.target.files)); e.target.value = ''; }} />
             </div>
           )}
         </div>
 
         {!model && (
-          <div style={{ ...cardStyle, textAlign: 'center', padding: '46px 20px' }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>🌊</div>
-            <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 6 }}>ยังไม่มีข้อมูล</div>
-            <div style={{ fontSize: 14, color: C.mut, maxWidth: 480, margin: '0 auto 18px', lineHeight: 1.6 }}>
-              อัปโหลด <b>2 ไฟล์</b>: <b>STM</b> (รายการเดินบัญชี — ใช้ drill-down) + <b>งบกระแสเงินสดรายเดือน</b> (สรุป — แสดงเป็นตารางงบ). เลือกพร้อมกันได้
-            </div>
-            {canEdit
-              ? <button onClick={() => fileRef.current && fileRef.current.click()} style={{ background: C.brand, color: '#fff', border: 0, borderRadius: 8, padding: '11px 22px', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>เลือกไฟล์…</button>
-              : <div style={{ fontSize: 13, color: C.faint }}>บัญชีนี้ดูได้อย่างเดียว — ให้ผู้ดูแลอัปโหลดไฟล์</div>}
+          <div style={{ ...card, textAlign: 'center', padding: '48px 20px' }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
+            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>ยังไม่มีข้อมูล</div>
+            <div style={{ fontSize: 14, color: C.mut, maxWidth: 480, margin: '0 auto 18px', lineHeight: 1.6 }}>อัปโหลด <b>2 ไฟล์</b>: <b>STM</b> (รายการเดินบัญชี) + <b>งบกระแสเงินสดรายเดือน</b> (สรุป). เลือกพร้อมกันได้</div>
+            {canEdit ? <button onClick={() => fileRef.current && fileRef.current.click()} style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '11px 22px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>เลือกไฟล์…</button> : <div style={{ fontSize: 13, color: C.faint }}>บัญชีนี้ดูได้อย่างเดียว — ให้ผู้ดูแลอัปโหลดไฟล์</div>}
           </div>
         )}
 
         {model && <React.Fragment>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, marginBottom: 18 }}>
-            <CfpKpi label="เงินสดปลายงวด" value={cfpFmtM(model.ending)} color={C.ink} sub={(model.net >= 0 ? '▲ ' : '▼ ') + cfpFmtSigned(model.net) + ' จากต้นงวด'} />
-            <CfpKpi label="ดำเนินงาน" value={cfpFmtM(model.acts.op.net)} color={model.acts.op.net < 0 ? C.neg : C.pos} onClick={() => pickAct('op')} sub="กดดูรายการ" />
-            <CfpKpi label="ลงทุน" value={cfpFmtM(model.acts.inv.net)} color={model.acts.inv.net < 0 ? C.neg : C.pos} onClick={() => pickAct('inv')} sub="กดดูรายการ" />
-            <CfpKpi label="จัดหาเงิน" value={cfpFmtM(model.acts.fin.net)} color={model.acts.fin.net < 0 ? C.neg : C.pos} onClick={() => pickAct('fin')} sub="กดดูรายการ" />
+          {/* tab nav */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+            {tabs.map(([k, label]) => (
+              <button key={k} onClick={() => setTab(k)} style={{ border: '1px solid ' + (tab === k ? 'transparent' : C.line), background: tab === k ? 'linear-gradient(135deg,#4F8AF7,#3a6fe0)' : '#fff', color: tab === k ? '#fff' : C.mut, fontWeight: 700, fontSize: 13.5, padding: '9px 16px', borderRadius: 12, cursor: 'pointer', boxShadow: tab === k ? '0 6px 16px rgba(79,138,247,.3)' : 'none' }}>{label}</button>
+            ))}
           </div>
 
-          {model.summary && model.summary.net != null && (
-            <div style={{ fontSize: 12.5, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : C.amber, marginBottom: 14, padding: '8px 12px', background: C.soft, borderRadius: 8, border: '1px solid ' + C.line }}>
-              {Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป: สุทธิ ' + cfpFmtB(model.net) : '⚠ STM สุทธิ ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}
+          {tab === 'overview' && <React.Fragment>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 16 }}>
+              <CfpKpiHero label="เงินสดต้นงวด" value={cfpFmtM(model.opening)} />
+              <CfpKpiHero label="กระแสเงินสดสุทธิ" value={cfpFmtSigned(model.net)} color={model.net < 0 ? C.neg : C.pos} sub={model.net >= 0 ? 'เงินสดเพิ่มขึ้น' : 'เงินสดลดลง'} />
+              <CfpKpiHero label="เงินสดปลายงวด" value={cfpFmtM(model.ending)} color={C.primaryD} sub={(model.net >= 0 ? '▲ ' : '▼ ') + cfpFmtSigned(model.net) + ' จากต้นงวด'} />
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14, marginBottom: 16 }}>
+              <CfpKpiAct k="op" value={model.acts.op.net} onClick={() => openAct('op')} />
+              <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} />
+              <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} />
+            </div>
+            {model.summary && model.summary.net != null && (
+              <div style={{ fontSize: 12.5, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
+            )}
+            <div style={card}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
+            <div style={card}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11.5, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
+            <div style={secTitle}><span>🤖 Executive Insights</span></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 14, marginBottom: 8 }}>
+              {model.acts.fin.net > 0 && model.acts.op.net < 0 && (<div style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>🔁 อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>ดำเนินงาน {cfpFmtM(model.acts.op.net)}</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>)}
+              {model.interest > 0 && (<div style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>％ ดอกเบี้ยจ่าย</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{cfpFmtM(model.interest)}</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>{model.payroll > 0 ? '≈ ' + Math.round(model.interest / model.payroll * 100) + '% ของเงินเดือน (' + cfpFmtM(model.payroll) + ')' : 'ภาระดอกเบี้ยรวมทั้งงวด'}</div></div>)}
+              {model.topInflow.amt > 0 && model.inflowTotal > 0 && (<div style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>📦 รายได้กระจุกตัว</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{Math.round(model.topInflow.amt / model.inflowTotal * 100)}% จากสินค้าหลัก</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>{model.topInflow.name.replace(/^เงินสดรับจากการขาย-?/, '')} ({cfpFmtM(model.topInflow.amt)})</div></div>)}
+            </div>
+          </React.Fragment>}
+
+          {tab === 'statement' && (
+            <div style={card}><div style={secTitle}><span>📑 งบกระแสเงินสด (รายเดือน)</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแถว/ช่อง → รายการจริงจาก STM</span></div><CfpStatementTable model={model} onPick={openStmt} /></div>
           )}
 
-          {/* statement table (the user's cashflow) */}
-          <div style={cardStyle}>
-            <div style={secHdr}>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>งบกระแสเงินสด (รายเดือน)</div>
-              <div style={{ fontSize: 12, color: C.faint }}>กดแถว/ช่อง → ดูรายการจริงจาก STM</div>
-            </div>
-            <CfpStatementTable model={model} onPick={pickStmt} />
-          </div>
+          {tab === 'explorer' && (
+            <div style={card}><div style={secTitle}><span>🔎 Transaction Explorer — รายการเดินบัญชีจาก STM</span></div><CfpExplorer model={model} toast={toast} /></div>
+          )}
 
-          {/* drill */}
-          <div id="cfp-drill" style={{ ...cardStyle, transition: 'box-shadow .25s' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🔍 รายละเอียด (STM) {drillTitle}</div>
-              {drill && <button onClick={() => { setDrill(null); setCatFilter(null); }} style={{ background: 'transparent', border: '1px solid ' + C.line, borderRadius: 7, padding: '4px 10px', fontSize: 12, color: C.mut, cursor: 'pointer', flexShrink: 0 }}>ปิด</button>}
-            </div>
-            <CfpDrill model={model} drill={drill} catFilter={catFilter} setCatFilter={setCatFilter} />
-          </div>
-
-          {/* waterfall */}
-          <div style={cardStyle}>
-            <div style={secHdr}>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>เงินสดเดินทางอย่างไร</div>
-              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: C.mut }}>
-                <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: C.pos, marginRight: 4, verticalAlign: 'middle' }} />เพิ่ม</span>
-                <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: C.neg, marginRight: 4, verticalAlign: 'middle' }} />ลด</span>
-                <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: C.gray, marginRight: 4, verticalAlign: 'middle' }} />ยอดรวม</span>
-              </div>
-            </div>
-            <CfpWaterfall model={model} onPick={pickAct} />
-          </div>
-
-          {/* monthly */}
-          <div style={cardStyle}>
-            <div style={secHdr}><div style={{ fontSize: 16, fontWeight: 600 }}>กระแสเงินสดรายเดือน</div><div style={{ fontSize: 12, color: C.faint }}>กดแท่งเพื่อแยกกิจกรรม</div></div>
-            <CfpMonthly model={model} onPick={pickMonth} />
-          </div>
-
-          {/* insights */}
-          <div style={{ fontSize: 13, color: C.mut, margin: '0 2px 10px' }}>จุดที่ควรจับตา</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 18 }}>
-            {model.acts.fin.net > 0 && model.acts.op.net < 0 && (
-              <div style={cardStyle}><div style={{ fontSize: 20, marginBottom: 4 }}>🔁</div><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 3 }}>อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 13, color: C.mut, lineHeight: 1.5 }}>ดำเนินงานสุทธิ {cfpFmtM(model.acts.op.net)} แต่จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>
-            )}
-            {model.interest > 0 && (
-              <div style={cardStyle}><div style={{ fontSize: 20, marginBottom: 4 }}>％</div><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 3 }}>ดอกเบี้ยจ่าย {cfpFmtM(model.interest)}</div><div style={{ fontSize: 13, color: C.mut, lineHeight: 1.5 }}>{model.payroll > 0 ? ('≈ ' + Math.round(model.interest / model.payroll * 100) + '% ของเงินเดือนทั้งบริษัท (' + cfpFmtM(model.payroll) + ')') : 'ภาระดอกเบี้ยรวมทั้งงวด'}</div></div>
-            )}
-            {model.topInflow.amt > 0 && model.inflowTotal > 0 && (
-              <div style={cardStyle}><div style={{ fontSize: 20, marginBottom: 4 }}>📦</div><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 3 }}>รายได้กระจุกตัว</div><div style={{ fontSize: 13, color: C.mut, lineHeight: 1.5 }}>{Math.round(model.topInflow.amt / model.inflowTotal * 100)}% จาก “{model.topInflow.name.replace(/^เงินสดรับจากการขาย-?/, '')}” ({cfpFmtM(model.topInflow.amt)})</div></div>
-            )}
-          </div>
-
-          <div style={{ fontSize: 11.5, color: C.faint, margin: '4px 2px 24px' }}>ตารางงบ = ไฟล์ “งบกระแสเงินสดรายเดือน” · รายละเอียด = ไฟล์ STM · เก็บในเครื่องนี้ (ยังไม่ sync ทีม) · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH') : '-'}</div>
+          <div style={{ fontSize: 11.5, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · เก็บในเครื่องนี้ (ยังไม่ sync ทีม) · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH') : '-'}</div>
         </React.Fragment>}
+
+        {modal && <CfpModal title={modal.title} subtitle={modal.subtitle} txns={modal.txns} onClose={() => setModal(null)} />}
       </div>
     );
   }
