@@ -374,7 +374,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
       <div className="anim-in dr-hero" style={{
         marginBottom: isPortrait ? 14 : 20, padding: isPortrait ? '18px 22px' : '22px 28px',
         borderRadius: 18, position: 'relative', overflow: 'hidden',
-        background: 'linear-gradient(135deg, #1a4490 0%, #1f56b8 50%, #2a6fdb 100%)',
+        background: 'linear-gradient(135deg, #1a592f 0%, #21703a 50%, #2e8b4a 100%)',
         boxShadow: '0 8px 22px rgba(26, 68, 144, 0.25)',
         color: 'white',
       }}>
@@ -447,7 +447,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
           )}
           count={ytdList.length}
           value={sumBal(ytdList)}
-          gradient="linear-gradient(135deg, #5b9eef 0%, #2a6fdb 100%)"
+          gradient="linear-gradient(135deg, #47a566 0%, #2e8b4a 100%)"
           accent="#7eb5f5"
           onClick={() => setDrillModal({ title: `มูลค่ารับสะสมในปี ${thisYear}`, list: ytdList })}
         />
@@ -823,11 +823,11 @@ function DailyIvTable({ list, projectByCode, showDate, empty }) {
         <tfoot>
           <tr style={{ background: 'var(--brand-50, #eef4ff)', borderTop: '2px solid var(--brand-200, #bfd4ff)' }}>
             {/* cols 1-5: ที่ / Job No / เลข IV / ชื่อโครงการ / งวด — รวมเป็นช่อง label */}
-            <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-700, #1a4490)', letterSpacing: '.02em' }}>
+            <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--brand-700, #1a592f)', letterSpacing: '.02em' }}>
               รวมทั้งสิ้น ({list.length} ใบ)
             </td>
             {/* col 6: BALANCE — ตัวเลขรวม (ตรงกับแถวข้อมูลข้างบน) */}
-            <td className="num strong" style={{ fontWeight: 800, color: 'var(--brand-700, #1a4490)', fontSize: 14, whiteSpace: 'nowrap' }}>
+            <td className="num strong" style={{ fontWeight: 800, color: 'var(--brand-700, #1a592f)', fontSize: 14, whiteSpace: 'nowrap' }}>
               {fmtNum(total)}
             </td>
             {/* col 7: วันที่รับเงิน (มีเฉพาะ showDate) */}

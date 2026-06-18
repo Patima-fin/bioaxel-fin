@@ -49,7 +49,7 @@ function PcStatusBadge({ status }) {
 }
 function PcProgress({ value, w = 56 }) {
   const v = value == null ? 0 : value;
-  let col = '#2a6fdb'; if (v >= 100) col = '#16a34a'; else if (v >= 70) col = '#0e9f9a'; else if (v < 30) col = '#94a3b8';
+  let col = '#2e8b4a'; if (v >= 100) col = '#16a34a'; else if (v >= 70) col = '#0e9f9a'; else if (v < 30) col = '#94a3b8';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
       <div style={{ width: w, height: 6, background: '#e7edf4', borderRadius: 10, overflow: 'hidden', flex: '0 0 auto' }}>
@@ -108,14 +108,14 @@ function PcKpiSection({ summary, filterStatus, onFilterStatus }) {
   };
   return (
     <div className="pc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(8,minmax(0,1fr))', gap: 10 }}>
-      {card('all', <PcI.building size={15} />, 'โครงการทั้งหมด', 'All Projects', summary.count.toLocaleString(), '฿' + PCU.fmtCompact(summary.contractTotal), '#2a6fdb', null)}
-      {card('wip', <PcI.refresh size={15} />, 'กำลังดำเนินการ', 'Work in Progress', summary.wip.toLocaleString(), '฿' + PCU.fmtCompact(summary.wipAmt), '#2a6fdb', 'Work in progress')}
+      {card('all', <PcI.building size={15} />, 'โครงการทั้งหมด', 'All Projects', summary.count.toLocaleString(), '฿' + PCU.fmtCompact(summary.contractTotal), '#2e8b4a', null)}
+      {card('wip', <PcI.refresh size={15} />, 'กำลังดำเนินการ', 'Work in Progress', summary.wip.toLocaleString(), '฿' + PCU.fmtCompact(summary.wipAmt), '#2e8b4a', 'Work in progress')}
       {card('await', <PcI.clock size={15} />, 'รอลงนาม', 'Awaiting Sign', summary.awaiting.toLocaleString(), '฿' + PCU.fmtCompact(summary.awaitAmt), '#f97316', 'ยังไม่ลงนาม')}
       {card('fin', <PcI.check size={15} />, 'เสร็จสิ้น', 'Finished', summary.finish.toLocaleString(), '฿' + PCU.fmtCompact(summary.finishAmt), '#16a34a', 'Finish')}
       {card('cancel', <PcI.close size={15} />, 'ยกเลิก', 'Cancelled', summary.cancelled.toLocaleString(), '฿' + PCU.fmtCompact(summary.cancelAmt), '#ef4444', 'ยกเลิก')}
       {card('contract', <PcI.money size={15} />, 'มูลค่าสัญญารวม', 'Contract Value', '฿' + PCU.fmtCompact(summary.contractTotal), 'รับแล้ว ฿' + PCU.fmtCompact(summary.received), '#0e9f9a', null)}
       {card('ar', <PcI.alert size={15} />, 'ยอดค้างรับ', 'Outstanding AR', '฿' + PCU.fmtCompact(summary.outstandingAR), null, '#b45309', null)}
-      {card('f30', <PcI.clock size={15} />, 'คาดรับ 30 วัน', 'Forecast 30d', '฿' + PCU.fmtCompact(summary.forecast30), '60d ฿' + PCU.fmtCompact(summary.forecast60), '#2563eb', null)}
+      {card('f30', <PcI.clock size={15} />, 'คาดรับ 30 วัน', 'Forecast 30d', '฿' + PCU.fmtCompact(summary.forecast30), '60d ฿' + PCU.fmtCompact(summary.forecast60), '#2e8b4a', null)}
     </div>
   );
 }
@@ -460,7 +460,7 @@ function PcGrid({ rows, allCols, state, setState, onOpenRow }) {
               const cond = PCGrid.rowCondStyle(r, state.cf);
               return (
                 <tr key={r.id} onClick={() => onOpenRow(r)} style={{ cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
-                  onMouseEnter={e => e.currentTarget.style.boxShadow = 'inset 0 0 0 9999px rgba(42,111,219,.035)'}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = 'inset 0 0 0 9999px rgba(46,139,74,.035)'}
                   onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
                   {frozenCols.map((c, i) => (
                     <td key={c.id} style={{ position: 'sticky', left: frozenOffsets[i], zIndex: 3, minWidth: colW(c), maxWidth: colW(c), width: colW(c), padding: state.density === 'compact' ? '6px 9px' : '10px 9px', textAlign: c.align || 'left', verticalAlign: 'middle', background: cond.background || '#fff', color: cond.color, borderRight: '1px solid #e6ecf4', overflow: 'hidden' }}>{PcCellRender(c, r)}</td>
@@ -775,7 +775,7 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                       {i.mergedFull ? <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '1px 7px', borderRadius: 100 }}>ส่งงวดเดียว 100% · รวมงวดก่อน</span> : ''}</span>
                     <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 9px', borderRadius: 100,
                       background: i.absorbed ? '#f1f5f9' : i.paid ? '#dcfce7' : i.delivered ? '#dceaff' : '#fef3c7',
-                      color: i.absorbed ? '#94a3b8' : i.paid ? '#15803d' : i.delivered ? '#1f56b8' : '#b45309' }}>
+                      color: i.absorbed ? '#94a3b8' : i.paid ? '#15803d' : i.delivered ? '#21703a' : '#b45309' }}>
                       {i.absorbed ? 'รวมในงวดสุดท้าย' : i.paid ? 'จ่ายแล้ว' : i.acceptDate ? 'ตรวจรับแล้ว' : i.delivered ? 'ส่งมอบแล้ว' : 'ยังไม่ส่ง'}</span>
                   </div>
                   {i.absorbed && <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 6 }}>ไม่ได้ส่งงวดนี้แยก — ยกไปรวมจ่ายในงวด {i.absorbedInto} (ส่งงวดเดียว 100%)</div>}
@@ -796,7 +796,7 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                     const sm = META[iv.status] || { label: iv.status || '—', badge: 'b-gray' };
                     const badgeColor = iv.status === 'paid' ? { bg: '#dcfce7', c: '#15803d' }
                       : iv.status === 'issue' ? { bg: '#fee2e2', c: '#b91c1c' }
-                      : iv.status === 'tracking' ? { bg: '#dceaff', c: '#1f56b8' }
+                      : iv.status === 'tracking' ? { bg: '#dceaff', c: '#21703a' }
                       : { bg: '#fffbeb', c: '#b45309' };
                     return (
                       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e6ecf4', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px', fontSize: 11.5 }}>
@@ -996,7 +996,7 @@ function PcAdvancedFilter({ rows, conds, mode, onApply, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════
 function PcUploadDiff({ diff, stats, onClose }) {
   const groups = [
-    { key: 'signed', icon: '✍️', label: 'ลงนามใหม่', color: '#2563eb', bg: '#dceaff', items: diff.signed || [], hint: 'เปลี่ยนจาก “รอลงนาม” → มีเลขสัญญาจริง' },
+    { key: 'signed', icon: '✍️', label: 'ลงนามใหม่', color: '#2e8b4a', bg: '#dceaff', items: diff.signed || [], hint: 'เปลี่ยนจาก “รอลงนาม” → มีเลขสัญญาจริง' },
     { key: 'added', icon: '➕', label: 'โครงการใหม่', color: '#15803d', bg: '#dcfce7', items: diff.added || [], hint: 'เลขสัญญาที่ไม่เคยมีในระบบ' },
     { key: 'cancelled', icon: '🔴', label: 'ยกเลิกเพิ่ม', color: '#b91c1c', bg: '#fee2e2', items: diff.cancelled || [], hint: 'เพิ่งถูกตั้งสถานะยกเลิกในไฟล์นี้' },
     { key: 'missing', icon: '➖', label: 'โครงการหายไป', color: '#b45309', bg: '#ffedd5', items: diff.missing || [], hint: 'มีในระบบเดิม แต่ไม่อยู่ในไฟล์ใหม่ (ยังคงเก็บไว้ ไม่ลบ)' },

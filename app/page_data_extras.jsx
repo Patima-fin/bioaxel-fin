@@ -1586,7 +1586,7 @@ function ForecastEntriesPage({ data, setData, toast }) {
         { key: 'EXPENSE_TYPE',  label: 'ต้นทาง', width: 100, render: r => {
           const et = String(r.EXPENSE_TYPE || r.expense_type || '').trim();
           const cfg = et === 'AP' ? ['#d97706','AP · BD']
-            : et === 'BANK_RECON' ? ['#2563eb','STM']
+            : et === 'BANK_RECON' ? ['#2e8b4a','STM']
             : et === 'LOAN' ? ['#7c3aed','LOAN']
             : et === 'Salary' ? ['#059669','Salary']
             : ['#64748b','Manual'];

@@ -23,8 +23,8 @@ const { useState: aState, useEffect: aEffect, useMemo: aMemo } = React;
 })();
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "themeMode": "blue",
-  "accentHue": 245,
+  "themeMode": "green",
+  "accentHue": 150,
   "fontPair": "plex",
   "density": "regular",
   "showAnimations": true,
@@ -462,7 +462,7 @@ function App() {
     const root = document.documentElement;
     // Theme palette
     const themes = {
-      blue:    { 500: '#2a6fdb', 600: '#1f56b8', 700: '#1a4490', 800: '#16356f', 400: '#5b94f7', 300: '#8db8ff', 200: '#b9d4ff', 100: '#dceaff', 50: '#f0f6ff' },
+      green:   { 500: '#2e8b4a', 600: '#21703a', 700: '#1a592f', 800: '#154524', 400: '#47a566', 300: '#7cc48f', 200: '#aedcb8', 100: '#d5edda', 50: '#eef7f1' }, blue:    { 500: '#2a6fdb', 600: '#1f56b8', 700: '#1a4490', 800: '#16356f', 400: '#5b94f7', 300: '#8db8ff', 200: '#b9d4ff', 100: '#dceaff', 50: '#f0f6ff' },
       teal:    { 500: '#0d9488', 600: '#0f766e', 700: '#115e59', 800: '#134e4a', 400: '#2dd4bf', 300: '#5eead4', 200: '#99f6e4', 100: '#ccfbf1', 50: '#f0fdfa' },
       indigo:  { 500: '#4f46e5', 600: '#4338ca', 700: '#3730a3', 800: '#312e81', 400: '#818cf8', 300: '#a5b4fc', 200: '#c7d2fe', 100: '#e0e7ff', 50: '#eef2ff' },
       slate:   { 500: '#475569', 600: '#334155', 700: '#1e293b', 800: '#0f172a', 400: '#94a3b8', 300: '#cbd5e1', 200: '#e2e8f0', 100: '#f1f5f9', 50: '#f8fafc' },
@@ -1045,7 +1045,7 @@ function LoginPage({ onLogin }) {
               onChange={e => setUsername(e.target.value)}
               placeholder="กรอกชื่อผู้ใช้"
               style={inputStyle}
-              onFocus={e => e.target.style.borderColor = '#2a6fdb'}
+              onFocus={e => e.target.style.borderColor = '#2e8b4a'}
               onBlur={e  => e.target.style.borderColor = '#e2e8f0'}
             />
           </div>
@@ -1057,7 +1057,7 @@ function LoginPage({ onLogin }) {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="กรอกรหัสผ่าน"
                 style={{ ...inputStyle, paddingRight: 42 }}
-                onFocus={e => e.target.style.borderColor = '#2a6fdb'}
+                onFocus={e => e.target.style.borderColor = '#2e8b4a'}
                 onBlur={e  => e.target.style.borderColor = '#e2e8f0'}
               />
               <button type="button" onClick={() => setShowPw(v => !v)}
@@ -1092,7 +1092,7 @@ function LoginPage({ onLogin }) {
 
           <button type="submit" disabled={loading} style={{
             width: '100%', padding: '13px',
-            background: loading ? '#93c5fd' : 'linear-gradient(135deg, #2a6fdb, #1a4490)',
+            background: loading ? '#9ed3ad' : 'linear-gradient(135deg, #2e8b4a, #1a592f)',
             color: '#fff', border: 'none', borderRadius: 11,
             fontSize: 15, fontWeight: 600,
             cursor: loading ? 'not-allowed' : 'pointer',

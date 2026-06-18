@@ -670,7 +670,7 @@ function PnLPage({ data, setData, toast }) {
     <div className="page pnl-page present-page" ref={pageRef}>
       {/* ── HERO BANNER ────────────────────────────────────────────────── */}
       <div className="anim-in pnl-hero" style={{
-        background: 'linear-gradient(135deg, #2563eb 0%, #1e3a8a 100%)',
+        background: 'linear-gradient(135deg, #2e8b4a 0%, #154524 100%)',
         borderRadius: 16, padding: '22px 28px', color: 'white',
         marginBottom: 18, boxShadow: '0 10px 28px rgba(30, 58, 138, 0.18)',
         display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
@@ -713,7 +713,7 @@ function PnLPage({ data, setData, toast }) {
             {userCanEdit && (
               <button onClick={() => setUploadOpen(true)} style={{
                 ...pnlHeroBtn,
-                background: 'rgba(255,255,255,0.95)', color: '#1e3a8a',
+                background: 'rgba(255,255,255,0.95)', color: '#154524',
                 border: '1px solid rgba(255,255,255,0.5)',
                 fontWeight: 600,
               }} title="นำเข้า DATA INPUT ของเดือน">
@@ -736,7 +736,7 @@ function PnLPage({ data, setData, toast }) {
         {[
           { label: 'รายได้รวม', value: k.revenue,
             iconSvg: <path d="M3 17l6-6 4 4 7-7M14 8h7v7" />,
-            iconBg: '#eff6ff', iconColor: '#2563eb',
+            iconBg: '#eff6ff', iconColor: '#2e8b4a',
             badge: 'ยอดสะสม ' + lastMonth + ' เดือน', badgeBg: '#f1f5f9', badgeColor: '#64748b' },
           { label: 'ต้นทุนรวม', value: k.cost,
             iconSvg: <><rect x="4" y="6" width="16" height="14" rx="2"/><path d="M4 10h16M9 6V4h6v2"/></>,
@@ -850,7 +850,7 @@ function PnLPage({ data, setData, toast }) {
               <button key={k} onClick={() => setViewMode(k)} style={{
                 padding: '5px 14px', fontSize: 12, fontWeight: 600,
                 background: viewMode === k ? 'white' : 'transparent',
-                color: viewMode === k ? '#1e3a8a' : '#64748b',
+                color: viewMode === k ? '#154524' : '#64748b',
                 border: 0, borderRadius: 6, cursor: 'pointer',
                 boxShadow: viewMode === k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
                 transition: 'all 120ms ease',
@@ -1060,7 +1060,7 @@ function PnLPage({ data, setData, toast }) {
                     critical: { bg: '#fef2f2', border: '#fca5a5', accent: '#dc2626' },
                     risk:     { bg: '#fffbeb', border: '#fcd34d', accent: '#d97706' },
                     good:     { bg: '#f0fdf4', border: '#86efac', accent: '#16a34a' },
-                    info:     { bg: '#eff6ff', border: '#93c5fd', accent: '#2563eb' },
+                    info:     { bg: '#eff6ff', border: '#9ed3ad', accent: '#2e8b4a' },
                   }[ins.kind] || { bg: '#f8fafc', border: '#cbd5e1', accent: '#475569' };
                   return (
                     <div key={i} style={{

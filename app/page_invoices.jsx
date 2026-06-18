@@ -1020,7 +1020,7 @@ function IvReportView({ rows, onOpen }) {
     {
       key: 'this_week',
       icon: '📅', label: 'คาดรับสัปดาห์นี้',
-      grad: 'linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%)', text: '#1e3a8a', border: '#63b3ed', // brand blue (Daily YTD)
+      grad: 'linear-gradient(135deg, #dbeafe 0%, #9ed3ad 100%)', text: '#154524', border: '#63b3ed', // brand blue (Daily YTD)
       rows: rows.filter(iv =>
         iv.status === 'tracking' &&
         iv.expectedReceive >= today && iv.expectedReceive <= weekEnd
@@ -1104,7 +1104,7 @@ function IvReportView({ rows, onOpen }) {
       >
         {/* Col 1: Job (line 1) + Period chip (line 2) + IV (line 3) — stacked เพื่อความสม่ำเสมอ */}
         <div style={{ lineHeight: 1.2, minWidth: 0 }}>
-          <div style={{ fontFamily: 'ui-monospace', fontWeight: 700, fontSize: 12, color: 'var(--brand-700,#2a6fdb)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontFamily: 'ui-monospace', fontWeight: 700, fontSize: 12, color: 'var(--brand-700,#2e8b4a)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {iv.jobNo}
           </div>
           {(iv.period === 0 || Number(iv.period) > 0) && (
@@ -1225,7 +1225,7 @@ function IvReportView({ rows, onOpen }) {
               </svg>
             ),
             count: thisWkRows.length, amt: sumBal(thisWkRows),
-            grad: 'linear-gradient(135deg, #5b9eef 0%, #2a6fdb 100%)', glow: 'rgba(42,111,219,.28)',
+            grad: 'linear-gradient(135deg, #47a566 0%, #2e8b4a 100%)', glow: 'rgba(46,139,74,.28)',
           },
           {
             label: 'คาดรับสัปดาห์หน้า', en: 'EXPECTED NEXT WEEK',
@@ -2017,7 +2017,7 @@ function DiagnosticPanel({ data, financeByCode, projectByCode, rows, onClose }) 
 
         {/* Summary stats */}
         <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--line)', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
-          <DiagStat label="IV ทั้งหมด" value={total} color="#2a6fdb" />
+          <DiagStat label="IV ทั้งหมด" value={total} color="#2e8b4a" />
           <DiagStat label="🤝 ครบทั้ง 2" value={hasBoth} color="#276749" />
           <DiagStat label="❌ ไม่เจอ project" value={noProject} color="#c53030" />
           <DiagStat label="💰 ไม่เจอ debt" value={noDebt} color="#dd6b20" />

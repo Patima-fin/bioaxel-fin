@@ -1,15 +1,16 @@
 /* BIOAXEL Financial Dashboard – design tokens & base styles */
 :root {
-  --brand-50:  #f0f6ff;
-  --brand-100: #dceaff;
-  --brand-200: #b9d4ff;
-  --brand-300: #8db8ff;
-  --brand-400: #5b94f7;
-  --brand-500: #2a6fdb;
-  --brand-600: #1f56b8;
-  --brand-700: #1a4490;
-  --brand-800: #16356f;
-  --brand-900: #0f244d;
+  /* BIOAXEL brand = เขียว (อิงโลโก้ใบไม้/เฟือง) — เดิมเป็นฟ้าของ Water POG */
+  --brand-50:  #eef7f1;
+  --brand-100: #d5edda;
+  --brand-200: #aedcb8;
+  --brand-300: #7cc48f;
+  --brand-400: #47a566;
+  --brand-500: #2e8b4a;
+  --brand-600: #21703a;
+  --brand-700: #1a592f;
+  --brand-800: #154524;
+  --brand-900: #0d2e18;
 
   --ink-900: #0c1729;
   --ink-800: #1a2538;
@@ -22,7 +23,7 @@
   --ink-100: #eff1f5;
   --ink-50:  #f7f8fa;
 
-  --bg: #f4f7fb;
+  --bg: #f4f8f5;
   --panel: #ffffff;
   --line: #e6ebf3;
   --line-soft: #eef2f7;
@@ -238,7 +239,7 @@ button { font: inherit; color: inherit; }
 .btn-primary {
   background: linear-gradient(180deg, var(--brand-500), var(--brand-600));
   border-color: var(--brand-600); color: white;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(31,86,184,.3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(46,139,74,.3);
 }
 .btn-primary:hover { background: linear-gradient(180deg, var(--brand-600), var(--brand-700)); border-color: var(--brand-700); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--ink-600); }
@@ -690,8 +691,8 @@ body.present-mode .present-page.cfp-page .cfp-grid table { font-size: 14px !impo
 /* Print/screen polish */
 .bg-pattern {
   background-image:
-    radial-gradient(circle at 10% 0%, rgba(42,111,219,.06), transparent 40%),
-    radial-gradient(circle at 90% 100%, rgba(42,111,219,.05), transparent 40%);
+    radial-gradient(circle at 10% 0%, rgba(46,139,74,.06), transparent 40%),
+    radial-gradient(circle at 90% 100%, rgba(46,139,74,.05), transparent 40%);
 }
 
 /* ============================================================================
@@ -1205,12 +1206,12 @@ body.present-mode .present-page.cfp-page .cfp-grid table { font-size: 14px !impo
     display: flex !important;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #1a4490 0%, #1f56b8 50%, #2a6fdb 100%) !important;
+    background: linear-gradient(135deg, #1a592f 0%, #21703a 50%, #2e8b4a 100%) !important;
     color: white !important;
     padding: 12pt 16pt !important;
     border-radius: 10pt !important;
     margin-bottom: 8pt !important;
-    box-shadow: 0 4pt 12pt rgba(26,68,144,.22) !important;
+    box-shadow: 0 4pt 12pt rgba(26,89,47,.22) !important;
   }
   body.iv-print-mode .iv-print-brand { display: flex; align-items: center; gap: 12pt; }
   body.iv-print-mode .iv-print-logo {
@@ -1332,7 +1333,7 @@ body.present-mode .present-page.cfp-page .cfp-grid table { font-size: 14px !impo
     padding: 11pt 16pt !important;
     border-radius: 10pt !important;
     margin-bottom: 8pt !important;
-    box-shadow: 0 4pt 12pt rgba(26,68,144,.22) !important;
+    box-shadow: 0 4pt 12pt rgba(26,89,47,.22) !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
@@ -1782,7 +1783,7 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
    Budget Control Center (add-on) — scoped .bcc- styles. Self-contained;
    does not touch any existing rule. Palette mirrors the provided design.
    ════════════════════════════════════════════════════════════════════════ */
-.bcc-page { --bcc-primary:#2F5FD0; --bcc-border:#E8EDF5; --bcc-ink:#1B2A4A; --bcc-mute:#7C8BA8; --bcc-grid:#EEF2F9; }
+.bcc-page { --bcc-primary:#2e8b4a; --bcc-border:#E8EDF5; --bcc-ink:#1B2A4A; --bcc-mute:#7C8BA8; --bcc-grid:#EEF2F9; }
 
 .bcc-badge-sample {
   display:inline-block; margin-left:10px; vertical-align:middle; font-size:11px; font-weight:700;
@@ -1809,10 +1810,10 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
 .bcc-uploadBtn {
   border:none; border-radius:10px; padding:9px 18px; cursor:pointer; white-space:nowrap;
   font-size:13px; font-weight:700; color:#fff; font-family:inherit;
-  background:linear-gradient(135deg,#2F5FD0,#4E89FF); box-shadow:0 4px 12px rgba(47,95,208,0.32);
+  background:linear-gradient(135deg,#2e8b4a,#21703a); box-shadow:0 4px 12px rgba(46,139,74,0.32);
   transition:transform .15s, box-shadow .15s;
 }
-.bcc-uploadBtn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 16px rgba(47,95,208,0.4); }
+.bcc-uploadBtn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 6px 16px rgba(46,139,74,0.4); }
 .bcc-uploadBtn:disabled { opacity:.6; cursor:default; }
 
 /* scope banner */
@@ -1862,13 +1863,13 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
 .bcc-aiBtn {
   border:none; border-radius:11px; padding:11px 22px; cursor:pointer; font-family:inherit;
   font-size:14px; font-weight:700; color:#fff;
-  background:linear-gradient(135deg,#2F5FD0,#7C5CE0); box-shadow:0 6px 18px rgba(74,71,208,0.32);
+  background:linear-gradient(135deg,#2e8b4a,#1aa46f); box-shadow:0 6px 18px rgba(46,139,74,0.32);
   transition:transform .15s, box-shadow .15s;
 }
 .bcc-aiBtn:hover { transform:translateY(-1px); box-shadow:0 8px 22px rgba(74,71,208,0.42); }
 .bcc-spinner {
   width:40px; height:40px; border-radius:50%; margin:0 auto;
-  border:3px solid #E5ECF8; border-top-color:#2F5FD0; animation:bccSpin .8s linear infinite;
+  border:3px solid #E1EFE7; border-top-color:#2e8b4a; animation:bccSpin .8s linear infinite;
 }
 @keyframes bccSpin { to { transform:rotate(360deg); } }
 
@@ -1930,7 +1931,7 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
   transition: all var(--t-fast) var(--ease);
 }
 .hp-chip:hover { border-color: var(--ink-300); background: var(--ink-50); }
-.hp-chip.is-active { background: var(--brand-500); border-color: var(--brand-500); color: #fff; box-shadow: 0 2px 6px rgba(31,86,184,.28); }
+.hp-chip.is-active { background: var(--brand-500); border-color: var(--brand-500); color: #fff; box-shadow: 0 2px 6px rgba(46,139,74,.28); }
 .hp-chip-n { font-size: 11px; font-weight: 700; background: var(--ink-100); color: var(--ink-600); border-radius: var(--radius-pill); min-width: 18px; padding: 0 5px; text-align: center; }
 .hp-chip.is-active .hp-chip-n { background: rgba(255,255,255,.25); color: #fff; }
 

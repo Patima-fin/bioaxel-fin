@@ -170,7 +170,7 @@ function StsCalcPage({ data }) {
         <div style={{ padding: '10px 16px', background: '#f0f9ff', borderBottom: '1px solid #bfdbfe', display: 'flex', justifyContent: 'space-between' }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>💰 เงินกู้ STS (#1)</div>
           <button onClick={() => addRow('stsDrawdowns', { date: '', amount: 0, note: '' })}
-              style={{ background: '#2a6fdb', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>+ เพิ่ม</button>
+              style={{ background: '#2e8b4a', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}>+ เพิ่ม</button>
         </div>
         <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
           <thead>

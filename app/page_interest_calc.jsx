@@ -159,7 +159,7 @@ function ParamForm({ params, setParams, debtLedger, debtMaster, onCalc }) {
               return <option key={i} value={d.id||d.contractNo}>{d.debtCategory} · {d.borrowerName} ({d.contractNo}) {rate}</option>;
             })}
           </select>
-          {params.loanLabel && <div style={{ fontSize:11, color:'#2a6fdb', marginTop:6 }}>✓ {params.loanLabel}</div>}
+          {params.loanLabel && <div style={{ fontSize:11, color:'#2e8b4a', marginTop:6 }}>✓ {params.loanLabel}</div>}
         </div>
       )}
 
@@ -207,7 +207,7 @@ function ParamForm({ params, setParams, debtLedger, debtMaster, onCalc }) {
 
       <div style={{ marginTop:16, display:'flex', gap:10, alignItems:'center' }}>
         <button onClick={onCalc}
-          style={{ padding:'9px 24px', borderRadius:9, border:'none', background:'linear-gradient(135deg,#2a6fdb,#1a4490)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 12px rgba(42,111,219,0.3)' }}>
+          style={{ padding:'9px 24px', borderRadius:9, border:'none', background:'linear-gradient(135deg,#2e8b4a,#1a592f)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 12px rgba(46,139,74,0.3)' }}>
           คำนวณ
         </button>
         {params.rate && params.principal && (
@@ -250,7 +250,7 @@ function ScheduleTable({ rows, params, onExportCSV, onPrint }) {
       {/* Summary bar */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:12, marginBottom:16 }}>
         {[
-          { label:'วงเงินต้น', value: fmtMoney(principal), color:'#2a6fdb' },
+          { label:'วงเงินต้น', value: fmtMoney(principal), color:'#2e8b4a' },
           { label:'อัตราดอกเบี้ย', value: rate+'% p.a.', color:'#c05621' },
           { label:'ระยะเวลา', value: rows.length+' เดือน', color:'#6b46c1' },
           { label:'ดอกเบี้ยรวมทั้งสิ้น', value: fmtMoney(totalInterest), color:'#c53030' },
@@ -271,7 +271,7 @@ function ScheduleTable({ rows, params, onExportCSV, onPrint }) {
           ⬇ Export CSV
         </button>
         <button onClick={onPrint}
-          style={{ padding:'7px 18px', borderRadius:8, border:'1.5px solid #63b3ed', background:'#ebf8ff', color:'#2a6fdb', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+          style={{ padding:'7px 18px', borderRadius:8, border:'1.5px solid #63b3ed', background:'#ebf8ff', color:'#2e8b4a', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
           🖨 Print / PDF
         </button>
       </div>
@@ -306,7 +306,7 @@ function ScheduleTable({ rows, params, onExportCSV, onPrint }) {
                 return [
                   /* Quarter header */
                   <tr key={'qh-'+q.key} style={{ background:'linear-gradient(90deg,#f0f6ff,#f8fafc)', borderTop:'2px solid #bfdbfe' }}>
-                    <td colSpan={8} style={{ padding:'7px 12px', fontWeight:700, fontSize:12, color:'#2a6fdb' }}>
+                    <td colSpan={8} style={{ padding:'7px 12px', fontWeight:700, fontSize:12, color:'#2e8b4a' }}>
                       {quarterLabel(q.year, q.quarter)}
                       <span style={{ marginLeft:12, fontSize:11, color:'#718096', fontWeight:400 }}>{q.rows.length} เดือน</span>
                     </td>

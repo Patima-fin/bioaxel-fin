@@ -327,7 +327,7 @@ function StsCalcDrawer({ projectReceipts, match, calcResult, isOpen, onClose, on
           <div style={{ fontSize: 11, color: 'var(--ink-400)', marginTop: 8 }}>
             ตรวจสอบว่ามีสัญญา STS-* ใน debtMaster ที่ projectCode/jobNo ตรงกับใบรับนี้
           </div>
-          <button onClick={onClose} style={{ marginTop: 16, background: '#2a6fdb', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer' }}>ปิด</button>
+          <button onClick={onClose} style={{ marginTop: 16, background: '#2e8b4a', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer' }}>ปิด</button>
         </div>
       </div>
     );
@@ -740,15 +740,15 @@ function buildStsReportHTML(groups, params, debtEvents) {
    body { font-family: "IBM Plex Sans Thai","Sarabun",system-ui,sans-serif; color:#1a2333; margin:0; font-size:12px; }
    .sheet { page-break-after: always; padding-bottom: 6mm; }
    .sheet:last-child { page-break-after: auto; }
-   .head { display:flex; align-items:center; gap:14px; border-bottom:2.5px solid #2a6fdb; padding-bottom:8px; margin-bottom:12px; }
+   .head { display:flex; align-items:center; gap:14px; border-bottom:2.5px solid #2e8b4a; padding-bottom:8px; margin-bottom:12px; }
    .logo { height:44px; }
-   h1 { font-size:17px; margin:0; color:#1a4490; }
+   h1 { font-size:17px; margin:0; color:#1a592f; }
    .sub { font-size:11px; color:#5a6478; margin-top:3px; }
-   h2 { font-size:12.5px; color:#1a4490; margin:13px 0 5px; border-left:3px solid #2a6fdb; padding-left:7px; }
+   h2 { font-size:12.5px; color:#1a592f; margin:13px 0 5px; border-left:3px solid #2e8b4a; padding-left:7px; }
    table { width:100%; border-collapse:collapse; }
    .info td { padding:4px 7px; border:1px solid #d6deeb; font-size:11.5px; }
    .info .k { background:#eef4fc; font-weight:700; width:130px; color:#33425f; }
-   .grid th { background:#2a6fdb; color:#fff; font-weight:600; padding:5px 7px; font-size:11px; text-align:left; }
+   .grid th { background:#2e8b4a; color:#fff; font-weight:600; padding:5px 7px; font-size:11px; text-align:left; }
    .grid td { padding:4px 7px; border-bottom:1px solid #e6ecf5; font-size:11px; }
    .grid tbody tr:nth-child(even) td { background:#f6f9fd; }
    .r { text-align:right; font-variant-numeric:tabular-nums; }
@@ -756,7 +756,7 @@ function buildStsReportHTML(groups, params, debtEvents) {
    .summary { margin-top:14px; break-inside:avoid; }
    .sum td { padding:6px 10px; border-bottom:1px solid #e6ecf5; font-size:12px; }
    .sum .b td { background:#eafaf0; font-weight:700; }
-   .sum .grand td { background:#1a4490; color:#fff; font-weight:800; font-size:14px; }
+   .sum .grand td { background:#1a592f; color:#fff; font-weight:800; font-size:14px; }
    .sign { display:flex; justify-content:space-between; margin-top:28px; font-size:11px; color:#33425f; }
   </style></head><body onload="setTimeout(function(){window.print();},250)">${sections}</body></html>`;
 }

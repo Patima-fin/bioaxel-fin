@@ -82,7 +82,7 @@
 
   // ── status meta (4 main) ──────────────────────────────────────────────────
   const STATUS_META = {
-    'Work in progress': { en: 'Work in Progress', th: 'กำลังดำเนินการ', color: '#1f56b8', bg: '#dceaff', dot: '#2a6fdb' },
+    'Work in progress': { en: 'Work in Progress', th: 'กำลังดำเนินการ', color: '#21703a', bg: '#dceaff', dot: '#2e8b4a' },
     'Finish':           { en: 'Finished',         th: 'เสร็จสิ้น',      color: '#15803d', bg: '#dcfce7', dot: '#16a34a' },
     'ยังไม่ลงนาม':       { en: 'Awaiting Signature', th: 'รอลงนาม',     color: '#b45309', bg: '#ffedd5', dot: '#f97316' },
     'ยกเลิก':           { en: 'Cancelled',        th: 'ยกเลิก',        color: '#7f1d1d', bg: '#fee2e2', dot: '#ef4444' },
@@ -599,7 +599,7 @@
   function lgByBank(rows) {
     const m = {};
     rows.forEach(r => { if (!r.lg || !r.lg.bank) return; const b = r.lg.bank;
-      if (!m[b]) m[b] = { bank: b, color: BANK_COLORS[b] || '#1f56b8', amount: 0, count: 0, active: 0, expired: 0, released: 0 };
+      if (!m[b]) m[b] = { bank: b, color: BANK_COLORS[b] || '#21703a', amount: 0, count: 0, active: 0, expired: 0, released: 0 };
       m[b].amount += r.lg.amount || 0; m[b].count++; m[b][r.lg.status] = (m[b][r.lg.status] || 0) + 1; });
     return Object.values(m).sort((a, b) => b.amount - a.amount);
   }
@@ -1090,14 +1090,14 @@
       body{color:#0d1f3a;background:#fff;padding:0}
       .num{font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
       .wrap{max-width:1040px;margin:0 auto;padding:30px 34px 50px}
-      .hd{display:flex;align-items:center;gap:16px;border-bottom:3px solid #2a6fdb;padding-bottom:16px;margin-bottom:22px}
+      .hd{display:flex;align-items:center;gap:16px;border-bottom:3px solid #2e8b4a;padding-bottom:16px;margin-bottom:22px}
       .hd img{height:54px;width:auto}
-      .hd .t1{font-size:21px;font-weight:800;color:#1f56b8;letter-spacing:-.3px}
+      .hd .t1{font-size:21px;font-weight:800;color:#21703a;letter-spacing:-.3px}
       .hd .t2{font-size:12px;color:#64748b;margin-top:2px}
       .hd .meta{margin-left:auto;text-align:right;font-size:11px;color:#64748b;line-height:1.6}
       .hd .meta b{color:#0d1f3a}
-      h2{font-size:13px;font-weight:800;color:#1f56b8;margin:24px 0 10px;display:flex;align-items:center;gap:8px}
-      h2::before{content:'';width:4px;height:15px;background:#2a6fdb;border-radius:3px;display:inline-block}
+      h2{font-size:13px;font-weight:800;color:#21703a;margin:24px 0 10px;display:flex;align-items:center;gap:8px}
+      h2::before{content:'';width:4px;height:15px;background:#2e8b4a;border-radius:3px;display:inline-block}
       .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
       .kpi{border:1px solid #e6ecf4;border-radius:11px;padding:13px 15px;background:linear-gradient(135deg,#f8fbff,#fff)}
       .kpi .lbl{font-size:10.5px;color:#64748b;font-weight:600}
@@ -1105,14 +1105,14 @@
       .kpi .s{font-size:10.5px;color:#94a3b8;margin-top:2px}
       table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
       th,td{padding:7px 9px;text-align:left;border-bottom:1px solid #eef2f7}
-      thead th{background:#1f56b8;color:#fff;font-weight:600;font-size:10.5px;border:none}
+      thead th{background:#21703a;color:#fff;font-weight:600;font-size:10.5px;border:none}
       thead th.r,td.r{text-align:right}thead th.c,td.c{text-align:center}
       tbody tr:nth-child(even){background:#f7faff}
       .pill{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:100px}
       .foot{margin-top:30px;padding-top:12px;border-top:1px solid #e6ecf4;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}
       @media print{.noprint{display:none}body{padding:0}.wrap{padding:14px 18px}thead th{-webkit-print-color-adjust:exact;print-color-adjust:exact}.kpi,tbody tr:nth-child(even){-webkit-print-color-adjust:exact;print-color-adjust:exact}}
       .btnbar{position:fixed;top:12px;right:16px;display:flex;gap:8px;z-index:9}
-      .btnbar button{font:600 12px/1 'IBM Plex Sans Thai',sans-serif;padding:9px 15px;border-radius:8px;border:none;cursor:pointer;background:#2a6fdb;color:#fff;box-shadow:0 4px 14px rgba(35,72,150,.3)}
+      .btnbar button{font:600 12px/1 'IBM Plex Sans Thai',sans-serif;padding:9px 15px;border-radius:8px;border:none;cursor:pointer;background:#2e8b4a;color:#fff;box-shadow:0 4px 14px rgba(35,72,150,.3)}
       .btnbar button.sec{background:#fff;color:#475569;border:1px solid #cbd5e1;box-shadow:none}`;
     const kindLabel = kind === 'summary' ? 'Executive Summary' : kind === 'both' ? 'สรุป + รายละเอียดโครงการ' : 'รายละเอียดโครงการ';
     const head = `
@@ -1132,12 +1132,12 @@
       const lg = lgByBank(rows);
       body += `<h2>ภาพรวม (Executive KPI)</h2><div class="kpis">
         <div class="kpi"><div class="lbl">โครงการทั้งหมด</div><div class="v num">${sum.count.toLocaleString()}</div><div class="s">มูลค่าสัญญารวม ฿${fmtCompact(sum.contractTotal)}</div></div>
-        <div class="kpi"><div class="lbl">กำลังดำเนินการ</div><div class="v num" style="color:#1f56b8">${sum.wip.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.wipAmt)}</div></div>
+        <div class="kpi"><div class="lbl">กำลังดำเนินการ</div><div class="v num" style="color:#21703a">${sum.wip.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.wipAmt)}</div></div>
         <div class="kpi"><div class="lbl">เสร็จสิ้น</div><div class="v num" style="color:#16a34a">${sum.finish.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.finishAmt)}</div></div>
         <div class="kpi"><div class="lbl">ยกเลิก</div><div class="v num" style="color:#ef4444">${sum.cancelled.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.cancelAmt)}</div></div>
         <div class="kpi"><div class="lbl">รับแล้ว (Received)</div><div class="v num" style="color:#15803d">฿${fmtCompact(sum.received)}</div></div>
         <div class="kpi"><div class="lbl">ยอดค้างรับ (AR)</div><div class="v num" style="color:#b45309">฿${fmtCompact(sum.outstandingAR)}</div></div>
-        <div class="kpi"><div class="lbl">คาดรับใน 30 วัน</div><div class="v num" style="color:#2563eb">฿${fmtCompact(sum.forecast30)}</div><div class="s">60 วัน ฿${fmtCompact(sum.forecast60)}</div></div>
+        <div class="kpi"><div class="lbl">คาดรับใน 30 วัน</div><div class="v num" style="color:#2e8b4a">฿${fmtCompact(sum.forecast30)}</div><div class="s">60 วัน ฿${fmtCompact(sum.forecast60)}</div></div>
         <div class="kpi"><div class="lbl">วงเงิน LG รวม</div><div class="v num">฿${fmtCompact(sum.lgTotal)}</div></div>
       </div>`;
       body += `<h2>สถานะโครงการ (Pipeline)</h2><table><thead><tr><th>สถานะย่อย</th><th class="r">จำนวน</th></tr></thead><tbody>

@@ -6,7 +6,7 @@
 'use strict';
 
 const DL_CATEGORY_COLOR = {
-  'WCI':       '#2a6fdb',
+  'WCI':       '#2e8b4a',
   'Non-WCI':   '#0d9488',
   'กรรมการ':    '#7c3aed',
   'LockWood':  '#0369a1',
@@ -39,7 +39,7 @@ const FACILITY_META = {
   'L/G':   { color: '#166534', bg: '#dcfce7', label: 'L/G',   full: 'Letter of Guarantee' },
   'T/R':   { color: '#0e7490', bg: '#cffafe', label: 'T/R',   full: 'Trust Receipt' },
   'L/C':   { color: '#9d174d', bg: '#fce7f3', label: 'L/C',   full: 'Letter of Credit' },
-  'TL':    { color: '#1e3a8a', bg: '#e0e7ff', label: 'TL',    full: 'Term Loan' },
+  'TL':    { color: '#154524', bg: '#e0e7ff', label: 'TL',    full: 'Term Loan' },
   'อื่นๆ': { color: '#525252', bg: '#f5f5f5', label: 'อื่นๆ', full: 'Other' },
 };
 function FacilityChip({ type, size = 'sm' }) {
@@ -608,7 +608,7 @@ function PrincipalEventModal({ open, kind, master, editEvent, onClose, onSave })
         </label>
       )}
       {isEdit && (
-        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', padding: '8px 12px', borderRadius: 7, fontSize: 12 }}>
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1a592f', padding: '8px 12px', borderRadius: 7, fontSize: 12 }}>
           ℹ️ แก้ไขรายการที่คีย์ผิด — ระบบจะ <strong>คำนวณยอดคงเหลือเงินต้นใหม่</strong> จากทุกรายการให้อัตโนมัติ
         </div>
       )}
@@ -2059,7 +2059,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                       </div>
                     </div>
                     {extracted.length > 0 && (
-                      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', padding: '6px 10px', borderRadius: 7, fontSize: 11.5, marginBottom: 10 }}>
+                      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1a592f', padding: '6px 10px', borderRadius: 7, fontSize: 11.5, marginBottom: 10 }}>
                         ℹ️ ดึงคืนเงินต้น <strong>{extracted.length}</strong> รายการจากตารางเดิมมาใช้คำนวณ (สัญญานี้ยังไม่มีใน "รายการรับ/คืนเงินกู้") — จะถูกบันทึกเมื่อกด "ใช้แบบอัตโนมัติ"
                       </div>
                     )}

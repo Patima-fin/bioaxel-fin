@@ -47,9 +47,9 @@
 
   // ── product mix by # projects (deck p2, 2024–Jan2025 cumulative) ─────────────
   const INV_MIX = [
-    { th: 'POG L', en: 'POG L', pct: 52, color: '#1f56b8' },
+    { th: 'POG L', en: 'POG L', pct: 52, color: '#21703a' },
     { th: 'POG Drink', en: 'POG Drink', pct: 38, color: '#0e9f9a' },
-    { th: 'POG M', en: 'POG M', pct: 6, color: '#2a6fdb' },
+    { th: 'POG M', en: 'POG M', pct: 6, color: '#2e8b4a' },
     { th: 'อื่นๆ', en: 'Other', pct: 4, color: '#b8862b' },
     { th: 'POG S', en: 'POG S', pct: 0, color: '#9aa83a' },
   ];
@@ -173,7 +173,7 @@
   // ── theme palettes ──────────────────────────────────────────────────────────
   const PAL = {
     light: { bg: '#eef2f8', card: '#ffffff', card2: '#f7faff', ink: '#0d1f3a', sub: '#5a6b86', line: '#e3e9f2',
-      brand: '#1f56b8', brand2: '#2a6fdb', accent: '#0e9f9a', gold: '#b8862b', good: '#1f8a5b', bad: '#c0392b', shadow: '0 10px 30px rgba(20,45,100,.10)' },
+      brand: '#21703a', brand2: '#2e8b4a', accent: '#0e9f9a', gold: '#b8862b', good: '#1f8a5b', bad: '#c0392b', shadow: '0 10px 30px rgba(20,45,100,.10)' },
     dark: { bg: '#0a1120', card: '#131d33', card2: '#0f1830', ink: '#eaf1fb', sub: '#93a6c4', line: '#243450', brand: '#5b93f3',
       brand2: '#7eacf7', accent: '#33c2bd', gold: '#e0ab4d', good: '#4cc38a', bad: '#ef6a5a', shadow: '0 12px 34px rgba(0,0,0,.45)' },
   };

@@ -5,7 +5,7 @@
 'use strict';
 
 const CATEGORY_META = {
-  'WCI':       { color: '#2a6fdb', bg: '#ebf8ff', label: 'WCI (นักลงทุนรายบุคคล)' },
+  'WCI':       { color: '#2e8b4a', bg: '#ebf8ff', label: 'WCI (นักลงทุนรายบุคคล)' },
   'Non-WCI':   { color: '#0d9488', bg: '#f0fdfa', label: 'Non-WCI (รายบุคคลอื่น)' },
   'กรรมการ':    { color: '#7c3aed', bg: '#f5f3ff', label: 'เงินกู้กรรมการ' },
   'LockWood':  { color: '#0369a1', bg: '#f0f9ff', label: 'LockWood (ไทย)' },

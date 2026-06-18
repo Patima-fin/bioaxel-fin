@@ -542,7 +542,7 @@ function AddTransferModal({ bankAccounts, onSave, onClose, initialTo, initialFro
                 ยกเลิก
               </button>
               <button onClick={handleSave}
-                style={{ padding:'8px 20px', borderRadius:8, border:'none', background:'linear-gradient(135deg,#2a6fdb,#1a4490)', color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 12px rgba(42,111,219,0.3)' }}>
+                style={{ padding:'8px 20px', borderRadius:8, border:'none', background:'linear-gradient(135deg,#2e8b4a,#1a592f)', color:'#fff', fontSize:13, fontWeight:600, cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 12px rgba(46,139,74,0.3)' }}>
                 {isEdit ? 'บันทึกการแก้ไข' : 'บันทึกการโอน'}
               </button>
             </div>
@@ -1121,7 +1121,7 @@ function BankAccountCard({ view, today, periodEnd, periodLabel, onQuickTransfer,
           )}
           {(hiddenCount > 0 || (showAll && dayGroups.length > 0)) && (
             <button onClick={() => setShowAll(s => !s)}
-              style={{ width:'100%', background:'#f8fafc', border:'none', borderBottom:'1px solid #f0f4f8', padding:'7px 14px', fontSize:11, fontWeight:600, color:'#2a6fdb', cursor:'pointer', fontFamily:'inherit' }}>
+              style={{ width:'100%', background:'#f8fafc', border:'none', borderBottom:'1px solid #f0f4f8', padding:'7px 14px', fontSize:11, fontWeight:600, color:'#2e8b4a', cursor:'pointer', fontFamily:'inherit' }}>
               {showAll ? `▴ ย่อ (เฉพาะช่วง “${periodLabel}”)` : `▾ ดูทั้งหมด (อีก ${hiddenCount} วัน)`}
             </button>
           )}
@@ -1142,7 +1142,7 @@ function BankAccountCard({ view, today, periodEnd, periodLabel, onQuickTransfer,
             <div style={{ padding:'10px 14px', background:'#fff5f5', borderTop:'1px dashed #fecaca', display:'flex', justifyContent:'space-between', alignItems:'center', gap:10 }}>
               <span style={{ fontSize:11, color:'#b91c1c' }}>ต้องเติมเงินอีกประมาณ <b>{fmtMoney(coverAmt)}</b> ก่อนรายการครบกำหนด</span>
               <button onClick={() => onQuickTransfer(acct.accountNo)}
-                style={{ background:'linear-gradient(135deg,#2a6fdb,#1a4490)', color:'#fff', border:'none', borderRadius:7, padding:'6px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
+                style={{ background:'linear-gradient(135deg,#2e8b4a,#1a592f)', color:'#fff', border:'none', borderRadius:7, padding:'6px 12px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit', whiteSpace:'nowrap' }}>
                 ⇄ โอนเข้าบัญชีนี้
               </button>
             </div>
@@ -1392,10 +1392,10 @@ function BDForecastPanel({ forecasts, periodEnd, periodLabel, today, totalRealBa
       {/* Summary tiles */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:1, background:'#eef0f6' }}>
         {[
-          { l:'เงินจริงตอนนี้', v:totalRealBalance, c:'#1a4490' },
+          { l:'เงินจริงตอนนี้', v:totalRealBalance, c:'#1a592f' },
           { l:'คาดรับ (ช่วงนี้)', v:inflow, c:'#276749' },
           { l:'คาดจ่าย (ช่วงนี้)', v:-outflow, c:'#c53030' },
-          { l:'เงินสดคาดการณ์สิ้นช่วง', v:projected, c: projected < 0 ? '#dc2626' : '#1a4490', bold:true },
+          { l:'เงินสดคาดการณ์สิ้นช่วง', v:projected, c: projected < 0 ? '#dc2626' : '#1a592f', bold:true },
         ].map((t, i) => (
           <div key={i} style={{ background:'#fff', padding:'10px 14px' }}>
             <div style={{ fontSize:11, color:'#718096' }}>{t.l}</div>
@@ -2180,8 +2180,8 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
           <button key={p.key} onClick={() => setPeriod(p.key)}
             style={{
               padding:'6px 13px', borderRadius:20, fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit',
-              border:'1.5px solid ' + (period === p.key ? '#2a6fdb' : '#e2e8f0'),
-              background: period === p.key ? '#2a6fdb' : '#fff',
+              border:'1.5px solid ' + (period === p.key ? '#2e8b4a' : '#e2e8f0'),
+              background: period === p.key ? '#2e8b4a' : '#fff',
               color: period === p.key ? '#fff' : '#475569',
             }}>
             {p.label}

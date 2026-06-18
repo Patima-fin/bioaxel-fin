@@ -14,7 +14,7 @@ const PROJ_STATUS = {
   construction_m2:  { label: 'ก่อสร้าง งวด 2',    color: '#7c2d12', bg: '#fef3c7', dot: '#d97706', order: 3 },
   construction_m3:  { label: 'ก่อสร้าง งวด 3',    color: '#7c2d12', bg: '#fef3c7', dot: '#d97706', order: 4 },
   waiting_invoice:  { label: 'รอออก Invoice',     color: '#5b21b6', bg: '#ede9fe', dot: '#7c3aed', order: 5 },
-  waiting_payment:  { label: 'รอรับชำระ',         color: '#1e40af', bg: '#dbeafe', dot: '#2563eb', order: 6 },
+  waiting_payment:  { label: 'รอรับชำระ',         color: '#1a592f', bg: '#dbeafe', dot: '#2e8b4a', order: 6 },
   partial_paid:     { label: 'เก็บเงินบางส่วน',   color: '#155e75', bg: '#cffafe', dot: '#0891b2', order: 7 },
   closed:           { label: 'ปิดโครงการ',        color: '#15803d', bg: '#dcfce7', dot: '#16a34a', order: 8 },
 };
@@ -568,7 +568,7 @@ function ProjectsPage({ data, setData, toast }) {
         const isSynth = /^XL-/.test(p._code);
         return (
           <div>
-            <div style={{ fontWeight: 700, fontFamily: 'ui-monospace', fontSize: 12, color: isSynth ? '#94a3b8' : '#1e40af' }}>
+            <div style={{ fontWeight: 700, fontFamily: 'ui-monospace', fontSize: 12, color: isSynth ? '#94a3b8' : '#1a592f' }}>
               {isSynth ? <span title={p._code}>(ไม่มีเลขสัญญา)</span> : p._code}
             </div>
             <div style={{ marginTop: 3 }}><PjStatusPill status={p._status} /></div>
@@ -620,13 +620,13 @@ function ProjectsPage({ data, setData, toast }) {
       case 'aging': return p._agingBucket
         ? <span style={{ fontSize: 10.5, fontWeight: 700,
               background: p._agingBucket === '90+' ? '#fee2e2' : p._agingBucket === '61-90' ? '#fef3c7' : '#dbeafe',
-              color:      p._agingBucket === '90+' ? '#b91c1c' : p._agingBucket === '61-90' ? '#92400e' : '#1e40af',
+              color:      p._agingBucket === '90+' ? '#b91c1c' : p._agingBucket === '61-90' ? '#92400e' : '#1a592f',
               padding: '2px 7px', borderRadius: 8 }}>{p._agingBucket}d</span>
         : '—';
       case 'dueDate': return fmtD(p._latestInvoice?.expectedReceive);
       case 'latestFollowUp': return p._latestFollowUp
         ? <div style={{ fontSize: 11, color: '#475569' }} title={p._latestFollowUp.note}>
-            <span style={{ color: '#1e40af', fontFamily: 'ui-monospace' }}>{fmtD(p._latestFollowUp.date)}</span>
+            <span style={{ color: '#1a592f', fontFamily: 'ui-monospace' }}>{fmtD(p._latestFollowUp.date)}</span>
             {' · '}
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: 150, verticalAlign: 'middle' }}>{p._latestFollowUp.note}</span>
           </div>
@@ -975,7 +975,7 @@ function UploadModal({ existingProjects, onClose, onParsed, diff, onConfirm }) {
             onDragLeave={(e) => { e.preventDefault(); setDrag(false); }}
             onDrop={onDrop}
             style={{
-              border: '2px dashed ' + (drag ? '#2563eb' : '#cbd5e1'),
+              border: '2px dashed ' + (drag ? '#2e8b4a' : '#cbd5e1'),
               borderRadius: 12, padding: 30, textAlign: 'center', cursor: 'pointer',
               background: drag ? '#eff6ff' : '#f8fafc',
             }}>
@@ -1234,7 +1234,7 @@ function MigrationModal({ existingProjects, onClose }) {
               <input type="file" ref={fileInputRef} accept=".xlsx" style={{ display: 'none' }}
                 onChange={e => e.target.files[0] && parseAndBuild(e.target.files[0])} />
             </div>
-            {busy && <div style={{ marginTop: 12, color: '#2563eb', fontSize: 13, textAlign: 'center' }}>⏳ กำลังประมวลผล…</div>}
+            {busy && <div style={{ marginTop: 12, color: '#2e8b4a', fontSize: 13, textAlign: 'center' }}>⏳ กำลังประมวลผล…</div>}
             {error && <div style={{ marginTop: 12, padding: 10, background: '#fef2f2', color: '#b91c1c', fontSize: 13, borderRadius: 6, border: '1px solid #fca5a5' }}>❌ {error}</div>}
           </>
         )}
@@ -1242,7 +1242,7 @@ function MigrationModal({ existingProjects, onClose }) {
         {result && (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 14 }}>
-              {statCard('คอลัมน์', result.stats.totalCols, '#1e40af', '#dbeafe')}
+              {statCard('คอลัมน์', result.stats.totalCols, '#1a592f', '#dbeafe')}
               {statCard('โครงการ', result.stats.totalRows, '#0891b2', '#cffafe')}
               {statCard('ยกเลิก', result.stats.cancelledCount, '#7f1d1d', '#fee2e2')}
               {statCard('คง ID เดิม', result.stats.preservedCount, '#7c3aed', '#ede9fe')}
@@ -1251,7 +1251,7 @@ function MigrationModal({ existingProjects, onClose }) {
             </div>
 
             <button onClick={download} style={{
-              background: '#2563eb', color: 'white', border: 'none', borderRadius: 8,
+              background: '#2e8b4a', color: 'white', border: 'none', borderRadius: 8,
               padding: '12px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
               width: '100%', marginBottom: 16,
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -1313,14 +1313,14 @@ function DiffPreview({ diff, onConfirm, onReset }) {
       {isAssigneeMode && (
         <div style={{
           padding: '8px 12px', background: '#dbeafe', borderRadius: 6,
-          fontSize: 11.5, color: '#1e40af', marginBottom: 12,
+          fontSize: 11.5, color: '#1a592f', marginBottom: 12,
         }}>
           📋 ตรวจพบไฟล์ <strong>ผู้รับโอนสิทธิ์</strong> — จะอัปเดตเฉพาะคอลัมน์ "ผู้รับโอนสิทธิ์" ของโครงการที่ match ด้วย JOB No. เท่านั้น (ไม่สร้างโครงการใหม่)
         </div>
       )}
       {(() => {
         const cards = [
-          { label: 'อ่านได้รวม',    value: diff.totalRead, color: '#1e40af', bg: '#dbeafe' },
+          { label: 'อ่านได้รวม',    value: diff.totalRead, color: '#1a592f', bg: '#dbeafe' },
           ...(isAssigneeMode ? [] : [{ label: 'เพิ่มใหม่', value: diff.newRows.length, color: '#15803d', bg: '#dcfce7' }]),
           { label: 'อัปเดต',         value: diff.updated.length, color: '#9a3412', bg: '#fef3c7' },
           { label: 'ไม่เปลี่ยน',     value: diff.unchanged.length, color: '#475569', bg: '#f1f5f9' },
@@ -1423,7 +1423,7 @@ function DiffPreview({ diff, onConfirm, onReset }) {
           borderRadius: 8, padding: '8px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600,
         }}>ยกเลิก / เลือกไฟล์ใหม่</button>
         <button onClick={onConfirm} disabled={diff.newRows.length === 0 && diff.updated.length === 0} style={{
-          background: '#2563eb', border: 0, color: 'white',
+          background: '#2e8b4a', border: 0, color: 'white',
           borderRadius: 8, padding: '8px 16px', fontSize: 12, cursor: 'pointer', fontWeight: 600,
           opacity: diff.newRows.length === 0 && diff.updated.length === 0 ? 0.5 : 1,
         }}>
@@ -1440,7 +1440,7 @@ function ProjectsHero({ kpi, totalCount, filteredCount, onFullscreen, onUpload, 
     <>
       {/* HERO BANNER */}
       <div className="anim-in" style={{
-        background: 'linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)',
+        background: 'linear-gradient(135deg, #1a592f 0%, #154524 100%)',
         borderRadius: 16, padding: '20px 24px', color: 'white',
         marginBottom: 14, boxShadow: '0 10px 28px rgba(30, 58, 138, 0.18)',
         display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap',
@@ -1450,7 +1450,7 @@ function ProjectsHero({ kpi, totalCount, filteredCount, onFullscreen, onUpload, 
           display: 'grid', placeItems: 'center', flexShrink: 0,
         }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-            <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" stroke="#1e40af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" stroke="#1a592f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
@@ -1468,7 +1468,7 @@ function ProjectsHero({ kpi, totalCount, filteredCount, onFullscreen, onUpload, 
         <div style={{ display: 'flex', gap: 8 }}>
           {onUpload && (
             <button onClick={onUpload} style={{
-              background: 'white', color: '#1e3a8a',
+              background: 'white', color: '#154524',
               border: '1px solid rgba(255,255,255,0.5)', borderRadius: 8,
               padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -1503,11 +1503,11 @@ function ProjectsHero({ kpi, totalCount, filteredCount, onFullscreen, onUpload, 
         gap: 10, marginBottom: 12,
       }}>
         {[
-          { label: 'ทั้งหมด',    value: kpi.count,                                                                              color: '#1e40af', bg: '#dbeafe', statuses: null },
+          { label: 'ทั้งหมด',    value: kpi.count,                                                                              color: '#1a592f', bg: '#dbeafe', statuses: null },
           { label: 'รอลงนาม',    value: kpi.byStatus.waiting_sign || 0,                                                          color: '#9a3412', bg: '#ffedd5', statuses: ['waiting_sign'] },
           { label: 'กำลังก่อสร้าง', value: (kpi.byStatus.construction_m1||0) + (kpi.byStatus.construction_m2||0) + (kpi.byStatus.construction_m3||0), color: '#7c2d12', bg: '#fef3c7', statuses: ['construction_m1','construction_m2','construction_m3'] },
           { label: 'รอออก IV',   value: kpi.byStatus.waiting_invoice || 0,                                                       color: '#5b21b6', bg: '#ede9fe', statuses: ['waiting_invoice'] },
-          { label: 'รอรับชำระ',  value: kpi.byStatus.waiting_payment || 0,                                                       color: '#1e40af', bg: '#dbeafe', statuses: ['waiting_payment'] },
+          { label: 'รอรับชำระ',  value: kpi.byStatus.waiting_payment || 0,                                                       color: '#1a592f', bg: '#dbeafe', statuses: ['waiting_payment'] },
           { label: 'บางส่วน',    value: kpi.byStatus.partial_paid || 0,                                                          color: '#155e75', bg: '#cffafe', statuses: ['partial_paid'] },
           { label: 'ปิดแล้ว',    value: kpi.byStatus.closed || 0,                                                                color: '#15803d', bg: '#dcfce7', statuses: ['closed'] },
           { label: 'ยกเลิก',     value: kpi.byStatus.cancelled || 0,                                                             color: '#7f1d1d', bg: '#fee2e2', statuses: ['cancelled'] },
@@ -1546,7 +1546,7 @@ function ProjectsHero({ kpi, totalCount, filteredCount, onFullscreen, onUpload, 
         gap: 10, marginBottom: 16,
       }}>
         {[
-          { label: 'มูลค่าสัญญารวม',    value: kpi.signedValue,  icon: '📑', accent: '#2563eb' },
+          { label: 'มูลค่าสัญญารวม',    value: kpi.signedValue,  icon: '📑', accent: '#2e8b4a' },
           { label: 'งานระหว่างก่อสร้าง', value: kpi.wipValue,     icon: '🏗️', accent: '#d97706' },
           { label: 'มูลค่า Invoice รวม', value: kpi.invoiceValue, icon: '📄', accent: '#7c3aed' },
           { label: 'AR คงค้าง',           value: kpi.arValue,      icon: '⏳', accent: '#dc2626' },
@@ -1608,12 +1608,12 @@ function ProjectsToolbar({ query, setQuery, filterOpen, setFilterOpen, activeFil
       <button onClick={() => setFilterOpen(o => !o)} style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
         background: activeFilterCount > 0 ? '#dbeafe' : 'white',
-        color: activeFilterCount > 0 ? '#1e40af' : '#475569',
-        border: '1px solid ' + (activeFilterCount > 0 ? '#93c5fd' : '#cbd5e1'),
+        color: activeFilterCount > 0 ? '#1a592f' : '#475569',
+        border: '1px solid ' + (activeFilterCount > 0 ? '#9ed3ad' : '#cbd5e1'),
         borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
       }}>
         <Icon name="filter" size={12} /> ตัวกรอง
-        {activeFilterCount > 0 && <span style={{ background: '#2563eb', color: 'white', padding: '0 6px', borderRadius: 8, fontSize: 10 }}>{activeFilterCount}</span>}
+        {activeFilterCount > 0 && <span style={{ background: '#2e8b4a', color: 'white', padding: '0 6px', borderRadius: 8, fontSize: 10 }}>{activeFilterCount}</span>}
       </button>
 
       <div style={{ flex: 1, minWidth: 220, maxWidth: 480, position: 'relative' }}>
@@ -1691,7 +1691,7 @@ function FilterPanel({ filters, setFilters, facets, clear, toggleSetItem }) {
               display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
               fontSize: 11.5, padding: '3px 6px', borderRadius: 5,
               background: active ? '#dbeafe' : 'transparent',
-              color: active ? '#1e40af' : '#334155',
+              color: active ? '#1a592f' : '#334155',
               fontWeight: active ? 600 : 400,
             }} onMouseEnter={e => !active && (e.currentTarget.style.background = '#f1f5f9')}
                onMouseLeave={e => !active && (e.currentTarget.style.background = 'transparent')}>
@@ -1800,7 +1800,7 @@ function InsightsSection({ insights }) {
             critical: { bg: '#fef2f2', border: '#fca5a5', accent: '#dc2626' },
             risk:     { bg: '#fffbeb', border: '#fcd34d', accent: '#d97706' },
             good:     { bg: '#f0fdf4', border: '#86efac', accent: '#16a34a' },
-            info:     { bg: '#eff6ff', border: '#93c5fd', accent: '#2563eb' },
+            info:     { bg: '#eff6ff', border: '#9ed3ad', accent: '#2e8b4a' },
           }[ins.kind] || { bg: '#f8fafc', border: '#cbd5e1', accent: '#475569' };
           return (
             <div key={i} style={{
@@ -1856,7 +1856,7 @@ function ProjectDrawer({ project, allEnriched, onClose, onSave }) {
         {/* HEADER */}
         <div style={{
           padding: 18, borderBottom: '1px solid #e2e8f0',
-          background: 'linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)',
+          background: 'linear-gradient(135deg, #1a592f 0%, #154524 100%)',
           color: 'white',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1886,8 +1886,8 @@ function ProjectDrawer({ project, allEnriched, onClose, onSave }) {
             <button key={k} onClick={() => setTab(k)} style={{
               flex: 1, padding: '10px 14px', fontSize: 12, fontWeight: 600,
               background: tab === k ? 'white' : 'transparent',
-              color: tab === k ? '#1e40af' : '#64748b',
-              border: 0, borderBottom: '2px solid ' + (tab === k ? '#2563eb' : 'transparent'),
+              color: tab === k ? '#1a592f' : '#64748b',
+              border: 0, borderBottom: '2px solid ' + (tab === k ? '#2e8b4a' : 'transparent'),
               cursor: 'pointer',
             }}>{label}</button>
           ))}
@@ -1940,18 +1940,18 @@ function OverviewTab({ p, onSave }) {
       {/* Status editor — manual override สถานะโครงการ */}
       <div style={{
         padding: 12, background: manualStatus ? '#dbeafe' : '#f1f5f9', borderRadius: 8, marginBottom: 10,
-        border: '1px solid ' + (manualStatus ? '#93c5fd' : '#cbd5e1'),
+        border: '1px solid ' + (manualStatus ? '#9ed3ad' : '#cbd5e1'),
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: manualStatus ? '#1e40af' : '#475569', fontWeight: 600 }}>
+          <div style={{ fontSize: 11, color: manualStatus ? '#1a592f' : '#475569', fontWeight: 600 }}>
             📌 สถานะโครงการ {manualStatus
               ? <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 4 }}>(ผู้ใช้กำหนดเอง)</span>
               : <span style={{ fontSize: 10, fontWeight: 500, marginLeft: 4 }}>(คำนวณอัตโนมัติ)</span>}
           </div>
           {!statusEdit && (
             <button onClick={() => setStatusEdit(true)} style={{
-              background: 'white', border: '1px solid ' + (manualStatus ? '#3b82f6' : '#94a3b8'),
-              color: manualStatus ? '#1e40af' : '#475569',
+              background: 'white', border: '1px solid ' + (manualStatus ? '#2e8b4a' : '#94a3b8'),
+              color: manualStatus ? '#1a592f' : '#475569',
               borderRadius: 6, padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             }}>✏️ แก้ไข</button>
           )}
@@ -2029,9 +2029,9 @@ function OverviewTab({ p, onSave }) {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               {allOptions.map(opt => (
                 <button key={opt} onClick={() => handleSelect(opt)} style={{
-                  background: opt === currentAssg ? '#1e40af' : 'white',
+                  background: opt === currentAssg ? '#1a592f' : 'white',
                   color: opt === currentAssg ? 'white' : '#475569',
-                  border: '1px solid ' + (opt === currentAssg ? '#1e40af' : '#cbd5e1'),
+                  border: '1px solid ' + (opt === currentAssg ? '#1a592f' : '#cbd5e1'),
                   borderRadius: 6, padding: '4px 12px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
                 }}>{opt}</button>
               ))}
@@ -2084,7 +2084,7 @@ function TimelineTab({ events }) {
         <div key={i} style={{ position: 'relative', marginBottom: 16 }}>
           <div style={{
             position: 'absolute', left: -22, top: 4, width: 16, height: 16,
-            borderRadius: 99, background: 'white', border: '2px solid #2563eb',
+            borderRadius: 99, background: 'white', border: '2px solid #2e8b4a',
             display: 'grid', placeItems: 'center', fontSize: 9,
           }}>{e.icon}</div>
           <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'ui-monospace' }}>{fmtD(e.date)}</div>
@@ -2098,7 +2098,7 @@ function TimelineTab({ events }) {
 
 function FinanceTab({ p }) {
   const rows = [
-    { label: 'มูลค่าสัญญา (Contract Value)', value: p._contractValue,  color: '#1e40af' },
+    { label: 'มูลค่าสัญญา (Contract Value)', value: p._contractValue,  color: '#1a592f' },
     { label: 'Invoice ออกแล้วรวม',           value: p._totalInvoiced, color: '#7c3aed' },
     { label: 'รับเงินแล้วรวม',               value: p._totalReceived, color: '#16a34a' },
     { label: 'AR คงค้าง (Outstanding)',     value: p._outstanding,   color: '#dc2626' },
