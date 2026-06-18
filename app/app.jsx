@@ -40,7 +40,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const ROLE_PERMS = {
   // ผู้บริหาร — เห็นเฉพาะ Dashboard (รายงานรับเงินรายวัน + War Room) — ไม่เห็นประมาณการ
   viewer: {
-    pages: new Set(['home', 'daily', 'warroom1', 'warroom2']),
+    pages: new Set(['home', 'daily', 'warroom1', 'warroom2', 'cashflow_present']),
     canEdit: false, canDelete: false, canApprove: false, canManageUsers: false,
   },
   // ฝ่ายการเงิน — ทำงานปกติ เพิ่ม/แก้ได้ แต่ลบไม่ได้ + ไม่เห็น audit + users
@@ -446,7 +446,7 @@ function App() {
     if (!isLoggedIn || !window.WTPAuth) return;
     if (!window.WTPAuth.canViewPage(route)) {
       // Pull routes object below — at this point it's not defined yet, fallback inline
-      const order = ['home','daily','warroom1','warroom2','cashflow','pnl','budget','debt','debt_ledger',
+      const order = ['home','daily','warroom1','warroom2','cashflow','cashflow_present','pnl','budget','debt','debt_ledger',
                      'iv_report','receipts','bank_diary','interest_calc','sts_calc','sts_workflow',
                      'projects','invoices','checks','data_forecast','data_bank','data_pv','data_payable'];
       const allowed = window.WTPAuth.firstAllowedPage(order);
@@ -499,6 +499,7 @@ function App() {
     warroom1: { label: 'War Room — รายรับ (หน้า 1)', title: 'Revenue Collection', icon: 'receivables' },
     warroom2: { label: 'War Room — รายปี (หน้า 2)', title: 'Annual Cash Flow', icon: 'forecast' },
     cashflow: { label: 'Weekly Forecast', title: 'Weekly Forecast', icon: 'chart' },
+    cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
     debt:        { label: 'ภาระหนี้ทั้งหมด',       title: 'Debt Register',   icon: 'money' },
     debt_ledger: { label: 'Debt Ledger · ดอกเบี้ย', title: 'Debt Ledger',     icon: 'money' },
     iv_report:   { label: 'รายงานติดตาม IV',         title: 'IV Tracking Report', icon: 'invoice' },
@@ -529,6 +530,7 @@ function App() {
     case 'warroom1':       page = <WarRoomPage1 data={data} setData={setData} toast={pushToast} />; break;
     case 'warroom2':       page = <WarRoomPage2 data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow':       page = <CashFlowDashboard data={data} setData={setData} toast={pushToast} />; break;
+    case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
     case 'projects':       page = <ProjectControlPage data={data} setData={setData} toast={pushToast} />; break;
     case 'investor':       page = <InvestorDashboard data={data} setData={setData} toast={pushToast} />; break;
     case 'invoices':       page = <InvoicesPage data={data} setData={setData} toast={pushToast} />; break;
@@ -772,6 +774,7 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
             ['warroom1', 'War Room · รายรับ',       'receivables'],
             ['warroom2', 'War Room · รายปี',        'forecast'],
             ['cashflow', 'Weekly Forecast', 'chart'],
+            ['cashflow_present', 'พรีเซนต์ Cash Flow', 'chart'],
             ['pnl',      'งบกำไรขาดทุน (P&L)',     'forecast'],
             ['budget',   'Budget Control Center',  'projects'],
             ['investor', 'Investor Dashboard',     'chart'],
@@ -922,7 +925,7 @@ function PresentModeToggle() {
 function Topbar({ route, routes, data, onReset, onMenuClick }) {
   const r = routes[route] || routes.daily;
   const today = new Date().toLocaleDateString('th-TH-u-ca-gregory', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-  const isPresentation = ['daily', 'warroom1', 'warroom2', 'cashflow', 'pnl', 'projects', 'budget', 'investor'].includes(route);
+  const isPresentation = ['daily', 'warroom1', 'warroom2', 'cashflow', 'cashflow_present', 'pnl', 'projects', 'budget', 'investor'].includes(route);
   return (
     <div className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
