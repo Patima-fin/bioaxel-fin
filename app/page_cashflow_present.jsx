@@ -81,6 +81,42 @@
   const CFP_ACT_NAME = { op: 'กิจกรรมดำเนินงาน', inv: 'กิจกรรมลงทุน', fin: 'กิจกรรมจัดหาเงิน', transfer: 'โอนระหว่างบัญชี', other: 'อื่นๆ' };
   const CFP_ACT_SHORT = { op: 'ดำเนินงาน', inv: 'ลงทุน', fin: 'จัดหาเงิน', transfer: 'โอน', other: 'อื่นๆ' };
 
+  function cfpShort(s) {
+    s = String(s || '').replace(/^เงินสดรับจากการขาย\s*-?\s*/, '').replace(/^เงินสดจ่ายเกี่ยวกับ\s*-?\s*/, '').replace(/^เงินสดรับ\s*-?\s*/, '').trim();
+    return s.length > 28 ? s.slice(0, 28) + '…' : s;
+  }
+  // วิเคราะห์ "จุดเฝ้าระวัง" รายกิจกรรม (sev: red ด่วน / amber เฝ้าระวัง / blue ข้อมูล / green ปกติ)
+  function cfpWatch(model, k) {
+    const a = model.acts[k]; if (!a) return [];
+    const cats = a.catList || [];
+    const out = cats.filter(c => c.net < 0), inn = cats.filter(c => c.net > 0);
+    const outTot = out.reduce((s, c) => s + Math.abs(c.net), 0), inTot = inn.reduce((s, c) => s + c.net, 0);
+    const F = [], order = { red: 0, amber: 1, blue: 2, green: 3 };
+    if (k === 'op') {
+      if (a.net < 0) F.push({ sev: 'red', t: 'กระแสเงินสดดำเนินงานติดลบ ' + cfpFmtM(a.net) + ' — รายจ่ายมากกว่ารายรับจากการดำเนินงาน' });
+      if (out.length) { const t = out[0], p = Math.round(Math.abs(t.net) / (outTot || 1) * 100); if (p >= 30) F.push({ sev: p >= 50 ? 'amber' : 'blue', t: 'รายจ่ายกระจุกที่ “' + cfpShort(t.name) + '” ' + p + '% (' + cfpFmtM(t.net) + ')' }); }
+      if (inn.length && inTot > 0) { const t = inn[0], p = Math.round(t.net / inTot * 100); if (p >= 70) F.push({ sev: 'amber', t: 'รายได้พึ่ง “' + cfpShort(t.name) + '” ' + p + '% ของรายรับดำเนินงาน — กระจุกตัวสูง' }); }
+    } else if (k === 'inv') {
+      if (a.net < 0) F.push({ sev: 'blue', t: 'ลงทุนซื้อสินทรัพย์สุทธิ ' + cfpFmtM(a.net) });
+      if (a.net > 0) F.push({ sev: 'amber', t: 'มีเงินสดจากการขาย/ลดสินทรัพย์ ' + cfpFmtM(a.net) });
+      if (out.length) { const t = out[0]; F.push({ sev: 'blue', t: 'ส่วนใหญ่คือ “' + cfpShort(t.name) + '” (' + cfpFmtM(t.net) + ')' }); }
+    } else if (k === 'fin') {
+      const interest = cats.filter(c => /ดอกเบี้ย/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
+      const loansIn = inn.filter(c => /กู้/.test(c.name)).reduce((s, c) => s + c.net, 0);
+      const director = cats.filter(c => /กรรมการ|ให้กู้ยืม/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
+      const repay = cats.filter(c => /ชำระคืน|คืนเงินกู้/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
+      if (interest > 0) F.push({ sev: (model.payroll && interest >= 0.5 * model.payroll) ? 'red' : 'amber', t: 'ดอกเบี้ยจ่าย ' + cfpFmtM(interest) + (model.payroll ? (' ≈ ' + Math.round(interest / model.payroll * 100) + '% ของเงินเดือนทั้งบริษัท') : '') });
+      if (loansIn > 0 && model.acts.op.net < 0) F.push({ sev: 'red', t: 'พึ่งเงินกู้ประคองสภาพคล่อง — รับกู้ ' + cfpFmtM(loansIn) + ' ขณะดำเนินงานติดลบ' });
+      else if (loansIn > 0) F.push({ sev: 'blue', t: 'รับเงินกู้เข้า ' + cfpFmtM(loansIn) + ' หนุนสภาพคล่อง' });
+      if (director > 0) F.push({ sev: 'amber', t: 'เงินให้กรรมการกู้ยืม ' + cfpFmtM(director) });
+      if (repay > 0) F.push({ sev: 'blue', t: 'ชำระคืนเงินกู้ ' + cfpFmtM(repay) });
+    }
+    if (!F.length) F.push({ sev: 'green', t: 'ไม่พบจุดเฝ้าระวังเด่นชัด' });
+    F.sort((x, y) => order[x.sev] - order[y.sev]);
+    return F.slice(0, 5);
+  }
+  const CFP_SEV = { red: { c: '#c0392b', bg: '#fdecea' }, amber: { c: '#8a6400', bg: '#fff7e0' }, blue: { c: '#1f6fb8', bg: '#eaf2ff' }, green: { c: '#15875a', bg: '#e6f7ef' } };
+
   function cfpAccountLabel(raw) {
     const s = String(raw || '');
     const m = s.match(/([SC])\/A#\s*([A-Za-z]*)\s*([\d-]+)\s*(.*)/);
@@ -512,6 +548,58 @@
     );
   }
 
+  /* ---------- activity detail (องค์ประกอบ + จุดเฝ้าระวัง รายกิจกรรม) ---------- */
+  function CfpActivityDetail({ model, k, onCat, onAll }) {
+    const a = model.acts[k]; if (!a) return null;
+    const flags = cfpWatch(model, k);
+    const cats = a.catList || [];
+    const maxAbs = Math.max.apply(null, cats.map(c => Math.abs(c.net)).concat([1]));
+    const inTot = cats.filter(c => c.net > 0).reduce((s, c) => s + c.net, 0);
+    const outTot = cats.filter(c => c.net < 0).reduce((s, c) => s + Math.abs(c.net), 0);
+    const top = cats.slice(0, 7);
+    return (
+      <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, boxShadow: C.shadow, marginBottom: 16, overflow: 'hidden' }}>
+        <div style={{ height: 5, background: ACT_COLOR[k] }} />
+        <div style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: C.ink }}>{CFP_ACT_NAME[k]}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: a.net < 0 ? C.neg : C.pos }}>{cfpFmtM(a.net)}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, fontSize: 12, flexWrap: 'wrap' }}>
+            <span style={{ background: C.posBg, color: C.pos, padding: '3px 10px', borderRadius: 20, fontWeight: 700 }}>รับ {cfpFmtM(inTot)}</span>
+            <span style={{ background: C.negBg, color: C.neg, padding: '3px 10px', borderRadius: 20, fontWeight: 700 }}>จ่าย {cfpFmtM(outTot)}</span>
+            <span style={{ background: C.soft, color: C.mut, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>{cats.length} หมวด</span>
+          </div>
+          <div className="cfp-act-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.25fr) minmax(0,1fr)', gap: 20 }}>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
+              {top.map((c, i) => (
+                <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 1fr auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
+                  <span style={{ fontSize: 12.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
+                  <span><CfpBar amt={c.net} max={maxAbs} /></span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
+                </div>
+              ))}
+              {cats.length > 7 && <div onClick={onAll} style={{ fontSize: 12, color: C.primary, cursor: 'pointer', marginTop: 9, fontWeight: 700 }}>ดูทั้งหมด {cats.length} หมวด →</div>}
+            </div>
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.mut, marginBottom: 8 }}>🚩 จุดเฝ้าระวัง</div>
+              {flags.map((f, i) => {
+                const s = CFP_SEV[f.sev] || CFP_SEV.blue;
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 11px', borderRadius: 10, background: s.bg, marginBottom: 7 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.c, marginTop: 5, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12.5, color: s.c, lineHeight: 1.45, fontWeight: 500 }}>{f.t}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ---------- main page ---------- */
   function CashFlowPresentPage({ data, setData, toast }) {
     const [stored, setStored] = useState(() => { try { return JSON.parse(localStorage.getItem(CFP_LS) || 'null'); } catch (e) { return null; } });
@@ -526,6 +614,8 @@
 
     function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
     function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }
+    function openCat(c) { const txns = (c.txns || []).slice().sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: c.name, subtitle: c.count + ' รายการ · สุทธิ ' + cfpFmtB(c.net), txns }); }
+    function watchSub(k) { const n = cfpWatch(model, k).filter(f => f.sev === 'red' || f.sev === 'amber').length; return n ? ('🚩 ' + n + ' จุดเฝ้าระวัง') : 'กดดูรายการ'; }
     function openStmt(row, monthNum) {
       if (!row.actKey) return;
       if (row.type === 'net') { openAct(row.actKey); return; }
@@ -568,7 +658,7 @@
     const pageWrap = { background: 'linear-gradient(155deg,#eef5ff 0%,#f0f7ff 55%,#e9f6f8 100%)', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
     const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
     const secTitle = { fontSize: 15, fontWeight: 700, margin: '0 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' };
-    const tabs = [['overview', '📊 ภาพรวม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
+    const tabs = [['overview', '📊 ภาพรวม'], ['activity', '🔬 ตามกิจกรรม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
 
     return (
       <div className="cfp-page present-page" style={pageWrap}>
@@ -610,9 +700,9 @@
               <CfpKpiHero label="เงินสดปลายงวด" value={cfpFmtM(model.ending)} color={C.primaryD} sub={(model.net >= 0 ? '▲ ' : '▼ ') + cfpFmtSigned(model.net) + ' จากต้นงวด'} />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14, marginBottom: 16 }}>
-              <CfpKpiAct k="op" value={model.acts.op.net} onClick={() => openAct('op')} />
-              <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} />
-              <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} />
+              <CfpKpiAct k="op" value={model.acts.op.net} onClick={() => openAct('op')} sub={watchSub('op')} />
+              <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} sub={watchSub('inv')} />
+              <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} sub={watchSub('fin')} />
             </div>
             {model.summary && model.summary.net != null && (
               <div style={{ fontSize: 12.5, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
@@ -661,6 +751,13 @@
                 </div>
               );
             })()}
+          </React.Fragment>}
+
+          {tab === 'activity' && <React.Fragment>
+            <div style={{ fontSize: 13, color: C.mut, margin: '0 2px 12px' }}>แต่ละกิจกรรมมีอะไรบ้าง + จุดที่ต้องเฝ้าระวัง (กดหมวดเพื่อดูรายการจริง)</div>
+            <CfpActivityDetail model={model} k="op" onCat={openCat} onAll={() => openAct('op')} />
+            <CfpActivityDetail model={model} k="inv" onCat={openCat} onAll={() => openAct('inv')} />
+            <CfpActivityDetail model={model} k="fin" onCat={openCat} onAll={() => openAct('fin')} />
           </React.Fragment>}
 
           {tab === 'statement' && (
