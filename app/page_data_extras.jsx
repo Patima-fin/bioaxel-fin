@@ -2062,6 +2062,8 @@ function parseExpressXML(xmlText) {
   function ssAttr(el, name) {
     return el.getAttributeNS(SS, name) || el.getAttribute('ss:' + name) || '';
   }
+  // EXPRESS ไม่ escape & ใน text content (เช่น "PM&CM") → XML invalid → แก้ก่อน parse
+  xmlText = xmlText.replace(/&(?![a-zA-Z_][\w.-]*;|#[0-9]+;|#x[0-9a-fA-F]+;)/g, '&amp;');
   var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
   var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
