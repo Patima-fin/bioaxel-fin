@@ -342,6 +342,8 @@ function CashFlowDashboard({ data, setData, toast }) {
   const [drillDown, setDrillDown] = cfState(null);
   // Per-item detail popup (ซ้อนบน drill-down) — เก็บ item ที่กด "ดู"
   const [detailItem, setDetailItem] = cfState(null);
+  // IV plan detail modal — แสดงรายละเอียด IV แยกราย tab
+  const [ivDrill, setIvDrill] = cfState(false);
   // โหมดช่องรายจ่าย Section 01: 'remaining' = ประมาณการตั้งมือ − จ่ายจริง (เดิม)
   //   'apPlan' = แผนจ่ายจริง = รายการ AP ที่เลือกจ่าย (ขึ้น CARD BANK) + รายการตั้งมือที่ติ๊กรวมเอง
   //   เก็บไว้ต่อเครื่อง (localStorage) — เป็น view preference ส่วนตัว ไม่ sync ทีม
@@ -1416,6 +1418,7 @@ function CashFlowDashboard({ data, setData, toast }) {
               lockedAt={ivPlanLock.lockedAt}
               lockEditable={editMode && !cfIsReadOnly()}
               onLock={handleLockClick}
+              onClick={() => setIvDrill(true)}
             />
             <PlanVsActualCard
               tone="info"
@@ -2218,6 +2221,22 @@ function CashFlowDashboard({ data, setData, toast }) {
         </Modal>
       )}
 
+      {/* ═════ IV plan detail modal ═══════════════════════════════════════ */}
+      {ivDrill && (
+        <IvPlanDrillModal
+          invoices={invoices}
+          ivPlanLock={ivPlanLock}
+          ivForecast={ivForecast}
+          ivActual={ivActual}
+          financeByCode={financeByCode}
+          weeks={weeks}
+          year={year}
+          month={month}
+          monthNames={monthNames}
+          onClose={() => setIvDrill(false)}
+        />
+      )}
+
       {/* ═════ Per-item detail popup (ซ้อนบน drill-down) ═══════════════════ */}
       {detailItem && (
         <Modal open={!!detailItem} title={'รายละเอียดรายการ · ' + (detailItem.name || '')} maxWidth={560}
@@ -2314,7 +2333,199 @@ function BalanceCard({ tone, label, value, hint, icon, editMode, ovKey, big, sty
   );
 }
 
-function PlanVsActualCard({ tone, icon, label, plan, actual, hint, editMode, ovKey, lockedAt, onLock, lockEditable }) {
+// ── IV Plan Detail Modal ──────────────────────────────────────────────────────
+function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeByCode, weeks, year, month, monthNames, onClose }) {
+  const [tab, setTab] = React.useState('all');
+
+  const bySafe = React.useMemo(() => {
+    const m = {};
+    (invoices || []).forEach(iv => {
+      const s = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
+      if (s) m[s] = iv;
+    });
+    return m;
+  }, [invoices]);
+
+  const { planItems, planSafes } = React.useMemo(() => {
+    const items = [], safes = new Set();
+    if (ivPlanLock && ivPlanLock.locked) {
+      (ivPlanLock.items || []).forEach(it => {
+        safes.add(it.safe);
+        items.push({ iv: bySafe[it.safe] || null, planNet: it.net, safe: it.safe });
+      });
+    } else {
+      (invoices || []).forEach(iv => {
+        if (!ivIsPaid(iv) && iv.expectedReceive && inMonth(iv.expectedReceive, year, month)) {
+          const net = ivNetExpected(iv, financeByCode);
+          if (net >= 1) {
+            const safe = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
+            safes.add(safe);
+            items.push({ iv, planNet: net, safe });
+          }
+        }
+      });
+    }
+    items.sort((a, b) => ((a.iv && a.iv.expectedReceive) || '').localeCompare((b.iv && b.iv.expectedReceive) || ''));
+    return { planItems: items, planSafes: safes };
+  }, [invoices, ivPlanLock, bySafe, year, month, financeByCode]);
+
+  const actualItems = React.useMemo(() => {
+    const items = [];
+    (invoices || []).forEach(iv => {
+      const ad = ivActualReceiveDate(iv);
+      if (ad && inMonth(ad, year, month)) {
+        const net = ivNetExpected(iv, financeByCode);
+        const safe = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
+        items.push({ iv, actualNet: net, actualDate: ad, safe, inPlan: planSafes.has(safe) });
+      }
+    });
+    items.sort((a, b) => (b.actualDate || '').localeCompare(a.actualDate || ''));
+    return items;
+  }, [invoices, year, month, financeByCode, planSafes]);
+
+  const pendingItems = React.useMemo(() => planItems.filter(p => !(p.iv && ivIsPaid(p.iv))), [planItems]);
+  const extraItems   = React.useMemo(() => actualItems.filter(a => !a.inPlan), [actualItems]);
+
+  const tabs = [
+    { key: 'all',      label: 'แผนทั้งหมด', count: planItems.length },
+    { key: 'received', label: 'รับแล้ว ✓',  count: actualItems.length },
+    { key: 'pending',  label: 'ยังไม่รับ',   count: pendingItems.length },
+    { key: 'extra',    label: '⚡ นอกแผน',   count: extraItems.length },
+  ];
+
+  const rows = tab === 'all'      ? planItems.map(p => ({ ...p, mode: 'plan' }))
+             : tab === 'received' ? actualItems.map(a => ({ ...a, mode: 'received' }))
+             : tab === 'pending'  ? pendingItems.map(p => ({ ...p, mode: 'plan' }))
+             : extraItems.map(a => ({ ...a, mode: 'received' }));
+
+  const gap = ivActual - ivForecast;
+  const mn  = (monthNames || [])[month - 1] || '';
+
+  const ivLabel   = (item) => { const iv = item.iv; if (!iv) return item.safe || '—'; return iv.ivNo || iv.IV_NO || iv.invoiceNo || '—'; };
+  const projLabel = (item) => { const iv = item.iv; if (!iv) return '—'; return iv.projectName || iv.jobNo || iv.contractRef || '—'; };
+  const custLabel = (item) => { const iv = item.iv; if (!iv) return ''; return (iv.customerName || iv.customer || '').toString().trim(); };
+  const statusBadge = (item) => {
+    const iv = item.iv;
+    if (!iv) return null;
+    if (ivIsPaid(iv)) return { label: 'รับแล้ว ✓', color: 'var(--good)', bg: 'var(--good-bg)' };
+    return { label: 'ติดตาม', color: 'oklch(55% 0.17 60)', bg: 'oklch(97% 0.02 60)' };
+  };
+  const fmtD = (d) => d ? fmtDate(d) : '—';
+  const fmtM = (n) => (n != null && n !== '') ? fmtNum(n, 0) : '—';
+  const isPlanTab = tab === 'all' || tab === 'pending';
+  const thStyle = { padding: '7px 8px', fontSize: 11, fontWeight: 700, color: 'var(--ink-500)', whiteSpace: 'nowrap', borderBottom: '2px solid var(--ink-100)' };
+  const tdStyle = (align) => ({ padding: '6px 8px', textAlign: align || 'left', fontSize: 12.5, verticalAlign: 'middle' });
+
+  return (
+    <Modal open={true} onClose={onClose}
+      title={`ใบแจ้งหนี้รอรับเงิน · ${mn} ${year}`}
+      maxWidth={940}
+      footer={<button className="btn btn-primary" onClick={onClose}>ปิด</button>}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
+        {[
+          { label: 'แผน (PLAN)',  value: ivForecast,    color: 'var(--brand-700)', sign: '' },
+          { label: 'รับจริงแล้ว', value: ivActual,       color: 'var(--good)',      sign: '' },
+          { label: gap >= 0 ? '▲ เกินแผน' : '▽ ขาดแผน', value: Math.abs(gap), color: gap >= 0 ? 'var(--good)' : 'var(--bad)', sign: gap >= 0 ? '+' : '-' },
+        ].map(({ label, value, color, sign }) => (
+          <div key={label} style={{ textAlign: 'center', padding: '10px 8px', background: 'var(--ink-50)', borderRadius: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-500)', marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{sign}฿{fmtM(value)}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding: '4px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: tab === t.key ? '1.5px solid var(--brand-500)' : '1.5px solid var(--ink-200)',
+            background: tab === t.key ? 'var(--brand-50)' : 'transparent',
+            color: tab === t.key ? 'var(--brand-700)' : 'var(--ink-600)',
+          }}>
+            {t.label}&nbsp;<span style={{ opacity: 0.7, fontSize: 11 }}>({t.count})</span>
+          </button>
+        ))}
+      </div>
+      {rows.length === 0
+        ? <div style={{ textAlign: 'center', color: 'var(--ink-400)', padding: 36, fontSize: 14 }}>ไม่มีรายการ</div>
+        : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--ink-50)' }}>
+                  {isPlanTab ? <>
+                    <th style={{ ...thStyle, width: 30, textAlign: 'center' }}>#</th>
+                    <th style={{ ...thStyle, width: 120 }}>เลขที่ IV</th>
+                    <th style={{ ...thStyle }}>โครงการ</th>
+                    <th style={{ ...thStyle, width: 130 }}>ลูกค้า</th>
+                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>แผน (฿)</th>
+                    <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>วันคาดรับ</th>
+                    <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>สถานะ</th>
+                  </> : <>
+                    <th style={{ ...thStyle, width: 120 }}>เลขที่ IV</th>
+                    <th style={{ ...thStyle }}>โครงการ</th>
+                    <th style={{ ...thStyle, width: 130 }}>ลูกค้า</th>
+                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>รับจริง (฿)</th>
+                    <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>วันรับจริง</th>
+                    {tab === 'extra' && <th style={{ ...thStyle, width: 75, textAlign: 'center' }}>หมายเหตุ</th>}
+                  </>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, ri) => {
+                  const badge = statusBadge(row);
+                  const iv = row.iv;
+                  const receivedDate = iv ? ivActualReceiveDate(iv) : null;
+                  const receivedThisMonth = receivedDate && inMonth(receivedDate, year, month);
+                  return (
+                    <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'var(--ink-50)', borderBottom: '1px solid var(--ink-100)' }}>
+                      {isPlanTab ? <>
+                        <td style={{ ...tdStyle('center'), color: 'var(--ink-400)', fontSize: 11 }}>{ri + 1}</td>
+                        <td style={{ ...tdStyle(), fontFamily: 'ui-monospace', fontWeight: 700, color: 'var(--brand-700)', whiteSpace: 'nowrap' }}>{ivLabel(row)}</td>
+                        <td style={{ ...tdStyle(), maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={projLabel(row)}>{projLabel(row)}</td>
+                        <td style={{ ...tdStyle(), color: 'var(--ink-500)', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={custLabel(row)}>{custLabel(row)}</td>
+                        <td style={{ ...tdStyle('right'), fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtM(row.planNet)}</td>
+                        <td style={{ ...tdStyle('center'), color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>{fmtD(iv && iv.expectedReceive)}</td>
+                        <td style={{ ...tdStyle('center') }}>
+                          {badge ? <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 10.5, fontWeight: 700,
+                            color: badge.color, background: badge.bg, border: `1px solid ${badge.color}`, whiteSpace: 'nowrap' }}>{badge.label}</span> : '—'}
+                          {receivedThisMonth && <div style={{ fontSize: 9.5, color: 'var(--good)', marginTop: 2 }}>{fmtD(receivedDate)}</div>}
+                        </td>
+                      </> : <>
+                        <td style={{ ...tdStyle(), fontFamily: 'ui-monospace', fontWeight: 700, color: 'var(--brand-700)', whiteSpace: 'nowrap' }}>{ivLabel(row)}</td>
+                        <td style={{ ...tdStyle(), maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={projLabel(row)}>{projLabel(row)}</td>
+                        <td style={{ ...tdStyle(), color: 'var(--ink-500)', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={custLabel(row)}>{custLabel(row)}</td>
+                        <td style={{ ...tdStyle('right'), fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--good)' }}>{fmtM(row.actualNet)}</td>
+                        <td style={{ ...tdStyle('center'), color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>{fmtD(row.actualDate)}</td>
+                        {tab === 'extra' && <td style={{ ...tdStyle('center') }}>
+                          <span style={{ fontSize: 10, color: 'var(--bad)', background: 'var(--bad-bg)', padding: '2px 6px', borderRadius: 10, fontWeight: 700 }}>นอกแผน</span>
+                        </td>}
+                      </>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'var(--ink-100)', fontWeight: 700 }}>
+                  {isPlanTab ? <>
+                    <td colSpan={4} style={{ ...tdStyle(), fontSize: 12, color: 'var(--ink-600)' }}>รวม {rows.length} ใบ</td>
+                    <td style={{ ...tdStyle('right'), fontVariantNumeric: 'tabular-nums', color: 'var(--brand-700)' }}>{fmtM(rows.reduce((s, r) => s + (r.planNet || 0), 0))}</td>
+                    <td colSpan={2} />
+                  </> : <>
+                    <td colSpan={3} style={{ ...tdStyle(), fontSize: 12, color: 'var(--ink-600)' }}>รวม {rows.length} ใบ</td>
+                    <td style={{ ...tdStyle('right'), fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtM(rows.reduce((s, r) => s + (r.actualNet || 0), 0))}</td>
+                    <td colSpan={tab === 'extra' ? 2 : 1} />
+                  </>}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )
+      }
+    </Modal>
+  );
+}
+
+function PlanVsActualCard({ tone, icon, label, plan, actual, hint, editMode, ovKey, lockedAt, onLock, lockEditable, onClick }) {
   const planK   = ovKey ? `${ovKey}.plan`   : null;
   const actualK = ovKey ? `${ovKey}.actual` : null;
   useOverrideSub(planK || '_');
@@ -2333,8 +2544,16 @@ function PlanVsActualCard({ tone, icon, label, plan, actual, hint, editMode, ovK
     <div className="card" style={{ padding: cfScale(18), position: 'relative', overflow: 'hidden' }}>
       <div className="kpi-accent" style={{ background: t.accent }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: cfScale(13), color: 'var(--ink-700)', fontWeight: 600 }}>
+        <div
+          onClick={onClick || undefined}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: cfScale(13), color: 'var(--ink-700)', fontWeight: 600,
+            cursor: onClick ? 'pointer' : 'default',
+            textDecoration: onClick ? 'underline dotted var(--ink-300)' : 'none',
+          }}
+          title={onClick ? 'คลิกเพื่อดูรายละเอียด' : undefined}
+        >
           {icon && <Icon name={icon} size={15} />}{label}
+          {onClick && <span style={{ fontSize: 11, color: 'var(--brand-500)', marginLeft: 2 }}>›</span>}
         </div>
         <Badge kind={pct >= 100 ? 'b-green' : pct >= 50 ? 'b-blue' : 'b-amber'} dot={false}>{pct.toFixed(1)}%</Badge>
       </div>
