@@ -128,7 +128,7 @@
   // keyed by contractNo · เก็บใน data.manualOverrides (synced ทุกเครื่อง) เป็น
   // JSON string ต่อโครงการ key = "pcfin.<ContractNo>" + cache localStorage
   // → ไม่ถูกเขียนทับเมื่อ upload Excel (แยกจาก data.projects) · ทีมเห็นเหมือนกัน
-  const PC_FIN_KEY = 'wtp-pc-finance-v1';
+  const PC_FIN_KEY = 'bio-pc-finance-v1';
   const PC_FIN_PREFIX = 'pcfin.';
   function loadFinanceMaster() {
     const out = {};
@@ -961,7 +961,7 @@
   }
 
   // ── local project snapshot (รอด cloud sync — รักษาคอลัมน์เต็มจาก Excel upload)
-  const PC_LOCAL_KEY = 'wtp-proj-control-v2';
+  const PC_LOCAL_KEY = 'bio-proj-control-v2';
   function loadLocalProjects() {
     try { const a = JSON.parse(localStorage.getItem(PC_LOCAL_KEY) || 'null'); return Array.isArray(a) && a.length ? a : null; } catch (_) { return null; }
   }

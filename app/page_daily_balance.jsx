@@ -210,7 +210,7 @@ function DailyBalancePage({ data, setData, toast }) {
     if (isNaN(balance)) { toast('กรอกตัวเลขให้ถูกต้อง'); return; }
     const a = accounts.find(x => x.Bank_AC === ac);
     const existing = todayByAc[ac];
-    const session = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const session = JSON.parse(localStorage.getItem('bio-session') || 'null');
     const holdVal = holdDraft[ac] !== undefined && holdDraft[ac] !== '' ? Number(holdDraft[ac]) : 0;
     const row = {
       id: existing ? existing.id : WTPData.newId(),
@@ -258,7 +258,7 @@ function DailyBalancePage({ data, setData, toast }) {
     const toSave = mainRows.filter(r => draft[r.ac] !== undefined && draft[r.ac] !== '');
     if (toSave.length === 0) { toast('ยังไม่มีรายการที่จะบันทึก'); return; }
     if (!confirm(`บันทึก ${toSave.length} บัญชี ที่ค่าวันที่ ${entryDate}?`)) return;
-    const session = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const session = JSON.parse(localStorage.getItem('bio-session') || 'null');
     const stamp = new Date().toISOString();
     const newRows = toSave.map(r => ({
       id: r.saved ? todayByAc[r.ac].id : WTPData.newId(),

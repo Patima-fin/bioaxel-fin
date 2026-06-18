@@ -499,7 +499,7 @@ function InvoicesPage({ data, setData, toast }) {
         ? WTPData.ensureReceiptForPaidInvoice(d.receipts || [], iv)
         : (d.receipts || []);
       // Mirror the embedded followUps arrays into the flat followUpsLog sheet
-      const user = (() => { try { return JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch(_) { return null; } })();
+      const user = (() => { try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch(_) { return null; } })();
       const newLog = WTPData.rebuildFollowUpsLog
         ? WTPData.rebuildFollowUpsLog(newInvoices, user && user.username, d.followUpsLog || [])
         : (d.followUpsLog || []);
@@ -2677,7 +2677,7 @@ function IvReportStandalonePage({ data, setData, toast }) {
       const newReceipts = WTPData.ensureReceiptForPaidInvoice
         ? WTPData.ensureReceiptForPaidInvoice(d.receipts || [], iv)
         : (d.receipts || []);
-      const user = (() => { try { return JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch(_) { return null; } })();
+      const user = (() => { try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch(_) { return null; } })();
       const newLog = WTPData.rebuildFollowUpsLog
         ? WTPData.rebuildFollowUpsLog(newInvoices, user && user.username, d.followUpsLog || [])
         : (d.followUpsLog || []);

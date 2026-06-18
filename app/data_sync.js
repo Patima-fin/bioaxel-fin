@@ -671,7 +671,7 @@
   // Used to stamp who-did-what on every write so Apps Script can log it.
   function _currentMeta(entity, oldRows, newRows) {
     var sess = null;
-    try { sess = JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch (_) {}
+    try { sess = JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch (_) {}
     var oldCount = (oldRows && oldRows.length) || 0;
     var newCount = (newRows && newRows.length) || 0;
     var delta    = newCount - oldCount;
@@ -1168,7 +1168,7 @@
    * อ่าน localStorage สดทุกครั้ง (ไม่ cache) เพราะ session เปลี่ยนได้ตลอด. */
   function _hasValidSession() {
     try {
-      var s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+      var s = JSON.parse(localStorage.getItem('bio-session') || 'null');
       if (!s) return false;
       var ttl = cfg.SESSION_TTL_MS || 0;
       if (ttl > 0 && s.time && (Date.now() - s.time) > ttl) return false;

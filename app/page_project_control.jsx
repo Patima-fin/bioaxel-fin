@@ -1052,7 +1052,7 @@ function PcUploadDiff({ diff, stats, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════
-const PC_STATE_KEY = 'wtp-pc-gridstate-v3';
+const PC_STATE_KEY = 'bio-pc-gridstate-v3';
 function pcDefaultState() {
   return { order: PCGrid.makeColumns().map(c => c.id), hidden: PCGrid.makeColumns().map(c => c.id).filter(id => !PCGrid.DEFAULT_VISIBLE.includes(id)),
     frozen: PCGrid.DEFAULT_FROZEN.slice(), widths: {}, sort: [], colFilters: {}, page: 1, pageSize: 50, cf: true, density: 'compact' };

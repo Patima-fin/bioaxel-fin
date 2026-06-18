@@ -277,15 +277,15 @@
 
   // ═══════════════════ MAIN PAGE ═══════════════════
   function InvestorDashboard({ data, setData, toast }) {
-    const [lang, setLang] = invSt(() => localStorage.getItem('wtp-inv-lang') || 'th');
-    const [theme, setTheme] = invSt(() => localStorage.getItem('wtp-inv-theme') || 'light');
+    const [lang, setLang] = invSt(() => localStorage.getItem('bio-inv-lang') || 'th');
+    const [theme, setTheme] = invSt(() => localStorage.getItem('bio-inv-theme') || 'light');
     const [sec, setSec] = invSt(0);
     const [present, setPresent] = invSt(false);
     const p = PAL[theme] || PAL.light;
     const tt = T[lang] || T.th;
     const m = invMemo(() => invMetrics(data), [data]);
-    invEff(() => { localStorage.setItem('wtp-inv-lang', lang); }, [lang]);
-    invEff(() => { localStorage.setItem('wtp-inv-theme', theme); }, [theme]);
+    invEff(() => { localStorage.setItem('bio-inv-lang', lang); }, [lang]);
+    invEff(() => { localStorage.setItem('bio-inv-theme', theme); }, [theme]);
 
     const rootStyle = { background: p.bg, color: p.ink, minHeight: '100vh', margin: present ? 0 : '-16px', padding: present ? '24px 30px' : '16px',
       fontFamily: "'IBM Plex Sans Thai','Sarabun',system-ui,sans-serif", position: present ? 'fixed' : 'relative', inset: present ? 0 : 'auto', zIndex: present ? 900 : 'auto', overflow: present ? 'auto' : 'visible' };

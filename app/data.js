@@ -4,7 +4,7 @@
 //     and renamed psNotes → pvVouchers (Payment Voucher).
 
 (function () {
-  const STORAGE_KEY = 'wtp-fin-data-v8';
+  const STORAGE_KEY = 'bio-fin-data-v8';
 
   // Globally-unique id = timestamp + per-session counter + random.
   //   ★ เดิมเป็น counter เริ่มที่ 1000 ที่ "รีเซ็ตทุกครั้งที่โหลดหน้า" → แถวใหม่ใบแรกได้

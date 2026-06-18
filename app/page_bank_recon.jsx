@@ -18,9 +18,9 @@
 const { useState: brState, useMemo: brMemo, useEffect: brEffect, useRef: brRef } = React;
 
 // ─── localStorage store (v1 — จุดเดียวที่จะสลับเป็น synced v2 ภายหลัง) ──────────
-const BR_LS_STMT  = 'wtp-bankrecon-stmt-v1';   // { [accountNo]: { 'YYYY-MM': StatementLine[] } }
-const BR_LS_MAP   = 'wtp-bankrecon-map-v1';    // { [brandKey]: ColumnMapping }
-const BR_LS_STATE = 'wtp-bankrecon-state-v1';  // { [lineId]: { decision, forecastId } }
+const BR_LS_STMT  = 'bio-bankrecon-stmt-v1';   // { [accountNo]: { 'YYYY-MM': StatementLine[] } }
+const BR_LS_MAP   = 'bio-bankrecon-map-v1';    // { [brandKey]: ColumnMapping }
+const BR_LS_STATE = 'bio-bankrecon-state-v1';  // { [lineId]: { decision, forecastId } }
 const BankReconStore = {
   _get(k, def) { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? def : v; } catch (_) { return def; } },
   _set(k, v)   { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },

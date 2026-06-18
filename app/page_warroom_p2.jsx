@@ -11,7 +11,7 @@ const { useMemo: wr2Memo, useState: wr2State } = React;
 // Cloud sync ไม่รับประกันว่าจะเก็บ WS-/XL- rows ได้ครบ (Apps Script schema
 // อาจ strip, race condition, etc.) → เก็บแยกใน localStorage แล้ว merge ทับ
 // data.projects ทุกครั้งที่ render → ไม่ "หาย" หลัง sync เด็ดขาด
-const WR2_LOCAL_PROJECTS_KEY = 'wtp-wr2-supplemental-projects-v1';
+const WR2_LOCAL_PROJECTS_KEY = 'bio-wr2-supplemental-projects-v1';
 function wr2LoadLocalProjects() {
   try {
     const a = JSON.parse(localStorage.getItem(WR2_LOCAL_PROJECTS_KEY) || '[]');

@@ -11,14 +11,14 @@ const { useState: aState, useEffect: aEffect, useMemo: aMemo } = React;
 // flag กันรันซ้ำ. ปลอดภัย: anti-empty-push + server base-reconcile กันดัน [] ทับชีต.
 (function () {
   try {
-    if (localStorage.getItem('wtp-proj-resync-v1') === '1') return;
-    var raw = localStorage.getItem('wtp-fin-data-v8');
+    if (localStorage.getItem('bio-proj-resync-v1') === '1') return;
+    var raw = localStorage.getItem('bio-fin-data-v8');
     if (raw) {
       var c = JSON.parse(raw);
-      if (c && Array.isArray(c.projects)) { c.projects = []; localStorage.setItem('wtp-fin-data-v8', JSON.stringify(c)); }
+      if (c && Array.isArray(c.projects)) { c.projects = []; localStorage.setItem('bio-fin-data-v8', JSON.stringify(c)); }
     }
-    localStorage.removeItem('wtp-proj-control-v2'); // ทิ้ง snapshot เก่า → ใช้ data.projects (synced 648) แทน
-    localStorage.setItem('wtp-proj-resync-v1', '1');
+    localStorage.removeItem('bio-proj-control-v2'); // ทิ้ง snapshot เก่า → ใช้ data.projects (synced 648) แทน
+    localStorage.setItem('bio-proj-resync-v1', '1');
   } catch (_) {}
 })();
 
@@ -61,7 +61,7 @@ const ROLE_PERMS = {
 };
 function _getRole() {
   try {
-    const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
     return (s && s.role) || 'viewer';
   } catch { return 'viewer'; }
 }
@@ -83,26 +83,26 @@ window.WTPAuth = {
 function App() {
   const [isLoggedIn, setIsLoggedIn] = aState(() => {
     try {
-      const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+      const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
       if (!s) return false;
       const ttl = (window.WTP_CONFIG && window.WTP_CONFIG.SESSION_TTL_MS) || 0;
-      if (ttl > 0 && Date.now() - s.time > ttl) { localStorage.removeItem('wtp-session'); return false; }
+      if (ttl > 0 && Date.now() - s.time > ttl) { localStorage.removeItem('bio-session'); return false; }
       // บังคับ re-login: session ที่สร้างก่อน FORCE_LOGOUT_BEFORE → เด้งออกทันทีที่โหลดโค้ดใหม่
       const flb = (window.WTP_CONFIG && window.WTP_CONFIG.FORCE_LOGOUT_BEFORE) || 0;
-      if (flb > 0 && s.time && s.time < flb) { localStorage.removeItem('wtp-session'); return false; }
+      if (flb > 0 && s.time && s.time < flb) { localStorage.removeItem('bio-session'); return false; }
       return true;
     } catch { return false; }
   });
   const [currentUser, setCurrentUser] = aState(() => {
     try {
-      const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+      const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
       return s || null;
     } catch { return null; }
   });
 
   const handleLogin = (userObj) => {
     const session = { ...userObj, time: Date.now() };
-    localStorage.setItem('wtp-session', JSON.stringify(session));
+    localStorage.setItem('bio-session', JSON.stringify(session));
     setCurrentUser(session);
     setIsLoggedIn(true);
     // ทุกคนที่ login เข้ามาต้องเจอหน้า Home ก่อนเสมอ (ไม่ว่า hash เดิมจะค้างหน้าไหน)
@@ -111,7 +111,7 @@ function App() {
   };
   const handleLogout = () => {
     try { if (WTPData.authSignOut) WTPData.authSignOut(); } catch (_) {}   // Phase 4: เคลียร์ Supabase session ด้วย
-    localStorage.removeItem('wtp-session');
+    localStorage.removeItem('bio-session');
     setIsLoggedIn(false);
     setCurrentUser(null);
   };
@@ -158,34 +158,34 @@ function App() {
     if (migratedRef.current) return;
     // รอจน manualOverrides โหลดจาก server เสร็จ (จะเป็น array แม้ว่าง)
     if (!Array.isArray(data.manualOverrides)) return;
-    if (localStorage.getItem('wtp-override-migrated-v1') === '1') {
+    if (localStorage.getItem('bio-override-migrated-v1') === '1') {
       migratedRef.current = true;
       return;
     }
     try {
-      const local = JSON.parse(localStorage.getItem('wtp-manual-overrides') || '{}');
+      const local = JSON.parse(localStorage.getItem('bio-manual-overrides') || '{}');
       const localKeys = Object.keys(local);
       if (localKeys.length === 0) {
-        localStorage.setItem('wtp-override-migrated-v1', '1');
+        localStorage.setItem('bio-override-migrated-v1', '1');
         migratedRef.current = true;
         return;
       }
       const existingKeys = new Set(data.manualOverrides.map(r => r && r.key).filter(Boolean));
       const toAdd = localKeys.filter(k => !existingKeys.has(k));
       if (toAdd.length === 0) {
-        localStorage.setItem('wtp-override-migrated-v1', '1');
+        localStorage.setItem('bio-override-migrated-v1', '1');
         migratedRef.current = true;
         return;
       }
       let updatedBy = '';
-      try { updatedBy = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; } catch (_) {}
+      try { updatedBy = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).username || ''; } catch (_) {}
       const updatedAt = new Date().toISOString();
       const newRows = toAdd.map(key => ({
         id: `ov_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}_${key.slice(0, 8)}`,
         key, value: Number(local[key]), updatedBy, updatedAt,
       }));
       setData(d => ({ ...d, manualOverrides: [...(d.manualOverrides || []), ...newRows] }));
-      localStorage.setItem('wtp-override-migrated-v1', '1');
+      localStorage.setItem('bio-override-migrated-v1', '1');
       migratedRef.current = true;
       pushToast && pushToast(`อัปโหลดค่า manual override ${newRows.length} รายการขึ้นระบบกลาง — ผู้ใช้คนอื่นจะเห็นแล้ว`);
     } catch (_) { /* non-fatal */ }
@@ -267,7 +267,7 @@ function App() {
     const checkIdle = () => {
       const now = Date.now();
       let sessTime = 0;
-      try { sessTime = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).time || 0; } catch (_) {}
+      try { sessTime = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).time || 0; } catch (_) {}
       // บังคับออก (admin สั่งผ่าน override `system.forceLogoutBefore` หรือ config FORCE_LOGOUT_BEFORE)
       if (sessTime > 0 && sessTime < forceLogoutThreshold()) { doLogout('kick'); return; }
       if (TTL_MS > 0 && sessTime > 0 && (now - sessTime) > TTL_MS) { doLogout('ttl'); return; }
@@ -299,7 +299,7 @@ function App() {
   aEffect(() => {
     if (!isLoggedIn) return;
     let sessTime = 0;
-    try { sessTime = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).time || 0; } catch (_) {}
+    try { sessTime = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).time || 0; } catch (_) {}
     if (sessTime > 0 && sessTime < forceLogoutThreshold()) {
       handleLogout();
       try { pushToast && pushToast('ระบบบังคับออกจากระบบ (ผู้ดูแลสั่งรีเซ็ต) — กรุณาเข้าสู่ระบบใหม่'); } catch (_) {}
@@ -317,7 +317,7 @@ function App() {
     const beat = () => {
       if (document.hidden) return;
       if ((Date.now() - lastActivityRef.current) > HB) return;   // idle → ข้าม
-      let s = null; try { s = JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch (_) {}
+      let s = null; try { s = JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch (_) {}
       if (!s || !s.username) return;
       WTPData.pushPresence({
         id: s.username, username: s.username,
@@ -418,11 +418,11 @@ function App() {
 
   // Desktop sidebar collapse state — true = ย่อเหลือเฉพาะไอคอน (persist ใน localStorage)
   const [sbCollapsed, setSbCollapsed] = aState(() => {
-    try { return localStorage.getItem('wtp-sb-collapsed') === '1'; } catch (_) { return false; }
+    try { return localStorage.getItem('bio-sb-collapsed') === '1'; } catch (_) { return false; }
   });
   const toggleCollapse = () => setSbCollapsed(c => {
     const next = !c;
-    try { localStorage.setItem('wtp-sb-collapsed', next ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('bio-sb-collapsed', next ? '1' : '0'); } catch (_) {}
     return next;
   });
 
@@ -877,12 +877,12 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
 // Present Mode — กดแล้วเข้าเต็มจอ + ซ่อน sidebar/แถบรก + spotlight + การ์ดมน
 // จัดการ class บน <body>, fullscreen API, จำสถานะใน localStorage (ใช้ได้ข้ามหน้า)
 function PresentModeToggle() {
-  const [on, setOn] = aState(() => { try { return localStorage.getItem('wtp-present-mode') === '1'; } catch (_) { return false; } });
+  const [on, setOn] = aState(() => { try { return localStorage.getItem('bio-present-mode') === '1'; } catch (_) { return false; } });
 
   // สไตล์ + persist ตามสถานะ on
   aEffect(() => {
     document.body.classList.toggle('present-mode', on);
-    try { localStorage.setItem('wtp-present-mode', on ? '1' : '0'); } catch (_) {}
+    try { localStorage.setItem('bio-present-mode', on ? '1' : '0'); } catch (_) {}
   }, [on]);
 
   // ถ้าผู้ใช้กด Esc / ออกจากเต็มจอเอง → ปิดโหมดให้สอดคล้องกัน
@@ -995,7 +995,7 @@ function LoginPage({ onLogin }) {
       if (match) onLogin(match);
       else setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     };
-    const cachedUsers = () => { try { const c = JSON.parse(localStorage.getItem('wtp-fin-data-v8') || 'null'); return (c && Array.isArray(c.users)) ? c.users : []; } catch (_) { return []; } };
+    const cachedUsers = () => { try { const c = JSON.parse(localStorage.getItem('bio-fin-data-v8') || 'null'); return (c && Array.isArray(c.users)) ? c.users : []; } catch (_) { return []; } };
 
     // ★ ดึงรายชื่อจาก "ชีตสด" ก่อน → user ที่อยู่ในชีต (เช่น baikao) ล็อกอินได้แม้ cache ในเครื่องว่าง
     //   (gviz อ่านสาธารณะ ไม่ต้อง auth) · fail/ช้า/ว่าง → fallback cache + config (พฤติกรรมเดิม)

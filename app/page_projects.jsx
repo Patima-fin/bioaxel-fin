@@ -71,7 +71,7 @@ const normalizeCode = (code) => {
 // Contract No.) มีอยู่เฉพาะในไฟล์ Excel ที่อัปโหลด — ไม่มีใน Google Sheet
 // ดังนั้นต้องเก็บลง localStorage เอง ไม่งั้น cloud sync จะ "ทับ" data.projects
 // ทุกครั้งจนโครงการยกเลิกหายหมด
-const PROJ_LS_KEY = 'wtp-proj-control-v2';
+const PROJ_LS_KEY = 'bio-proj-control-v2';
 function loadLocalProjects() {
   try {
     const s = localStorage.getItem(PROJ_LS_KEY);

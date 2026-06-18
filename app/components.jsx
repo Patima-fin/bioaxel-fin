@@ -744,13 +744,13 @@ class ErrorBoundary extends React.Component {
 // data.manualOverrides = [{ id, key, value, updatedBy, updatedAt }, ...]
 // localStorage = cache เร็ว สำหรับ cold-start ก่อน sync เสร็จ + offline fallback
 // ใช้ใน Warroom รายปี + Cashflow รายสัปดาห์ + Daily Bank Balance
-const OVERRIDE_LS_KEY = 'wtp-manual-overrides';
+const OVERRIDE_LS_KEY = 'bio-manual-overrides';
 // ── Role guard — owner = ดูอย่างเดียว, ห้ามเขียน override ที่ data layer
 // ป้องกันได้แม้ user จะ bypass UI (เช่น force editMode=true ใน DevTools, หรือเรียก
 // WTPOverride.set() ตรงๆ จาก console)
 function _wtpRoleIsReadOnly() {
   try {
-    const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
     const role = (s && s.role) || 'viewer';
     return role === 'owner' || role === 'viewer';
   } catch (_) { return false; }
@@ -797,7 +797,7 @@ const WTPOverride = {
     // 2) Push to cloud via setData → trigger sync to Google Sheets
     if (typeof window.__wtpSetData === 'function') {
       let updatedBy = '';
-      try { updatedBy = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; } catch (_) {}
+      try { updatedBy = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).username || ''; } catch (_) {}
       const updatedAt = new Date().toISOString();
       window.__wtpSetData(d => {
         const arr = Array.isArray(d.manualOverrides) ? d.manualOverrides : [];
@@ -828,7 +828,7 @@ const WTPOverride = {
     if (clearing) delete local[key]; else local[key] = value;
     this._saveLocal(local);
     if (typeof window.__wtpSetData === 'function') {
-      let updatedBy = ''; try { updatedBy = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; } catch (_) {}
+      let updatedBy = ''; try { updatedBy = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).username || ''; } catch (_) {}
       const updatedAt = new Date().toISOString();
       window.__wtpSetData(d => {
         const arr = Array.isArray(d.manualOverrides) ? d.manualOverrides : [];
@@ -867,7 +867,7 @@ const WTPOverride = {
     // 2) Push to cloud (one setData update for the whole batch)
     if (typeof window.__wtpSetData === 'function') {
       let updatedBy = '';
-      try { updatedBy = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; } catch (_) {}
+      try { updatedBy = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).username || ''; } catch (_) {}
       const updatedAt = new Date().toISOString();
       window.__wtpSetData(d => {
         const arr = Array.isArray(d.manualOverrides) ? d.manualOverrides.slice() : [];
@@ -948,7 +948,7 @@ const WTPOverride = {
     if (keys.length === 0) { console.log('ไม่มี override ใน localStorage'); return 0; }
     if (typeof window.__wtpSetData !== 'function') { console.error('window.__wtpSetData ยังไม่ ready'); return 0; }
     let updatedBy = '';
-    try { updatedBy = (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; } catch (_) {}
+    try { updatedBy = (JSON.parse(localStorage.getItem('bio-session') || 'null') || {}).username || ''; } catch (_) {}
     const updatedAt = new Date().toISOString();
     window.__wtpSetData(d => {
       const arr = Array.isArray(d.manualOverrides) ? d.manualOverrides.slice() : [];
@@ -1086,7 +1086,7 @@ function EditableNumber({ ovKey, computed, editMode, format, digits = 2, style, 
 // owner = สิทธิ์ดูอย่างเดียว (ผู้บริหาร) → ซ่อนปุ่มแก้ไขด้วยมือ
 function _getCurrentRole() {
   try {
-    const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
     return (s && s.role) || 'viewer';
   } catch (_) { return 'viewer'; }
 }

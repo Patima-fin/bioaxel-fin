@@ -12,7 +12,7 @@
  * ===================================================================== */
 (function () {
   const { useState, useEffect, useMemo, useRef } = React;
-  const CFP_LS = 'wtp-cfpresent-v1';
+  const CFP_LS = 'bio-cfpresent-v1';
   const CFP_MONTHS = { 1: 'ม.ค.', 2: 'ก.พ.', 3: 'มี.ค.', 4: 'เม.ย.', 5: 'พ.ค.', 6: 'มิ.ย.', 7: 'ก.ค.', 8: 'ส.ค.', 9: 'ก.ย.', 10: 'ต.ค.', 11: 'พ.ย.', 12: 'ธ.ค.' };
 
   // palette (อิงตัวอย่าง Executive Cash Flow Dashboard)
@@ -609,12 +609,12 @@
     const [stored, setStored] = useState(() => { try { return JSON.parse(localStorage.getItem(CFP_LS) || 'null'); } catch (e) { return null; } });
     const [uploading, setUploading] = useState(false);
     const [tab, setTab] = useState('overview');
-    const [topN, setTopN] = useState(10); const [era, setEra] = useState(() => { try { return localStorage.getItem('wtp-cfp-era') || 'auto'; } catch (e) { return 'auto'; } });
+    const [topN, setTopN] = useState(10); const [era, setEra] = useState(() => { try { return localStorage.getItem('bio-cfp-era') || 'auto'; } catch (e) { return 'auto'; } });
     const [modal, setModal] = useState(null);
     const fileRef = useRef(null);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
 
-    const model = useMemo(() => { if (!stored || !stored.stm) return null; try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; } }, [stored]); useEffect(() => { try { localStorage.setItem('wtp-cfp-era', era); } catch (e) {} }, [era]);
+    const model = useMemo(() => { if (!stored || !stored.stm) return null; try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; } }, [stored]); useEffect(() => { try { localStorage.setItem('bio-cfp-era', era); } catch (e) {} }, [era]);
 
     function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
     function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }

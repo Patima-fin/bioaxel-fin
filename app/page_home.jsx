@@ -361,7 +361,7 @@ function HomePage({ data }) {
   const asOf = new Date().toISOString().slice(0, 10); // live reference (meta.asOf is stale)
 
   const session = (() => {
-    try { return JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch { return null; }
+    try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch { return null; }
   })();
   const roleTh = { viewer: 'ผู้บริหาร', owner: 'เจ้าของ', staff: 'ฝ่ายการเงิน', manager: 'หัวหน้าการเงิน' };
   const dept = session ? (roleTh[session.role] || 'ฝ่ายการเงิน') : 'ฝ่ายการเงิน';

@@ -109,7 +109,7 @@ function inMonth(dateISO, year, month) {
 // ── Per-PV manual category override (cf.pvCat.<PL_PV_No> = 1-4) ──────────────
 const cfPvCatKey = (pvNo) => 'cf.pvCat.' + String(pvNo || '').trim();
 // ── Vendor → หมวด mapping (เจ้าหนี้กลุ่มการเงิน/ลีสซิ่ง → หมวด 3) · แก้รายชื่อใน localStorage ได้
-const CF_VENDOR_CAT_LS_KEY = 'wtp-cf-vendor-cat';
+const CF_VENDOR_CAT_LS_KEY = 'bio-cf-vendor-cat';
 const CF_VENDOR_CAT_DEFAULTS = [
   { frag: 'ลีซ อิท', cat: 3 }, { frag: 'ลีสซิ่ง', cat: 3 }, { frag: 'ลิสซิ่ง', cat: 3 },
   { frag: 'แคปปิตอล', cat: 3 }, { frag: 'capital', cat: 3 }, { frag: 'leasing', cat: 3 },
@@ -291,7 +291,7 @@ function todayYmdInt() {
 // role ที่เขียน override ไม่ได้ (owner/viewer) — ใช้ gate auto-capture + ปุ่มล็อก
 function cfIsReadOnly() {
   try {
-    const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
     const role = (s && s.role) || 'viewer';
     return role === 'owner' || role === 'viewer';
   } catch (_) { return false; }

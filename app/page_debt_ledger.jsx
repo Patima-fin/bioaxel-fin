@@ -917,7 +917,7 @@ function RolloverModal({ open, master, onClose, onSave }) {
 // ── Shared mutation hook — used by both pages ───────────────────────────────
 function useDebtContractActions(setData, toast) {
   const session = (() => {
-    try { return JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch (_) { return null; }
+    try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch (_) { return null; }
   })();
   const username = (session && session.username) || '';
 

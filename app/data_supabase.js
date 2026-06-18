@@ -106,7 +106,7 @@
   /* ── session / meta helpers (port จาก data_sync.js) ─────────────────── */
   function _hasValidSession() {
     try {
-      var s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+      var s = JSON.parse(localStorage.getItem('bio-session') || 'null');
       if (!s) return false;
       var ttl = cfg.SESSION_TTL_MS || 0;
       if (ttl > 0 && s.time && (Date.now() - s.time) > ttl) return false;
@@ -115,7 +115,7 @@
   }
   function _currentMeta() {
     var s = null;
-    try { s = JSON.parse(localStorage.getItem('wtp-session') || 'null'); } catch (_) {}
+    try { s = JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch (_) {}
     return {
       user:        (s && (s.username || s.user)) || 'unknown',
       displayName: (s && s.displayName) || '',

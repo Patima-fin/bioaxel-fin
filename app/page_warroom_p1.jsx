@@ -713,7 +713,7 @@ function RcDeductInput({ value, max, onSave }) {
   // ★ role guard — owner/viewer ดูอย่างเดียว ไม่ให้เปิดโหมดแก้ไข
   const readOnly = (() => {
     try {
-      const s = JSON.parse(localStorage.getItem('wtp-session') || 'null');
+      const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
       const role = (s && s.role) || 'viewer';
       return role === 'owner' || role === 'viewer';
     } catch (_) { return false; }
