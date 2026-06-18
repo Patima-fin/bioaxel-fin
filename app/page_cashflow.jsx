@@ -353,6 +353,15 @@ function CashFlowDashboard({ data, setData, toast }) {
     setS01OutMode(m);
     try { localStorage.setItem('bio-cf-s01outmode', m); } catch (_) {}
   };
+  // ขอบเขตของโหมด 'apPlan': 'month' = ตั้งแต่สัปดาห์ปัจจุบันถึงสิ้นเดือน (เดิม) | 'week' = เฉพาะสัปดาห์ปัจจุบัน
+  const [s01ApScope, setS01ApScope] = cfState(() => {
+    try { return localStorage.getItem('bio-cf-s01apscope') === 'week' ? 'week' : 'month'; }
+    catch (_) { return 'month'; }
+  });
+  const setS01ApScopePersist = (s) => {
+    setS01ApScope(s);
+    try { localStorage.setItem('bio-cf-s01apscope', s); } catch (_) {}
+  };
 
   // Footer notes — พับเก็บไว้ (ผู้บริหารเห็นแค่เนื้อหาหลัก) กดเปิดเองถ้าอยากดู
   const [showNotes, setShowNotes] = cfState(false);
@@ -558,6 +567,14 @@ function CashFlowDashboard({ data, setData, toast }) {
       return { 1: (g[1] || 0) + (m[1] || 0), 2: (g[2] || 0) + (m[2] || 0),
                3: (g[3] || 0) + (m[3] || 0), 4: (g[4] || 0) + (m[4] || 0) };
     }), [apPlanByWeekCat, manualIncludedByWeekCat]);
+
+  // ── apPlanScopedByWeekCat = จำกัดขอบเขตตาม s01ApScope ──
+  //   'week' = เฉพาะสัปดาห์ปัจจุบัน (สัปดาห์อื่น = 0 → คอลัมน์ "สัปดาห์ที่เหลือ"/total ไม่นับ) · 'month' = เต็มเหมือนเดิม
+  const apPlanScopedByWeekCat = cfMemo(() =>
+    s01ApScope === 'week'
+      ? apPlanCombinedByWeekCat.map((g, i) => i === nowWeek ? g : { 1: 0, 2: 0, 3: 0, 4: 0 })
+      : apPlanCombinedByWeekCat,
+    [apPlanCombinedByWeekCat, s01ApScope, nowWeek]);
 
   // ── IV PLAN lock — baseline "คาดรับ" ที่ freeze ตั้งแต่วันที่ 1 ของเดือน ──
   //   ovTick กระตุ้น recompute เมื่อ override (จาก cloud/user อื่น) เปลี่ยน
@@ -781,7 +798,7 @@ function CashFlowDashboard({ data, setData, toast }) {
   //   → ช่องสัปดาห์ปัจจุบันโชว์เฉพาะส่วนที่ "ยังต้องจ่าย" (mirror ฝั่งรับเงิน ivCombinedByWeek)
   //   KPI การ์ด + Section 02 (ติดตามจ่ายจริง) ยังใช้ forecast เต็ม — ตัวเลขจึงต่างกันโดยตั้งใจ
   //   โหมด 'apPlan' = แผนจ่ายจริง (AP ที่เลือกจ่าย + ตั้งมือที่ติ๊กรวม) ไม่มี rollover เดือนถัดไป
-  const _outGrid     = s01OutMode === 'apPlan' ? apPlanCombinedByWeekCat : forecastRemainingByWeekCat;
+  const _outGrid     = s01OutMode === 'apPlan' ? apPlanScopedByWeekCat : forecastRemainingByWeekCat;
   const _outRollover = s01OutMode === 'apPlan' ? { 1: 0, 2: 0, 3: 0, 4: 0 } : nextMonthInflow.out;
   const planOut  = {
     1: currentRestSplit(_outGrid.map(g => g[1]), _outRollover[1]),
@@ -835,7 +852,8 @@ function CashFlowDashboard({ data, setData, toast }) {
   //   apItems = AP ที่เลือกจ่าย (รวมในยอดเสมอ) · manualCands = ตั้งมือในช่องนั้น (ติ๊กรวมได้)
   const openApPlanDrill = (cat, period, label) => {
     const wkInPeriod = (wIdx) =>
-      period === 'current' ? wIdx === nowWeek
+      s01ApScope === 'week' ? wIdx === nowWeek    // ขอบเขต "เฉพาะสัปดาห์นี้" → ทุกคอลัมน์เห็นเฉพาะสัปดาห์ปัจจุบัน
+      : period === 'current' ? wIdx === nowWeek
       : period === 'rest'  ? wIdx > nowWeek
       : wIdx >= nowWeek;   // total
     const apItems = [], manualCands = [];
@@ -1506,18 +1524,32 @@ function CashFlowDashboard({ data, setData, toast }) {
                     2: กระแสเงินสดออก (Outflow Details) · 4 หมวด
                     <span style={{ fontWeight: 500, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
                       {s01OutMode === 'apPlan'
-                        ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม</span>
+                        ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
                         : <span>· ยอด<strong>คงเหลือต้องจ่าย</strong> (หักที่จ่ายจริงแล้ว)</span>}
                     </span>
                   </div>
-                  <div data-no-capture="1" style={{ display: 'inline-flex', borderRadius: cfScale(8), overflow: 'hidden', border: '1px solid var(--bad)', fontSize: cfScale(11.5), fontWeight: 700, flexShrink: 0 }}>
-                    {[['remaining', 'ประมาณการคงเหลือ'], ['apPlan', 'แผนจ่ายจริง (AP)']].map(opt => (
-                      <button key={opt[0]} type="button" onClick={() => setS01OutModePersist(opt[0])}
-                        title={opt[0] === 'apPlan' ? 'รายการ AP ที่เลือกจ่ายไว้แล้ว (ขึ้น CARD BANK หน้า Bank Diary) + รายการตั้งมือที่ติ๊กรวมเอง' : 'ประมาณการตั้งมือ − จ่ายจริงแล้ว = ยอดคงเหลือต้องจ่าย'}
-                        style={{ padding: `${cfScale(4)} ${cfScale(10)}`, border: 'none', cursor: 'pointer',
-                          background: s01OutMode === opt[0] ? 'var(--bad)' : 'transparent',
-                          color: s01OutMode === opt[0] ? '#fff' : 'var(--bad)' }}>{opt[1]}</button>
-                    ))}
+                  {/* ปุ่มสลับโหมด/ขอบเขต — ซ่อนในโหมดนำเสนอ (no-present) + ไม่ติดใน PNG capture (data-no-capture) */}
+                  <div data-no-capture="1" className="no-present" style={{ display: 'inline-flex', alignItems: 'center', gap: cfScale(8), flexShrink: 0, flexWrap: 'wrap' }}>
+                    {s01OutMode === 'apPlan' && (
+                      <div style={{ display: 'inline-flex', borderRadius: cfScale(8), overflow: 'hidden', border: '1px solid var(--ink-400)', fontSize: cfScale(11), fontWeight: 700 }}>
+                        {[['month', 'ทั้งเดือน'], ['week', 'เฉพาะสัปดาห์นี้']].map(opt => (
+                          <button key={opt[0]} type="button" onClick={() => setS01ApScopePersist(opt[0])}
+                            title={opt[0] === 'week' ? 'แสดงแผนจ่ายเฉพาะสัปดาห์ปัจจุบัน' : 'แสดงตั้งแต่สัปดาห์ปัจจุบันถึงสิ้นเดือน'}
+                            style={{ padding: `${cfScale(4)} ${cfScale(9)}`, border: 'none', cursor: 'pointer',
+                              background: s01ApScope === opt[0] ? 'var(--ink-600)' : 'transparent',
+                              color: s01ApScope === opt[0] ? '#fff' : 'var(--ink-600)' }}>{opt[1]}</button>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'inline-flex', borderRadius: cfScale(8), overflow: 'hidden', border: '1px solid var(--bad)', fontSize: cfScale(11.5), fontWeight: 700 }}>
+                      {[['remaining', 'ประมาณการคงเหลือ'], ['apPlan', 'แผนจ่ายจริง (AP)']].map(opt => (
+                        <button key={opt[0]} type="button" onClick={() => setS01OutModePersist(opt[0])}
+                          title={opt[0] === 'apPlan' ? 'รายการ AP ที่เลือกจ่ายไว้แล้ว (ขึ้น CARD BANK หน้า Bank Diary) + รายการตั้งมือที่ติ๊กรวมเอง' : 'ประมาณการตั้งมือ − จ่ายจริงแล้ว = ยอดคงเหลือต้องจ่าย'}
+                          style={{ padding: `${cfScale(4)} ${cfScale(10)}`, border: 'none', cursor: 'pointer',
+                            background: s01OutMode === opt[0] ? 'var(--bad)' : 'transparent',
+                            color: s01OutMode === opt[0] ? '#fff' : 'var(--bad)' }}>{opt[1]}</button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </td>
