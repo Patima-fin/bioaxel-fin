@@ -569,12 +569,13 @@ function CashFlowDashboard({ data, setData, toast }) {
     }), [apPlanByWeekCat, manualIncludedByWeekCat]);
 
   // ── apPlanScopedByWeekCat = จำกัดขอบเขตตาม s01ApScope ──
-  //   'week' = เฉพาะสัปดาห์ปัจจุบัน (สัปดาห์อื่น = 0 → คอลัมน์ "สัปดาห์ที่เหลือ"/total ไม่นับ) · 'month' = เต็มเหมือนเดิม
+  //   'week' = สัปดาห์ปัจจุบัน = AP plan ที่เลือก · สัปดาห์ที่เหลือ = forecastRemaining (ประมาณการคีย์มือ)
+  //   'month' = AP plan เต็มเดือนเหมือนเดิม
   const apPlanScopedByWeekCat = cfMemo(() =>
     s01ApScope === 'week'
-      ? apPlanCombinedByWeekCat.map((g, i) => i === nowWeek ? g : { 1: 0, 2: 0, 3: 0, 4: 0 })
+      ? apPlanCombinedByWeekCat.map((g, i) => i === nowWeek ? g : (forecastRemainingByWeekCat[i] || { 1: 0, 2: 0, 3: 0, 4: 0 }))
       : apPlanCombinedByWeekCat,
-    [apPlanCombinedByWeekCat, s01ApScope, nowWeek]);
+    [apPlanCombinedByWeekCat, s01ApScope, nowWeek, forecastRemainingByWeekCat]);
 
   // ── IV PLAN lock — baseline "คาดรับ" ที่ freeze ตั้งแต่วันที่ 1 ของเดือน ──
   //   ovTick กระตุ้น recompute เมื่อ override (จาก cloud/user อื่น) เปลี่ยน
@@ -904,7 +905,8 @@ function CashFlowDashboard({ data, setData, toast }) {
 
   const openDrillDown = (row, period, label) => {
     // โหมดแผนจ่ายจริง: ช่องรายจ่ายเปิด drill แบบ AP (รายการที่เลือกจ่าย + ติ๊กรวมตั้งมือ)
-    if (row && row.indexOf('out') === 0 && s01OutMode === 'apPlan') {
+    // week scope + rest = สัปดาห์ที่เหลือแสดง forecastRemaining → ใช้ drill ปกติ
+    if (row && row.indexOf('out') === 0 && s01OutMode === 'apPlan' && !(s01ApScope === 'week' && period === 'rest')) {
       openApPlanDrill(Number(row.slice(3)), period, label);
       return;
     }
