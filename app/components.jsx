@@ -1204,6 +1204,47 @@ function EditModeToggle({ value, onChange, label = 'โหมดแก้ไข'
   );
 }
 
+// ─── ลำดับบัญชีธนาคารที่ทีมจัดเอง ────────────────────────────────────────────
+//   เก็บเป็น JSON array ของ Bank_AC ตามลำดับที่ต้องการแสดง ใน
+//   manualOverrides key 'bankSortOrder' (sync ทั้งทีม, ไม่แตะแถว entity).
+//   ★ จำเป็นเพราะ Supabase/Postgres ไม่มี "ลำดับแถว" ในตัว — ใช้ร่วม
+//     Daily Balance + Bank Diary เพื่อให้เลข # ตรงกันทั้งสองหน้า.
+const BANK_SORT_KEY = 'bankSortOrder';
+function wtpBankSortOrderFrom(manualOverrides) {
+  const arr = Array.isArray(manualOverrides) ? manualOverrides : [];
+  let row = null;
+  for (let i = 0; i < arr.length; i++) { if (arr[i] && arr[i].key === BANK_SORT_KEY) { row = arr[i]; break; } }
+  if (!row || row.value == null || row.value === '') return [];
+  try { const a = JSON.parse(row.value); return Array.isArray(a) ? a.map(String) : []; } catch (_) { return []; }
+}
+// เรียงสำเนา list ตามลำดับที่บันทึก (stable: ตัวที่ไม่อยู่ในลำดับคงตำแหน่งเดิม → ต่อท้าย)
+// acOf(item) → เลขบัญชีของ item
+function wtpSortBankAccounts(list, acOf, manualOverrides) {
+  const arr = Array.isArray(list) ? list : [];
+  const order = wtpBankSortOrderFrom(manualOverrides);
+  if (!order.length) return arr.slice();
+  const idx = {}; order.forEach((ac, i) => { idx[String(ac)] = i; });
+  const rank = (item) => { const r = idx[String(acOf(item))]; return r === undefined ? Infinity : r; };
+  return arr.slice().sort((a, b) => rank(a) - rank(b));
+}
+// ย้าย acNo ขึ้น/ลง 1 ตำแหน่งภายในกลุ่ม แล้ว persist ลง override
+function wtpMoveBankAccount(acNo, dir, groupAcs, allAcs, manualOverrides) {
+  acNo = String(acNo);
+  const g = (groupAcs || []).map(String);
+  const pos = g.indexOf(acNo);
+  const target = g[pos + dir];
+  if (pos < 0 || target == null) return false;
+  let order = wtpBankSortOrderFrom(manualOverrides);
+  const present = (allAcs || []).map(String);
+  present.forEach(ac => { if (order.indexOf(ac) < 0) order.push(ac); });
+  order = order.filter(ac => present.indexOf(ac) >= 0);
+  const ia = order.indexOf(acNo), ib = order.indexOf(String(target));
+  if (ia < 0 || ib < 0) return false;
+  const tmp = order[ia]; order[ia] = order[ib]; order[ib] = tmp;
+  try { WTPOverride.setRaw(BANK_SORT_KEY, JSON.stringify(order)); } catch (_) { return false; }
+  return true;
+}
+
 // ─── Export to globals ───────────────────────────────────────────────────────
 Object.assign(window, {
   fmtNum, fmtInt, fmtMoney, fmtDate, fmtDateLong, parseDateFlexible,
@@ -1213,4 +1254,5 @@ Object.assign(window, {
   ColFilterDropdown, FilterableColHeader,
   WTPOverride, EditableNumber, EditModeToggle, useOverrideSub, useOverrideSubAny,
   CloudSyncStatusButton,
+  wtpBankSortOrderFrom, wtpSortBankAccounts, wtpMoveBankAccount,
 });
