@@ -76,7 +76,7 @@
 
   // ตาราง analytics ที่อ่าน/เขียนแบบ on-demand (ไม่ preload, ไม่อยู่ใน realtime/diff loop) —
   // หน้า P&L/Budget เรียกผ่าน fetchSheetRows (อ่าน) + WTPData.writeTable (นำเข้า)
-  var SHEET_TABLES = ['pnlBase', 'budgetHo'];
+  var SHEET_TABLES = ['pnlBase', 'budgetHo', 'cashflowPresent'];
   var SHEET_TABLE_SET = {}; SHEET_TABLES.forEach(function (t) { SHEET_TABLE_SET[t] = true; });
 
   // entity ที่ data.js ตัดออกจาก localStorage (กัน quota) → load() ไม่มี → ต้องใช้ React state / cachedData

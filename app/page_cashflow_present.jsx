@@ -8,11 +8,22 @@
  *    3) รายการ (Transaction Explorer) — ตารางรายการ STM + ค้นหา/กรอง/sort
  *  อัปโหลด 2 ไฟล์: STM (รายการเดินบัญชี) + งบกระแสเงินสดรายเดือน (สรุป)
  *  Self-contained: พึ่ง window.React + window.XLSX. prefix `cfp`/`Cfp`.
- *  เก็บ localStorage `wtp-cfpresent-v1` (ต่อเครื่อง) — ยังไม่ sync ทีม.
+ *  ★ ข้อมูล "ส่วนกลาง" sync ผ่าน Supabase (ตาราง cashflowPresent, 1 แถว id='current')
+ *    → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน. localStorage `bio-cfpresent-v1` = cache/offline
+ *    ต่อเครื่อง. ต้องรัน supabase/cashflow-present.sql ครั้งเดียวก่อน (ไม่งั้น degrade เป็น local).
  * ===================================================================== */
 (function () {
   const { useState, useEffect, useMemo, useRef } = React;
   const CFP_LS = 'bio-cfpresent-v1';
+  // ── team-share ผ่าน Supabase: เก็บ 1 แถว (id='current') ในตาราง cashflowPresent
+  //    → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน (เดิม localStorage ต่อเครื่อง = เห็นแค่คนอัป).
+  //    อ่าน/เขียนผ่าน WTPData.fetchSheetRows/writeTable (cashflowPresent ∈ SHEET_TABLES).
+  //    ต้องรัน supabase/cashflow-present.sql ครั้งเดียวก่อน (ไม่งั้น write จะ error → degrade เป็น local).
+  const CFP_TABLE = 'cashflowPresent';
+  const CFP_ROW_ID = 'current';
+  function cfpCanSync() { return !!(window.WTPData && window.WTPData.fetchSheetRows && window.WTPData.writeTable && window.WTP_CONFIG && window.WTP_CONFIG.BACKEND === 'supabase'); }
+  function cfpCurrentUser() { try { var s = JSON.parse(localStorage.getItem('bio-session') || 'null'); return s ? (s.displayName || s.username || '') : ''; } catch (e) { return ''; } }
+  function cfpWhen(ts) { try { var d = new Date(ts); var p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   const CFP_MONTHS = { 1: 'ม.ค.', 2: 'ก.พ.', 3: 'มี.ค.', 4: 'เม.ย.', 5: 'พ.ค.', 6: 'มิ.ย.', 7: 'ก.ค.', 8: 'ส.ค.', 9: 'ก.ย.', 10: 'ต.ค.', 11: 'พ.ย.', 12: 'ธ.ค.' };
 
   // palette (อิงตัวอย่าง Executive Cash Flow Dashboard)
@@ -611,10 +622,36 @@
     const [tab, setTab] = useState('overview');
     const [topN, setTopN] = useState(10); const [era, setEra] = useState(() => { try { return localStorage.getItem('bio-cfp-era') || 'auto'; } catch (e) { return 'auto'; } });
     const [modal, setModal] = useState(null);
+    const [synced, setSynced] = useState(false);      // โหลด/แชร์ผ่านส่วนกลาง (Supabase) สำเร็จล่าสุด
+    const [shareBusy, setShareBusy] = useState(false);
     const fileRef = useRef(null);
+    const fetchedRef = useRef(false);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
 
     const model = useMemo(() => { if (!stored || !stored.stm) return null; try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; } }, [stored]); useEffect(() => { try { localStorage.setItem('bio-cfp-era', era); } catch (e) {} }, [era]);
+
+    // โหลดข้อมูล "ส่วนกลาง" จาก Supabase ตอนเข้าหน้า → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน
+    //   server = แหล่งจริง (ทับ local cache); ถ้า server ว่าง/ตารางยังไม่สร้าง → คง local เดิม
+    useEffect(() => {
+      if (fetchedRef.current || !cfpCanSync()) return;
+      fetchedRef.current = true; let alive = true;
+      window.WTPData.fetchSheetRows(CFP_TABLE).then(rows => {
+        if (!alive) return;
+        const row = (rows || []).find(r => r && r.stm);
+        if (row && row.stm) { setStored(row); setSynced(true); try { localStorage.setItem(CFP_LS, JSON.stringify(row)); } catch (e) {} }
+      }).catch(e => { console.warn('[cfp] โหลดส่วนกลางไม่สำเร็จ:', e && e.message); });
+      return () => { alive = false; };
+    }, []);
+
+    function refreshShared() {
+      if (!cfpCanSync()) return; setShareBusy(true);
+      window.WTPData.fetchSheetRows(CFP_TABLE).then(rows => {
+        const row = (rows || []).find(r => r && r.stm);
+        if (row && row.stm) { setStored(row); setSynced(true); try { localStorage.setItem(CFP_LS, JSON.stringify(row)); } catch (e) {} toast && toast('โหลดข้อมูลส่วนกลางล่าสุดแล้ว'); }
+        else { toast && toast('ยังไม่มีข้อมูลส่วนกลาง — ให้ผู้ดูแลอัปโหลด', 'error'); }
+        setShareBusy(false);
+      }).catch(e => { setShareBusy(false); toast && toast('โหลดไม่สำเร็จ: ' + (e && e.message || ''), 'error'); });
+    }
 
     function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
     function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }
@@ -652,17 +689,31 @@
           else if (kind === 'summary') { summary = cfpParseSummary(aoa); }
           else if (!sawStm) { const guess = cfpParseStm(aoa); if (guess.txns.length) { stm = guess; sawStm = true; } } }
         if (!stm || !stm.txns.length) {
-          if (summary && stored && stored.stm) { persist({ stm: stored.stm, summary }); toast && toast('อัปเดตตารางงบสรุปแล้ว'); }
+          if (summary && stored && stored.stm) { const r = await persist({ stm: stored.stm, summary }); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
           else { toast && toast('ต้องมีไฟล์ STM (รายการเดินบัญชี)', 'error'); }
           setUploading(false); return;
         }
-        persist({ stm, summary: summary || (stored && stored.summary) || null });
-        toast && toast('อ่านข้อมูลสำเร็จ · ' + stm.txns.length + ' รายการ' + (summary ? ' + งบสรุป' : ''));
+        const r = await persist({ stm, summary: summary || (stored && stored.summary) || null });
+        toast && toast('อ่านข้อมูลสำเร็จ · ' + stm.txns.length + ' รายการ' + (summary ? ' + งบสรุป' : '') + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
       } catch (e) { console.error(e); toast && toast('อ่านไฟล์ไม่สำเร็จ: ' + (e.message || e), 'error'); }
       setUploading(false);
     }
-    function persist(obj) { const payload = Object.assign({ uploadedAt: Date.now() }, obj); try { localStorage.setItem(CFP_LS, JSON.stringify(payload)); } catch (e) { console.error('[cfp] save', e); } setStored(payload); }
-    function clearData() { if (!confirm('ล้างข้อมูล Cash Flow ในเครื่องนี้?')) return; localStorage.removeItem(CFP_LS); setStored(null); }
+    function cfpShareSuffix(r) { if (!r) return ''; if (r.shared) return ' · 🌐 แชร์ให้ทีมแล้ว'; if (r.reason === 'error') return ' · ⚠️ แชร์ส่วนกลางไม่สำเร็จ (บันทึกในเครื่อง · รัน SQL?)'; return ''; }
+    // บันทึก local (cache/offline) + push ขึ้นส่วนกลาง (ทุกคนเห็น). คืน {shared, reason}.
+    async function persist(obj) {
+      const payload = Object.assign({ id: CFP_ROW_ID, uploadedAt: Date.now(), uploadedBy: cfpCurrentUser() }, obj);
+      try { localStorage.setItem(CFP_LS, JSON.stringify(payload)); } catch (e) { console.error('[cfp] save', e); }
+      setStored(payload);
+      if (!cfpCanSync()) return { shared: false, reason: 'local' };
+      setShareBusy(true);
+      try { await window.WTPData.writeTable(CFP_TABLE, [payload], r => r.id); setSynced(true); setShareBusy(false); return { shared: true }; }
+      catch (e) { setShareBusy(false); setSynced(false); console.warn('[cfp] แชร์ส่วนกลางไม่สำเร็จ:', e && e.message); return { shared: false, reason: 'error', message: e && e.message }; }
+    }
+    function clearData() {
+      if (!confirm('ล้างข้อมูล Cash Flow ส่วนกลาง? (ทุกคนจะไม่เห็นจนกว่าจะอัปใหม่)')) return;
+      localStorage.removeItem(CFP_LS); setStored(null); setSynced(false);
+      if (cfpCanSync()) { setShareBusy(true); window.WTPData.writeTable(CFP_TABLE, [], r => r.id).then(() => { setShareBusy(false); toast && toast('ล้างข้อมูลส่วนกลางแล้ว'); }).catch(e => { setShareBusy(false); toast && toast('ล้างในเครื่องแล้ว แต่ส่วนกลางไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }); }
+    }
 
     const pageWrap = { background: 'transparent', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
     const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
@@ -675,14 +726,24 @@
           <div>
             <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-.4px' }}>Executive Cash Flow Dashboard</div>
             <div style={{ fontSize: 13, color: C.mut, marginTop: 3 }}>BIOAXEL{model ? ' · งวด ' + model.periodLabel + ' · ' + model.txnCount + ' รายการ · ' + model.accounts.length + ' บัญชี' : ' · อัปโหลดไฟล์เพื่อเริ่ม'}</div>
+            {model && (
+              <div style={{ fontSize: 12, marginTop: 6, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                {synced
+                  ? <span style={{ background: '#e6f5ea', color: C.primaryD, border: '1px solid #bfe6cb', borderRadius: 99, padding: '2px 10px', fontWeight: 700 }}>🌐 ข้อมูลส่วนกลาง · ทุกคนเห็นชุดนี้</span>
+                  : <span style={{ background: '#fff5e6', color: '#a8620a', border: '1px solid #f0d6a8', borderRadius: 99, padding: '2px 10px', fontWeight: 700 }} title="ข้อมูลนี้ยังอยู่แค่ในเครื่องนี้ — อัปโหลด (หรือกดโหลดล่าสุด) เพื่อแชร์/ดึงชุดส่วนกลาง">📌 ข้อมูลในเครื่อง (ยังไม่แชร์)</span>}
+                {stored && stored.uploadedBy && <span style={{ color: C.faint }}>อัปโดย {stored.uploadedBy}{stored.uploadedAt ? ' · ' + cfpWhen(stored.uploadedAt) : ''}</span>}
+                {shareBusy && <span style={{ color: C.faint }}>⏳ กำลัง sync…</span>}
+              </div>
+            )}
           </div>
-          {canEdit && (
-            <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {cfpCanSync() && <button onClick={refreshShared} disabled={shareBusy} className="no-present" title="ดึงข้อมูลส่วนกลางล่าสุด (ที่คนอื่นอัปไว้)" style={{ background: '#fff', color: C.primaryD, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{shareBusy ? '⏳' : '↻'} โหลดล่าสุด</button>}
+            {canEdit && (<React.Fragment>
               <select value={era} onChange={e => setEra(e.target.value)} className="no-present" title="ปีในไฟล์ข้อมูล (พ.ศ./ค.ศ.)" style={{ border: '1px solid ' + C.line, borderRadius: 11, padding: '0 10px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' }}><option value="auto">ปี: อัตโนมัติ</option><option value="be">ไฟล์เป็น พ.ศ.</option><option value="ce">ไฟล์เป็น ค.ศ.</option></select><button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} className="no-present" style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '9px 16px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: C.shadow }}>{uploading ? '⏳ กำลังอ่าน…' : (model ? '⬆️ อัปเดตไฟล์' : '⬆️ อัปโหลด STM + งบสรุป')}</button>
               {model && <button onClick={clearData} className="no-present" style={{ background: '#fff', color: C.mut, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, cursor: 'pointer' }}>ล้าง</button>}
               <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={e => { if (e.target.files.length) onUpload(Array.from(e.target.files)); e.target.value = ''; }} />
-            </div>
-          )}
+            </React.Fragment>)}
+          </div>
         </div>
 
         {!model && (

@@ -15,7 +15,7 @@
 --     'bankAccounts','pvVouchers','payables','debtLedger','receipts','bankEntries','checks',
 --     'debtMaster','bankTransfers','stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents',
 --     'users','cashflowSnapshots','followUpsLog','manualOverrides','bankReconLines',
---     'bankReconState','presence','audit_log'];
+--     'bankReconState','presence','pnlBase','budgetHo','cashflowPresent','audit_log'];
 --   begin foreach t in array names loop execute format('alter table %I disable row level security', t); end loop; end $$;
 -- =====================================================================
 
@@ -34,7 +34,7 @@ declare
     'debtLedger','receipts','bankEntries','checks','debtMaster','bankTransfers',
     'stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents','users',
     'cashflowSnapshots','followUpsLog','manualOverrides','bankReconLines','bankReconState',
-    'pnlBase','budgetHo'
+    'pnlBase','budgetHo','cashflowPresent'
   ];
 begin
   foreach t in array ents loop
