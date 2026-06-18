@@ -2053,6 +2053,65 @@ function _isPayableDetailRow(o) {
   return true;
 }
 
+// Parse ไฟล์ "เจ้าหนี้คงค้างแบบละเอียด" XML จากโปรแกรม EXPRESS (SpreadsheetML)
+// โครงสร้างลำดับชั้น: A11=ชื่อเจ้าหนี้ → A12+DateTime=แถวรายการ → A14=แถวสรุป(ข้าม)
+// Col index (1-based): 1=วันที่  3=เลขที่เอกสาร  4=เลขที่บิล  5=ยอดในบิล
+//   7=ยอดคงค้าง  18=ครบกำหนด  19=หมายเหตุ  20=เลขที่เอกสาร PO
+function parseExpressXML(xmlText) {
+  var SS = 'urn:schemas-microsoft-com:office:spreadsheet';
+  function ssAttr(el, name) {
+    return el.getAttributeNS(SS, name) || el.getAttribute('ss:' + name) || '';
+  }
+  var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
+  var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
+  var results = [];
+  var vendor = '', vendorCode = '';
+  rowEls.forEach(function(rowEl) {
+    var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
+    if (!cellEls.length) return;
+    var cm = {}, li = 0;
+    cellEls.forEach(function(cell) {
+      var is = ssAttr(cell, 'Index');
+      li = is ? parseInt(is) : li + 1;
+      var d = cell.getElementsByTagNameNS('*', 'Data')[0];
+      cm[li] = {
+        v: d ? d.textContent.trim() : '',
+        t: d ? (d.getAttribute('ss:Type') || ssAttr(d, 'Type') || '') : '',
+        s: ssAttr(cell, 'StyleID'),
+      };
+    });
+    var c1 = cm[1];
+    if (!c1) return; // ไม่มี col1 = แถวตัดยอดชำระ → ข้าม
+    if (c1.s === 'A11') { // แถวชื่อเจ้าหนี้ เช่น "บริษัท ก จำกัด /A002"
+      var raw = c1.v, si = raw.lastIndexOf('/');
+      if (si >= 0) { vendor = raw.slice(0, si).trim(); vendorCode = raw.slice(si + 1).trim(); }
+      else { vendor = raw; vendorCode = ''; }
+      return;
+    }
+    if (c1.s === 'A14' || c1.s === 'A10') return; // สรุปยอด / หัวหมวด → ข้าม
+    if (c1.s === 'A12' && c1.t === 'DateTime') { // แถวรายการจริง
+      var vchno = (cm[3] && cm[3].v) || '';
+      if (!vchno) return;
+      var g = function(i) { return (cm[i] && cm[i].v) || ''; };
+      var gn = function(i) { var v = g(i); return v ? String(parseFloat(v.replace(/,/g, '')) || 0) : ''; };
+      results.push({
+        vchdate:    c1.v,      // ISO date เช่น "2026-04-30"
+        vchno:      vchno,     // RS… / AP… / AD… / CV…
+        docno:      g(4),      // เลขที่บิล (invoice no.)
+        cust_name:  vendor,    // ชื่อเจ้าหนี้
+        maincode:   vendorCode,
+        Amount:     gn(5),     // ยอดในบิล
+        netpayment: gn(7),     // ยอดคงค้าง
+        due2:       g(18),     // วันครบกำหนด (ISO)
+        remark:     g(19),     // หมายเหตุ
+        refno:      g(20),     // เลขที่เอกสาร PO
+      });
+    }
+  });
+  return results;
+}
+
 // เทียบค่าให้ทน format ต่าง — date → epoch (กัน DD/MM vs ISO), number → parseNum (กัน "2,000.00")
 function _payableNormCmp(v, type) {
   if (type === 'number') return parseNum(v);
@@ -2205,10 +2264,29 @@ function DataPayablePage({ data, setData, toast }) {
   const [importFileName, setImportFileName]   = dxState('');
   const [importPreview, setImportPreview]     = dxState(null);   // {added,changed,unchanged,missing,paidCut,…}
   const [selectedMissing, setSelectedMissing] = dxState(() => new Set());   // id แถวเดิม (หาย) ที่เลือกจะลบ
+  const [xmlParsedRows, setXmlParsedRows]     = dxState(null);  // rows จาก parseExpressXML (XML path)
 
-  // อัปโหลด .xlsx ตรงๆ → แปลงเป็น TSV → ใส่ใน textarea (reuse handleImport)
+  // อัปโหลดไฟล์ → .xml ใช้ parseExpressXML (EXPRESS), อื่นๆ ใช้ XLSX.js → TSV
   const handleFileUpload = (file) => {
     if (!file) return;
+    // ── XML จาก EXPRESS ──────────────────────────────────────────────────────
+    if (file.name.toLowerCase().endsWith('.xml')) {
+      const rdr = new FileReader();
+      rdr.onload = function(e) {
+        try {
+          const rows = parseExpressXML(e.target.result);
+          if (!rows.length) { toast('ไม่พบรายการเจ้าหนี้ในไฟล์ XML — ตรวจสอบรูปแบบไฟล์'); return; }
+          setXmlParsedRows(rows);
+          setImportFileName(file.name);
+          toast('อ่านไฟล์ XML แล้ว ' + rows.length + ' รายการ — กด "ตรวจสอบข้อมูล" เพื่อดู preview');
+        } catch (err) {
+          toast('อ่านไฟล์ XML ไม่สำเร็จ: ' + err.message);
+        }
+      };
+      rdr.readAsText(file, 'UTF-8');
+      return;
+    }
+    // ── Excel / CSV ──────────────────────────────────────────────────────────
     if (!window.XLSX) { toast('ไม่พบไลบรารี SheetJS — กรุณาใช้วิธี Copy-Paste แทน'); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -2275,6 +2353,10 @@ function DataPayablePage({ data, setData, toast }) {
     if (v.startsWith('APO')) return 'APO';
     if (v.startsWith('APS')) return 'APS';
     if (v.startsWith('APV')) return 'APV';
+    if (v.startsWith('AP'))  return 'AP';   // EXPRESS
+    if (v.startsWith('RS'))  return 'RS';   // EXPRESS ใบรับสินค้า
+    if (v.startsWith('AD'))  return 'AD';   // EXPRESS ทดรองจ่าย
+    if (v.startsWith('CV'))  return 'CV';   // EXPRESS
     return 'other';
   };
 
@@ -2336,7 +2418,7 @@ function DataPayablePage({ data, setData, toast }) {
   const topDpt = Object.entries(byDpt).sort((a,b)=>b[1]-a[1])[0] || ['—', 0];
 
   // Doc-type counts
-  const dtCount = { APO: 0, APS: 0, APV: 0 };
+  const dtCount = { APO: 0, APS: 0, APV: 0, AP: 0, RS: 0, AD: 0, CV: 0 };
   rows.forEach(r => { const t = getDocType(r.vchno); if (dtCount[t] !== undefined) dtCount[t]++; });
 
   const toggleSort = (key) => {
@@ -2363,31 +2445,34 @@ function DataPayablePage({ data, setData, toast }) {
 
   const resetImport = () => {
     setShowImport(false); setImportText(''); setImportPasteOpen(false);
-    setImportFileName(''); setImportPreview(null); setSelectedMissing(new Set());
+    setImportFileName(''); setImportPreview(null); setSelectedMissing(new Set()); setXmlParsedRows(null);
   };
 
-  // วิเคราะห์ไฟล์ → สร้าง preview (ตัดแถวสรุปยอด + แยกใหม่/แก้/หาย/จ่ายแล้ว) ก่อน commit
+  // วิเคราะห์ไฟล์ → สร้าง preview (แยกใหม่/แก้/หาย/จ่ายแล้ว) ก่อน commit
+  // รองรับ 2 path: XML จาก EXPRESS (xmlParsedRows) และ TSV/Excel (importText)
   const handleImport = () => {
-    if (!importText.trim()) { toast('ไม่มีข้อมูล'); return; }
-    const lines = importText.trim().split('\n');
-    if (lines.length < 2) { toast('ต้องมีแถวหัวตารางและข้อมูลอย่างน้อย 1 แถว'); return; }
-    const headers = lines[0].split('\t').map(h => h.trim());
+    let detail, blankSkipped = 0, summarySkipped = 0;
 
-    // parse rows → objects (ยังไม่ใส่ id) + normalise due2
-    const parsed = [];
-    let blankSkipped = 0;
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split('\t');
-      if (cols.every(c => !String(c || '').trim())) { blankSkipped++; continue; }
-      const obj = {};
-      headers.forEach((h, j) => { obj[h] = cols[j] != null ? cols[j].trim() : ''; });
-      if (!obj.due2) { for (const k of _DUE_ALT_KEYS) { if (obj[k]) { obj.due2 = obj[k]; break; } } }
-      parsed.push(obj);
+    if (xmlParsedRows) {
+      // ── XML path: rows ผ่าน parseExpressXML มาแล้ว (filtered + cust_name set) ──
+      detail = xmlParsedRows;
+    } else {
+      // ── TSV/Excel path ──────────────────────────────────────────────────────
+      if (!importText.trim()) { toast('ไม่มีข้อมูล'); return; }
+      const lines = importText.trim().split('\n');
+      if (lines.length < 2) { toast('ต้องมีแถวหัวตารางและข้อมูลอย่างน้อย 1 แถว'); return; }
+      const headers = lines[0].split('\t').map(h => h.trim());
+      const parsed = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split('\t');
+        if (cols.every(c => !String(c || '').trim())) { blankSkipped++; continue; }
+        const obj = {};
+        headers.forEach((h, j) => { obj[h] = cols[j] != null ? cols[j].trim() : ''; });
+        if (!obj.due2) { for (const k of _DUE_ALT_KEYS) { if (obj[k]) { obj.due2 = obj[k]; break; } } }
+        parsed.push(obj);
+      }
+      detail = parsed.filter(o => { const keep = _isPayableDetailRow(o); if (!keep) summarySkipped++; return keep; });
     }
-
-    // (1) ตัดแถวสรุปยอดเจ้าหนี้ (Total By Vendor) — เก็บเฉพาะแถวรายการจริง
-    let summarySkipped = 0;
-    const detail = parsed.filter(o => { const keep = _isPayableDetailRow(o); if (!keep) summarySkipped++; return keep; });
 
     // (2) เซ็ตของที่จ่ายแล้ว (ดึงไป PV) — vchno ที่ตรงกับ AP_No ใน pvVouchers
     const paidSet = new Set((data.pvVouchers || []).map(pv => String(pv.AP_No || '').trim()).filter(Boolean));
@@ -2550,8 +2635,8 @@ function DataPayablePage({ data, setData, toast }) {
       <div className="card" style={{ padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div className="tabnav" style={{ flex: '0 0 auto' }}>
           <button className={docFilter === 'all' ? 'active' : ''} onClick={() => setDocFilter('all')}>ทั้งหมด ({rows.length})</button>
-          {['APO','APS','APV'].map(t => (
-            <button key={t} className={docFilter === t ? 'active' : ''} onClick={() => setDocFilter(t)}>{t} ({dtCount[t]||0})</button>
+          {['APO','APS','APV','AP','RS','AD','CV'].filter(t => dtCount[t] > 0).map(t => (
+            <button key={t} className={docFilter === t ? 'active' : ''} onClick={() => setDocFilter(t)}>{t} ({dtCount[t]})</button>
           ))}
         </div>
 
@@ -2700,7 +2785,7 @@ function DataPayablePage({ data, setData, toast }) {
             </button>
           </> : <>
             <button className="btn btn-ghost" onClick={resetImport}>ยกเลิก</button>
-            <button className="btn btn-primary" onClick={handleImport} disabled={!importText.trim()}><Icon name="check" size={13} /> ตรวจสอบข้อมูล</button>
+            <button className="btn btn-primary" onClick={handleImport} disabled={!importText.trim() && !xmlParsedRows}><Icon name="check" size={13} /> ตรวจสอบข้อมูล</button>
           </>}>
 
           {importHelpOpen && (
@@ -2709,11 +2794,11 @@ function DataPayablePage({ data, setData, toast }) {
               background: '#fefce8', border: '1px solid #fde68a', borderLeft: '3px solid #f6ad55',
               borderRadius: 7, color: 'var(--ink-700)', lineHeight: 1.65,
             }}>
-              <div>📥 <strong>อัปโหลดไฟล์ .xlsx/.csv</strong> หรือ <strong>วาง TSV</strong>. แถวแรกต้องเป็นชื่อคอลัมน์ (header)</div>
-              <div>🧹 <strong>แถวสรุปยอด</strong> (Total By Vendor) ถูกตัดออกอัตโนมัติ — นำเข้าเฉพาะรายการจริง (vchno = APO/APS/APV)</div>
+              <div>📊 <strong>ไฟล์ .xml จากโปรแกรม EXPRESS</strong> — รายงาน "เจ้าหนี้คงค้างแบบละเอียด" รองรับทุก prefix (RS/AP/AD/CV)</div>
+              <div>📥 หรือ <strong>อัปโหลด .xlsx/.csv</strong> / <strong>วาง TSV</strong>. แถวแรกต้องเป็นชื่อคอลัมน์ (header)</div>
+              <div>🧹 <strong>แถวสรุปยอด/หัวหมวด</strong> ถูกตัดออกอัตโนมัติ — นำเข้าเฉพาะรายการจริง</div>
               <div>🔁 รายการที่ <strong>vchno ซ้ำ</strong> แต่ค่าเปลี่ยน (ยอด/วันครบกำหนด) จะ <strong>แจ้งเตือนให้ตรวจทาน</strong> ก่อนอัปเดต</div>
               <div>✅ รายการที่ <strong>ดึงไป PV แล้ว</strong> (vchno = AP_No ใน PV) จะไม่นำเข้า และตัดของเดิมในลิสต์ออกให้</div>
-              <div>📆 คอลัมน์วันครบกำหนด: ถ้าไม่มี <code>due2</code> ระบบจะ map จาก due/duedate/Due/maturity ฯลฯ ให้อัตโนมัติ</div>
             </div>
           )}
 
@@ -2779,19 +2864,19 @@ function DataPayablePage({ data, setData, toast }) {
                 border: 'none',
               }}>
                 <Icon name="upload" size={13} />
-                เลือกไฟล์ Excel
+                เลือกไฟล์
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt"
+                  accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt,.xml"
                   onChange={(e) => handleFileUpload(e.target.files?.[0])}
                   style={{ display: 'none' }}
                 />
               </label>
               <span style={{ fontSize: 11.5, color: importDragOver ? 'var(--brand-700)' : 'var(--ink-500)', fontWeight: importDragOver ? 600 : 400 }}>
-                {importDragOver ? '⬇️ วางไฟล์ที่นี่' : 'หรือลากไฟล์มาวาง — รองรับ .xlsx, .xls, .csv'}
+                {importDragOver ? '⬇️ วางไฟล์ที่นี่' : 'หรือลากไฟล์มาวาง — .xml (EXPRESS), .xlsx, .csv'}
               </span>
-              {importFileName && (
-                <button type="button" onClick={() => { setImportFileName(''); setImportText(''); }}
+              {(importFileName) && (
+                <button type="button" onClick={() => { setImportFileName(''); setImportText(''); setXmlParsedRows(null); }}
                   style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid var(--ink-200)', borderRadius: 6, padding: '3px 9px', fontSize: 11, color: 'var(--ink-600)', cursor: 'pointer' }}>
                   ✕ ล้างไฟล์
                 </button>
@@ -2799,8 +2884,9 @@ function DataPayablePage({ data, setData, toast }) {
             </div>
             {importFileName && (
               <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ink-700)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13 }}>📄</span>
+                <span style={{ fontSize: 13 }}>{xmlParsedRows ? '📊' : '📄'}</span>
                 <strong>{importFileName}</strong>
+                {xmlParsedRows && <span style={{ fontSize: 11, color: 'var(--good)' }}>✓ XML EXPRESS · {xmlParsedRows.length} รายการ</span>}
               </div>
             )}
           </div>
