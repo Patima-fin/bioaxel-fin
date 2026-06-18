@@ -1529,7 +1529,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: cfScale(8), flexWrap: 'wrap' }}>
                   <div style={{ fontWeight: 700, color: 'var(--bad)', fontSize: cfScale(16) }}>
                     2: กระแสเงินสดออก (Outflow Details) · 4 หมวด
-                    <span style={{ fontWeight: 500, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
+                    <span className="no-present" style={{ fontWeight: 500, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
                       {s01OutMode === 'apPlan'
                         ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
                         : <span>· ยอด<strong>คงเหลือต้องจ่าย</strong> (หักที่จ่ายจริงแล้ว)</span>}
