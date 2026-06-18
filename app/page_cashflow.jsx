@@ -241,6 +241,10 @@ function ivActualReceiveDate(iv) {
   //   เดิมอ่านแค่ JSON → ช่อง "รับจริง" (Actual) นับใบที่วันรับอยู่ในคอลัมน์แบนไม่ได้
   return (typeof ivReceivedDate === 'function' ? ivReceivedDate(iv) : (iv.actualReceive && iv.actualReceive.date)) || null;
 }
+function ivIsProject(iv) {
+  // เฉพาะ invType='P' (โครงการ, default) — ตัด invType='O' (อื่นๆ) ออก
+  return String(iv.invType || iv.invtype || 'P').trim().toUpperCase() !== 'O';
+}
 
 // ─── IV PLAN lock — freeze "คาดรับ" baseline ตั้งแต่วันที่ 1 ของเดือน ─────────
 //   ปัญหาเดิม: forecast คำนวณสด + ตัด IV ที่ paid ออก → ยอด PLAN หดลงเรื่อยๆ
@@ -589,8 +593,9 @@ function CashFlowDashboard({ data, setData, toast }) {
     const actual       = weeks.map(() => 0);
     const bySafe       = {};   // sanitized ivNo → live IV (ไว้เช็คสถานะรับเงิน)
     invoices.forEach(iv => {
-      const net = ivNetExpected(iv, financeByCode);
       const s = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo); if (s) bySafe[s] = iv;
+      if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P) — ตัด O ออก
+      const net = ivNetExpected(iv, financeByCode);
       // Live forecast (fallback เมื่อเดือนยังไม่ถูกล็อก) — IV ที่ยังไม่รับเงิน + คาดรับเดือนนี้
       if (!ivIsPaid(iv) && iv.expectedReceive && inMonth(iv.expectedReceive, year, month)) {
         const w = findWeekIdx(iv.expectedReceive, weeks);
@@ -672,6 +677,7 @@ function CashFlowDashboard({ data, setData, toast }) {
     let count = 0;
     invoices.forEach(iv => {
       if (!iv.expectedReceive || !inMonth(iv.expectedReceive, year, month)) return;
+      if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P) — ตัด O ออกจากการล็อกแผน
       // ตัด IV ที่ "รับเงินจริงไปแล้วก่อนเดือนนี้" — เป็นเงินของเดือนก่อน ไม่ใช่แผนเดือนนี้
       //   (ใบที่รับเงินภายในเดือนนี้ยังคงไว้ — เคยเป็นแผน + เกิดจริงในเดือนเดียวกัน)
       const ad = ivActualReceiveDate(iv);
@@ -2350,11 +2356,14 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
     const items = [], safes = new Set();
     if (ivPlanLock && ivPlanLock.locked) {
       (ivPlanLock.items || []).forEach(it => {
+        const iv = bySafe[it.safe] || null;
+        if (iv && !ivIsProject(iv)) return;  // ข้ามประเภทอื่นๆ ที่อาจค้างอยู่ใน lock เก่า
         safes.add(it.safe);
-        items.push({ iv: bySafe[it.safe] || null, planNet: it.net, safe: it.safe });
+        items.push({ iv, planNet: it.net, safe: it.safe });
       });
     } else {
       (invoices || []).forEach(iv => {
+        if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P)
         if (!ivIsPaid(iv) && iv.expectedReceive && inMonth(iv.expectedReceive, year, month)) {
           const net = ivNetExpected(iv, financeByCode);
           if (net >= 1) {
@@ -2372,6 +2381,7 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
   const actualItems = React.useMemo(() => {
     const items = [];
     (invoices || []).forEach(iv => {
+      if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P)
       const ad = ivActualReceiveDate(iv);
       if (ad && inMonth(ad, year, month)) {
         const net = ivNetExpected(iv, financeByCode);
