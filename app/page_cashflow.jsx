@@ -1440,20 +1440,25 @@ function CashFlowDashboard({ data, setData, toast }) {
           </div>
         </div>
 
-        {/* ── ขวา — คาดการณ์สิ้นเดือน อันใหญ่ ── */}
-        <BalanceCard
-          big
-          tone={strategicNet < 0 ? 'bad' : 'good'}
-          label="คาดการณ์สิ้นเดือน (Strategic)"
-          value={strategicNet}
-          editMode={editMode}
-          ovKey={`${ovPrefix}.strategic`}
-          hint={
-            (strategicNet < 0 ? '⚠️ ติดลบ · ' : '') +
-            `B/F ${fmtNum(monthBFAvailable, 0)} + IV ${fmtNum(ivForecast, 0)} + เงินกู้ ${fmtNum(loanForecast, 0)} − ค่าใช้จ่าย ${fmtNum(outflowForecast, 0)}`
-          }
-          icon={strategicNet < 0 ? 'arrow_down' : 'arrow_up'}
-        />
+        {/* ── ขวา — คาดการณ์คงเหลือ ณ ปัจจุบัน (= สุทธิ TOTAL ของ SEC1) ── */}
+        {(() => {
+          const _netMon = WTPOverride.resolve(`${ovPrefix}.s01.netMonth`, netEndOfMonth);
+          return (
+            <BalanceCard
+              big
+              tone={_netMon < 0 ? 'bad' : 'good'}
+              label="คาดการณ์คงเหลือ ณ ปัจจุบัน"
+              value={_netMon}
+              editMode={editMode}
+              ovKey={`${ovPrefix}.s01.netMonth`}
+              hint={
+                (_netMon < 0 ? '⚠️ ติดลบ · ' : '') +
+                `B/F ${fmtNum(weekBF, 0)} + รับ ${fmtNum(inflowCurrent + inflowRest, 0)} − จ่าย ${fmtNum(totalOutCurrent + totalOutRest, 0)}`
+              }
+              icon={_netMon < 0 ? 'arrow_down' : 'arrow_up'}
+            />
+          );
+        })()}
       </div>
 
       {/* ═════ SECTION B — Plan: current week vs rest of month ═════════ */}
