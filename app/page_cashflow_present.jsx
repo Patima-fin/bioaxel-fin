@@ -53,25 +53,32 @@
     if (/^-?\d+(\.\d+)?$/.test(s)) { const n = parseFloat(s); return neg ? -n : n; }
     return 0;
   }
+  // ★ ทุก path คืน "ค.ศ. (CE)" เสมอ — กฎรวม: ปีที่ได้ > 2400 = พ.ศ. → ลบ 543
+  //   (กัน bug "ปี 612" = เอาปี พ.ศ. 2569 ไปคิดต่อ). era hint คุมเฉพาะปี 2 หลัก.
   let cfpEraHint = 'auto'; function cfpToISO(v) {
     if (v == null || v === '') return '';
     if (typeof v === 'number' && isFinite(v) && v > 1000) {
-      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
+      if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
     }
     let s = String(v).trim();
-    const era = cfpEraHint || 'auto'; if (era === 'auto' && typeof window.parseDateFlexible === 'function') {
-      try { const iso = window.parseDateFlexible(s); if (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) return iso.slice(0, 10); } catch (e) {}
+    const era = cfpEraHint || 'auto';
+    let d = null, mo = null, y = null;
+    if (era === 'auto' && typeof window.parseDateFlexible === 'function') {
+      try { const iso = window.parseDateFlexible(s); if (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) { y = +iso.slice(0, 4); mo = +iso.slice(5, 7); d = +iso.slice(8, 10); } } catch (e) {}
     }
-    const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-    if (m) {
-      let d = +m[1], mo = +m[2], y = +m[3];
-      if (era === 'be') { if (y < 100) y += 2500; y -= 543; } else if (era === 'ce') { if (y < 100) y += 2000; } else { if (y < 100) y += 2000; if (y > 2400) y -= 543; }
-      if (d > 31 && y <= 31) { const t = d; d = y; y = t; }
-      if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }
-      return String(y).padStart(4, '0') + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    if (d == null) {
+      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+      if (m) {
+        d = +m[1]; mo = +m[2]; y = +m[3];
+        if (era === 'be') { if (y < 100) y += 2500; } else { if (y < 100) y += 2000; }
+        if (d > 31 && y <= 31) { const t = d; d = y; y = t; }
+        if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }
+      }
     }
-    return '';
+    if (d == null || mo == null || y == null) return '';
+    if (y > 2400) y -= 543;   // พ.ศ. → ค.ศ. (กฎรวมทุก era/ทุก path)
+    return String(y).padStart(4, '0') + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
   }
   const cfpMonth = iso => (iso && iso.length >= 7) ? +iso.slice(5, 7) : 0;
   function cfpFmtB(v) { const n = Math.round(Math.abs(v || 0)); return (v < 0 ? '-' : '') + '฿' + n.toLocaleString('en-US'); }
@@ -80,9 +87,12 @@
   function cfpFmtPlain(v) { return Math.round(Math.abs(v || 0)).toLocaleString('en-US'); }
   function cfpThaiDate(iso) {
     if (!iso || iso.length < 10) return iso || '';
-    const y = +iso.slice(0, 4), m = +iso.slice(5, 7), d = +iso.slice(8, 10);
-    return d + ' ' + (CFP_MONTHS[m] || m) + ' ' + (y + 543 - 2500);
+    let y = +iso.slice(0, 4); const m = +iso.slice(5, 7), d = +iso.slice(8, 10);
+    if (y > 2400) y -= 543;   // กัน iso เก่าที่เก็บเป็น พ.ศ. (อัปก่อนแก้ bug) → แสดงเป็น ค.ศ.
+    return d + ' ' + (CFP_MONTHS[m] || m) + ' ' + y;   // ปี ค.ศ. เต็ม (มาตรฐานทั้งแอป)
   }
+  // แปลงเลขปี พ.ศ. (2401–2600) ในข้อความอิสระ (เช่น period label จากไฟล์) → ค.ศ. ให้ทั้งหน้าเป็น ค.ศ.
+  function cfpCeText(s) { return String(s || '').replace(/\b(2[4-9]\d\d)\b/g, function (m) { var n = +m; return n > 2400 ? String(n - 543) : m; }); }
 
   function cfpActKey(activity, category) {
     const a = String(activity || ''); const c = String(category || '');
@@ -293,8 +303,8 @@
       allTxns: txns, txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
       accounts: Object.keys(accounts), interest, payroll, inflowTotal, topInflow,
       summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
-      monthLabels: (summary && summary.monthLabels) || [],
-      periodLabel: (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + (new Date().getFullYear() + 543 - 2500)) : ''),
+      monthLabels: ((summary && summary.monthLabels) || []).map(cfpCeText),
+      periodLabel: cfpCeText((summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + new Date().getFullYear()) : '')),
     };
   }
 
@@ -416,27 +426,43 @@
 
   /* ---------- SVG: monthly stacked (net by activity) ---------- */
     function CfpMonthly({ model, onPick }) {
-    const W = 720, H = 320, padX = 46, base = 168, span = 120;
     const mo = model.monthly; if (!mo.length) return null;
+    const acts = ['op', 'inv', 'fin'];
+    // ★ บาร์ทุกแท่งขึ้นทางเดียวจาก baseline เดียว (สูง = ขนาดของเงิน) — ติดลบไม่ทิ่มลง
+    //   บอกค่าบนหัวแท่ง (แดง = ติดลบ) + จัดกลุ่มเป็นเดือน (พื้นสลับเฉดให้แยกเดือนง่าย)
+    const W = 760, H = 296, padX = 18, padTop = 42, baseY = 226, span = baseY - padTop;
     const maxAbs = Math.max.apply(null, mo.map(d => Math.max(Math.abs(d.op), Math.abs(d.inv), Math.abs(d.fin))).concat([1]));
     const slot = (W - padX * 2) / mo.length, cx = i => padX + slot * i + slot / 2;
-    const acts = ['op', 'inv', 'fin'];
-    const gb = Math.min(26, (slot * 0.62) / 3), gap = Math.min(6, gb * 0.25);
+    const gb = Math.min(34, (slot * 0.66) / 3), gap = Math.min(9, gb * 0.3);
     const groupW = gb * 3 + gap * 2;
-    const barH = v => Math.max(1, Math.abs(v) / maxAbs * span);
+    const barH = v => Math.max(2, Math.abs(v) / maxAbs * span);
+    const lbl = v => (v >= 0 ? '+' : '-') + (Math.abs(v) / 1e6).toFixed(1) + 'M';
     return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่ง)">
-        <line x1={padX - 8} y1={base} x2={W - padX + 8} y2={base} stroke={C.line} />
+      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่งขึ้นทางเดียว)">
+        {/* legend */}
+        {acts.map((k, j) => (
+          <g key={'lg' + k} transform={'translate(' + (padX + 2 + j * 132) + ',16)'}>
+            <rect x="0" y="-9" width="12" height="12" rx="3" fill={ACT_COLOR[k]} />
+            <text x="17" y="1" fontSize="12" fill={C.mut} fontWeight="600">{CFP_ACT_SHORT[k]}</text>
+          </g>
+        ))}
         {mo.map((d, i) => {
           const gx = cx(i) - groupW / 2;
           return (
             <g key={'g' + i} style={{ cursor: 'pointer' }} onClick={() => onPick && onPick(d.m)}>
+              <rect x={cx(i) - slot / 2 + 3} y={padTop - 10} width={slot - 6} height={baseY - padTop + 10} rx="9" fill={i % 2 ? 'rgba(46,139,74,0.045)' : 'transparent'} />
               {acts.map((k, j) => {
-                const v = d[k] || 0; const h = barH(v); const bx = gx + j * (gb + gap); const y = v >= 0 ? base - h : base;
-                return (<rect key={k} x={bx} y={y} width={gb} height={h} rx="3" fill={ACT_COLOR[k]} opacity="0.92"><title>{CFP_ACT_SHORT[k] + ' ' + cfpFmtM(v)}</title></rect>);
+                const v = d[k] || 0; const h = barH(v); const bx = gx + j * (gb + gap); const neg = v < 0;
+                return (
+                  <g key={k}>
+                    <rect x={bx} y={baseY - h} width={gb} height={h} rx="3" fill={ACT_COLOR[k]} opacity={neg ? 0.5 : 0.95}><title>{CFP_ACT_SHORT[k] + ' ' + cfpFmtM(v)}</title></rect>
+                    <text x={bx + gb / 2} y={baseY - h - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill={neg ? C.neg : ACT_COLOR[k]}>{lbl(v)}</text>
+                  </g>
+                );
               })}
-              <text x={cx(i)} y={H - 24} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={C.ink}>{d.label}</text>
-              <text x={cx(i)} y={H - 9} textAnchor="middle" fontSize="11" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>{cfpFmtSigned(d.net)}</text>
+              <line x1={cx(i) - slot / 2 + 3} y1={baseY} x2={cx(i) + slot / 2 - 3} y2={baseY} stroke={C.line} />
+              <text x={cx(i)} y={baseY + 18} textAnchor="middle" fontSize="12" fontWeight="800" fill={C.ink}>{d.label}</text>
+              <text x={cx(i)} y={baseY + 33} textAnchor="middle" fontSize="11" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>สุทธิ {cfpFmtSigned(d.net)}</text>
             </g>
           );
         })}
@@ -718,7 +744,7 @@
     const pageWrap = { background: 'transparent', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
     const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
     const secTitle = { fontSize: 15, fontWeight: 700, margin: '0 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' };
-    const tabs = [['overview', '📊 ภาพรวม'], ['activity', '🔬 ตามกิจกรรม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
+    const tabs = [['overview', '📊 ภาพรวม'], ['activity', '🔬 สรุปกิจกรรม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
 
     return (
       <div className="cfp-page present-page" style={pageWrap}>
@@ -824,7 +850,7 @@
           </React.Fragment>}
 
           {tab === 'activity' && <React.Fragment>
-            <div style={{ fontSize: 13, color: C.mut, margin: '0 2px 12px' }}>แต่ละกิจกรรมมีอะไรบ้าง + จุดที่ต้องเฝ้าระวัง (กดหมวดเพื่อดูรายการจริง)</div>
+            <div style={{ ...secTitle, margin: '0 2px 12px' }}><span>🔬 สรุปกิจกรรม</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>แต่ละกิจกรรมมีอะไร + จุดเฝ้าระวัง · กดหมวด → รายการจริง</span></div>
             <CfpActivityDetail model={model} k="op" onCat={openCat} onAll={() => openAct('op')} />
             <CfpActivityDetail model={model} k="inv" onCat={openCat} onAll={() => openAct('inv')} />
             <CfpActivityDetail model={model} k="fin" onCat={openCat} onAll={() => openAct('fin')} />
@@ -838,7 +864,7 @@
             <div className="cfp-card" style={card}><div style={secTitle}><span>🔎 Transaction Explorer — รายการเดินบัญชีจาก STM</span></div><CfpExplorer model={model} toast={toast} /></div>
           )}
 
-          <div style={{ fontSize: 11, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · เก็บในเครื่องนี้ (ยังไม่ sync ทีม) · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH') : '-'}</div>
+          <div style={{ fontSize: 11, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · {synced ? 'ข้อมูลส่วนกลาง (ทุกคนเห็น)' : 'ข้อมูลในเครื่อง'} · วันที่แสดงเป็น ค.ศ. · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH-u-ca-gregory') : '-'}</div>
         </React.Fragment>}
 
         {modal && <CfpModal title={modal.title} subtitle={modal.subtitle} txns={modal.txns} onClose={() => setModal(null)} />}
