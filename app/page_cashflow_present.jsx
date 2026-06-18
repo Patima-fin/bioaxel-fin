@@ -308,8 +308,8 @@
           <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
         </div>
         <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-            <thead><tr style={{ color: C.mut, textAlign: 'left' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ color: C.mut, textAlign: 'left', fontSize: 12 }}>
               <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff', width: 96 }}>วันที่</th>
               <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff' }}>รายการ</th>
               <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fbfdff', width: 70 }}>บัญชี</th>
@@ -330,7 +330,7 @@
         <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 900, width: '100%', maxHeight: '86vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
           <div style={{ padding: '16px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
               {subtitle && <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>{subtitle}</div>}
             </div>
             <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
@@ -349,7 +349,7 @@
       <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow }}>
         <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 4px', color: color || C.ink, letterSpacing: '-.5px' }}>{value}</div>
-        {sub && <div style={{ fontSize: 11.5, color: C.mut }}>{sub}</div>}
+        {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
       </div>
     );
   }
@@ -359,7 +359,7 @@
       <div onClick={onClick} className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
         <div style={{ height: 5, margin: '-16px -20px 12px', background: col }} />
         <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{CFP_ACT_NAME[k]} <span style={{ color: C.faint, fontSize: 11 }}>กดดู ›</span></div>
-        <div style={{ fontSize: 23, fontWeight: 800, margin: '7px 0 2px', color: value < 0 ? C.neg : C.pos, letterSpacing: '-.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtM(value)}</div>
+        <div style={{ fontSize: 22, fontWeight: 800, margin: '7px 0 2px', color: value < 0 ? C.neg : C.pos, letterSpacing: '-.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtM(value)}</div>
         {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
       </div>
     );
@@ -438,7 +438,7 @@
     const months = (model.monthLabels && model.monthLabels.length) ? model.monthLabels : model.months.map(m => CFP_MONTHS[m]);
     const monthNumByIdx = i => model.months[i] || (i + 1);
     const acct = v => { if (!v) return <span style={{ color: C.faint }}>-</span>; const neg = v < 0; return <span style={{ color: neg ? C.neg : C.ink }}>{neg ? '(' + cfpFmtPlain(v) + ')' : cfpFmtPlain(v)}</span>; };
-    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 11.5, position: 'sticky', top: 0, background: '#fbfdff' };
+    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 12, position: 'sticky', top: 0, background: '#fbfdff' };
     return (
       <div className="cfp-stmt" style={{ overflowX: 'auto', maxHeight: '76vh', overflowY: 'auto', borderRadius: 12, border: '1px solid ' + C.line }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
@@ -506,7 +506,7 @@
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'transactions.csv'; a.click();
       toast && toast('ดาวน์โหลด CSV · ' + rows.length + ' รายการ');
     }
-    const th = (label, k, align) => <th onClick={k ? () => sortBy(k) : undefined} style={{ padding: '8px 9px', fontWeight: 700, fontSize: 11.5, color: C.mut, cursor: k ? 'pointer' : 'default', whiteSpace: 'nowrap', textAlign: align || 'left', position: 'sticky', top: 0, background: '#fbfdff', userSelect: 'none' }}>{label}{k ? arrow(k) : ''}</th>;
+    const th = (label, k, align) => <th onClick={k ? () => sortBy(k) : undefined} style={{ padding: '8px 9px', fontWeight: 700, fontSize: 12, color: C.mut, cursor: k ? 'pointer' : 'default', whiteSpace: 'nowrap', textAlign: align || 'left', position: 'sticky', top: 0, background: '#fbfdff', userSelect: 'none' }}>{label}{k ? arrow(k) : ''}</th>;
     return (
       <div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
@@ -517,23 +517,23 @@
           <select value={fType} onChange={e => setFType(e.target.value)} style={sel}><option value="">รับ+จ่าย</option><option value="in">รับเข้า</option><option value="out">จ่ายออก</option></select>
           <button onClick={exportCSV} style={{ ...sel, cursor: 'pointer', fontWeight: 600 }}>⬇ CSV</button>
         </div>
-        <div style={{ display: 'flex', gap: 18, fontSize: 12.5, color: C.mut, marginBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 18, fontSize: 12, color: C.mut, marginBottom: 10 }}>
           <span><b style={{ color: C.ink }}>{rows.length.toLocaleString('en-US')}</b> รายการ</span>
           <span>รับ <b style={{ color: C.pos }}>{cfpFmtB(totIn)}</b></span>
           <span>จ่าย <b style={{ color: C.neg }}>{cfpFmtB(totOut)}</b></span>
           <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
         </div>
         <div className="cfp-grid" style={{ overflowX: 'auto', maxHeight: '70vh', overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 820 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 820 }}>
             <thead><tr>{th('วันที่', 'iso')}{th('เลขที่', 'docNo')}{th('รายการ', 'note')}{th('บัญชี', 'account')}{th('หมวด', 'category')}{th('กิจกรรม', 'actKey')}{th('รับ', 'flow', 'right')}{th('จ่าย', null, 'right')}{th('คงเหลือ', 'balance', 'right')}</tr></thead>
             <tbody>
               {shown.map((t, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid ' + C.line }}>
                   <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
-                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap', fontSize: 11.5 }}>{t.docNo}</td>
+                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap', fontSize: 12 }}>{t.docNo}</td>
                   <td style={{ padding: '6px 9px', color: C.ink, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || '-'}</td>
                   <td style={{ padding: '6px 9px' }}><CfpBankPill acct={t.account} /></td>
-                  <td style={{ padding: '6px 9px', color: C.mut, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5 }} title={t.category}>{t.category}</td>
+                  <td style={{ padding: '6px 9px', color: C.mut, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }} title={t.category}>{t.category}</td>
                   <td style={{ padding: '6px 9px' }}><CfpTag k={t.actKey} /></td>
                   <td style={{ padding: '6px 9px', textAlign: 'right', color: C.pos, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.flow > 0 ? cfpFmtPlain(t.flow) : ''}</td>
                   <td style={{ padding: '6px 9px', textAlign: 'right', color: C.neg, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.flow < 0 ? cfpFmtPlain(t.flow) : ''}</td>
@@ -543,7 +543,7 @@
             </tbody>
           </table>
         </div>
-        {rows.length > shown.length && <div style={{ fontSize: 11.5, color: C.faint, marginTop: 8 }}>แสดง {shown.length} จาก {rows.length.toLocaleString('en-US')} รายการ — ใช้ตัวกรอง/ค้นหาเพื่อแคบลง</div>}
+        {rows.length > shown.length && <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>แสดง {shown.length} จาก {rows.length.toLocaleString('en-US')} รายการ — ใช้ตัวกรอง/ค้นหาเพื่อแคบลง</div>}
       </div>
     );
   }
@@ -562,7 +562,7 @@
         <div style={{ height: 5, background: ACT_COLOR[k] }} />
         <div style={{ padding: '16px 20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: C.ink }}>{CFP_ACT_NAME[k]}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{CFP_ACT_NAME[k]}</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: a.net < 0 ? C.neg : C.pos }}>{cfpFmtM(a.net)}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, fontSize: 12, flexWrap: 'wrap' }}>
@@ -572,24 +572,24 @@
           </div>
           <div className="cfp-act-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.25fr) minmax(0,1fr)', gap: 20 }}>
             <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
               {top.map((c, i) => (
                 <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 1fr auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
-                  <span style={{ fontSize: 12.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
+                  <span style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
                   <span><CfpBar amt={c.net} max={maxAbs} /></span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
                 </div>
               ))}
               {cats.length > 7 && <div onClick={onAll} style={{ fontSize: 12, color: C.primary, cursor: 'pointer', marginTop: 9, fontWeight: 700 }}>ดูทั้งหมด {cats.length} หมวด →</div>}
             </div>
             <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.mut, marginBottom: 8 }}>🚩 จุดเฝ้าระวัง</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>🚩 จุดเฝ้าระวัง</div>
               {flags.map((f, i) => {
                 const s = CFP_SEV[f.sev] || CFP_SEV.blue;
                 return (
                   <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 11px', borderRadius: 10, background: s.bg, marginBottom: 7 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.c, marginTop: 5, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12.5, color: s.c, lineHeight: 1.45, fontWeight: 500 }}>{f.t}</span>
+                    <span style={{ fontSize: 12, color: s.c, lineHeight: 1.45, fontWeight: 500 }}>{f.t}</span>
                   </div>
                 );
               })}
@@ -689,7 +689,7 @@
           {/* tab nav */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
             {tabs.map(([k, label]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ border: '1px solid ' + (tab === k ? 'transparent' : C.line), background: tab === k ? 'linear-gradient(135deg,#4F8AF7,#3a6fe0)' : '#fff', color: tab === k ? '#fff' : C.mut, fontWeight: 700, fontSize: 13.5, padding: '9px 16px', borderRadius: 12, cursor: 'pointer', boxShadow: tab === k ? '0 6px 16px rgba(79,138,247,.3)' : 'none' }}>{label}</button>
+              <button key={k} onClick={() => setTab(k)} style={{ border: '1px solid ' + (tab === k ? 'transparent' : C.line), background: tab === k ? 'linear-gradient(135deg,#2e8b4a,#1f6e3a)' : '#fff', color: tab === k ? '#fff' : C.mut, fontWeight: 700, fontSize: 14, padding: '9px 16px', borderRadius: 12, cursor: 'pointer', boxShadow: tab === k ? '0 6px 16px rgba(46,139,74,.3)' : 'none' }}>{label}</button>
             ))}
           </div>
 
@@ -705,15 +705,15 @@
               <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} sub={watchSub('fin')} />
             </div>
             {model.summary && model.summary.net != null && (
-              <div style={{ fontSize: 12.5, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
+              <div style={{ fontSize: 12, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
             )}
             <div className="cfp-card" style={card}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
-            <div className="cfp-card" style={card}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11.5, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
+            <div className="cfp-card" style={card}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
             <div style={secTitle}><span>🤖 Executive Insights</span></div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 14, marginBottom: 8 }}>
-              {model.acts.fin.net > 0 && model.acts.op.net < 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>🔁 อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>ดำเนินงาน {cfpFmtM(model.acts.op.net)}</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>)}
-              {model.interest > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>％ ดอกเบี้ยจ่าย</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{cfpFmtM(model.interest)}</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>{model.payroll > 0 ? '≈ ' + Math.round(model.interest / model.payroll * 100) + '% ของเงินเดือน (' + cfpFmtM(model.payroll) + ')' : 'ภาระดอกเบี้ยรวมทั้งงวด'}</div></div>)}
-              {model.topInflow.amt > 0 && model.inflowTotal > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(79,138,247,.12),rgba(54,197,216,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>📦 รายได้กระจุกตัว</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{Math.round(model.topInflow.amt / model.inflowTotal * 100)}% จากสินค้าหลัก</div><div style={{ fontSize: 11.5, color: C.mut, marginTop: 3 }}>{model.topInflow.name.replace(/^เงินสดรับจากการขาย-?/, '')} ({cfpFmtM(model.topInflow.amt)})</div></div>)}
+              {model.acts.fin.net > 0 && model.acts.op.net < 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>🔁 อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>ดำเนินงาน {cfpFmtM(model.acts.op.net)}</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>)}
+              {model.interest > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>％ ดอกเบี้ยจ่าย</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{cfpFmtM(model.interest)}</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>{model.payroll > 0 ? '≈ ' + Math.round(model.interest / model.payroll * 100) + '% ของเงินเดือน (' + cfpFmtM(model.payroll) + ')' : 'ภาระดอกเบี้ยรวมทั้งงวด'}</div></div>)}
+              {model.topInflow.amt > 0 && model.inflowTotal > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>📦 รายได้กระจุกตัว</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{Math.round(model.topInflow.amt / model.inflowTotal * 100)}% จากสินค้าหลัก</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>{model.topInflow.name.replace(/^เงินสดรับจากการขาย-?/, '')} ({cfpFmtM(model.topInflow.amt)})</div></div>)}
             </div>
             {(function () {
               const ranked = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').slice().sort((a, b) => Math.abs(b.flow) - Math.abs(a.flow)).slice(0, topN);
@@ -725,8 +725,8 @@
                     </select>
                   </div>
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 640 }}>
-                      <thead><tr style={{ color: C.mut, textAlign: 'left' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                      <thead><tr style={{ color: C.mut, textAlign: 'left', fontSize: 12 }}>
                         <th style={{ padding: '7px 8px', fontWeight: 700, width: 34 }}>#</th>
                         <th style={{ padding: '7px 8px', fontWeight: 700, width: 92 }}>วันที่</th>
                         <th style={{ padding: '7px 8px', fontWeight: 700 }}>รายการ</th>
@@ -768,7 +768,7 @@
             <div className="cfp-card" style={card}><div style={secTitle}><span>🔎 Transaction Explorer — รายการเดินบัญชีจาก STM</span></div><CfpExplorer model={model} toast={toast} /></div>
           )}
 
-          <div style={{ fontSize: 11.5, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · เก็บในเครื่องนี้ (ยังไม่ sync ทีม) · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH') : '-'}</div>
+          <div style={{ fontSize: 11, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · เก็บในเครื่องนี้ (ยังไม่ sync ทีม) · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH') : '-'}</div>
         </React.Fragment>}
 
         {modal && <CfpModal title={modal.title} subtitle={modal.subtitle} txns={modal.txns} onClose={() => setModal(null)} />}
