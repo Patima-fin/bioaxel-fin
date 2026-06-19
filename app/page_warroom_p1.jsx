@@ -195,13 +195,21 @@ function WarRoomPage1({ data, setData, toast }) {
       if (mx) hasIvSet.add(mx[1]);
     });
 
-    // 3) Derive projects ด้วย pc_engine (same logic as Project Control page)
+    // 3) เลือก project source เหมือน Project Control: local snapshot ก่อน (120 cols)
+    //    ถ้า local มีแถวมากกว่า → ใช้ local; ไม่งั้นใช้ data.projects (Supabase)
+    let rawProjects = data.projects || [];
+    try {
+      const localProjs = (window.PCU && PCU.loadLocalProjects) ? PCU.loadLocalProjects() : [];
+      if (Array.isArray(localProjs) && localProjs.length > rawProjects.length) rawProjects = localProjs;
+    } catch (_) {}
+
+    // Derive projects ด้วย pc_engine (same logic as Project Control page)
     //    กรอง sub==='ดำเนินงาน' = ลงนามแล้ว + มี Start + ยังไม่รับเงิน/ส่งมอบ
     let derivedRows = [];
     try {
       if (window.PCU && PCU.deriveProjects) {
         derivedRows = PCU.deriveProjects(
-          data.projects || [],
+          rawProjects,
           data.invoices  || [],
           data.receipts  || []
         );
