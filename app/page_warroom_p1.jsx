@@ -202,8 +202,8 @@ function WarRoomPage1({ data, setData, toast }) {
       if (window.PCU && PCU.deriveProjects) {
         derivedRows = PCU.deriveProjects(
           data.projects || [],
-          data.manualOverrides || {},
-          data.receipts || []
+          data.invoices  || [],
+          data.receipts  || []
         );
       }
     } catch (_) {}
