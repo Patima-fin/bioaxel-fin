@@ -38,106 +38,102 @@
       currency: 'THB',
     },
 
-    // ── 02. Pipeline summary (War Room) ─────────────────────────────────────
+    // ── 02. Pipeline summary (War Room) — zeroed for BIOAXEL (not maintained by sync) ──
     pipeline: {
-      waitingSign:    { count: 10, gross: 35118000.00,  debt: 16649500.00,  net: 18468500.00 },
-      signedWip:      { count: 23, gross: 42952000.00,  debt: 8818806.05,   net: 34133193.95 },
-      invoicedOutstanding: { count: 4, gross: 10154200.00, debt: 2809200.00, net: 7345000.00 },
-      totalProjectValue: 247453578.76,
-      invoiceBroughtForward: 10154200.00,
-      signedNotDelivered:    35118000.00,
-      notSigned:             47900000.00,
-      totalDebt:             84498100.00,
-      usableNet:             162955478.76,
+      waitingSign:    { count: 0, gross: 0, debt: 0, net: 0 },
+      signedWip:      { count: 0, gross: 0, debt: 0, net: 0 },
+      invoicedOutstanding: { count: 0, gross: 0, debt: 0, net: 0 },
+      totalProjectValue: 0,
+      invoiceBroughtForward: 0,
+      signedNotDelivered:    0,
+      notSigned:             0,
+      totalDebt:             0,
+      usableNet:             0,
     },
 
-    // ── War Room P1 / P2 (unchanged) ────────────────────────────────────────
+    // ── War Room P1 / P2 — zeroed for BIOAXEL (pre-computed from Google Sheet; not synced) ──
     warroomP1: {
-      topKpis: { totalInvoices: 10, estimatedCashInflow: 35118000.00, estimatedDebt: 16649500.00, netProjection: 18468500.00 },
-      thisMonthNetProjection: 20968200.00,
-      nextMonthNetProjection: 18468500.00,
+      topKpis: { totalInvoices: 0, estimatedCashInflow: 0, estimatedDebt: 0, netProjection: 0 },
+      thisMonthNetProjection: 0,
+      nextMonthNetProjection: 0,
       outstandingSummary: {
-        systemTotal:        { count: 14, gross: 45272200.00, debt: -19458700.00, net: 25813500.00 },
-        thisMonthTracked:   { count: 4,  gross: 10154200.00, debt: -2809200.00,  net: 7345000.00 },
-        nextMonthRollover:  { count: 10, gross: 35118000.00, debt: -16649500.00, net: 18468500.00 },
+        systemTotal:        { count: 0, gross: 0, debt: 0, net: 0 },
+        thisMonthTracked:   { count: 0, gross: 0, debt: 0, net: 0 },
+        nextMonthRollover:  { count: 0, gross: 0, debt: 0, net: 0 },
       },
       outstandingThisMonthByTransfer: [
-        { type: 'ไม่โอนสิทธิรับเงิน', count: 1, gross: 2154200.00, debt: 0,           net: 2154200.00 },
-        { type: 'โอนสิทธิรับเงิน',    count: 3, gross: 8000000.00, debt: -2809200.00, net: 5190800.00 },
+        { type: 'ไม่โอนสิทธิรับเงิน', count: 0, gross: 0, debt: 0, net: 0 },
+        { type: 'โอนสิทธิรับเงิน',    count: 0, gross: 0, debt: 0, net: 0 },
       ],
-      outstandingThisMonthTotal: { count: 4, gross: 10154200.00, debt: -2809200.00, net: 7345000.00 },
+      outstandingThisMonthTotal: { count: 0, gross: 0, debt: 0, net: 0 },
       outstandingByTransfer: [
-        { type: 'ไม่โอนสิทธิรับเงิน', count: 3,  gross: 5000000.00,  debt: -2000000.00,  net: 3000000.00 },
-        { type: 'โอนสิทธิรับเงิน',    count: 7,  gross: 30118000.00, debt: -14649500.00, net: 15468500.00 },
+        { type: 'ไม่โอนสิทธิรับเงิน', count: 0, gross: 0, debt: 0, net: 0 },
+        { type: 'โอนสิทธิรับเงิน',    count: 0, gross: 0, debt: 0, net: 0 },
       ],
-      outstandingTotal: { count: 10, gross: 35118000.00, debt: -16649500.00, net: 18468500.00 },
+      outstandingTotal: { count: 0, gross: 0, debt: 0, net: 0 },
       wipByTransfer: [
-        { type: 'ไม่โอนสิทธิรับเงิน', count: 12, gross: 21839603.76,  debt: 0,            net: 21839603.76 },
-        { type: 'โอนสิทธิรับเงิน',    count: 71, gross: 182265900.00, debt: -65039400.00, net: 117226500.00 },
+        { type: 'ไม่โอนสิทธิรับเงิน', count: 0, gross: 0, debt: 0, net: 0 },
+        { type: 'โอนสิทธิรับเงิน',    count: 0, gross: 0, debt: 0, net: 0 },
       ],
-      wipTotal: { count: 83, gross: 204105503.76, debt: -65039400.00, net: 139066103.76 },
+      wipTotal: { count: 0, gross: 0, debt: 0, net: 0 },
     },
     warroomP2: {
-      totalProjectValue:      247453578.76,
-      invoiceForwardTotal:    45272200.00,
-      wipValue:               154281378.76,
-      unsignedTotal: { count: 10, value: 47900000.00 },
-      signedTotal:   { count: 0,  value: 199553578.76 },
+      totalProjectValue:      0,
+      invoiceForwardTotal:    0,
+      wipValue:               0,
+      unsignedTotal: { count: 0, value: 0 },
+      signedTotal:   { count: 0, value: 0 },
     },
 
-    // ── YTD / weekly / monthly ──────────────────────────────────────────────
-    ytdRevenue: [
-      { month: 'มกราคม',   en: 'Jan', count: 13, gross: 35644984.34, debt: 0,           net: 35644984.34 },
-      { month: 'กุมภาพันธ์', en: 'Feb', count: 16, gross: 26170400.00, debt: -8898400.00, net: 17272000.00 },
-      { month: 'มีนาคม',   en: 'Mar', count: 15, gross: 32846184.32, debt: -13363100.00,net: 19483084.32 },
-      { month: 'เมษายน',   en: 'Apr', count: 23, gross: 42952000.00, debt: -8818806.05, net: 34133193.95 },
-      { month: 'พฤษภาคม', en: 'May', count: 4,  gross: 10814000.00, debt: -5963196.05, net: 4850803.95  },
-    ],
+    // ── YTD / weekly / monthly — zeroed for BIOAXEL ──────────────────────────
+    ytdRevenue: [],
     weeklyExpectedReceipt: [
-      { week: 1, count: 2, gross: 7554200.00,  debt: -2159200.00, net: 5395000.00 },
-      { week: 2, count: 2, gross: 2600000.00,  debt: -650000.00,  net: 1950000.00 },
-      { week: 3, count: 12, gross: 21839603.76, debt: 0,          net: 21839603.76 },
+      { week: 1, count: 0, gross: 0, debt: 0, net: 0 },
+      { week: 2, count: 0, gross: 0, debt: 0, net: 0 },
+      { week: 3, count: 0, gross: 0, debt: 0, net: 0 },
       { week: 4, count: 0, gross: 0, debt: 0, net: 0 },
       { week: 5, count: 0, gross: 0, debt: 0, net: 0 },
     ],
     monthlyForecast: [
-      { month: 'พฤษภาคม', en: 'May',  pctOfRemaining: 14, invIssued: 10154200.00, signed: 0, unsigned: 0, debt: -2809200.00,   netUsable: 7345000.00 },
-      { month: 'มิถุนายน', en: 'Jun', pctOfRemaining: 11, invIssued: 35118000.00, signed: 0, unsigned: 0, debt: -16649500.00,  netUsable: 18468500.00 },
-      { month: 'กรกฎาคม', en: 'Jul', pctOfRemaining: 13, invIssued: 0,           signed: 23450300.00, unsigned: 0,         debt: -11366800.00, netUsable: 20524900.00 },
-      { month: 'สิงหาคม', en: 'Aug', pctOfRemaining: 16, invIssued: 0,           signed: 41105000.00, unsigned: 0,         debt: -17654700.00, netUsable: 23450300.00 },
-      { month: 'กันยายน', en: 'Sep', pctOfRemaining: 24, invIssued: 0,           signed: 48739478.76, unsigned: 0,         debt: -23057900.00, netUsable: 25681578.76 },
-      { month: 'ตุลาคม',  en: 'Oct', pctOfRemaining: 5,  invIssued: 0,           signed: 13105200.00, unsigned: 28740000,  debt: -3240000.00,  netUsable: 38605200.00 },
-      { month: 'พฤศจิกายน',en: 'Nov',pctOfRemaining: 18, invIssued: 0,           signed: 19440000.00, unsigned: 19160000, debt: -9720000.00,  netUsable: 28880000.00 },
-      { month: 'ธันวาคม',  en: 'Dec', pctOfRemaining: 0,  invIssued: 0,           signed: 0,           unsigned: 0,         debt: 0,            netUsable: 0 },
+      { month: 'มกราคม',   en: 'Jan', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'กุมภาพันธ์', en: 'Feb', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'มีนาคม',   en: 'Mar', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'เมษายน',   en: 'Apr', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'พฤษภาคม', en: 'May', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'มิถุนายน', en: 'Jun', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'กรกฎาคม', en: 'Jul', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'สิงหาคม', en: 'Aug', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'กันยายน', en: 'Sep', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'ตุลาคม',  en: 'Oct', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'พฤศจิกายน',en: 'Nov',pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
+      { month: 'ธันวาคม',  en: 'Dec', pctOfRemaining: 0, invIssued: 0, signed: 0, unsigned: 0, debt: 0, netUsable: 0 },
     ],
 
     daily: {
-      asOfDate: '2026-05-15',
-      ytdAccum:   { count: 77, value: 149332093.66 },
-      mtdAccum:   { count: 5,  value: 11045525.00 },
-      todayAccum: { count: 1,  value: 231525.00 },
-      invoicesToday: [
-        { id: id(), no: 1, code: 'PP064-STIIS', name: 'บ้านพรุกง ม.2 ต.วังใหญ่ อ.เทพา จ.สงขลา', period: 1, amount: 231525.00, receivedAt: '2026-05-15' },
-      ],
+      asOfDate: '',
+      ytdAccum:   { count: 0, value: 0 },
+      mtdAccum:   { count: 0, value: 0 },
+      todayAccum: { count: 0, value: 0 },
+      invoicesToday: [],
     },
 
     cashFlow: {
-      month: 'May 2026',
-      bf: 2924226.17, planTotal: 28300000.00, actualPaid: 7597582.34, paidPct: 26.85,
-      revInflow: 4805469, loanReceived: 1473275, loanLine: 3757661, loanRemain: 4600000, finalNet: -8504440,
+      month: '',
+      bf: 0, planTotal: 0, actualPaid: 0, paidPct: 0,
+      revInflow: 0, loanReceived: 0, loanLine: 0, loanRemain: 0, finalNet: 0,
       inflow: [
-        { key: 'bf',      label: 'เงินสดคงเหลือยกมา',          actual:[2924226.17, 0,0,0,0], plan:[0,0,0,0,0] },
-        { key: 'project', label: 'รับเงินโครงการ',              actual:[2924226.17, 0,0,0,0], plan:[0, 8500523.50, 0, 0, 0] },
-        { key: 'loan',    label: 'เงินกู้/สินเชื่อหมุนเวียน',     actual:[0,0,0,0,0],            plan:[0, 3200000, 0, 0, 0] },
+        { key: 'bf',      label: 'เงินสดคงเหลือยกมา',          actual:[0,0,0,0,0], plan:[0,0,0,0,0] },
+        { key: 'project', label: 'รับเงินโครงการ',              actual:[0,0,0,0,0], plan:[0,0,0,0,0] },
+        { key: 'loan',    label: 'เงินกู้/สินเชื่อหมุนเวียน',     actual:[0,0,0,0,0], plan:[0,0,0,0,0] },
       ],
       outflow: [
-        { key: 'op',   label: '1. ค่าใช้จ่ายดำเนินงานรายสัปดาห์', plan:[1500000,1500000,1500000,1800000,1500000], actual:[1808097.83, 251317.48, 0, 0, 0] },
-        { key: 'proj', label: '2. ค่าใช้จ่ายโครงการ/ติดตั้ง',     plan:[3000000,3000000,3000000,3000000,3000000], actual:[2478115.64, 0, 0, 0, 0] },
-        { key: 'fin',  label: '3. ต้นทุนทางการเงินและดอกเบี้ย',  plan:[1320000,1160000,160000,1000000,3060000],  actual:[38393.86, 0, 3021657.53, 0, 0] },
-        { key: 'misc', label: '4. ค่าใช้จ่ายเบ็ดเตล็ดและเงินเดือน',plan:[0,0,3300000,0,0],                          actual:[0,0,0,0,0] },
+        { key: 'op',   label: '1. ค่าใช้จ่ายดำเนินงานรายสัปดาห์', plan:[0,0,0,0,0], actual:[0,0,0,0,0] },
+        { key: 'proj', label: '2. ค่าใช้จ่ายโครงการ/ติดตั้ง',     plan:[0,0,0,0,0], actual:[0,0,0,0,0] },
+        { key: 'fin',  label: '3. ต้นทุนทางการเงินและดอกเบี้ย',  plan:[0,0,0,0,0], actual:[0,0,0,0,0] },
+        { key: 'misc', label: '4. ค่าใช้จ่ายเบ็ดเตล็ดและเงินเดือน',plan:[0,0,0,0,0], actual:[0,0,0,0,0] },
       ],
-      closing: [-1331906.41, -6279476.50, -3584977.04, -6599615.67, -3300000.00],
-      nowWeek: 2,
+      closing: [0,0,0,0,0],
+      nowWeek: 1,
     },
 
     // ────────────────────────────────────────────────────────────────────────
@@ -624,6 +620,11 @@
     return s;
   }
 
+  // summary keys ที่ไม่ใช่ entity จาก Supabase และ user ไม่เคยแก้เอง
+  // → ให้ load() เขียนทับจาก seed เสมอ (กัน cache เก่า เช่น ค่า Water POG ที่ค้างอยู่)
+  var SUMMARY_RESET_KEYS = ['pipeline','warroomP1','warroomP2','ytdRevenue',
+    'weeklyExpectedReceipt','monthlyForecast','daily','cashFlow'];
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -636,6 +637,9 @@
       Object.keys(fresh).forEach(function(k){
         if (!(k in loaded) || loaded[k] == null) loaded[k] = fresh[k];
       });
+      // เขียนทับ summary keys จาก seed เสมอ — ค่าพวกนี้ user ไม่แก้เอง
+      // กัน cache เก่า (เช่น ค่า Water POG ที่ค้างอยู่) โผล่ในหน้า War Room / Cashflow
+      SUMMARY_RESET_KEYS.forEach(function(k){ loaded[k] = fresh[k]; });
       return loaded;
     } catch (_) { return freshState(); }
   }
