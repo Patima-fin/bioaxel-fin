@@ -203,8 +203,12 @@ function WarRoomPage1({ data, setData, toast }) {
       // ข้ามโครงการที่ยกเลิก
       const rawSt = String(p['สถานะโครงการ'] || p.status || '');
       if (/ยกเลิก|cancel/i.test(rawSt)) return;
-      // ข้ามโครงการที่มี IV แล้ว
+      // ข้ามโครงการที่ยังไม่ลงนาม (WS- = synthetic / ไม่มี Start date)
       const code = String(p['Contract No.'] || p.code || '').trim();
+      if (/^WS-/i.test(code)) return;
+      const startDate = String(p['Start'] || p.startDate || '').trim();
+      if (!startDate) return; // ยังไม่มี start date = ยังไม่เริ่มงาน
+      // ข้ามโครงการที่มี IV แล้ว (ขึ้น Section 02/03 แทน)
       if (code && hasIvSet.has(code)) return;
       // Finance Master
       const f = finMaster[code] || {};
