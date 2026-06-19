@@ -200,14 +200,10 @@ function WarRoomPage1({ data, setData, toast }) {
     (data.projects || []).forEach(p => {
       const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || 0);
       if (!contract) return;
-      // ข้ามโครงการที่ยกเลิก
+      // เฉพาะโครงการที่สถานะ = "กำลังดำเนินการ" (ผู้ใช้กรอกใน Excel)
       const rawSt = String(p['สถานะโครงการ'] || p.status || '');
-      if (/ยกเลิก|cancel/i.test(rawSt)) return;
-      // ข้ามโครงการที่ยังไม่ลงนาม (WS- = synthetic / ไม่มี Start date)
+      if (!/กำลังดำเนินการ/i.test(rawSt)) return;
       const code = String(p['Contract No.'] || p.code || '').trim();
-      if (/^WS-/i.test(code)) return;
-      const startDate = String(p['Start'] || p.startDate || '').trim();
-      if (!startDate) return; // ยังไม่มี start date = ยังไม่เริ่มงาน
       // ข้ามโครงการที่มี IV แล้ว (ขึ้น Section 02/03 แทน)
       if (code && hasIvSet.has(code)) return;
       // Finance Master
@@ -216,7 +212,8 @@ function WarRoomPage1({ data, setData, toast }) {
       // ภาระหนี้: มีถ้า assignee อยู่ใน creditors
       const isCreditor = assignee && WR1_CREDITORS[assignee];
       const gross = contract;
-      const debt  = isCreditor ? Math.round(contract * (Number(f.debtPct) || 1)) : 0;
+      const debtPct = f.debtPct != null ? Number(f.debtPct) : 0;
+      const debt  = isCreditor ? Math.round(contract * debtPct) : 0;
       rows.push({ code, gross, debt, net: gross - debt, assignee });
     });
 
