@@ -426,5 +426,11 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **(2) ซ่อนปุ่มตอนนำเสนอ** = ใส่ **`className="no-present"`** ที่ container ปุ่มสลับ (CSS เดิม `body.present-mode .no-present { display:none !important }` ใน styles.css). ปุ่มมี `data-no-capture="1"` อยู่แล้ว (ไม่ติด PNG export). subtitle ของหัวข้อยังโชว์ (เพิ่ม " · เฉพาะสัปดาห์นี้" เมื่อ scope=week) — ซ่อนเฉพาะ "ปุ่มกด".
 - **verify (preview):** BIO live (DB ว่าง) — toggle + scope sub-toggle render, scope แสดงเฉพาะ apPlan (สลับ remaining → หาย), present-mode → `.no-present` display:none + ปุ่มไม่มี layout box, ไม่ crash. WP **isolated render (`CashFlowDashboard` จริง + mock AP 2 สัปดาห์)** — month: current=100k/rest=50k/total=150k → คลิก "เฉพาะสัปดาห์นี้": **current=100k/rest=0/total=100k** (AP สัปดาห์ถัดไป 50k ถูกตัด) ✓. ทั้ง 2 ไฟล์ compile ผ่าน (`CashFlowDashboard` defined, ไม่มี Babel error).
 
+## 2026-06-19 — fix(projects): synthetic code limit 36→120 — กัน 2 โครงการชื่อยาวถูก merge เป็น 1
+- **อาการ:** อัปโหลดไฟล์ที่มี 2 โครงการชื่อยาวเหมือนกันแต่ต่างเฉพาะท้าย (เช่น "…(จุดที่ 1)" / "…(จุดที่ 2)") → ระบบดึงเข้าแค่ 1 รายการ.
+- **ROOT CAUSE:** `_clean()` ใน `parseProjectControl` (`pc_engine.jsx:1010`) ตัดชื่อเหลือ **36 ตัวอักษร** ก่อนสร้าง synthetic code (`WS-<ปี>-<ชื่อ>`) → ชื่อไทยยาวๆ ที่ต่างกันตรงท้ายได้ key เดียวกัน → Phase 2 (`byCode`) merge เป็น 1 โครงการ.
+- **FIX:** `slice(0, 36)` → `slice(0, 120)` — รองรับชื่อยาวได้สบาย synthetic code ยังเป็น text ธรรมดา ไม่มี constraint ความยาว (Postgres `text` PK). **ไม่กระทบ id ของโครงการที่มีเลขสัญญาจริง** (path แยกกัน).
+- **⚠️ หลังแก้: ต้องอัปโหลดไฟล์ใหม่อีกครั้ง** — โครงการที่เคยถูก merge เป็น 1 จะถูกสร้างเป็น 2 รายการ (id ใหม่); Finance Master (`pcfin.*`) ของโครงการเดิมไม่ติดมาด้วย (ต้องกรอกใหม่).
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
