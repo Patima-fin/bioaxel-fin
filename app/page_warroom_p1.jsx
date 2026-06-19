@@ -166,6 +166,75 @@ function WarRoomPage1({ data, setData, toast }) {
     net:   nextMthIvs.reduce((s, iv) => s + iv.netExpected, 0),
   }), [nextMthIvs]);
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // SECTION 04 — WIP construction: live from data.projects + Finance Master
+  // โครงการที่ยังไม่ส่งมอบ และยังไม่เปิดใบแจ้งหนี้
+  // ════════════════════════════════════════════════════════════════════════════
+  const WR1_CREDITORS = { KTB:1, 'WCI+STS':1, WCI:1, LIT:1, Funding:1, P2P:1, STS:1 };
+
+  const wipSection = wr1Memo(() => {
+    // 1) โหลด Finance Master (pcfin.*) จาก manualOverrides (team-synced)
+    const finMaster = {};
+    try {
+      const ov = (window.WTPOverride && window.WTPOverride._load) ? window.WTPOverride._load() : {};
+      for (const k in ov) {
+        if (k.indexOf('pcfin.') === 0) {
+          const code = k.slice(6);
+          try { const obj = JSON.parse(ov[k]); if (obj && typeof obj === 'object') finMaster[code] = obj; } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    // 2) รหัสโครงการที่มี IV อยู่แล้ว (Section 02/03) → ไม่นับซ้ำใน Section 04
+    const hasIvSet = new Set();
+    (data.invoices || []).forEach(iv => {
+      const s = String(iv.jobNo || iv.contractRef || '').trim();
+      if (!s) return;
+      hasIvSet.add(s);
+      const mx = s.match(/^(.+)-[A-Z]{2,6}$/);
+      if (mx) hasIvSet.add(mx[1]);
+    });
+
+    // 3) สร้างรายการโครงการ WIP
+    const rows = [];
+    (data.projects || []).forEach(p => {
+      const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || 0);
+      if (!contract) return;
+      // ข้ามโครงการที่ยกเลิก
+      const rawSt = String(p['สถานะโครงการ'] || p.status || '');
+      if (/ยกเลิก|cancel/i.test(rawSt)) return;
+      // ข้ามโครงการที่มี IV แล้ว
+      const code = String(p['Contract No.'] || p.code || '').trim();
+      if (code && hasIvSet.has(code)) return;
+      // Finance Master
+      const f = finMaster[code] || {};
+      const assignee = String(f.assignee != null ? f.assignee : (p['ผู้รับโอนสิทธิ์'] || '')).trim();
+      // ภาระหนี้: มีถ้า assignee อยู่ใน creditors
+      const isCreditor = assignee && WR1_CREDITORS[assignee];
+      const gross = contract;
+      const debt  = isCreditor ? Math.round(contract * (Number(f.debtPct) || 1)) : 0;
+      rows.push({ code, gross, debt, net: gross - debt, assignee });
+    });
+
+    // 4) จัดกลุ่มตามโอนสิทธิ์
+    const groups = {
+      'ไม่โอนสิทธิรับเงิน': { count: 0, gross: 0, debt: 0, net: 0 },
+      'โอนสิทธิรับเงิน':    { count: 0, gross: 0, debt: 0, net: 0 },
+    };
+    rows.forEach(r => {
+      const k = r.assignee ? 'โอนสิทธิรับเงิน' : 'ไม่โอนสิทธิรับเงิน';
+      groups[k].count++;
+      groups[k].gross += r.gross;
+      groups[k].debt  += r.debt;
+      groups[k].net   += r.net;
+    });
+    const wipByTransfer = Object.entries(groups).map(([type, v]) => ({ type, ...v }));
+    const wipTotal = rows.reduce((acc, r) => ({
+      count: acc.count + 1, gross: acc.gross + r.gross, debt: acc.debt + r.debt, net: acc.net + r.net,
+    }), { count: 0, gross: 0, debt: 0, net: 0 });
+    return { wipByTransfer, wipTotal };
+  }, [data.projects, data.invoices, data.manualOverrides]);
+
   return (
     <div className="page bg-pattern present-page wr-page">
       <div className="page-head anim-in">
@@ -435,26 +504,31 @@ function WarRoomPage1({ data, setData, toast }) {
         </table>
       </SectionCard>
 
-      {/* SECTION 04 — WIP construction (pre-computed from sheet — ยังไม่ส่งมอบ ไม่มีใน data.invoices) */}
-      <SectionCard num="04" title="งานที่อยู่ระหว่างดำเนินการก่อสร้าง" subtitle="ยังไม่ส่งมอบงาน และยังไม่เปิดใบแจ้งหนี้" totalLabel="คาดการณ์รับสุทธิงานก่อสร้างทั้งหมด" total={warroomP1.wipTotal.net}>
+      {/* SECTION 04 — WIP construction: live from data.projects + Finance Master */}
+      <SectionCard num="04" title="งานที่อยู่ระหว่างดำเนินการก่อสร้าง" subtitle="ยังไม่ส่งมอบงาน และยังไม่เปิดใบแจ้งหนี้ · คำนวณจากมูลค่าสัญญาในระบบโครงการ" totalLabel="คาดการณ์รับสุทธิงานก่อสร้างทั้งหมด" total={wipSection.wipTotal.net}>
         <table className="tbl">
           <thead>
             <tr>
               <th>ประเภทการโอนสิทธิ์</th>
               <th style={{ width: 90, textAlign: 'center' }}>จำนวน</th>
-              <th style={{ textAlign: 'right' }}>รายรับรวม (GROSS)</th>
+              <th style={{ textAlign: 'right' }}>มูลค่าสัญญา (GROSS)</th>
               <th style={{ textAlign: 'right' }}>หักภาระหนี้ (Debt)</th>
               <th style={{ textAlign: 'right' }}>คงเหลือสุทธิ (NET)</th>
             </tr>
           </thead>
           <tbody>
-            {warroomP1.wipByTransfer.map((t, i) => (
+            {wipSection.wipTotal.count === 0 && (
+              <tr><td colSpan={5} style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--ink-400)' }}>
+                ไม่มีโครงการที่อยู่ระหว่างก่อสร้าง · ตรวจสอบว่ากรอกมูลค่าสัญญาในหน้าโครงการแล้ว
+              </td></tr>
+            )}
+            {wipSection.wipByTransfer.map((t, i) => (
               <tr key={i}>
                 <td>
                   <Badge kind={t.type.startsWith('โอน') ? 'b-amber' : 'b-blue'} dot={false}>{t.type}</Badge>
                 </td>
                 <td style={{ textAlign: 'center' }}>{t.count}</td>
-                <td className="num">{fmtNum(t.gross, 2)}</td>
+                <td className="num">{t.gross ? fmtNum(t.gross, 2) : <span className="muted">-</span>}</td>
                 <td className="num" style={{ color: t.debt ? 'var(--bad)' : 'var(--ink-400)' }}>{t.debt ? '(' + fmtNum(Math.abs(t.debt), 2) + ')' : '-'}</td>
                 <td className="num strong">{fmtNum(t.net, 2)}</td>
               </tr>
@@ -463,10 +537,10 @@ function WarRoomPage1({ data, setData, toast }) {
           <tfoot>
             <tr>
               <td>Total</td>
-              <td style={{ textAlign: 'center' }}>{warroomP1.wipTotal.count}</td>
-              <td className="num">{fmtNum(warroomP1.wipTotal.gross, 2)}</td>
-              <td className="num" style={{ color: 'var(--bad)' }}>({fmtNum(Math.abs(warroomP1.wipTotal.debt), 2)})</td>
-              <td className="num">{fmtNum(warroomP1.wipTotal.net, 2)}</td>
+              <td style={{ textAlign: 'center' }}>{wipSection.wipTotal.count}</td>
+              <td className="num">{fmtNum(wipSection.wipTotal.gross, 2)}</td>
+              <td className="num" style={{ color: 'var(--bad)' }}>({fmtNum(Math.abs(wipSection.wipTotal.debt), 2)})</td>
+              <td className="num">{fmtNum(wipSection.wipTotal.net, 2)}</td>
             </tr>
           </tfoot>
         </table>
