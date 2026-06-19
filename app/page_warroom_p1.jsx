@@ -218,7 +218,7 @@ function WarRoomPage1({ data, setData, toast }) {
 
     const rows = [];
     derivedRows.forEach(p => {
-      if (p.sub !== 'ดำเนินงาน') return;
+      if (p.projectStatus !== 'ดำเนินงาน') return;
       const code = String(p.code || p['Contract No.'] || '').trim();
       if (code && hasIvSet.has(code)) return; // มี IV แล้ว → Section 02/03
       const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || p.contract || 0);
