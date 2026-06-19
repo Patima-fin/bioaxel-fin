@@ -195,21 +195,28 @@ function WarRoomPage1({ data, setData, toast }) {
       if (mx) hasIvSet.add(mx[1]);
     });
 
-    // 3) สร้างรายการโครงการ WIP
+    // 3) Derive projects ด้วย pc_engine (same logic as Project Control page)
+    //    กรอง sub==='ดำเนินงาน' = ลงนามแล้ว + มี Start + ยังไม่รับเงิน/ส่งมอบ
+    let derivedRows = [];
+    try {
+      if (window.PCU && PCU.deriveProjects) {
+        derivedRows = PCU.deriveProjects(
+          data.projects || [],
+          data.manualOverrides || {},
+          data.receipts || []
+        );
+      }
+    } catch (_) {}
+
     const rows = [];
-    (data.projects || []).forEach(p => {
-      const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || 0);
+    derivedRows.forEach(p => {
+      if (p.sub !== 'ดำเนินงาน') return;
+      const code = String(p.code || p['Contract No.'] || '').trim();
+      if (code && hasIvSet.has(code)) return; // มี IV แล้ว → Section 02/03
+      const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || p.contract || 0);
       if (!contract) return;
-      // เฉพาะโครงการที่สถานะ = "กำลังดำเนินการ" (ผู้ใช้กรอกใน Excel)
-      const rawSt = String(p['สถานะโครงการ'] || p.status || '');
-      if (!/กำลังดำเนินการ/i.test(rawSt)) return;
-      const code = String(p['Contract No.'] || p.code || '').trim();
-      // ข้ามโครงการที่มี IV แล้ว (ขึ้น Section 02/03 แทน)
-      if (code && hasIvSet.has(code)) return;
-      // Finance Master
       const f = finMaster[code] || {};
       const assignee = String(f.assignee != null ? f.assignee : (p['ผู้รับโอนสิทธิ์'] || '')).trim();
-      // ภาระหนี้: มีถ้า assignee อยู่ใน creditors
       const isCreditor = assignee && WR1_CREDITORS[assignee];
       const gross = contract;
       const debtPct = f.debtPct != null ? Number(f.debtPct) : 0;
