@@ -1007,7 +1007,7 @@
         hasS('เซ็นสัญญา') || hasS('Payment 1 Status') || hasS('Receive Date'));
     };
     const _yr = (s) => { const m = String(s || '').match(/Main\s*all(\d+)/i); return m ? m[1] : 'XX'; };
-    const _clean = (name) => String(name || '').trim().replace(/\s+/g, '_').slice(0, 36);
+    const _clean = (name) => String(name || '').trim().replace(/\s+/g, '_').slice(0, 120);
     const CANON = /^[A-Z]{2,5}\d{2,5}(-[A-Z]{2,6})?$/;
     const finalizeCode = (raw, sheet) => { const c = String(raw || '').trim(); if (!c) return ''; if (/^(XL|WS)-/.test(c)) return c; if (CANON.test(c)) return c; return c + '-' + _yr(sheet); };
     // normalize ทุกวันที่ → ISO ด้วย isoOf (รองรับ M/D, ปี 2 หลัก ฯลฯ) เก็บรูปแบบเดียวกันหมด
