@@ -187,6 +187,20 @@
     ['op', 'inv', 'fin'].forEach(k => { const a = model.acts[k]; if (a) a.catList.forEach(c => { if (names.indexOf(c.name) >= 0) res.push(c); }); });
     return res;
   }
+  // ★ ชื่อหมวดเดียวกันอาจมีใน >1 กิจกรรม (net คนละค่า) — เวอร์ชันนี้ "ยึดกิจกรรมของบรรทัด" ก่อน, fallback กิจกรรมอื่น
+  function cfpCatsByNamesInAct(model, names, actKey) {
+    const res = []; if (!names || !names.length) return res;
+    const act = model.acts[actKey];
+    names.forEach(n => {
+      let c = null;
+      if (act) { for (let i = 0; i < act.catList.length; i++) { if (act.catList[i].name === n) { c = act.catList[i]; break; } } }
+      if (!c) c = cfpCatsByNames(model, [n])[0];
+      if (c) res.push(c);
+    });
+    return res;
+  }
+  // net ของหมวด "ในกิจกรรมที่ระบุ" (กันชื่อชนข้ามกิจกรรม)
+  function cfpCatNetInAct(model, name, actKey) { const c = cfpCatsByNamesInAct(model, [name], actKey)[0]; return c ? c.net : 0; }
   // ยึด "หมวด" เป็นหลัก: fallback เดาด้วยชื่อหมวดเมื่อยังไม่ได้จับคู่เอง (manual map ดูใน openStmt)
   function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, strict) {
     const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
@@ -379,42 +393,45 @@
     const leaves = useMemo(() => (model.stmt || []).filter(r => r.type === 'leaf' && r.actKey), [model]);
     // working copy: เริ่มจาก catMap; บรรทัดที่ยังไม่ตั้ง → เดาอัตโนมัติด้วยชื่อหมวด (ให้ผู้ใช้ปรับ/ยืนยัน)
     const init = useMemo(() => {
-      const m = {}; const claimed = new Set(); // 1 หมวด = 1 บรรทัด: หมวดที่ถูกจับแล้วไม่ถูกแจกซ้ำ
-      // pass 1: การจับคู่ที่บันทึกไว้ (เจตนาผู้ใช้) จองหมวดก่อน — ตัดหมวดที่ซ้ำกับบรรทัดก่อนหน้า (clean ของเก่าที่เคยซ้ำ)
-      leaves.forEach(r => { if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { const uniq = catMap[r.label].filter(n => !claimed.has(n)); uniq.forEach(n => claimed.add(n)); m[r.label] = uniq; } });
-      // pass 2: เดาอัตโนมัติให้บรรทัดที่เหลือ — เฉพาะหมวดที่ยังไม่ถูกจอง
+      const m = {}; const claimed = new Set(); // 1 หมวด = 1 บรรทัด (ต่อกิจกรรม): คีย์ "กิจกรรม|ชื่อ" กันชื่อชนข้ามกิจกรรม
+      const keyOf = (ak, n) => ak + '' + n;
+      // pass 1: การจับคู่ที่บันทึกไว้ (เจตนาผู้ใช้) จองหมวดก่อน — ตัดหมวดที่ซ้ำกับบรรทัดก่อนหน้าในกิจกรรมเดียวกัน
+      leaves.forEach(r => { if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { const uniq = catMap[r.label].filter(n => !claimed.has(keyOf(r.actKey, n))); uniq.forEach(n => claimed.add(keyOf(r.actKey, n))); m[r.label] = uniq; } });
+      // pass 2: เดาอัตโนมัติให้บรรทัดที่เหลือ — เฉพาะหมวดที่ยังไม่ถูกจอง (ในกิจกรรมนั้น)
       leaves.forEach(r => {
         if (m[r.label]) return;
         const act = model.acts[r.actKey];
         const dir = r.total > 0 ? 1 : r.total < 0 ? -1 : 0;
-        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && !claimed.has(c.name)).map(c => c.name) : [];
-        guess.forEach(n => claimed.add(n));
+        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && !claimed.has(keyOf(r.actKey, c.name))).map(c => c.name) : [];
+        guess.forEach(n => claimed.add(keyOf(r.actKey, n)));
         m[r.label] = guess;
       });
       return m;
     }, [model, catMap, leaves]);
     const [m, setM] = useState(init);
     const [q, setQ] = useState('');
-    const catNet = name => { const c = cfpCatsByNames(model, [name])[0]; return c ? c.net : 0; };
+    const catNet = (name, actKey) => cfpCatNetInAct(model, name, actKey); // ยึดกิจกรรมของบรรทัด (กันชื่อชนข้ามกิจกรรม)
     const tol = v => 1; // ✓ ต้องตรงเป๊ะ (เผื่อปัดเศษ ≤ 1 บาทเท่านั้น) — เดิม 1% หลวมเกินไป
-    const isOk = (label, sel) => { const r = leaves.find(x => x.label === label); if (!r) return false; const s = (sel || m[label] || []); return s.length > 0 && Math.abs(s.reduce((a, n) => a + catNet(n), 0) - r.total) <= tol(r.total); };
+    const isOk = (label, sel) => { const r = leaves.find(x => x.label === label); if (!r) return false; const s = (sel || m[label] || []); return s.length > 0 && Math.abs(s.reduce((a, n) => a + catNet(n, r.actKey), 0) - r.total) <= tol(r.total); };
     // ย่อ/กาง: เริ่มต้นย่อบรรทัดที่ "✓ ตรง" แล้ว เหลือกางเฉพาะที่ยังต้องจัด (ไม่ต้องเลื่อนหาไกล)
     const [expanded, setExpanded] = useState(() => { const s = {}; leaves.forEach(r => { if (!isOk(r.label, init[r.label])) s[r.label] = true; }); return s; });
     useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
-    // เลือกหมวด: ถ้าเปิด (ON) → ย้ายหมวดนั้นออกจากบรรทัดอื่นด้วย (1 หมวด = 1 บรรทัด)
+    const leafAct = {}; leaves.forEach(r => { leafAct[r.label] = r.actKey; });
+    // เลือกหมวด: ถ้าเปิด (ON) → ย้ายหมวดนั้นออกจากบรรทัด "กิจกรรมเดียวกัน" อื่น (1 หมวด = 1 บรรทัด ต่อกิจกรรม)
     const toggle = (leaf, name) => setM(prev => {
-      const next = Object.assign({}, prev); const cur = (next[leaf] || []).slice(); const i = cur.indexOf(name);
+      const next = Object.assign({}, prev); const cur = (next[leaf] || []).slice(); const i = cur.indexOf(name); const a = leafAct[leaf];
       if (i >= 0) { cur.splice(i, 1); next[leaf] = cur; }
-      else { Object.keys(next).forEach(l => { if (l !== leaf && next[l] && next[l].indexOf(name) >= 0) next[l] = next[l].filter(x => x !== name); }); cur.push(name); next[leaf] = cur; }
+      else { Object.keys(next).forEach(l => { if (l !== leaf && leafAct[l] === a && next[l] && next[l].indexOf(name) >= 0) next[l] = next[l].filter(x => x !== name); }); cur.push(name); next[leaf] = cur; }
       return next;
     });
     const toggleExp = label => setExpanded(prev => Object.assign({}, prev, { [label]: !prev[label] }));
     const setAllExp = on => setExpanded(() => { const s = {}; if (on) leaves.forEach(r => { s[r.label] = true; }); return s; });
     const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
     const okCount = leaves.filter(r => isOk(r.label)).length;
-    // หมวดที่ถูกเลือกให้บรรทัดใดบรรทัดหนึ่งแล้ว → ซ่อนจากตัวเลือกของบรรทัดอื่น (1 หมวด = 1 บรรทัด กันนับซ้ำ)
-    const selByCat = {}; leaves.forEach(r => (m[r.label] || []).forEach(n => { (selByCat[n] = selByCat[n] || []).push(r.label); }));
-    const usedByOther = (name, leaf) => (selByCat[name] || []).some(l => l !== leaf);
+    // หมวดที่ถูกเลือกแล้ว → ใช้กับบรรทัดอื่นไม่ได้ (1 หมวด = 1 บรรทัด) — คีย์ด้วย "กิจกรรม|ชื่อ" กันชื่อชนข้ามกิจกรรม
+    const ck = (actKey, name) => actKey + '' + name;
+    const selByCat = {}; leaves.forEach(r => (m[r.label] || []).forEach(n => { const k = ck(r.actKey, n); (selByCat[k] = selByCat[k] || []).push(r.label); }));
+    const ownerOf = (actKey, name, leaf) => (selByCat[ck(actKey, name)] || []).filter(l => l !== leaf)[0];
     return (
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300, padding: 20 }}>
         <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
@@ -434,11 +451,14 @@
           <div style={{ padding: '8px 22px 16px', overflow: 'auto' }}>
             {shown.map((r, ri) => {
               const sel = m[r.label] || [];
-              const selSum = sel.reduce((s, n) => s + catNet(n), 0);
+              const selSum = sel.reduce((s, n) => s + catNet(n, r.actKey), 0);
               const ok = Math.abs(selSum - r.total) <= tol(r.total);
               const act = model.acts[r.actKey];
-              // ตัวเลือก = หมวดในกิจกรรมนี้ ที่ยัง "ว่าง" (ไม่ถูกบรรทัดอื่นเลือก) หรือบรรทัดนี้เลือกเองอยู่
-              const cats = (act ? act.catList : []).filter(c => sel.indexOf(c.name) >= 0 || !usedByOther(c.name, r.label));
+              // ตัวเลือก = หมวดในกิจกรรมนี้ + หมวดที่เลือกไว้แต่อยู่กิจกรรมอื่น (จะได้เห็น/เอาออกได้ ไม่เป็นยอดผีที่ลบไม่ได้)
+              const actCats = act ? act.catList.slice() : [];
+              const actNames = {}; actCats.forEach(c => { actNames[c.name] = 1; });
+              const extraSel = sel.filter(n => !actNames[n]).map(n => cfpCatsByNames(model, [n])[0]).filter(Boolean);
+              const cats = actCats.concat(extraSel);
               const isExp = !!expanded[r.label];
               return (
                 <div key={ri} style={{ padding: '9px 0', borderBottom: '1px solid ' + C.line }}>
@@ -451,9 +471,10 @@
                   {isExp && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {cats.length ? cats.map((c, ci) => {
                       const on = sel.indexOf(c.name) >= 0;
+                      const owner = on ? null : ownerOf(r.actKey, c.name, r.label);
                       return (
-                        <button key={ci} onClick={() => toggle(r.label, c.name)} title={'ยอดหมวด ' + cfpFmtPlain(c.net)} style={{ cursor: 'pointer', fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px solid ' + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : C.mut, fontWeight: on ? 700 : 500 }}>
-                          {on ? '✓ ' : ''}{c.name} <span style={{ opacity: .7, fontSize: 11 }}>({cfpFmtPlain(c.net)})</span>
+                        <button key={ci} onClick={() => toggle(r.label, c.name)} title={owner ? ('ใช้อยู่ที่ "' + owner + '" — กดเพื่อย้ายมาบรรทัดนี้') : ('ยอดหมวด ' + cfpFmtPlain(c.net))} style={{ cursor: 'pointer', fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px ' + (owner ? 'dashed ' : 'solid ') + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : (owner ? C.faint : C.mut), fontWeight: on ? 700 : 500, opacity: owner ? 0.6 : 1 }}>
+                          {on ? '✓ ' : (owner ? '↩ ' : '')}{c.name} <span style={{ opacity: .7, fontSize: 11 }}>({cfpFmtPlain(c.net)})</span>{owner ? <span style={{ fontSize: 10, opacity: .8 }}> · ใช้ที่อื่น</span> : null}
                         </button>
                       );
                     }) : <span style={{ fontSize: 12, color: C.faint }}>ไม่มีหมวดในกิจกรรมนี้</span>}
@@ -805,7 +826,7 @@
       const map = (stored && stored.catMap) || {};
       const mapped = !isActNet && Array.isArray(map[row.label]) && map[row.label].length ? map[row.label] : null;
       if (mapped) {
-        const cats = cfpCatsByNames(model, mapped);
+        const cats = cfpCatsByNamesInAct(model, mapped, row.actKey);
         let txns = []; cats.forEach(c => { txns = txns.concat(c.txns); });
         if (monthNum) txns = txns.filter(t => t.month === monthNum);
         txns = txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
