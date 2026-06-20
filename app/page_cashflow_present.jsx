@@ -181,15 +181,25 @@
     if (lcs >= 8 && lcs >= 0.7 * mn) return true;
     return false;
   }
-  function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir) {
-    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
+  function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, targetAmt, strict) {
+    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [], how: '' };
     const sameDir = c => !dir || ((c.net >= 0 ? 1 : -1) === dir);
+    const catSum = c => { const ts = monthNum ? c.txns.filter(t => t.month === monthNum) : c.txns; return ts.reduce((s, t) => s + t.flow, 0); };
+    // 1) จับคู่ด้วย "ชื่อหมวด" STM
     let cats = act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c));
+    let how = cats.length ? 'name' : '';
+    // 2) ชื่อไม่ตรง → จับคู่ด้วย "ยอด": หมวดที่ผลรวม (เดือน/รวม) ≈ ยอดในเซลล์ (กันชื่อหมวดต่างกัน)
+    if (!cats.length && targetAmt) {
+      const tgt = Math.abs(targetAmt), tol = Math.max(1, tgt * 0.005);
+      const near = act.catList.filter(sameDir).filter(c => { const ct = Math.abs(catSum(c)); return ct > 0 && Math.abs(ct - tgt) <= tol; });
+      if (near.length) { cats = near; how = 'amount'; }
+    }
     const matched = cats.length > 0;
-    const src = matched ? cats : act.catList.filter(sameDir);
+    // strict (leaf): จับคู่ไม่ได้ → คืนว่าง (ไม่ fallback ทั้งกิจกรรม เพราะยอดจะไม่ตรงเซลล์)
+    const src = matched ? cats : (strict ? [] : act.catList.filter(sameDir));
     let txns = []; src.forEach(c => { txns = txns.concat(c.txns); });
     if (monthNum) txns = txns.filter(t => t.month === monthNum);
-    return { txns, matched, cats: cats.map(c => c.name) };
+    return { txns, matched, cats: cats.map(c => c.name), how };
   }
 
   /* ---------- parse STM ---------- */
@@ -695,10 +705,19 @@
       }
       if (!row.actKey) return;
       const isActNet = row.type === 'net';
-      const dir = isActNet ? 0 : (row.total > 0 ? 1 : row.total < 0 ? -1 : 0);
-      const res = cfpFindStmtTxns(model, isActNet ? '' : row.label, row.actKey, monthNum, dir);
+      // ยอดเป้าหมาย = ค่าในเซลล์ที่กด (ช่องเดือน → row.vals[idx] · ช่องรวม → row.total)
+      const monthIdx = monthNum ? model.months.indexOf(monthNum) : -1;
+      const targetAmt = isActNet ? 0 : (monthNum ? (monthIdx >= 0 ? (row.vals && row.vals[monthIdx]) : 0) : row.total);
+      const dir = isActNet ? 0 : (Number(targetAmt) > 0 ? 1 : Number(targetAmt) < 0 ? -1 : (row.total > 0 ? 1 : -1));
+      // strict เฉพาะ leaf — จับคู่ไม่ได้ให้ขึ้น "ไม่พบรายการ" แทนยอดทั้งกิจกรรมที่ไม่ตรง
+      const strict = row.type === 'leaf';
+      const res = cfpFindStmtTxns(model, isActNet ? '' : row.label, row.actKey, monthNum, dir, targetAmt, strict);
       const txns = res.txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
-      setModal({ title: row.label, subtitle: (res.matched ? 'จับคู่หมวด STM: ' + res.cats.join(', ') : 'ทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม')) + ' · ' + txns.length + ' รายการ' + mlab, txns });
+      let sub;
+      if (isActNet) sub = 'ทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม');
+      else if (res.matched) sub = (res.how === 'amount' ? 'จับคู่ตามยอด' : 'จับคู่หมวด STM: ' + res.cats.join(', '));
+      else sub = 'ไม่พบรายการ STM ที่ตรงกับบรรทัดนี้ (STM จัดหมวดต่างจากงบ)';
+      setModal({ title: row.label, subtitle: sub + ' · ' + txns.length + ' รายการ' + mlab, txns });
     }
 
     async function readAoa(file) {
