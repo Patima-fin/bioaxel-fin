@@ -606,8 +606,24 @@ body.present-mode.no-anim .present-page .kpi:hover { transform: none; }
   .cfp-page { padding: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .cfp-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .cfp-page .cfp-card,
-  .cfp-page .card { box-shadow: none !important; backdrop-filter: none !important; break-inside: avoid; page-break-inside: avoid; }
+  .cfp-page .card { box-shadow: none !important; backdrop-filter: none !important; }
+  /* การ์ดทั่วไปไม่ตัดข้ามหน้า; แต่การ์ดที่มีตาราง (งบ/รายการ) ให้ไหลข้ามหน้าได้ (ตารางยาว) */
+  .cfp-page .cfp-card,
+  .cfp-page .card { break-inside: avoid; page-break-inside: avoid; }
+  .cfp-page .cfp-card:has(table),
+  .cfp-page .card:has(table) { break-inside: auto !important; page-break-inside: auto !important; }
+  /* ★ ปลดล็อกกล่องเลื่อน (maxHeight/overflow) → พิมพ์เนื้อหา "ทั้งหมด" ไหลลงเต็มหน้า ไม่ถูกตัดที่ 70-76vh */
+  .cfp-page .cfp-stmt,
+  .cfp-page .cfp-grid,
+  .cfp-page [style*="overflow"] { max-height: none !important; overflow: visible !important; }
+  /* หัวตาราง/คอลัมน์แรกเป็น sticky บนจอ → static ตอนปรินต์ กันลอย/ซ้อน */
+  .cfp-page thead th,
+  .cfp-page tbody td { position: static !important; }
+  /* ตารางงบ/รายการ: เต็มความกว้างกระดาษ */
+  .cfp-page .cfp-stmt table,
+  .cfp-page .cfp-grid table { width: 100% !important; min-width: 0 !important; }
   .cfp-page table { break-inside: auto; }
+  .cfp-page thead { display: table-header-group; }  /* หัวตารางซ้ำทุกหน้าเมื่อไหลข้ามหน้า */
   .cfp-page tr { break-inside: avoid; page-break-inside: avoid; }
   @page { size: A4; margin: 10mm; }
 }
