@@ -181,25 +181,22 @@
     if (lcs >= 8 && lcs >= 0.7 * mn) return true;
     return false;
   }
-  function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, targetAmt, strict) {
-    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [], how: '' };
+  // หาหมวด (STM category objects) จากรายชื่อหมวด — ค้นทุกกิจกรรม (op/inv/fin)
+  function cfpCatsByNames(model, names) {
+    const res = []; if (!names || !names.length) return res;
+    ['op', 'inv', 'fin'].forEach(k => { const a = model.acts[k]; if (a) a.catList.forEach(c => { if (names.indexOf(c.name) >= 0) res.push(c); }); });
+    return res;
+  }
+  // ยึด "หมวด" เป็นหลัก: fallback เดาด้วยชื่อหมวดเมื่อยังไม่ได้จับคู่เอง (manual map ดูใน openStmt)
+  function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, strict) {
+    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
     const sameDir = c => !dir || ((c.net >= 0 ? 1 : -1) === dir);
-    const catSum = c => { const ts = monthNum ? c.txns.filter(t => t.month === monthNum) : c.txns; return ts.reduce((s, t) => s + t.flow, 0); };
-    // 1) จับคู่ด้วย "ชื่อหมวด" STM
-    let cats = act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c));
-    let how = cats.length ? 'name' : '';
-    // 2) ชื่อไม่ตรง → จับคู่ด้วย "ยอด": หมวดที่ผลรวม (เดือน/รวม) ≈ ยอดในเซลล์ (กันชื่อหมวดต่างกัน)
-    if (!cats.length && targetAmt) {
-      const tgt = Math.abs(targetAmt), tol = Math.max(1, tgt * 0.005);
-      const near = act.catList.filter(sameDir).filter(c => { const ct = Math.abs(catSum(c)); return ct > 0 && Math.abs(ct - tgt) <= tol; });
-      if (near.length) { cats = near; how = 'amount'; }
-    }
+    const cats = leafLabel ? act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c)) : [];
     const matched = cats.length > 0;
-    // strict (leaf): จับคู่ไม่ได้ → คืนว่าง (ไม่ fallback ทั้งกิจกรรม เพราะยอดจะไม่ตรงเซลล์)
     const src = matched ? cats : (strict ? [] : act.catList.filter(sameDir));
     let txns = []; src.forEach(c => { txns = txns.concat(c.txns); });
     if (monthNum) txns = txns.filter(t => t.month === monthNum);
-    return { txns, matched, cats: cats.map(c => c.name), how };
+    return { txns, matched, cats: cats.map(c => c.name) };
   }
 
   /* ---------- parse STM ---------- */
@@ -371,6 +368,79 @@
           </div>
           <div style={{ padding: '12px 22px 22px', overflow: 'auto' }}>
             {txns.length ? <CfpTxnTable txns={txns} /> : <div style={{ fontSize: 13, color: C.faint, padding: '10px 0' }}>ไม่พบรายการ</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------- Category mapping editor (จับคู่ บรรทัดงบ ↔ หมวด STM) ---------- */
+  function CfpMapModal({ model, catMap, onClose, onSave }) {
+    const leaves = useMemo(() => (model.stmt || []).filter(r => r.type === 'leaf' && r.actKey), [model]);
+    // working copy: เริ่มจาก catMap; บรรทัดที่ยังไม่ตั้ง → เดาอัตโนมัติด้วยชื่อหมวด (ให้ผู้ใช้ปรับ/ยืนยัน)
+    const init = useMemo(() => {
+      const m = {};
+      leaves.forEach(r => {
+        if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { m[r.label] = catMap[r.label].slice(); return; }
+        const act = model.acts[r.actKey];
+        const dir = r.total > 0 ? 1 : r.total < 0 ? -1 : 0;
+        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir))).map(c => c.name) : [];
+        m[r.label] = guess;
+      });
+      return m;
+    }, [model, catMap, leaves]);
+    const [m, setM] = useState(init);
+    const [q, setQ] = useState('');
+    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
+    const catNet = name => { const c = cfpCatsByNames(model, [name])[0]; return c ? c.net : 0; };
+    const toggle = (leaf, name) => setM(prev => { const cur = (prev[leaf] || []).slice(); const i = cur.indexOf(name); if (i >= 0) cur.splice(i, 1); else cur.push(name); return Object.assign({}, prev, { [leaf]: cur }); });
+    const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
+    const tol = v => Math.max(1, Math.abs(v) * 0.01);
+    return (
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300, padding: 20 }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
+          <div style={{ padding: '16px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>⚙ จัดหมวด — จับคู่บรรทัดงบ ↔ หมวด STM</div>
+              <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>เลือกหมวด STM ของแต่ละบรรทัด · ✓ = ยอดหมวดตรงกับยอดในงบ · ตั้งครั้งเดียว แชร์ทั้งทีม</div>
+            </div>
+            <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
+          </div>
+          <div style={{ padding: '10px 22px', borderBottom: '1px solid ' + C.line }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาบรรทัดงบ…" style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', border: '1px solid ' + C.line, borderRadius: 10, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+          </div>
+          <div style={{ padding: '8px 22px 16px', overflow: 'auto' }}>
+            {shown.map((r, ri) => {
+              const sel = m[r.label] || [];
+              const selSum = sel.reduce((s, n) => s + catNet(n), 0);
+              const ok = Math.abs(selSum - r.total) <= tol(r.total);
+              const act = model.acts[r.actKey]; const cats = act ? act.catList : [];
+              return (
+                <div key={ri} style={{ padding: '11px 0', borderBottom: '1px solid ' + C.line }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 7 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{r.label} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>· {CFP_ACT_NAME[r.actKey]}</span></div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: sel.length ? (ok ? C.pos : C.neg) : C.faint }}>
+                      {sel.length ? (ok ? '✓ ตรง ' : '⚠ ต่าง ') + cfpFmtPlain(selSum) + ' / งบ ' + cfpFmtPlain(r.total) : 'ยังไม่เลือก · งบ ' + cfpFmtPlain(r.total)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {cats.length ? cats.map((c, ci) => {
+                      const on = sel.indexOf(c.name) >= 0;
+                      return (
+                        <button key={ci} onClick={() => toggle(r.label, c.name)} title={'ยอดหมวด ' + cfpFmtPlain(c.net)} style={{ cursor: 'pointer', fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px solid ' + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : C.mut, fontWeight: on ? 700 : 500 }}>
+                          {on ? '✓ ' : ''}{c.name} <span style={{ opacity: .7, fontSize: 11 }}>({cfpFmtPlain(c.net)})</span>
+                        </button>
+                      );
+                    }) : <span style={{ fontSize: 12, color: C.faint }}>ไม่มีหมวดในกิจกรรมนี้</span>}
+                  </div>
+                </div>
+              );
+            })}
+            {!shown.length && <div style={{ fontSize: 13, color: C.faint, padding: '14px 0' }}>ไม่พบบรรทัด</div>}
+          </div>
+          <div style={{ padding: '12px 22px', borderTop: '1px solid ' + C.line, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button onClick={onClose} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 11, padding: '9px 16px', fontSize: 14 }}>ยกเลิก</button>
+            <button onClick={() => onSave(m)} style={{ cursor: 'pointer', border: 0, background: C.primary, color: '#fff', borderRadius: 11, padding: '9px 18px', fontSize: 14, fontWeight: 700, boxShadow: C.shadow }}>บันทึกการจับหมวด</button>
           </div>
         </div>
       </div>
@@ -664,6 +734,7 @@
     const [synced, setSynced] = useState(false);      // โหลด/แชร์ผ่านส่วนกลาง (Supabase) สำเร็จล่าสุด
     const [shareBusy, setShareBusy] = useState(false);
     const [orient, setOrient] = useState(() => { try { return localStorage.getItem('bio-cfp-print-orient') || 'portrait'; } catch (e) { return 'portrait'; } });
+    const [mapOpen, setMapOpen] = useState(false);
     const fileRef = useRef(null);
     const fetchedRef = useRef(false);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
@@ -705,19 +776,31 @@
       }
       if (!row.actKey) return;
       const isActNet = row.type === 'net';
-      // ยอดเป้าหมาย = ค่าในเซลล์ที่กด (ช่องเดือน → row.vals[idx] · ช่องรวม → row.total)
-      const monthIdx = monthNum ? model.months.indexOf(monthNum) : -1;
-      const targetAmt = isActNet ? 0 : (monthNum ? (monthIdx >= 0 ? (row.vals && row.vals[monthIdx]) : 0) : row.total);
-      const dir = isActNet ? 0 : (Number(targetAmt) > 0 ? 1 : Number(targetAmt) < 0 ? -1 : (row.total > 0 ? 1 : -1));
-      // strict เฉพาะ leaf — จับคู่ไม่ได้ให้ขึ้น "ไม่พบรายการ" แทนยอดทั้งกิจกรรมที่ไม่ตรง
-      const strict = row.type === 'leaf';
-      const res = cfpFindStmtTxns(model, isActNet ? '' : row.label, row.actKey, monthNum, dir, targetAmt, strict);
+      // ★ 1) ยึด "การจับคู่หมวด" ที่ผู้ใช้ตั้งไว้ (catMap) ก่อนเสมอ — แม่นสุด ยอดตรงตามหมวดจริง
+      const map = (stored && stored.catMap) || {};
+      const mapped = !isActNet && Array.isArray(map[row.label]) && map[row.label].length ? map[row.label] : null;
+      if (mapped) {
+        const cats = cfpCatsByNames(model, mapped);
+        let txns = []; cats.forEach(c => { txns = txns.concat(c.txns); });
+        if (monthNum) txns = txns.filter(t => t.month === monthNum);
+        txns = txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
+        setModal({ title: row.label, subtitle: 'หมวดที่จับคู่: ' + mapped.join(', ') + ' · ' + txns.length + ' รายการ' + mlab, txns }); return;
+      }
+      // 2) ยังไม่ได้จับคู่ → เดาด้วยชื่อหมวด (fallback)
+      const dir = isActNet ? 0 : (row.total > 0 ? 1 : row.total < 0 ? -1 : 0);
+      const res = cfpFindStmtTxns(model, isActNet ? '' : row.label, row.actKey, monthNum, dir, row.type === 'leaf');
       const txns = res.txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
       let sub;
       if (isActNet) sub = 'ทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม');
-      else if (res.matched) sub = (res.how === 'amount' ? 'จับคู่ตามยอด' : 'จับคู่หมวด STM: ' + res.cats.join(', '));
-      else sub = 'ไม่พบรายการ STM ที่ตรงกับบรรทัดนี้ (STM จัดหมวดต่างจากงบ)';
+      else if (res.matched) sub = '⚙ เดาหมวดอัตโนมัติ (ยังไม่ได้ตั้ง — กด "จัดหมวด" เพื่อยืนยัน): ' + res.cats.join(', ');
+      else sub = 'ยังไม่ได้จับคู่หมวด — กดปุ่ม "⚙ จัดหมวด" เพื่อเลือกหมวด STM ของบรรทัดนี้';
       setModal({ title: row.label, subtitle: sub + ' · ' + txns.length + ' รายการ' + mlab, txns });
+    }
+    function saveCatMap(newMap) {
+      persist({ stm: stored.stm, summary: stored.summary || null, catMap: newMap }).then(r => {
+        toast && toast('บันทึกการจับหมวดแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
+      });
+      setMapOpen(false);
     }
 
     async function readAoa(file) {
@@ -900,7 +983,7 @@
           </React.Fragment>}
 
           {tab === 'statement' && (
-            <div className="cfp-card" style={card}><div style={secTitle}><span>📑 งบกระแสเงินสด (รายเดือน)</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแถว/ช่อง → รายการจริงจาก STM</span></div><CfpStatementTable model={model} onPick={openStmt} /></div>
+            <div className="cfp-card" style={card}><div style={secTitle}><span>📑 งบกระแสเงินสด (รายเดือน)</span><span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{canEdit && <button onClick={() => setMapOpen(true)} className="no-print" style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 10, padding: '6px 12px', fontSize: 13, fontWeight: 600 }}>⚙ จัดหมวด</button>}<span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแถว/ช่อง → รายการจริงจาก STM</span></span></div><CfpStatementTable model={model} onPick={openStmt} /></div>
           )}
 
           {tab === 'explorer' && (
@@ -911,6 +994,7 @@
         </React.Fragment>}
 
         {modal && <CfpModal title={modal.title} subtitle={modal.subtitle} txns={modal.txns} onClose={() => setModal(null)} />}
+        {mapOpen && model && <CfpMapModal model={model} catMap={(stored && stored.catMap) || {}} onClose={() => setMapOpen(false)} onSave={saveCatMap} />}
       </div>
     );
   }
