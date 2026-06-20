@@ -591,6 +591,27 @@ body.present-mode.no-anim .present-page .kpi:hover { transform: none; }
   body.present-mode .present-page .kpi:hover { transform: none; box-shadow: none; }
 }
 
+/* ── ปรินต์/บันทึก PDF หน้า Cash Flow Present (#cashflow_present) ──────────────
+   ปุ่ม "🖨️ ปรินต์ PDF" เรียก window.print(). กฎนี้ scope ด้วย body:has(.cfp-page)
+   → ซ่อน sidebar/topbar/ปุ่ม/แท็บ, เต็มความกว้าง, การ์ดไม่ตัดข้ามหน้า, พิมพ์สีตรง.
+   (ไม่กระทบหน้าอื่นเพราะ :has ผูกกับ .cfp-page เท่านั้น) */
+@media print {
+  body:has(.cfp-page) .sb,
+  body:has(.cfp-page) .sb-scrim,
+  body:has(.cfp-page) .topbar,
+  body:has(.cfp-page) .no-print { display: none !important; }
+  body:has(.cfp-page) .app { grid-template-columns: 1fr !important; display: block !important; }
+  body:has(.cfp-page) .page,
+  body:has(.cfp-page) .main { max-width: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  .cfp-page { padding: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .cfp-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .cfp-page .cfp-card,
+  .cfp-page .card { box-shadow: none !important; backdrop-filter: none !important; break-inside: avoid; page-break-inside: avoid; }
+  .cfp-page table { break-inside: auto; }
+  .cfp-page tr { break-inside: avoid; page-break-inside: avoid; }
+  @page { size: A4; margin: 10mm; }
+}
+
 /* ── ปุ่มสลับโหมดนำเสนอ (Topbar) ───────────────────────────────────────── */
 .present-toggle {
   display: inline-flex; align-items: center; gap: 7px;

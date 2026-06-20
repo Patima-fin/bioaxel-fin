@@ -432,5 +432,12 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **FIX:** `slice(0, 36)` → `slice(0, 120)` — รองรับชื่อยาวได้สบาย synthetic code ยังเป็น text ธรรมดา ไม่มี constraint ความยาว (Postgres `text` PK). **ไม่กระทบ id ของโครงการที่มีเลขสัญญาจริง** (path แยกกัน).
 - **⚠️ หลังแก้: ต้องอัปโหลดไฟล์ใหม่อีกครั้ง** — โครงการที่เคยถูก merge เป็น 1 จะถูกสร้างเป็น 2 รายการ (id ใหม่); Finance Master (`pcfin.*`) ของโครงการเดิมไม่ติดมาด้วย (ต้องกรอกใหม่).
 
+## 2026-06-20 — Cash Flow Present: ปุ่มปรินต์ PDF (build `page_cashflow_present 20260620a` / `styles.css 20260620a`)
+- **คำขอผู้ใช้:** หน้า `#cashflow_present` อยากกด "ปรินต์ PDF" ได้.
+- **FIX:** เพิ่มปุ่ม **"🖨️ ปรินต์ PDF"** ในแถบเครื่องมือหัวหน้า (แสดงเมื่อมี `model`, **ทุก role** รวม viewer/ผู้บริหาร — ไม่ผูก `canEdit`) → เรียก `printPdf()` = `window.print()` (รูปแบบเดียวกับหน้า Investor). ตั้ง `document.title` ชั่วคราวเป็น `BIOAXEL-CashFlow-<งวด>-<ชื่อแท็บ>` → ใช้เป็นชื่อไฟล์ PDF, คืนค่าเดิมหลัง 1 วิ. **ปรินต์เฉพาะแท็บที่เปิดอยู่** (overview/activity/statement/explorer) เพราะแท็บอื่นไม่ถูก render ใน DOM.
+- **print CSS (`styles.css`, `@media print`, scope ด้วย `body:has(.cfp-page)`):** ซ่อน `.sb`/`.sb-scrim`/`.topbar`/`.no-print`, `.app`/`.main` เต็มความกว้าง (grid→block, padding 0), `.cfp-card`/`.card` = ไม่มีเงา/backdrop-filter + `break-inside:avoid`, `tr` ไม่ตัดข้ามหน้า, `print-color-adjust:exact` (พิมพ์สีตรง), `@page A4 margin 10mm`. **`:has(.cfp-page)` → ไม่กระทบหน้าอื่น.**
+- **คลาส `no-print` (ใหม่):** ใส่ที่กล่องปุ่มเครื่องมือ (refreshShared/ปรินต์/อัปโหลด/ล้าง/เลือกปี) + แถบแท็บ → แสดงบนจอ แต่หายตอนปรินต์. (ต่างจาก `no-present` ที่หายเฉพาะโหมดนำเสนอ).
+- **verify (preview, inject session+sample):** ปุ่มขึ้น · คลิก → `window.print()` ถูกเรียก + `document.title`=`BIOAXEL-CashFlow-สำหรับงวด…-ภาพรวม` · print CSS rule ครบใน stylesheet · ไม่มี console error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
