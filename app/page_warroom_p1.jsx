@@ -219,12 +219,14 @@ function WarRoomPage1({ data, setData, toast }) {
     const rows = [];
     derivedRows.forEach(p => {
       if (p.projectStatus !== 'ดำเนินงาน') return;
-      const code = String(p.code || p['Contract No.'] || '').trim();
+      // ★ อ่านชื่อฟิลด์ของ "derived row" (pc_engine output) ไม่ใช่ raw sheet:
+      //   code → contractNo · มูลค่าสัญญา → contractAmt · ผู้รับโอน → assignee
+      const code = String(p.contractNo || p.code || p['Contract No.'] || '').trim();
       if (code && hasIvSet.has(code)) return; // มี IV แล้ว → Section 02/03
-      const contract = Number(p['มูลค่าสัญญาที่เซ็น'] || p.contract || 0);
+      const contract = Number(p.contractAmt || p['มูลค่าสัญญาที่เซ็น'] || p.contract || 0);
       if (!contract) return;
       const f = finMaster[code] || {};
-      const assignee = String(f.assignee != null ? f.assignee : (p['ผู้รับโอนสิทธิ์'] || '')).trim();
+      const assignee = String(f.assignee != null ? f.assignee : (p.assignee || p['ผู้รับโอนสิทธิ์'] || '')).trim();
       const isCreditor = assignee && WR1_CREDITORS[assignee];
       const gross = contract;
       const debtPct = f.debtPct != null ? Number(f.debtPct) : 0;

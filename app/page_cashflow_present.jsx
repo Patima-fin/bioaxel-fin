@@ -424,21 +424,22 @@
     );
   }
 
-  /* ---------- SVG: monthly stacked (net by activity) ---------- */
+  /* ---------- SVG: monthly grouped bars (up/down by activity) ---------- */
     function CfpMonthly({ model, onPick }) {
     const mo = model.monthly; if (!mo.length) return null;
     const acts = ['op', 'inv', 'fin'];
-    // ★ บาร์ทุกแท่งขึ้นทางเดียวจาก baseline เดียว (สูง = ขนาดของเงิน) — ติดลบไม่ทิ่มลง
-    //   บอกค่าบนหัวแท่ง (แดง = ติดลบ) + จัดกลุ่มเป็นเดือน (พื้นสลับเฉดให้แยกเดือนง่าย)
-    const W = 760, H = 296, padX = 18, padTop = 42, baseY = 226, span = baseY - padTop;
+    // ★ แท่งกลุ่มตามกิจกรรม "ขึ้น/ลง" จากเส้นศูนย์ — บวกขึ้น (เข้ม) · ลบลง (จาง)
+    //   ค่ากำกับ: บวกบนหัวแท่ง · ลบใต้แท่ง. จัดกลุ่มรายเดือน (พื้นสลับเฉดแยกเดือน).
+    const W = 760, H = 320, padX = 20, padTop = 40, padBot = 56;
+    const plotH = H - padTop - padBot, baseY = H - padBot, zeroY = padTop + plotH / 2, half = plotH / 2 - 12;
     const maxAbs = Math.max.apply(null, mo.map(d => Math.max(Math.abs(d.op), Math.abs(d.inv), Math.abs(d.fin))).concat([1]));
     const slot = (W - padX * 2) / mo.length, cx = i => padX + slot * i + slot / 2;
     const gb = Math.min(34, (slot * 0.66) / 3), gap = Math.min(9, gb * 0.3);
     const groupW = gb * 3 + gap * 2;
-    const barH = v => Math.max(2, Math.abs(v) / maxAbs * span);
+    const barH = v => Math.max(2, Math.abs(v) / maxAbs * half);
     const lbl = v => (v >= 0 ? '+' : '-') + (Math.abs(v) / 1e6).toFixed(1) + 'M';
     return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่งขึ้นทางเดียว)">
+      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่งขึ้น/ลง)">
         {/* legend */}
         {acts.map((k, j) => (
           <g key={'lg' + k} transform={'translate(' + (padX + 2 + j * 132) + ',16)'}>
@@ -450,22 +451,24 @@
           const gx = cx(i) - groupW / 2;
           return (
             <g key={'g' + i} style={{ cursor: 'pointer' }} onClick={() => onPick && onPick(d.m)}>
-              <rect x={cx(i) - slot / 2 + 3} y={padTop - 10} width={slot - 6} height={baseY - padTop + 10} rx="9" fill={i % 2 ? 'rgba(46,139,74,0.045)' : 'transparent'} />
+              <rect x={cx(i) - slot / 2 + 3} y={padTop - 8} width={slot - 6} height={plotH + 8} rx="9" fill={i % 2 ? 'rgba(46,139,74,0.045)' : 'transparent'} />
               {acts.map((k, j) => {
                 const v = d[k] || 0; const h = barH(v); const bx = gx + j * (gb + gap); const neg = v < 0;
+                const by = neg ? zeroY : zeroY - h, ty = neg ? zeroY + h + 12 : zeroY - h - 5;
                 return (
                   <g key={k}>
-                    <rect x={bx} y={baseY - h} width={gb} height={h} rx="3" fill={ACT_COLOR[k]} opacity={neg ? 0.5 : 0.95}><title>{CFP_ACT_SHORT[k] + ' ' + cfpFmtM(v)}</title></rect>
-                    <text x={bx + gb / 2} y={baseY - h - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill={neg ? C.neg : ACT_COLOR[k]}>{lbl(v)}</text>
+                    <rect x={bx} y={by} width={gb} height={h} rx="3" fill={ACT_COLOR[k]} opacity={neg ? 0.55 : 0.95}><title>{CFP_ACT_SHORT[k] + ' ' + cfpFmtM(v)}</title></rect>
+                    <text x={bx + gb / 2} y={ty} textAnchor="middle" fontSize="10" fontWeight="700" fill={neg ? C.neg : ACT_COLOR[k]}>{lbl(v)}</text>
                   </g>
                 );
               })}
-              <line x1={cx(i) - slot / 2 + 3} y1={baseY} x2={cx(i) + slot / 2 - 3} y2={baseY} stroke={C.line} />
-              <text x={cx(i)} y={baseY + 18} textAnchor="middle" fontSize="12" fontWeight="800" fill={C.ink}>{d.label}</text>
-              <text x={cx(i)} y={baseY + 33} textAnchor="middle" fontSize="11" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>สุทธิ {cfpFmtSigned(d.net)}</text>
+              <text x={cx(i)} y={baseY + 22} textAnchor="middle" fontSize="12" fontWeight="800" fill={C.ink}>{d.label}</text>
+              <text x={cx(i)} y={baseY + 37} textAnchor="middle" fontSize="11" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>สุทธิ {cfpFmtSigned(d.net)}</text>
             </g>
           );
         })}
+        {/* เส้นศูนย์ (zero line) เต็มความกว้าง */}
+        <line x1={padX} y1={zeroY} x2={W - padX} y2={zeroY} stroke={C.faint} strokeWidth="1.2" />
       </svg>
     );
   }
@@ -822,8 +825,10 @@
             {model.summary && model.summary.net != null && (
               <div style={{ fontSize: 12, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
             )}
-            <div className="cfp-card" style={card}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
-            <div className="cfp-card" style={card}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(370px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
+              <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
+              <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
+            </div>
             <div style={secTitle}><span>🤖 Executive Insights</span></div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 14, marginBottom: 8 }}>
               {model.acts.fin.net > 0 && model.acts.op.net < 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>🔁 อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>ดำเนินงาน {cfpFmtM(model.acts.op.net)}</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>)}
