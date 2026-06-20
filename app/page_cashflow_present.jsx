@@ -379,12 +379,16 @@
     const leaves = useMemo(() => (model.stmt || []).filter(r => r.type === 'leaf' && r.actKey), [model]);
     // working copy: เริ่มจาก catMap; บรรทัดที่ยังไม่ตั้ง → เดาอัตโนมัติด้วยชื่อหมวด (ให้ผู้ใช้ปรับ/ยืนยัน)
     const init = useMemo(() => {
-      const m = {};
+      const m = {}; const claimed = new Set(); // 1 หมวด = 1 บรรทัด: หมวดที่ถูกจับแล้วไม่ถูกแจกซ้ำ
+      // pass 1: การจับคู่ที่บันทึกไว้ (เจตนาผู้ใช้) จองหมวดก่อน — ตัดหมวดที่ซ้ำกับบรรทัดก่อนหน้า (clean ของเก่าที่เคยซ้ำ)
+      leaves.forEach(r => { if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { const uniq = catMap[r.label].filter(n => !claimed.has(n)); uniq.forEach(n => claimed.add(n)); m[r.label] = uniq; } });
+      // pass 2: เดาอัตโนมัติให้บรรทัดที่เหลือ — เฉพาะหมวดที่ยังไม่ถูกจอง
       leaves.forEach(r => {
-        if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { m[r.label] = catMap[r.label].slice(); return; }
+        if (m[r.label]) return;
         const act = model.acts[r.actKey];
         const dir = r.total > 0 ? 1 : r.total < 0 ? -1 : 0;
-        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir))).map(c => c.name) : [];
+        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && !claimed.has(c.name)).map(c => c.name) : [];
+        guess.forEach(n => claimed.add(n));
         m[r.label] = guess;
       });
       return m;
@@ -397,11 +401,20 @@
     // ย่อ/กาง: เริ่มต้นย่อบรรทัดที่ "✓ ตรง" แล้ว เหลือกางเฉพาะที่ยังต้องจัด (ไม่ต้องเลื่อนหาไกล)
     const [expanded, setExpanded] = useState(() => { const s = {}; leaves.forEach(r => { if (!isOk(r.label, init[r.label])) s[r.label] = true; }); return s; });
     useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
-    const toggle = (leaf, name) => setM(prev => { const cur = (prev[leaf] || []).slice(); const i = cur.indexOf(name); if (i >= 0) cur.splice(i, 1); else cur.push(name); return Object.assign({}, prev, { [leaf]: cur }); });
+    // เลือกหมวด: ถ้าเปิด (ON) → ย้ายหมวดนั้นออกจากบรรทัดอื่นด้วย (1 หมวด = 1 บรรทัด)
+    const toggle = (leaf, name) => setM(prev => {
+      const next = Object.assign({}, prev); const cur = (next[leaf] || []).slice(); const i = cur.indexOf(name);
+      if (i >= 0) { cur.splice(i, 1); next[leaf] = cur; }
+      else { Object.keys(next).forEach(l => { if (l !== leaf && next[l] && next[l].indexOf(name) >= 0) next[l] = next[l].filter(x => x !== name); }); cur.push(name); next[leaf] = cur; }
+      return next;
+    });
     const toggleExp = label => setExpanded(prev => Object.assign({}, prev, { [label]: !prev[label] }));
     const setAllExp = on => setExpanded(() => { const s = {}; if (on) leaves.forEach(r => { s[r.label] = true; }); return s; });
     const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
     const okCount = leaves.filter(r => isOk(r.label)).length;
+    // หมวดที่ถูกเลือกให้บรรทัดใดบรรทัดหนึ่งแล้ว → ซ่อนจากตัวเลือกของบรรทัดอื่น (1 หมวด = 1 บรรทัด กันนับซ้ำ)
+    const selByCat = {}; leaves.forEach(r => (m[r.label] || []).forEach(n => { (selByCat[n] = selByCat[n] || []).push(r.label); }));
+    const usedByOther = (name, leaf) => (selByCat[name] || []).some(l => l !== leaf);
     return (
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300, padding: 20 }}>
         <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
@@ -423,7 +436,9 @@
               const sel = m[r.label] || [];
               const selSum = sel.reduce((s, n) => s + catNet(n), 0);
               const ok = Math.abs(selSum - r.total) <= tol(r.total);
-              const act = model.acts[r.actKey]; const cats = act ? act.catList : [];
+              const act = model.acts[r.actKey];
+              // ตัวเลือก = หมวดในกิจกรรมนี้ ที่ยัง "ว่าง" (ไม่ถูกบรรทัดอื่นเลือก) หรือบรรทัดนี้เลือกเองอยู่
+              const cats = (act ? act.catList : []).filter(c => sel.indexOf(c.name) >= 0 || !usedByOther(c.name, r.label));
               const isExp = !!expanded[r.label];
               return (
                 <div key={ri} style={{ padding: '9px 0', borderBottom: '1px solid ' + C.line }}>
