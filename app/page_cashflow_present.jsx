@@ -391,11 +391,17 @@
     }, [model, catMap, leaves]);
     const [m, setM] = useState(init);
     const [q, setQ] = useState('');
-    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
     const catNet = name => { const c = cfpCatsByNames(model, [name])[0]; return c ? c.net : 0; };
-    const toggle = (leaf, name) => setM(prev => { const cur = (prev[leaf] || []).slice(); const i = cur.indexOf(name); if (i >= 0) cur.splice(i, 1); else cur.push(name); return Object.assign({}, prev, { [leaf]: cur }); });
-    const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
     const tol = v => Math.max(1, Math.abs(v) * 0.01);
+    const isOk = (label, sel) => { const r = leaves.find(x => x.label === label); if (!r) return false; const s = (sel || m[label] || []); return s.length > 0 && Math.abs(s.reduce((a, n) => a + catNet(n), 0) - r.total) <= tol(r.total); };
+    // ย่อ/กาง: เริ่มต้นย่อบรรทัดที่ "✓ ตรง" แล้ว เหลือกางเฉพาะที่ยังต้องจัด (ไม่ต้องเลื่อนหาไกล)
+    const [expanded, setExpanded] = useState(() => { const s = {}; leaves.forEach(r => { if (!isOk(r.label, init[r.label])) s[r.label] = true; }); return s; });
+    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
+    const toggle = (leaf, name) => setM(prev => { const cur = (prev[leaf] || []).slice(); const i = cur.indexOf(name); if (i >= 0) cur.splice(i, 1); else cur.push(name); return Object.assign({}, prev, { [leaf]: cur }); });
+    const toggleExp = label => setExpanded(prev => Object.assign({}, prev, { [label]: !prev[label] }));
+    const setAllExp = on => setExpanded(() => { const s = {}; if (on) leaves.forEach(r => { s[r.label] = true; }); return s; });
+    const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
+    const okCount = leaves.filter(r => isOk(r.label)).length;
     return (
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300, padding: 20 }}>
         <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
@@ -406,8 +412,11 @@
             </div>
             <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
           </div>
-          <div style={{ padding: '10px 22px', borderBottom: '1px solid ' + C.line }}>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาบรรทัดงบ…" style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', border: '1px solid ' + C.line, borderRadius: 10, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+          <div style={{ padding: '10px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาบรรทัดงบ…" style={{ flex: '1 1 200px', boxSizing: 'border-box', padding: '8px 12px', border: '1px solid ' + C.line, borderRadius: 10, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: okCount === leaves.length ? C.pos : C.mut, whiteSpace: 'nowrap' }}>✓ {okCount}/{leaves.length} ตรง</span>
+            <button onClick={() => setAllExp(false)} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 11px', fontSize: 12, fontWeight: 600 }}>▸ ย่อทั้งหมด</button>
+            <button onClick={() => setAllExp(true)} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 11px', fontSize: 12, fontWeight: 600 }}>▾ กางทั้งหมด</button>
           </div>
           <div style={{ padding: '8px 22px 16px', overflow: 'auto' }}>
             {shown.map((r, ri) => {
@@ -415,15 +424,16 @@
               const selSum = sel.reduce((s, n) => s + catNet(n), 0);
               const ok = Math.abs(selSum - r.total) <= tol(r.total);
               const act = model.acts[r.actKey]; const cats = act ? act.catList : [];
+              const isExp = !!expanded[r.label];
               return (
-                <div key={ri} style={{ padding: '11px 0', borderBottom: '1px solid ' + C.line }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 7 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{r.label} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>· {CFP_ACT_NAME[r.actKey]}</span></div>
+                <div key={ri} style={{ padding: '9px 0', borderBottom: '1px solid ' + C.line }}>
+                  <div onClick={() => toggleExp(r.label)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: isExp ? 7 : 0, cursor: 'pointer' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}><span style={{ color: C.faint, fontWeight: 400, marginRight: 4 }}>{isExp ? '▾' : '▸'}</span>{r.label} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>· {CFP_ACT_NAME[r.actKey]}</span></div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: sel.length ? (ok ? C.pos : C.neg) : C.faint }}>
                       {sel.length ? (ok ? '✓ ตรง ' : '⚠ ต่าง ') + cfpFmtPlain(selSum) + ' / งบ ' + cfpFmtPlain(r.total) : 'ยังไม่เลือก · งบ ' + cfpFmtPlain(r.total)}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {isExp && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {cats.length ? cats.map((c, ci) => {
                       const on = sel.indexOf(c.name) >= 0;
                       return (
@@ -432,7 +442,7 @@
                         </button>
                       );
                     }) : <span style={{ fontSize: 12, color: C.faint }}>ไม่มีหมวดในกิจกรรมนี้</span>}
-                  </div>
+                  </div>}
                 </div>
               );
             })}
