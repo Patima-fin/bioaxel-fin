@@ -604,13 +604,26 @@
   /* ---------- statement table ---------- */
   function CfpStatementTable({ model, onPick }) {
     const rows = model.stmt;
+    const [collapsed, setCollapsed] = useState({});   // { groupRowIndex: true } = ย่อกลุ่มนั้น
     if (!rows || !rows.length) return <div style={{ fontSize: 13, color: C.faint, padding: '6px 0' }}>อัปโหลดไฟล์ “งบกระแสเงินสดรายเดือน” เพิ่ม เพื่อแสดงตารางงบ</div>;
     const months = (model.monthLabels && model.monthLabels.length) ? model.monthLabels : model.months.map(m => CFP_MONTHS[m]);
     const monthNumByIdx = i => model.months[i] || (i + 1);
+    const toggle = i => setCollapsed(c => Object.assign({}, c, { [i]: !c[i] }));
+    // หากลุ่มเจ้าของของแต่ละรายการย่อย (group ครอบ leaf จนเจอแถวที่ไม่ใช่ leaf) → ใช้ย่อ/ขยาย
+    let cur = -1; const ownerOf = rows.map((r, i) => { if (r.type === 'group') { cur = i; return -1; } if (r.type === 'leaf') return cur; cur = -1; return -1; });
+    const anyGroup = rows.some(r => r.type === 'group');
+    // ผลรวมของรายการย่อยในแต่ละกลุ่ม (order-based) → ใช้เดาฝั่งรับ/จ่ายของหัวกลุ่มที่ชื่อไม่มีคำว่า รับ/จ่าย
+    const grpSum = {}; { let g = -1; rows.forEach((r, i) => { if (r.type === 'group') { g = i; grpSum[i] = 0; } else if (r.type === 'leaf' && g >= 0) { grpSum[g] += (r.total || 0); } else if (r.type !== 'leaf') { g = -1; } }); }
+    // ฝั่ง รับ/จ่าย: ดูจากชื่อก่อน (รับ/จ่าย) ไม่งั้นใช้เครื่องหมายยอด (ลบ=จ่าย บวก=รับ) → แถบสีซ้าย เขียว=รับ แดง=จ่าย
+    const sideOf = (r, ri) => { const l = String(r.label || ''); if (/จ่าย/.test(l)) return 'out'; if (/รับ/.test(l)) return 'in'; let t = r.total; if (r.type === 'group') t = grpSum[ri]; return t < 0 ? 'out' : t > 0 ? 'in' : null; };
     const acct = v => { if (!v) return <span style={{ color: C.faint }}>-</span>; const neg = v < 0; return <span style={{ color: neg ? C.neg : C.ink }}>{neg ? '(' + cfpFmtPlain(v) + ')' : cfpFmtPlain(v)}</span>; };
-    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 12, position: 'sticky', top: 0, background: '#fafdfb' };
+    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 12, position: 'sticky', top: 0, background: '#f4faf6' };
     return (
       <div className="cfp-stmt" style={{ overflowX: 'auto', maxHeight: '76vh', overflowY: 'auto', borderRadius: 12, border: '1px solid ' + C.line }}>
+        {anyGroup && <div className="no-print" style={{ display: 'flex', gap: 8, padding: '7px 10px', borderBottom: '1px solid ' + C.line, background: '#f4faf6', position: 'sticky', top: 0, zIndex: 4 }}>
+          <button onClick={() => { const c = {}; rows.forEach((r, i) => { if (r.type === 'group') c[i] = true; }); setCollapsed(c); }} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 10px' }}>▸ ย่อทุกกลุ่ม</button>
+          <button onClick={() => setCollapsed({})} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 10px' }}>▾ กางทุกกลุ่ม</button>
+        </div>}
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
           <thead><tr>
             <th style={{ ...th, textAlign: 'left', left: 0, zIndex: 3 }}>รายการ</th>
@@ -620,20 +633,29 @@
           <tbody>
             {rows.map((r, ri) => {
               const isLeaf = r.type === 'leaf', isSection = r.type === 'section', isNet = r.type === 'net', isGrand = r.type === 'grand', isSub = r.type === 'subtotal', isGroup = r.type === 'group';
-              const rowBg = isSection ? '#dbeede' : isNet ? '#e3f8ee' : isGrand ? '#e6f5ea' : isSub ? '#eef6f1' : 'transparent';
+              if (isLeaf && ownerOf[ri] >= 0 && collapsed[ownerOf[ri]]) return null;   // ซ่อนรายการย่อยเมื่อกลุ่มถูกย่อ
+              const side = sideOf(r, ri);
+              const sideAcc = side === 'in' ? C.pos : side === 'out' ? C.neg : null;   // เขียว=รับ · แดง=จ่าย
+              const accent = sideAcc || C.primary;
+              // สีไล่ระดับชั้น (เขียวเข้ม→อ่อน) ให้แยกชั้นชัด: section เข้มสุด > สุทธิ/รวม > หัวรับ-จ่าย > รายการย่อย(ขาว)
+              const rowBg = isSection ? '#cfe7d6' : isGrand ? '#cde6d4' : isNet ? '#d8eede' : isGroup ? '#e3f2e8' : isSub ? '#e9f4ed' : 'transparent';
               const fw = (isSection || isNet || isSub || isGrand) ? 800 : (isGroup ? 700 : 400);
               const indent = isSection ? 0 : (isGroup ? 14 : (isSub || isNet || isGrand ? 14 : 26));
               const clickable = isLeaf || isNet || isSub || isGrand; const emptyVals = isSection || isGroup;
-              const col = isSection ? C.primaryD : isNet ? '#0f9b6c' : isGrand ? C.primaryD : C.ink;
+              const col = (isSection || isNet || isGrand) ? C.primaryD : ((isGroup || isSub) && sideAcc) ? (side === 'in' ? C.primaryD : C.neg) : C.ink;
+              const labelBg = rowBg === 'transparent' ? '#fff' : rowBg;
+              const leftBar = (isGroup || isSub) ? ('4px solid ' + accent) : (isLeaf && sideAcc) ? ('4px solid ' + (side === 'in' ? 'rgba(21,196,134,.22)' : 'rgba(251,94,109,.20)')) : '4px solid transparent';
+              const tdTop = isNet ? ('2px solid ' + C.primary) : (isSub && sideAcc) ? ('1.5px solid ' + accent) : '0';
               return (
                 <tr key={ri} style={{ background: rowBg }}>
-                  <td onClick={() => clickable && onPick && onPick(r, null)} style={{ padding: '6px 8px', paddingLeft: 8 + indent, fontWeight: fw, color: col, cursor: clickable ? 'pointer' : 'default', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: rowBg === 'transparent' ? '#fff' : rowBg, borderBottom: '1px solid ' + C.line }}>
-                    {r.label}{clickable && <span style={{ color: C.faint, fontWeight: 400 }}> ›</span>}
+                  <td onClick={() => { if (isGroup) toggle(ri); else if (clickable && onPick) onPick(r, null); }} style={{ padding: '6px 8px', paddingLeft: 8 + indent, fontWeight: fw, color: col, cursor: (isGroup || clickable) ? 'pointer' : 'default', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: labelBg, borderBottom: '1px solid ' + C.line, borderLeft: leftBar, borderTop: tdTop }}>
+                    {isGroup && <span style={{ color: accent, marginRight: 5, display: 'inline-block', width: 10 }}>{collapsed[ri] ? '▸' : '▾'}</span>}
+                    {r.label}{(clickable && !isGroup) && <span style={{ color: C.faint, fontWeight: 400 }}> ›</span>}
                   </td>
                   {months.map((m, ci) => (
-                    <td key={ci} onClick={() => clickable && !emptyVals && onPick && onPick(r, monthNumByIdx(ci))} style={{ padding: '6px 8px', textAlign: 'right', fontWeight: (isNet || isSub || isGrand) ? 800 : 400, cursor: (clickable && !emptyVals) ? 'pointer' : 'default', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid ' + C.line }}>{emptyVals ? '' : acct(r.vals[ci])}</td>
+                    <td key={ci} onClick={() => clickable && !emptyVals && onPick && onPick(r, monthNumByIdx(ci))} style={{ padding: '6px 8px', textAlign: 'right', fontWeight: (isNet || isSub || isGrand) ? 800 : 400, cursor: (clickable && !emptyVals) ? 'pointer' : 'default', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid ' + C.line, borderTop: tdTop }}>{emptyVals ? '' : acct(r.vals[ci])}</td>
                   ))}
-                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', background: '#eaf4ee', borderBottom: '1px solid ' + C.line }}>{emptyVals ? '' : acct(r.total)}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', background: '#e8f4ec', borderBottom: '1px solid ' + C.line, borderTop: tdTop }}>{emptyVals ? '' : acct(r.total)}</td>
                 </tr>
               );
             })}
