@@ -650,6 +650,7 @@
     const [modal, setModal] = useState(null);
     const [synced, setSynced] = useState(false);      // โหลด/แชร์ผ่านส่วนกลาง (Supabase) สำเร็จล่าสุด
     const [shareBusy, setShareBusy] = useState(false);
+    const [orient, setOrient] = useState(() => { try { return localStorage.getItem('bio-cfp-print-orient') || 'portrait'; } catch (e) { return 'portrait'; } });
     const fileRef = useRef(null);
     const fetchedRef = useRef(false);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
@@ -742,12 +743,18 @@
     }
     // ปรินต์/บันทึก PDF ของแท็บที่กำลังเปิดอยู่ (ใช้ window.print เหมือนหน้า Investor; print CSS ใน styles.css
     //   ซ่อน sidebar/topbar/ปุ่ม/แท็บ + พิมพ์สีตรง). ตั้ง document.title ชั่วคราว → ใช้เป็นชื่อไฟล์ PDF.
-    function printPdf() {
+    //   แนวกระดาษ (แนวตั้ง/แนวนอน): inject <style> @page size ชั่วคราว (override @page ใน styles.css).
+    function printPdf(o) {
+      var dir = o || orient;
       var prev = document.title, tabName = (tabs.filter(function (t) { return t[0] === tab; })[0] || ['', ''])[1].replace(/^[^ ]+ /, '');
       try { document.title = 'BIOAXEL-CashFlow' + (model ? '-' + model.periodLabel : '') + (tabName ? '-' + tabName : ''); } catch (e) { }
+      var st = document.getElementById('cfp-print-orient');
+      if (!st) { st = document.createElement('style'); st.id = 'cfp-print-orient'; document.head.appendChild(st); }
+      st.textContent = '@media print{@page{size:A4 ' + (dir === 'landscape' ? 'landscape' : 'portrait') + ';margin:10mm;}}';
       window.print();
       setTimeout(function () { try { document.title = prev; } catch (e) { } }, 1000);
     }
+    function setOrientPersist(v) { setOrient(v); try { localStorage.setItem('bio-cfp-print-orient', v); } catch (e) { } }
 
     const pageWrap = { background: 'transparent', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
     const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
@@ -772,7 +779,10 @@
           </div>
           <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             {cfpCanSync() && <button onClick={refreshShared} disabled={shareBusy} className="no-present" title="ดึงข้อมูลส่วนกลางล่าสุด (ที่คนอื่นอัปไว้)" style={{ background: '#fff', color: C.primaryD, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{shareBusy ? '⏳' : '↻'} โหลดล่าสุด</button>}
-            {model && <button onClick={printPdf} title="ปรินต์ / บันทึกเป็น PDF (แท็บที่เปิดอยู่)" style={{ background: '#fff', color: C.primaryD, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>🖨️ ปรินต์ PDF</button>}
+            {model && (<span style={{ display: 'inline-flex', alignItems: 'stretch', border: '1px solid ' + C.line, borderRadius: 11, overflow: 'hidden', background: '#fff' }}>
+              <select value={orient} onChange={e => setOrientPersist(e.target.value)} title="แนวกระดาษเมื่อปรินต์" style={{ border: 0, borderRight: '1px solid ' + C.line, padding: '0 8px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' }}><option value="portrait">แนวตั้ง</option><option value="landscape">แนวนอน</option></select>
+              <button onClick={() => printPdf()} title="ปรินต์ / บันทึกเป็น PDF (แท็บที่เปิดอยู่)" style={{ background: '#fff', color: C.primaryD, border: 0, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>🖨️ ปรินต์ PDF</button>
+            </span>)}
             {canEdit && (<React.Fragment>
               <select value={era} onChange={e => setEra(e.target.value)} className="no-present" title="ปีในไฟล์ข้อมูล (พ.ศ./ค.ศ.)" style={{ border: '1px solid ' + C.line, borderRadius: 11, padding: '0 10px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' }}><option value="auto">ปี: อัตโนมัติ</option><option value="be">ไฟล์เป็น พ.ศ.</option><option value="ce">ไฟล์เป็น ค.ศ.</option></select><button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} className="no-present" style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '9px 16px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: C.shadow }}>{uploading ? '⏳ กำลังอ่าน…' : (model ? '⬆️ อัปเดตไฟล์' : '⬆️ อัปโหลด STM + งบสรุป')}</button>
               {model && <button onClick={clearData} className="no-present" style={{ background: '#fff', color: C.mut, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, cursor: 'pointer' }}>ล้าง</button>}

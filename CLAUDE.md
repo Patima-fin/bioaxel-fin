@@ -438,6 +438,7 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **print CSS (`styles.css`, `@media print`, scope ด้วย `body:has(.cfp-page)`):** ซ่อน `.sb`/`.sb-scrim`/`.topbar`/`.no-print`, `.app`/`.main` เต็มความกว้าง (grid→block, padding 0), `.cfp-card`/`.card` = ไม่มีเงา/backdrop-filter + `break-inside:avoid`, `tr` ไม่ตัดข้ามหน้า, `print-color-adjust:exact` (พิมพ์สีตรง), `@page A4 margin 10mm`. **`:has(.cfp-page)` → ไม่กระทบหน้าอื่น.**
 - **คลาส `no-print` (ใหม่):** ใส่ที่กล่องปุ่มเครื่องมือ (refreshShared/ปรินต์/อัปโหลด/ล้าง/เลือกปี) + แถบแท็บ → แสดงบนจอ แต่หายตอนปรินต์. (ต่างจาก `no-present` ที่หายเฉพาะโหมดนำเสนอ).
 - **verify (preview, inject session+sample):** ปุ่มขึ้น · คลิก → `window.print()` ถูกเรียก + `document.title`=`BIOAXEL-CashFlow-สำหรับงวด…-ภาพรวม` · print CSS rule ครบใน stylesheet · ไม่มี console error.
+- **(build `20260620b`) เลือกแนวกระดาษ แนวตั้ง/แนวนอน:** ดรอปดาวน์ข้างปุ่มปรินต์ (`orient` state, persist localStorage `bio-cfp-print-orient`, default `portrait`). `printPdf()` inject `<style id="cfp-print-orient">@media print{@page{size:A4 portrait|landscape;margin:10mm}}</style>` ก่อนเรียก `window.print()` → override `@page` ใน styles.css (style ที่ append เข้า head ทีหลัง ชนะ cascade). verify: dropdown แนวตั้ง/แนวนอน · เลือก → inject CSS ถูกต้องทั้ง 2 แนว · persist ลง localStorage.
 
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
