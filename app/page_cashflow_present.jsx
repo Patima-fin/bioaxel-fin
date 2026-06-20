@@ -392,7 +392,7 @@
     const [m, setM] = useState(init);
     const [q, setQ] = useState('');
     const catNet = name => { const c = cfpCatsByNames(model, [name])[0]; return c ? c.net : 0; };
-    const tol = v => Math.max(1, Math.abs(v) * 0.01);
+    const tol = v => 1; // ✓ ต้องตรงเป๊ะ (เผื่อปัดเศษ ≤ 1 บาทเท่านั้น) — เดิม 1% หลวมเกินไป
     const isOk = (label, sel) => { const r = leaves.find(x => x.label === label); if (!r) return false; const s = (sel || m[label] || []); return s.length > 0 && Math.abs(s.reduce((a, n) => a + catNet(n), 0) - r.total) <= tol(r.total); };
     // ย่อ/กาง: เริ่มต้นย่อบรรทัดที่ "✓ ตรง" แล้ว เหลือกางเฉพาะที่ยังต้องจัด (ไม่ต้องเลื่อนหาไกล)
     const [expanded, setExpanded] = useState(() => { const s = {}; leaves.forEach(r => { if (!isOk(r.label, init[r.label])) s[r.label] = true; }); return s; });
