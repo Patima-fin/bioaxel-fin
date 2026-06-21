@@ -7,8 +7,8 @@
 // useToasts, WTPData, WTP_CONFIG, XLSX.
 //
 // ── Canonical "ฐาน DATA" schema this page expects (1 row per GL account) ──
-//   group : one of PL_GROUP_ORDER keys (saleGoods, service, otherIncome,
-//           cogs, selling, admin, finance)   ← โครงสร้าง BIO (7 กลุ่ม)
+//   group : one of PL_GROUP_ORDER keys (saleGoods, otherIncome,
+//           cogs, selling, admin, finance)   ← โครงสร้าง BIO (6 กลุ่ม · ขาย+บริการรวม)
 //   code  : รหัสบัญชี (GL / ac_code)
 //   name  : ชื่อบัญชี
 //   m1..m12 : ยอดรายเดือน (number) ของปีบัญชีนั้น
@@ -24,29 +24,27 @@ const PL_SHEET = 'pnlBase';   // ตาราง Supabase (ย้ายจาก
 const PL_MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const PL_MONTHS_TH_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
-// 7 TYPE labels — ตรงกับบรรทัดในงบ BIO (index = ลำดับใน PL_GROUP_ORDER)
-// โครงสร้าง BIO: รายได้(ขาย/บริการ/อื่น) − ต้นทุนขาย = ขั้นต้น − ขาย − บริหาร = ก่อนการเงิน − การเงิน = สุทธิ
-// (ไม่มีบรรทัด Cost of service / Commission แยกแบบ Water POG — ค่านายหน้าฝังอยู่ใน ขาย/บริหาร)
+// 6 TYPE labels — ตรงกับบรรทัดในงบ BIO (index = ลำดับใน PL_GROUP_ORDER)
+// โครงสร้าง BIO (label สั้นแบบ POG): รายได้ขาย+บริการรวมบรรทัดเดียว / รายได้อื่น − ต้นทุนขาย
+//   = ขั้นต้น − (ขาย + บริหาร + การเงิน รวมเป็น "รวมค่าใช้จ่ายขายและบริหาร" ยอดเดียวแบบ POG) = สุทธิ
 const PL_TYPES = [
-  'รายได้จากการขาย (Revenue from sale of goods)',
-  'รายได้จากการให้บริการ (Revenue from service)',
+  'รายได้จากการขายและบริการ (Revenue from sales and services)',
   'รายได้อื่น (Other income)',
-  'ต้นทุนขาย (Cost of sales)',
+  'ต้นทุนขาย (Cost of goods sold)',
   'ค่าใช้จ่ายในการขาย (Selling expenses)',
   'ค่าใช้จ่ายในการบริหาร (Administrative expenses)',
   'ต้นทุนทางการเงิน (Finance costs)',
 ];
 
-const PL_GROUP_ORDER = ['saleGoods','service','otherIncome','cogs','selling','admin','finance'];
+const PL_GROUP_ORDER = ['saleGoods','otherIncome','cogs','selling','admin','finance'];
 
 const PL_GROUP_META = {
-  saleGoods:   { line: 'Revenue from sale of goods',  th: 'รายได้จากการขาย',          type: 0 },
-  service:     { line: 'Revenue from service',        th: 'รายได้จากการให้บริการ',     type: 1 },
-  otherIncome: { line: 'Other income',                th: 'รายได้อื่น',                type: 2 },
-  cogs:        { line: 'Cost of sales',               th: 'ต้นทุนขาย',                 type: 3 },
-  selling:     { line: 'Selling expenses',            th: 'ค่าใช้จ่ายในการขาย',        type: 4 },
-  admin:       { line: 'Administrative expenses',     th: 'ค่าใช้จ่ายในการบริหาร',      type: 5 },
-  finance:     { line: 'Finance costs',               th: 'ต้นทุนทางการเงิน',          type: 6 },
+  saleGoods:   { line: 'Revenue from sales and services', th: 'รายได้จากการขายและบริการ',  type: 0 },
+  otherIncome: { line: 'Other income',                    th: 'รายได้อื่น',                type: 1 },
+  cogs:        { line: 'Cost of goods sold',              th: 'ต้นทุนขาย',                 type: 2 },
+  selling:     { line: 'Selling expenses',                th: 'ค่าใช้จ่ายในการขาย',        type: 3 },
+  admin:       { line: 'Administrative expenses',         th: 'ค่าใช้จ่ายในการบริหาร',      type: 4 },
+  finance:     { line: 'Finance costs',                   th: 'ต้นทุนทางการเงิน',          type: 5 },
 };
 const PL_TYPE_TO_GROUP = {};
 PL_GROUP_ORDER.forEach(k => { PL_TYPE_TO_GROUP[PL_TYPES[PL_GROUP_META[k].type]] = k; });
@@ -72,7 +70,7 @@ const PL_KNOWN_ACCOUNTS = {
   // '4120-99': 'otherIncome',   // ตัวอย่าง: ถ้ามีรหัสที่ต้องบังคับกลุ่มเอง
 };
 
-const PL_REVENUE_KEYS = { saleGoods: 1, service: 1, otherIncome: 1 };
+const PL_REVENUE_KEYS = { saleGoods: 1, otherIncome: 1 };
 const PL_isRevenue = (key) => !!PL_REVENUE_KEYS[key];
 
 // ── number helpers (ported from design — parentheses for negatives) ──
@@ -99,8 +97,7 @@ const PL_negCls = (v) => (typeof v === 'number' && v < 0) ? ' pnl-neg' : '';
 // ── infer group from BIO chart-of-accounts code prefix ──
 // BIO รหัส = NNNN-NN (เช่น 4110-01). จัดกลุ่มจาก 2 หลักแรก — ตรวจกับงบจริง
 // ม.ค.–พ.ค. 2569: ทุก subtotal (รายได้/ต้นทุนขาย/ขาย/บริหาร/การเงิน) ตรงถึงหลักสตางค์
-//   411x          → รายได้จากการขาย (saleGoods)        [4110, 4120]
-//   413x          → รายได้จากการให้บริการ (service)
+//   41xx          → รายได้จากการขายและบริการ (saleGoods)  [ขาย+บริการ รวมกลุ่มเดียว ไม่แยก]
 //   42xx / 44xx   → รายได้อื่น (otherIncome)            [รายได้อื่น/ส่วนลดรับ/ดอกเบี้ยรับ]
 //   51xx          → ต้นทุนขาย (cogs)
 //   52xx          → ค่าใช้จ่ายในการขาย (selling)
@@ -117,8 +114,8 @@ function PL_inferGroup(code, name) {
   // บัญชีพัก / งบดุล — ไม่อยู่ในงบกำไรขาดทุน
   if (/ตั้งพัก|พักรอ|suspense|clearing/i.test(n)) return null;
   const p2 = c.slice(0, 2), p3 = c.slice(0, 3);
-  // รายได้
-  if (p2 === '41') return (p3 === '413') ? 'service' : 'saleGoods';   // 4130 = บริการ, ที่เหลือ = ขาย
+  // รายได้ — ขาย+บริการ รวมเป็นกลุ่มเดียว (BIO ไม่แยก)
+  if (p2 === '41') return 'saleGoods';
   if (p2 === '42' || p2 === '44') return 'otherIncome';
   // ต้นทุน / ค่าใช้จ่าย
   if (p2 === '51') return 'cogs';
@@ -138,8 +135,7 @@ const PL_SAMPLE = {
   year: 2569,
   lastMonth: 5,
   groups: {
-    saleGoods:   [1380317, 39681, 170714, 9290956, 6756583, 0,0,0,0,0,0,0],
-    service:     [   4673,  9346,   4673,    4673,    4673, 0,0,0,0,0,0,0],
+    saleGoods:   [1384990, 49027, 175387, 9295629, 6761256, 0,0,0,0,0,0,0],
     otherIncome: [    867,  1367,   1501,    4846,     550, 0,0,0,0,0,0,0],
     cogs:        [1733121, 238010, 615942, 8085423, 5237102, 0,0,0,0,0,0,0],
     selling:     [ 554800,1036142, 638341,  788332,  244113, 0,0,0,0,0,0,0],
@@ -223,25 +219,22 @@ function PL_parseRows(rows) {
   return { groups, accounts, lastMonth: lastMonth || 1, year: year || 0 };
 }
 
-// ── compute subtotals (โครงสร้าง BIO) ──
-// รายได้ − ต้นทุนขาย = ขั้นต้น − (ขาย+บริหาร) = ก่อนต้นทุนการเงิน − การเงิน = สุทธิ
+// ── compute subtotals (โครงสร้าง BIO · label/รวม แบบ POG) ──
+// รายได้(ขาย+บริการ + อื่น) − ต้นทุนขาย = ขั้นต้น − (ขาย+บริหาร+การเงิน) = สุทธิ
 function PL_compute(d, lastMonth) {
-  const salesRevenue  = PL_addArr(d.saleGoods, d.service);
-  const totalRevenue  = PL_addArr(salesRevenue, d.otherIncome);
+  const totalRevenue  = PL_addArr(d.saleGoods, d.otherIncome);   // ขาย+บริการ รวมใน saleGoods แล้ว
   // ต้นทุนขาย = COGS อย่างเดียว (BIO ไม่มี cost of service / commission แยกบรรทัด)
   const totalCost     = d.cogs.slice();
   const grossProfit   = totalRevenue.map((v, i) => v - totalCost[i]);
   const gpMargin      = grossProfit.map((v, i) => totalRevenue[i] ? (v / totalRevenue[i] * 100) : NaN);
-  // ค่าใช้จ่ายขายและบริหาร = ขาย + บริหาร (ไม่รวมต้นทุนการเงิน — แยกบรรทัดหลังกำไรก่อนการเงิน)
-  const totalSGA      = PL_addArr(d.selling, d.admin);
-  const profitBeforeFinance = grossProfit.map((v, i) => v - totalSGA[i]);
-  const financeCost   = d.finance.slice();
-  const netProfit     = profitBeforeFinance.map((v, i) => v - financeCost[i]);
+  // รวมค่าใช้จ่ายขายและบริหาร = ขาย + บริหาร + การเงิน (รวมยอดเดียวแบบ POG)
+  const totalSGA      = PL_addArr(PL_addArr(d.selling, d.admin), d.finance);
+  const netProfit     = grossProfit.map((v, i) => v - totalSGA[i]);
   const trend = netProfit.map((v, i) => {
     if (i === 0 || netProfit[i - 1] === 0 || i >= lastMonth) return NaN;
     return (v - netProfit[i - 1]) / Math.abs(netProfit[i - 1]) * 100;
   });
-  return { salesRevenue, totalRevenue, totalCost, grossProfit, gpMargin, totalSGA, profitBeforeFinance, financeCost, netProfit, trend };
+  return { totalRevenue, totalCost, grossProfit, gpMargin, totalSGA, netProfit, trend };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -522,20 +515,17 @@ function PnLPage({ data, setData, toast }) {
   const d = groups;
   const c = comp;
   const reportRows = [
-    { label: 'Revenue from sale of goods (รายได้จากการขาย)', arr: d.saleGoods,   indent: true, key: 'saleGoods' },
-    { label: 'Revenue from service (รายได้จากการให้บริการ)',  arr: d.service,     indent: true, key: 'service' },
-    { label: 'รายได้จากการขายและบริการ',     arr: c.salesRevenue, cls: 'pnl-sub' },
-    { label: 'Other income (รายได้อื่น)',     arr: d.otherIncome, indent: true, key: 'otherIncome' },
+    { label: 'Revenue from sales and services', arr: d.saleGoods,   indent: true, key: 'saleGoods' },
+    { label: 'Other income',                arr: d.otherIncome, indent: true, key: 'otherIncome' },
     { label: 'รวมรายได้',                   arr: c.totalRevenue, cls: 'pnl-strong' },
-    { label: 'Cost of sales (ต้นทุนขาย)',     arr: d.cogs,        indent: true, key: 'cogs' },
-    { label: 'กำไร(ขาดทุน)ขั้นต้น',          arr: c.grossProfit, cls: 'pnl-gp' },
+    { label: 'Cost of goods sold',          arr: d.cogs,        indent: true, key: 'cogs' },
+    { label: 'Gross Profit',                arr: c.grossProfit, cls: 'pnl-gp' },
     { label: '% margin',                    arr: c.gpMargin,    cls: 'pnl-pct', pct: true, totalVal: (PL_sum(c.totalRevenue, lastMonth) ? PL_sum(c.grossProfit, lastMonth) / PL_sum(c.totalRevenue, lastMonth) * 100 : NaN) },
-    { label: 'Selling expenses (ค่าใช้จ่ายในการขาย)',        arr: d.selling,     indent: true, key: 'selling' },
-    { label: 'Administrative expenses (ค่าใช้จ่ายในการบริหาร)', arr: d.admin,    indent: true, key: 'admin' },
-    { label: 'รวมค่าใช้จ่ายในการขายและบริหาร', arr: c.totalSGA,  cls: 'pnl-strong' },
-    { label: 'กำไร(ขาดทุน)ก่อนต้นทุนทางการเงิน', arr: c.profitBeforeFinance, cls: 'pnl-sub' },
-    { label: 'Finance costs (ต้นทุนทางการเงิน)', arr: d.finance, indent: true, key: 'finance' },
-    { label: 'กำไร(ขาดทุน)สุทธิ',            arr: c.netProfit,   cls: 'pnl-net' },
+    { label: 'Selling expenses',            arr: d.selling,     indent: true, key: 'selling' },
+    { label: 'Administrative expenses',     arr: d.admin,       indent: true, key: 'admin' },
+    { label: 'Finance costs',               arr: d.finance,     indent: true, key: 'finance' },
+    { label: 'รวมค่าใช้จ่ายขายและบริหาร',     arr: c.totalSGA,   cls: 'pnl-strong' },
+    { label: 'Net Profit',                  arr: c.netProfit,   cls: 'pnl-net' },
     { label: 'Trend %',                     arr: c.trend,       cls: 'pnl-pct', pct: true, totalVal: NaN },
   ];
 
@@ -873,14 +863,15 @@ function PnLPage({ data, setData, toast }) {
         const adminYtd = PL_sum(groups.admin, lastMonth);
         const finYtd   = PL_sum(groups.finance, lastMonth);
         const gpYtd    = PL_sum(c.grossProfit, lastMonth);
-        const pbfYtd   = PL_sum(c.profitBeforeFinance, lastMonth);
+        const sellAdminYtd = PL_sum(groups.selling, lastMonth) + adminYtd;  // ขาย+บริหาร (ไม่รวมการเงิน)
+        const pbfYtd   = gpYtd - sellAdminYtd;                              // ขาดทุนจากดำเนินงานก่อนต้นทุนการเงิน
         const pctRev   = (v) => rev ? v / rev * 100 : 0;
         // 1) ผลสุทธิ
         if (k.net < 0) {
           insights.push({
             kind: 'critical', icon: '🚨', title: 'ขาดทุนสุทธิ ' + PL_fmt(-k.net) + ' บาท (' + PL_fmtPct(Math.abs(pctRev(k.net))) + ' ของรายได้)',
-            body: 'YTD ' + elapsed + ' เดือน · รายได้ ' + PL_fmt(rev) + ' · ค่าใช้จ่ายรวม ' + PL_fmt(cogsYtd + sgaYtd + finYtd) +
-                  ' = ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' + ขาย/บริหาร ' + PL_fmt(sgaYtd) + ' + การเงิน ' + PL_fmt(finYtd),
+            body: 'YTD ' + elapsed + ' เดือน · รายได้ ' + PL_fmt(rev) + ' · ค่าใช้จ่ายรวม ' + PL_fmt(cogsYtd + sgaYtd) +
+                  ' = ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' + ขาย/บริหาร ' + PL_fmt(sellAdminYtd) + ' + การเงิน ' + PL_fmt(finYtd),
           });
         } else if (k.net > 0) {
           insights.push({ kind: 'good', icon: '✅', title: 'กำไรสุทธิ ' + PL_fmt(k.net) + ' บาท (' + PL_fmtPct(pctRev(k.net)) + ' ของรายได้)', body: 'YTD สะสม ' + elapsed + ' เดือน' });
@@ -891,7 +882,7 @@ function PnLPage({ data, setData, toast }) {
             body: 'ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' > รายได้ ' + PL_fmt(rev) + ' (ต้นทุน = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้) · ทบทวนการตั้งราคา/ต้นทุนต่อหน่วย' });
         } else if (k.gpM < 20) {
           insights.push({ kind: 'risk', icon: '📊', title: 'อัตรากำไรขั้นต้นบาง (' + PL_fmtPct(k.gpM) + ')',
-            body: 'ต้นทุนขาย = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้ · เหลือกำไรขั้นต้น ' + PL_fmt(gpYtd) + ' รองรับค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sgaYtd) });
+            body: 'ต้นทุนขาย = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้ · เหลือกำไรขั้นต้น ' + PL_fmt(gpYtd) + ' รองรับค่าใช้จ่ายขาย/บริหาร/การเงิน ' + PL_fmt(sgaYtd) });
         }
         // 3) ค่าใช้จ่ายบริหารเทียบกำไรขั้นต้น (ตัวฉุดหลัก)
         if (adminYtd > 0 && gpYtd > 0 && adminYtd > gpYtd) {
@@ -901,7 +892,7 @@ function PnLPage({ data, setData, toast }) {
         // 4) ขาดทุนจากการดำเนินงาน (ก่อนต้นทุนการเงิน)
         if (pbfYtd < 0) {
           insights.push({ kind: 'info', icon: '📉', title: 'ขาดทุนจากการดำเนินงานก่อนต้นทุนการเงิน ' + PL_fmt(-pbfYtd),
-            body: 'กำไรขั้นต้น ' + PL_fmt(gpYtd) + ' − ค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sgaYtd) + ' = ' + PL_fmt(pbfYtd) + ' · บวกต้นทุนการเงินอีก ' + PL_fmt(finYtd) });
+            body: 'กำไรขั้นต้น ' + PL_fmt(gpYtd) + ' − ค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sellAdminYtd) + ' = ' + PL_fmt(pbfYtd) + ' · บวกต้นทุนการเงินอีก ' + PL_fmt(finYtd) });
         }
         // 5) ต้นทุนการเงิน
         if (finYtd > 0 && rev > 0 && pctRev(finYtd) >= 5) {
