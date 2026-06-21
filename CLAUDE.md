@@ -458,5 +458,8 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
   - **ย่อ/ขยายกลุ่ม:** state `collapsed` ต่อ index ของแถว `group`; `ownerOf[ri]` (order-based) = แถว group ที่ครอบ leaf นั้น → กดหัวกลุ่ม toggle ▾/▸ ซ่อน leaf. ปุ่ม "▸ ย่อทุกกลุ่ม / ▾ กางทุกกลุ่ม" (โชว์เฉพาะเมื่อมี group row).
 - verify (preview localhost:8010, ข้อมูลจริง 589 รายการ 5 เดือน): รายรับ/เงินกู้รับเข้า = เขียว · ต้นทุน/ค่าใช้จ่ายพนักงาน/ค่าที่ปรึกษา/ซื้อสินทรัพย์/ชำระคืนเงินกู้ = แดง (จาก value-sign) · ย่อ/กางทำงาน · ไม่มี console error.
 
+## 2026-06-21 — Cash Flow Present: เอา legend ซ้ำในกราฟรายเดือนออก (build `page_cashflow_present 20260621a`)
+- คำขอผู้ใช้ ("เอาในกรอบสีแดงออก ทั้ง POG และ BIO"): กราฟ "กระแสเงินสดรายเดือน (แยกตามกิจกรรม)" (`CfpMonthly`) มี legend ดำเนินงาน/ลงทุน/จัดหาเงิน **2 ชุด** — ชุดในหัวการ์ด + ชุดซ้ำใน SVG (มุมซ้ายบนในตัวกราฟ). ลบ **ชุดใน SVG** (บล็อก `{/* legend */}{acts.map(...)}` หลังแท็ก `<svg>`) ออก. ไม่แตะ `padTop`/ขนาดแท่ง/ป้ายค่า; `const acts` ยังใช้วาดแท่งกราฟต่อ. (แก้เหมือน POG เป๊ะ build เดียวกัน.)
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

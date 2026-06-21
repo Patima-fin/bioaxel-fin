@@ -566,13 +566,6 @@
     const lbl = v => (v >= 0 ? '+' : '-') + (Math.abs(v) / 1e6).toFixed(1) + 'M';
     return (
       <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่งขึ้น/ลง)">
-        {/* legend */}
-        {acts.map((k, j) => (
-          <g key={'lg' + k} transform={'translate(' + (padX + 2 + j * 132) + ',16)'}>
-            <rect x="0" y="-9" width="12" height="12" rx="3" fill={ACT_COLOR[k]} />
-            <text x="17" y="1" fontSize="12" fill={C.mut} fontWeight="600">{CFP_ACT_SHORT[k]}</text>
-          </g>
-        ))}
         {mo.map((d, i) => {
           const gx = cx(i) - groupW / 2;
           return (
