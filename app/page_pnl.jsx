@@ -8,7 +8,7 @@
 //
 // ── Canonical "ฐาน DATA" schema this page expects (1 row per GL account) ──
 //   group : one of PL_GROUP_ORDER keys (saleGoods, service, otherIncome,
-//           cogs, costService, commission, selling, admin, finance)
+//           cogs, selling, admin, finance)   ← โครงสร้าง BIO (7 กลุ่ม)
 //   code  : รหัสบัญชี (GL / ac_code)
 //   name  : ชื่อบัญชี
 //   m1..m12 : ยอดรายเดือน (number) ของปีบัญชีนั้น
@@ -24,31 +24,29 @@ const PL_SHEET = 'pnlBase';   // ตาราง Supabase (ย้ายจาก
 const PL_MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const PL_MONTHS_TH_FULL = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
-// 9 TYPE labels — ตรงกับบรรทัดในงบ (index = ลำดับใน PL_GROUP_ORDER)
+// 7 TYPE labels — ตรงกับบรรทัดในงบ BIO (index = ลำดับใน PL_GROUP_ORDER)
+// โครงสร้าง BIO: รายได้(ขาย/บริการ/อื่น) − ต้นทุนขาย = ขั้นต้น − ขาย − บริหาร = ก่อนการเงิน − การเงิน = สุทธิ
+// (ไม่มีบรรทัด Cost of service / Commission แยกแบบ Water POG — ค่านายหน้าฝังอยู่ใน ขาย/บริหาร)
 const PL_TYPES = [
-  'รายได้จากการขายสินค้า (Reveneue from sale of goods)',
-  'รายได้จากการบริการ (Reveneue from service)',
+  'รายได้จากการขาย (Revenue from sale of goods)',
+  'รายได้จากการให้บริการ (Revenue from service)',
   'รายได้อื่น (Other income)',
-  'ต้นทุนขายสินค้า (Cost of goods sold)',
-  'ต้นทุนบริการ (Cost of service)',
-  'ค่าคอมมิชชั่น (Commission)',
+  'ต้นทุนขาย (Cost of sales)',
   'ค่าใช้จ่ายในการขาย (Selling expenses)',
   'ค่าใช้จ่ายในการบริหาร (Administrative expenses)',
   'ต้นทุนทางการเงิน (Finance costs)',
 ];
 
-const PL_GROUP_ORDER = ['saleGoods','service','otherIncome','cogs','costService','commission','selling','admin','finance'];
+const PL_GROUP_ORDER = ['saleGoods','service','otherIncome','cogs','selling','admin','finance'];
 
 const PL_GROUP_META = {
-  saleGoods:   { line: 'Reveneue from sale of goods',  th: 'รายได้จากการขายสินค้า',      type: 0 },
-  service:     { line: 'Reveneue from service',        th: 'รายได้จากการบริการ',          type: 1 },
-  otherIncome: { line: 'Other income',                 th: 'รายได้อื่น',                   type: 2 },
-  cogs:        { line: 'Cost of goods sold',           th: 'ต้นทุนขายสินค้า',             type: 3 },
-  costService: { line: 'Cost of service',              th: 'ต้นทุนบริการ',                 type: 4 },
-  commission:  { line: 'Commission',                   th: 'ค่าคอมมิชชั่น',                type: 5 },
-  selling:     { line: 'Selling expenses',             th: 'ค่าใช้จ่ายในการขาย',          type: 6 },
-  admin:       { line: 'Administrative expenses',      th: 'ค่าใช้จ่ายในการบริหาร',        type: 7 },
-  finance:     { line: 'Finance costs',                th: 'ต้นทุนทางการเงิน',             type: 8 },
+  saleGoods:   { line: 'Revenue from sale of goods',  th: 'รายได้จากการขาย',          type: 0 },
+  service:     { line: 'Revenue from service',        th: 'รายได้จากการให้บริการ',     type: 1 },
+  otherIncome: { line: 'Other income',                th: 'รายได้อื่น',                type: 2 },
+  cogs:        { line: 'Cost of sales',               th: 'ต้นทุนขาย',                 type: 3 },
+  selling:     { line: 'Selling expenses',            th: 'ค่าใช้จ่ายในการขาย',        type: 4 },
+  admin:       { line: 'Administrative expenses',     th: 'ค่าใช้จ่ายในการบริหาร',      type: 5 },
+  finance:     { line: 'Finance costs',               th: 'ต้นทุนทางการเงิน',          type: 6 },
 };
 const PL_TYPE_TO_GROUP = {};
 PL_GROUP_ORDER.forEach(k => { PL_TYPE_TO_GROUP[PL_TYPES[PL_GROUP_META[k].type]] = k; });
@@ -61,69 +59,17 @@ const pnlHeroBtn = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
 };
 
-// ── งบประมาณประจำปี 2569 (จาก DATA Budget.xlsx — Sheet "ประมาณการกำไร ขาดทุน") ──
-// ใช้เปรียบเทียบ "รวมทั้งปี" YTD กับเป้าหมาย (ไม่เทียบรายเดือน)
-const PL_BUDGET_2569 = {
-  year: 2569,
-  // — Revenue —
-  salesRevenue:   1474020000.00,   // รายได้จากการขาย (รวม saleGoods + service ใน actual)
-  otherIncome:       1285251.00,   // รายได้อื่นๆ
-  revenue:        1475305251.00,   // รวมรายได้
-  // — Cost of Construction —
-  constructCost:  1091566895.37,   // ต้นทุนงานก่อสร้าง (cogs + costService)
-  commission:       94632084.00,   // ค่าคอมมิชชั่น
-  totalCost:      1186198979.37,   // รวมต้นทุนงานก่อสร้าง
-  grossProfit:     287821020.63,   // กำไรขั้นต้น
-  // — SG&A —
-  selling:          12751002.62,   // ค่าใช้จ่ายในการขาย
-  admin:           151791445.58,   // ค่าใช้จ่ายในการบริหาร
-  finance:          63857611.83,   // ต้นทุนทางการเงิน
-  totalSGA:        228400060.03,   // รวมค่าใช้จ่ายขายและบริหาร (เป้า แนน)
-  netProfit:        59420960.61,   // กำไร(ขาดทุน)สุทธิ
-};
+// ── ปีบัญชี + งบประมาณ ──
+// ปีบัญชี (พ.ศ.) อ่านจาก header ของไฟล์ PL ที่อัป (date-serial) — fallback 2569
+const PL_YEAR_DEFAULT = 2569;
+// BIO ยังไม่มีไฟล์งบประมาณรายปี → PL_BUDGET = null → ซ่อนส่วน "เทียบงบประมาณ"
+// (เมื่อมีเป้าจริง ใส่ออบเจ็กต์ { revenue, totalCost, grossProfit, totalSGA, netProfit } ที่นี่)
+const PL_BUDGET = null;
 
-// ── Ground-truth account → group lookup (เรียนรู้จาก TYP.xlsx — 168 บัญชี) ──
-// เพื่อให้การ classify หลัง upload เป็น deterministic + auto-fill new-account UI
-// 2 type พิเศษจาก TYP ('Income tax payable' + 'Income tax') ถูก route ไป admin
-// ก่อน (ยังไม่มี group เฉพาะสำหรับภาษี — รออัปเดต report layout)
+// ── Optional per-account override (โดยปกติว่าง — BIO ใช้ prefix ล้วน) ──
+// ใส่เฉพาะบัญชีที่ prefix เดาผิด (rare). key = รหัสบัญชี (มี/ไม่มีขีดก็ได้)
 const PL_KNOWN_ACCOUNTS = {
-  '4100001':'saleGoods','4100002':'service','4100003':'saleGoods','4100004':'service',
-  '4200001':'saleGoods',
-  '4300002':'otherIncome','4300003':'otherIncome','4300004':'otherIncome','4300005':'otherIncome','4300006':'otherIncome','4300007':'otherIncome',
-  '4400001':'otherIncome','4400002':'otherIncome','4400003':'otherIncome',
-  '5110001':'cogs','5110002':'cogs','5110003':'cogs',
-  '5120000':'costService','5121001':'cogs','5130001':'cogs','5140001':'cogs',
-  '5200000':'cogs','5200001':'cogs','5200002':'commission','5200003':'cogs','5200004':'cogs','5200005':'costService','5200006':'cogs','5200007':'cogs','5200008':'cogs',
-  '5211001':'admin','5212001':'admin','5213001':'admin','5221000':'costService','5223000':'admin',
-  '5311001':'selling','5311002':'selling','5311003':'selling','5311004':'admin','5311005':'selling',
-  '5312002':'selling','5312003':'selling','5312004':'selling','5312005':'selling','5312006':'selling','5312008':'selling','5312009':'selling','5312010':'selling','5312011':'selling','5312012':'selling','5312013':'selling',
-  '5320001':'selling','5320002':'selling','5330002':'selling',
-  '5340002':'selling','5340004':'selling','5340005':'selling','5340007':'selling','5340008':'selling','5340009':'selling','5340010':'selling','5340012':'selling','5340013':'selling','5340014':'selling','5340015':'selling',
-  '5350001':'selling','5350002':'selling','5350003':'selling',
-  '5361002':'admin','5361003':'admin','5362001':'admin','5362002':'admin','5362003':'admin','5363005':'admin','5363006':'admin',
-  '5380001':'admin','5380002':'admin','5380003':'admin',
-  '6100001':'selling',
-  '6201003':'admin','6201004':'admin',
-  '6211001':'admin','6211002':'admin','6211003':'admin','6211004':'admin',
-  '6212001':'admin','6212002':'admin','6212003':'admin','6212004':'admin','6212005':'admin','6212006':'admin','6212007':'admin','6212008':'admin','6212009':'admin','6212010':'admin','6212011':'admin','6212012':'admin',
-  '6220001':'admin','6220002':'admin','6220003':'admin','6220004':'admin',
-  '6230001':'admin','6230002':'admin','6230003':'admin',
-  '6241001':'admin','6241002':'admin','6241003':'admin',
-  '6242001':'admin','6242002':'admin',
-  '6243001':'admin','6243002':'admin','6243003':'admin','6243004':'admin',
-  '6244001':'admin','6244002':'admin','6244003':'admin',
-  '6245001':'admin','6245002':'admin','6245003':'admin','6245004':'admin',
-  '6246001':'admin','6246003':'admin','6246004':'admin','6246007':'admin','6246008':'admin','6246009':'admin',
-  '6251001':'admin','6251002':'admin','6251003':'admin','6251004':'admin','6251005':'finance','6251006':'admin','6251007':'admin',
-  '6252001':'admin','6252002':'admin','6252003':'admin',
-  '6253002':'admin','6253003':'admin','6253006':'admin',
-  '6261002':'admin','6261003':'admin','6261004':'admin','6261005':'admin','6261006':'admin','6261007':'admin','6261008':'admin',
-  '6262002':'admin','6262003':'admin',
-  '6270001':'admin','6270002':'admin','6270003':'admin','6270004':'admin','6270005':'admin','6270006':'admin',
-  '7100001':'finance','7200001':'finance','7200002':'finance','7200003':'finance','7200004':'finance',
-  '7300001':'admin',
-  '7400001':'admin','7400002':'admin','7400003':'otherIncome','7401001':'admin','7401002':'otherIncome',
-  '7500001':'admin','7500002':'admin','7500003':'admin',
+  // '4120-99': 'otherIncome',   // ตัวอย่าง: ถ้ามีรหัสที่ต้องบังคับกลุ่มเอง
 };
 
 const PL_REVENUE_KEYS = { saleGoods: 1, service: 1, otherIncome: 1 };
@@ -150,77 +96,55 @@ function PL_fmtPct(v, opt) {
 }
 const PL_negCls = (v) => (typeof v === 'number' && v < 0) ? ' pnl-neg' : '';
 
-// ── infer group from chart-of-accounts code prefix (fallback only) ──
-// ปรับให้แม่นกับผังบัญชี BIOAXEL / WaterPOG (ตรวจกับ TB01.xlsx ม.ค. 2569)
-//   4100001  รายได้ค่าบริการก่อสร้าง         → saleGoods
-//   4100002  PM CM                            → service
-//   4100003  POC adjustment                   → saleGoods (contra)
-//   4100004  หลังการขาย                       → service
-//   4200001  ขายสินค้า                        → otherIncome (per legacy report bucket)
-//   4300xxx / 4400xxx                          → otherIncome
-//   5110xxx / 5121xxx / 5130xxx / 5140xxx     → cogs
-//   5200000 / 5200008                          → cogs
-//   5200002                                    → commission
-//   5120000 / 5200005 / 5221xxx               → costService
-//   5200001/3/4/6/7 / 5211xxx / 5213xxx / 5223xxx → costService
-//   53xxxxx                                    → selling
-//   54xxxxx / 55xxxxx / 6xxxxxx               → admin
-//   56xxxxx (& รายการมีคำว่า "ดอกเบี้ย")     → finance
+// ── infer group from BIO chart-of-accounts code prefix ──
+// BIO รหัส = NNNN-NN (เช่น 4110-01). จัดกลุ่มจาก 2 หลักแรก — ตรวจกับงบจริง
+// ม.ค.–พ.ค. 2569: ทุก subtotal (รายได้/ต้นทุนขาย/ขาย/บริหาร/การเงิน) ตรงถึงหลักสตางค์
+//   411x          → รายได้จากการขาย (saleGoods)        [4110, 4120]
+//   413x          → รายได้จากการให้บริการ (service)
+//   42xx / 44xx   → รายได้อื่น (otherIncome)            [รายได้อื่น/ส่วนลดรับ/ดอกเบี้ยรับ]
+//   51xx          → ต้นทุนขาย (cogs)
+//   52xx          → ค่าใช้จ่ายในการขาย (selling)
+//   53xx/54xx/55xx→ ค่าใช้จ่ายในการบริหาร (admin)        [รวมค่าเสื่อม 5410 / ตัดจำหน่าย 5420 / FX 5500]
+//   71xx / 72xx   → ต้นทุนทางการเงิน (finance)          [ดอกเบี้ยจ่าย / ดบ.เช่าซื้อ]
 function PL_inferGroup(code, name) {
-  const c = String(code || '').replace(/[^0-9]/g, '');
+  const raw = String(code || '').trim();
+  const c = raw.replace(/[^0-9]/g, '');
   const n = String(name || '');
   if (!c) return null;
-  // 0) บัญชีพัก / งบดุล — ไม่อยู่ในงบกำไรขาดทุน (เช่น 7900002 ลูกหนี้-เจ้าหนี้ ตั้งพัก)
-  //    กันออกถาวร ไม่ว่าจะหลุดมาในไฟล์หรือค้างจาก import เก่า
-  if (/ตั้งพัก|พักรอ|suspense|clearing/i.test(n)) return null;
-  if (c.slice(0, 2) === '79') return null;
-  // 1) ground-truth จาก TYP.xlsx ก่อน — แม่นยำ 100% สำหรับ 168 บัญชีที่บัญชีระบุไว้
+  // override รายตัว (ถ้ามี) — รองรับทั้งมี/ไม่มีขีด
+  if (PL_KNOWN_ACCOUNTS[raw]) return PL_KNOWN_ACCOUNTS[raw];
   if (PL_KNOWN_ACCOUNTS[c]) return PL_KNOWN_ACCOUNTS[c];
-  // prefix rules
-  const p2 = c.slice(0, 2), p3 = c.slice(0, 3), p4 = c.slice(0, 4);
+  // บัญชีพัก / งบดุล — ไม่อยู่ในงบกำไรขาดทุน
+  if (/ตั้งพัก|พักรอ|suspense|clearing/i.test(n)) return null;
+  const p2 = c.slice(0, 2), p3 = c.slice(0, 3);
+  // รายได้
+  if (p2 === '41') return (p3 === '413') ? 'service' : 'saleGoods';   // 4130 = บริการ, ที่เหลือ = ขาย
+  if (p2 === '42' || p2 === '44') return 'otherIncome';
+  // ต้นทุน / ค่าใช้จ่าย
+  if (p2 === '51') return 'cogs';
+  if (p2 === '52') return 'selling';
+  if (p2 === '53' || p2 === '54' || p2 === '55') return 'admin';
+  if (p2 === '71' || p2 === '72') return 'finance';
+  // เผื่อผังบัญชีขยายในอนาคต (fallback แบบอนุรักษ์)
   const first = c[0];
-  // revenue
-  if (p2 === '41') return 'saleGoods';
-  if (p2 === '42' || p2 === '43' || p2 === '44' || p2 === '49') return 'otherIncome';
-  // expense: finance-keyword (ดอกเบี้ย/ค่าธรรมเนียมธนาคาร) — applies only to 5xxx/6xxx/7xxx, not 4xxx (interest income)
-  if (first !== '4' && /ดอกเบี้ย|ค่าธรรมเนียมธนาคาร|interest|bank\s*fee/i.test(n)) return 'finance';
-  // cogs (construction materials / direct labor / POC cost / extra work)
-  if (p3 === '511' || (p3 === '512' && p4 !== '5120') || p3 === '513' || p3 === '514') return 'cogs';
-  if (c === '5200000' || c === '5200008') return 'cogs';
-  // costService (rest of 52xxxxx + 521xxx-523xxx)
-  if (p2 === '52') return 'costService';
-  // selling (marketing dept)
-  if (p2 === '53') return 'selling';
-  // admin (back-office + 6xxxxx general overhead)
-  if (p2 === '54' || p2 === '55' || first === '6') return 'admin';
-  // finance prefix
-  if (p2 === '56') return 'finance';
-  // 7xxx: tax / dividend / financing-service / suspense
-  if (first === '7') {
-    if (p2 === '74') return 'admin';            // ภาษีเงินได้
-    if (p2 === '75') return 'finance';          // ค่าบริการทางการเงิน (STS/factoring)
-    if (p2 === '73') return 'admin';            // เงินปันผลจ่าย (treated as admin appropriation)
-    return 'admin';                              // 79xx suspense etc.
-  }
-  // last-resort
   if (first === '4') return 'otherIncome';
+  if (first === '7') return /ดอกเบี้ย|interest|เช่าซื้อ|กู้ยืม|ค่าธรรมเนียมธนาคาร|bank\s*fee/i.test(n) ? 'finance' : 'admin';
   if (first === '5' || first === '6') return 'admin';
   return null;
 }
 
 // Sample data (design mock) — used ONLY when ฐาน DATA can't be read yet.
 const PL_SAMPLE = {
-  lastMonth: 4,
+  year: 2569,
+  lastMonth: 5,
   groups: {
-    saleGoods:   [17428766.05, 38129318.29, 39416963.70, 33566347.43, 0,0,0,0,0,0,0,0],
-    service:     [ 1914212.90,  1884933.35,  1546591.84,  1718591.79, 0,0,0,0,0,0,0,0],
-    otherIncome: [  245257.76,   269864.52,  -388345.17,   109361.66, 0,0,0,0,0,0,0,0],
-    cogs:        [13328720.46, 29080923.21, 36681133.79, 21037218.98, 0,0,0,0,0,0,0,0],
-    costService: [ 1930712.73,  1790991.10,  1067633.80,  1635288.68, 0,0,0,0,0,0,0,0],
-    commission:  [ 2280067.83,  1563171.83,  3007320.42,  1824827.56, 0,0,0,0,0,0,0,0],
-    selling:     [  983985.43,   948741.28,   802137.10,   959612.65, 0,0,0,0,0,0,0,0],
-    admin:       [ 8574563.13, 11571532.94, 11540779.64,  8429023.06, 0,0,0,0,0,0,0,0],
-    finance:     [ 4174039.65,  4026281.01,  3786441.08,  4039440.82, 0,0,0,0,0,0,0,0],
+    saleGoods:   [1380317, 39681, 170714, 9290956, 6756583, 0,0,0,0,0,0,0],
+    service:     [   4673,  9346,   4673,    4673,    4673, 0,0,0,0,0,0,0],
+    otherIncome: [    867,  1367,   1501,    4846,     550, 0,0,0,0,0,0,0],
+    cogs:        [1733121, 238010, 615942, 8085423, 5237102, 0,0,0,0,0,0,0],
+    selling:     [ 554800,1036142, 638341,  788332,  244113, 0,0,0,0,0,0,0],
+    admin:       [2868640,3227749,3374152, 2812765, 2158410, 0,0,0,0,0,0,0],
+    finance:     [ 971198, 868800,1001539,  733157,  638892, 0,0,0,0,0,0,0],
   },
 };
 
@@ -292,25 +216,32 @@ function PL_parseRows(rows) {
   for (let m = 0; m < 12; m++) {
     if (PL_GROUP_ORDER.some(k => Math.abs(groups[k][m]) > 0.005)) lastMonth = m + 1;
   }
-  return { groups, accounts, lastMonth: lastMonth || 1 };
+  // ปีบัญชี (พ.ศ.) — อ่านจาก field year ของแถวที่อัปไว้ (ถ้ามี)
+  let year = 0;
+  const yKey = findKey(['year', 'ปี', 'ปีบัญชี']);
+  if (yKey) { for (const r of rows) { const y = Number(r[yKey]); if (y) { year = y; break; } } }
+  return { groups, accounts, lastMonth: lastMonth || 1, year: year || 0 };
 }
 
-// ── compute subtotals (ported verbatim from design PL_compute) ──
+// ── compute subtotals (โครงสร้าง BIO) ──
+// รายได้ − ต้นทุนขาย = ขั้นต้น − (ขาย+บริหาร) = ก่อนต้นทุนการเงิน − การเงิน = สุทธิ
 function PL_compute(d, lastMonth) {
   const salesRevenue  = PL_addArr(d.saleGoods, d.service);
   const totalRevenue  = PL_addArr(salesRevenue, d.otherIncome);
-  // ต้นทุนงานก่อสร้าง = Cost of goods sold + Cost of service + Commission (รวม 3 รายการ)
-  const constructCost = PL_addArr(PL_addArr(d.cogs, d.costService), d.commission);
-  const totalCost     = constructCost;
+  // ต้นทุนขาย = COGS อย่างเดียว (BIO ไม่มี cost of service / commission แยกบรรทัด)
+  const totalCost     = d.cogs.slice();
   const grossProfit   = totalRevenue.map((v, i) => v - totalCost[i]);
   const gpMargin      = grossProfit.map((v, i) => totalRevenue[i] ? (v / totalRevenue[i] * 100) : NaN);
-  const totalSGA      = PL_addArr(PL_addArr(d.selling, d.admin), d.finance);
-  const netProfit     = grossProfit.map((v, i) => v - totalSGA[i]);
+  // ค่าใช้จ่ายขายและบริหาร = ขาย + บริหาร (ไม่รวมต้นทุนการเงิน — แยกบรรทัดหลังกำไรก่อนการเงิน)
+  const totalSGA      = PL_addArr(d.selling, d.admin);
+  const profitBeforeFinance = grossProfit.map((v, i) => v - totalSGA[i]);
+  const financeCost   = d.finance.slice();
+  const netProfit     = profitBeforeFinance.map((v, i) => v - financeCost[i]);
   const trend = netProfit.map((v, i) => {
     if (i === 0 || netProfit[i - 1] === 0 || i >= lastMonth) return NaN;
     return (v - netProfit[i - 1]) / Math.abs(netProfit[i - 1]) * 100;
   });
-  return { salesRevenue, totalRevenue, constructCost, totalCost, grossProfit, gpMargin, totalSGA, netProfit, trend };
+  return { salesRevenue, totalRevenue, totalCost, grossProfit, gpMargin, totalSGA, profitBeforeFinance, financeCost, netProfit, trend };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -335,31 +266,31 @@ function PnLPage({ data, setData, toast }) {
 
   const userCanEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
 
+  const sampleModel = () => ({ groups: PL_SAMPLE.groups, accounts: {}, lastMonth: PL_SAMPLE.lastMonth, year: PL_SAMPLE.year });
   const loadData = () => {
     setLoading(true);
     if (!window.WTPData || !WTPData.fetchSheetRows) {
-      setModel(PL_SAMPLE.groups ? { groups: PL_SAMPLE.groups, accounts: {}, lastMonth: PL_SAMPLE.lastMonth } : null);
+      setModel(sampleModel());
       setIsSample(true); setLoading(false); return;
     }
     WTPData.fetchSheetRows(PL_SHEET)
       .then(rows => {
         const parsed = PL_parseRows(rows);
         if (parsed) { setModel(parsed); setIsSample(false); }
-        else { setModel({ groups: PL_SAMPLE.groups, accounts: {}, lastMonth: PL_SAMPLE.lastMonth }); setIsSample(true); }
+        else { setModel(sampleModel()); setIsSample(true); }
       })
-      .catch(() => { setModel({ groups: PL_SAMPLE.groups, accounts: {}, lastMonth: PL_SAMPLE.lastMonth }); setIsSample(true); })
+      .catch(() => { setModel(sampleModel()); setIsSample(true); })
       .finally(() => setLoading(false));
   };
   plEffect(() => { loadData(); }, []);
 
   const lastMonth = model ? model.lastMonth : 0;
   const groups = model ? model.groups : null;
+  const plYear = (model && model.year) || PL_YEAR_DEFAULT;
   const comp = plMemo(() => groups ? PL_compute(groups, lastMonth) : null, [groups, lastMonth]);
 
-  // default month to import = next month after last data
-  const [impMonth, setImpMonth] = plState(1);
-  const [impAudit, setImpAudit] = plState('PRE-CLOSING');
-  plEffect(() => { setImpMonth(Math.min((lastMonth || 0) + 1, 12) || 1); }, [lastMonth]);
+  // ผลการ parse ไฟล์ล่าสุด (ใช้ส่ง postImportFull หลังจัดกลุ่มบัญชีใหม่)
+  const [lastParsed, setLastParsed] = plState(null);
 
   // known account codes (for new-account detection)
   const knownCodes = plMemo(() => {
@@ -380,84 +311,107 @@ function PnLPage({ data, setData, toast }) {
   const pickFile = (f) => { if (f) setFile(f); };
   const onDrop = (e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]); };
 
-  // parse the uploaded workbook → [{code,name,amount}] for the chosen month
+  // ── parse ชีต PL (งบเปรียบเทียบรายเดือนของ BIO) ──
+  // โครงสร้าง: หัวคอลัมน์เดือน = date-serial (1 ม.ค. / 1 ก.พ. …) + คอลัมน์ "รวม"
+  //            แต่ละแถว = รหัสบัญชี NNNN-NN + ชื่อ + ยอดรายเดือน
+  // คืน { accounts:[{code,name,m:[12]}], monthsPresent:[..], year:พ.ศ., monthsLabel }
   const parseWorkbook = (f) => new Promise((resolve, reject) => {
     if (!window.XLSX) { reject(new Error('ไม่พบไลบรารี SheetJS — รีเฟรชหน้า')); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false, cellNF: true });
-        // prefer a sheet named like DATA INPUT, else first sheet
-        const sn = wb.SheetNames.find(n => /data\s*input|input|ฐาน/i.test(n)) || wb.SheetNames[0];
-        const ws = wb.Sheets[sn];
-        const aoa = window.XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
-        if (!aoa.length) { resolve([]); return; }
-        // find header row (the one containing a code-ish + amount-ish column)
-        let hdrIdx = 0;
-        for (let i = 0; i < Math.min(aoa.length, 8); i++) {
-          const joined = aoa[i].map(c => String(c || '').toLowerCase()).join('|');
-          if (/code|รหัส|ชื่อบัญชี|name|amount|ยอด|จำนวน/.test(joined)) { hdrIdx = i; break; }
+        const X = window.XLSX;
+        const wb = X.read(e.target.result, { type: 'array', cellDates: false });
+        const codeRe = /^\d{4}-\d{1,2}$/;       // รูปแบบ BIO (4110-01)
+        const codeReLoose = /^\d{4,7}$/;        // เผื่อไฟล์รุ่นไม่มีขีด
+        const isCode = (s) => codeRe.test(s) || codeReLoose.test(s);
+        // เลือกชีต: ชื่อ "PL" ก่อน, ไม่งั้นชีตที่มีรหัสบัญชีเยอะสุด
+        const aoaOf = (n) => X.utils.sheet_to_json(wb.Sheets[n], { header: 1, blankrows: false });
+        let sn = wb.SheetNames.find(n => /^pl$/i.test(String(n).trim()));
+        if (!sn) sn = wb.SheetNames.find(n => /กำไรขาดทุน|งบกำไร|p\s*&\s*l|profit/i.test(String(n)));
+        if (!sn) {
+          let bestSn = wb.SheetNames[0], bestCnt = -1;
+          wb.SheetNames.forEach(n => {
+            let cnt = 0; aoaOf(n).forEach(r => (r || []).forEach(c => { if (isCode(String(c == null ? '' : c).trim())) cnt++; }));
+            if (cnt > bestCnt) { bestCnt = cnt; bestSn = n; }
+          });
+          sn = bestSn;
         }
-        // normalize header row: บังคับให้ทุกช่องเป็น string (ป้องกัน sparse slot จาก XLSX
-        // เช่น col L ใน TB01 ที่ไม่มี header — findCol second-pass เคยพังตรงนี้)
-        const hdrRaw = aoa[hdrIdx] || [];
-        const hdr = [];
-        for (let i = 0; i < hdrRaw.length; i++) hdr[i] = String(hdrRaw[i] == null ? '' : hdrRaw[i]).trim().toLowerCase();
-        // findCol: 2-pass — ตรงตัวก่อน (exact match) แล้วจึง substring
-        // เพื่อให้ 'ac_code' ชนะ 'maincode' (ทั้งคู่มี 'code' เป็น substring)
-        const findCol = (names) => {
-          for (const n of names) { for (let i = 0; i < hdr.length; i++) { if (hdr[i] === n) return i; } }
-          for (const n of names) { for (let i = 0; i < hdr.length; i++) { if (hdr[i] && hdr[i].indexOf(n) >= 0) return i; } }
-          return -1;
+        const aoa = aoaOf(sn);
+        if (!aoa.length) { resolve({ accounts: [], monthsPresent: [], year: 0, monthsLabel: '' }); return; }
+
+        // serial (Excel 1900) → { month, year(ค.ศ.) }
+        const serialMonth = (serial) => {
+          const d = new Date(Math.round((Number(serial) - 25569) * 86400000));
+          return { month: d.getUTCMonth() + 1, year: d.getUTCFullYear() };
         };
-        const cCol = findCol(['ac_code', 'code', 'รหัสบัญชี', 'รหัส', 'maincode']);
-        const nCol = findCol(['ac_des', 'ชื่อบัญชี', 'name', 'description', 'desc', 'รายการ']);
-        const aCol = findCol(['amount', 'ยอด', 'จำนวน', 'net', 'total']);
-        // หลัก: คำนวณจาก cur_dr / cur_cr (ของเดือนนั้น) ตามประเภทบัญชี
-        //   Revenue (4xxx) : amount = cur_cr − cur_dr   (บวก = revenue ปกติ)
-        //   Expense (5xxx+): amount = cur_dr − cur_cr   (บวก = expense ปกติ)
-        // วิธีนี้รองรับทั้ง:
-        //   - TB01 (col L = signed-by-type, positive)
-        //   - TB02+ (col L = uniform =I-H, expense negative)
-        //   - Cost reversal (เช่น TB04 5140001 cur_cr=2M, cur_dr=0 → −2M = "ลดต้นทุน" ✓)
-        // ใช้ col L เฉพาะเป็น fallback ถ้าไม่มี cur_dr/cur_cr
-        const cdrCol = findCol(['cur_dr', 'cur dr', 'curdr']);
-        const ccrCol = findCol(['cur_cr', 'cur cr', 'curcr']);
-        const lCol = 11;
-        const num = (v) => {
-          const n = Number(String(v == null ? '' : v).replace(/[^0-9.\-]/g, ''));
-          return isNaN(n) ? 0 : n;
-        };
-        const out = [];
+        const isSerial = (v) => typeof v === 'number' && v >= 40000 && v <= 60000;
+
+        // 1) หาแถวหัวคอลัมน์เดือน (≥3 cell ที่เป็น date-serial) → ได้คอลัมน์เดือน + ปี
+        let hdrIdx = -1, monthCols = [], yearCE = 0;
+        for (let i = 0; i < Math.min(aoa.length, 14); i++) {
+          const row = aoa[i] || [], cols = [];
+          for (let c = 0; c < row.length; c++) {
+            if (isSerial(row[c])) { const sm = serialMonth(row[c]); cols.push({ col: c, month: sm.month }); if (!yearCE) yearCE = sm.year; }
+          }
+          if (cols.length >= 3) { hdrIdx = i; monthCols = cols; break; }
+        }
+        // fallback: หัวคอลัมน์เป็นชื่อเดือนไทย (ม.ค./มกราคม)
+        if (hdrIdx < 0) {
+          for (let i = 0; i < Math.min(aoa.length, 14); i++) {
+            const row = aoa[i] || [], cols = [];
+            for (let c = 0; c < row.length; c++) {
+              const s = String(row[c] == null ? '' : row[c]).trim();
+              let mi = PL_MONTHS_TH.findIndex(m => s.indexOf(m) === 0);
+              if (mi < 0) mi = PL_MONTHS_TH_FULL.findIndex(m => s.indexOf(m) === 0);
+              if (mi >= 0) cols.push({ col: c, month: mi + 1 });
+            }
+            if (cols.length >= 3) { hdrIdx = i; monthCols = cols; break; }
+          }
+        }
+        if (hdrIdx < 0) { resolve({ accounts: [], monthsPresent: [], year: 0, monthsLabel: '' }); return; }
+
+        // 2) หาคอลัมน์รหัสบัญชี (คอลัมน์ที่มีค่า match รหัสมากสุด)
+        const colHits = {};
         for (let i = hdrIdx + 1; i < aoa.length; i++) {
-          const row = aoa[i];
-          const code = cCol >= 0 ? String(row[cCol] || '').trim() : '';
-          if (!code) continue;
-          const first = String(code).trim().charAt(0);
-          let amount = 0;
-          if (aCol >= 0) {
-            amount = num(row[aCol]);
-          } else if (cdrCol >= 0 && ccrCol >= 0) {
-            const cdr = num(row[cdrCol]), ccr = num(row[ccrCol]);
-            amount = first === '4' ? (ccr - cdr) : (cdr - ccr);
-          } else {
-            // fallback: col L + sign normalize สำหรับ expense
-            amount = num(row[lCol]);
-            if (first !== '4' && amount < 0) amount = -amount;
-          }
-          out.push({ code, name: nCol >= 0 ? String(row[nCol] || '').trim() : '', amount });
+          const row = aoa[i] || [];
+          for (let c = 0; c < row.length; c++) { if (isCode(String(row[c] == null ? '' : row[c]).trim())) colHits[c] = (colHits[c] || 0) + 1; }
         }
-        // ── Clean-missing feature ──────────────────────────────────────────────
-        // เพิ่มบัญชีที่อยู่ใน TYP ground-truth แต่ "ไม่อยู่ในไฟล์เดือนนั้น" ด้วย amount=0
-        // เพื่อให้ Apps Script ทับ m{month} เป็น 0 → ลบยอดค้างจาก upload เก่าที่ผิด
-        // (เช่น upload TB02 ตอนเลือกเดือน 1 → m1 ของ 6220002 ค้างอยู่ 14,360 → reset เป็น 0)
-        const seenCodes = new Set(out.map(a => String(a.code).replace(/[^0-9]/g, '')));
-        for (const knownCode of Object.keys(PL_KNOWN_ACCOUNTS)) {
-          if (!seenCodes.has(knownCode)) {
-            out.push({ code: knownCode, name: '', amount: 0 });
-          }
+        let codeCol = -1, best = 0;
+        Object.keys(colHits).forEach(c => { if (colHits[c] > best) { best = colHits[c]; codeCol = Number(c); } });
+        if (codeCol < 0) { resolve({ accounts: [], monthsPresent: [], year: 0, monthsLabel: '' }); return; }
+        const nameCol = codeCol + 1;
+
+        const num = (v) => {
+          if (v == null || v === '') return 0;
+          if (typeof v === 'number') return v;
+          let s = String(v).trim(), neg = false;
+          if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+          s = s.replace(/[^0-9.\-]/g, '');
+          const n = Number(s);
+          return isNaN(n) ? 0 : (neg ? -Math.abs(n) : n);
+        };
+
+        // 3) อ่านรายบัญชี (aggregate ถ้ารหัสซ้ำ — เช่น 7100-01 โผล่ 2 แถว)
+        const byCode = {};
+        for (let i = hdrIdx + 1; i < aoa.length; i++) {
+          const row = aoa[i] || [];
+          const code = String(row[codeCol] == null ? '' : row[codeCol]).trim();
+          if (!isCode(code)) continue;           // ข้ามแถว section/subtotal (ไม่มีรหัส)
+          const name = String(row[nameCol] == null ? '' : row[nameCol]).trim();
+          let rec = byCode[code];
+          if (!rec) rec = byCode[code] = { code, name, m: new Array(12).fill(0) };
+          if (!rec.name && name) rec.name = name;
+          monthCols.forEach(mc => { rec.m[mc.month - 1] += num(row[mc.col]); });
         }
-        resolve(out);
+        const accounts = Object.keys(byCode).map(c => byCode[c]);
+        const monthsPresent = monthCols.map(mc => mc.month).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+        const year = yearCE ? yearCE + 543 : 0;   // ค.ศ. → พ.ศ.
+        const mn = monthsPresent;
+        const monthsLabel = mn.length
+          ? (mn.length > 1 ? PL_MONTHS_TH[mn[0] - 1] + '–' + PL_MONTHS_TH[mn[mn.length - 1] - 1] : PL_MONTHS_TH[mn[0] - 1]) + (year ? ' ' + year : '')
+          : '';
+        resolve({ accounts, monthsPresent, year, monthsLabel });
       } catch (err) { reject(err); }
     };
     reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
@@ -468,90 +422,54 @@ function PnLPage({ data, setData, toast }) {
     if (!file) { toast('โปรดเลือกไฟล์ก่อนนำเข้า'); return; }
     setBusy(true);
     try {
-      const accts = await parseWorkbook(file);
-      if (!accts.length) { toast('ไม่พบรายการบัญชีในไฟล์ — ตรวจหัวคอลัมน์ (code/name/amount)'); setBusy(false); return; }
-      // "ใหม่" = ไม่อยู่ใน ฐาน DATA cloud + ไม่อยู่ใน TYP ground-truth (PL_KNOWN_ACCOUNTS)
-      // → บัญชีที่ TYP รู้จักอยู่แล้วจะถูก pre-classify เงียบๆ ไม่ต้อง popup ให้พี่จัดกลุ่มเอง
-      const unknown = accts.filter(a => {
-        const code = String(a.code).trim();
-        return !knownCodes.has(code) && !PL_KNOWN_ACCOUNTS[code.replace(/[^0-9]/g, '')];
-      });
-      if (unknown.length) {
-        setNewAccts(unknown.map(a => ({ ...a, group: PL_inferGroup(a.code, a.name) || '' })));
-        toast('พบผังบัญชีใหม่ ' + unknown.length + ' รายการ — โปรดจัดประเภท (อีก ' + (accts.length - unknown.length) + ' รายการ ระบบจัดให้แล้ว)');
-        setUploadOpen(false);
-        setBusy(false);
-      } else {
-        toast('จัดกลุ่มจาก TYP ครบ ' + accts.length + ' รายการ · กำลังบันทึก…');
-        await postImport(accts, []);
+      const parsed = await parseWorkbook(file);
+      if (!parsed || !parsed.accounts.length) {
+        toast('ไม่พบรายการบัญชีในไฟล์ — ต้องมีชีต PL ที่มีคอลัมน์รหัสบัญชี + หัวคอลัมน์เป็นเดือน'); setBusy(false); return;
       }
-    } catch (err) { toast('ผิดพลาด: ' + err.message); setBusy(false); }
+      setLastParsed(parsed);
+      // "ใหม่" = บัญชีที่ prefix จัดกลุ่มอัตโนมัติไม่ได้ (ปกติ = 0 สำหรับผังบัญชี BIO)
+      const unknown = parsed.accounts.filter(a => !PL_inferGroup(a.code, a.name));
+      if (unknown.length) {
+        setNewAccts(unknown.map(a => ({ code: a.code, name: a.name, amount: PL_sum(a.m, 12), group: '' })));
+        toast('พบผังบัญชีที่จัดกลุ่มอัตโนมัติไม่ได้ ' + unknown.length + ' รายการ — โปรดจัดประเภท (อีก ' + (parsed.accounts.length - unknown.length) + ' รายการ ระบบจัดให้แล้ว)');
+        setUploadOpen(false); setBusy(false);
+      } else {
+        toast('อ่านงบ ' + parsed.monthsLabel + ' · ' + parsed.accounts.length + ' บัญชี · กำลังบันทึก…');
+        await postImportFull(parsed, {});
+      }
+    } catch (err) { toast('ผิดพลาด: ' + (err && err.message || err)); setBusy(false); }
   };
 
-  // นำเข้า P&L ลง Supabase (ตาราง pnlBase) — aggregate รายเดือนฝั่ง client
-  //   (ย้าย logic plUpsertBase_ จาก Apps Script มาทำที่นี่: set m{month} ต่อ code,
-  //    เพิ่ม code ใหม่, เคลียร์ m{month}=0 ของ code ที่ไม่อยู่ในไฟล์ใหม่) แล้วเขียนทั้งตารางกลับ
-  const postImport = async (accounts, newClassified) => {
+  // นำเข้างบทั้งชีต PL ลง Supabase (ตาราง pnlBase) — เขียนทับทั้งตาราง (id = code)
+  //   "อัปทั้งชีต = เห็นทั้งชีต": บัญชีที่ไม่อยู่ในไฟล์ใหม่จะหายจากฐาน, เดือนที่ไม่มีในไฟล์ = 0
+  const postImportFull = async (parsed, groupOverride) => {
     if (!window.WTPData || !window.WTPData.writeTable) { toast('ระบบยังไม่พร้อม'); setBusy(false); return; }
-    const month = Number(impMonth);
-    if (!(month >= 1 && month <= 12)) { toast('เดือนไม่ถูกต้อง (1–12)'); setBusy(false); return; }
-    const mKey = 'm' + month;
-    const newGroupByCode = {};
-    (newClassified || []).forEach(a => { const c = String(a.code).trim(); if (c) newGroupByCode[c] = a.group || ''; });
+    if (!parsed || !parsed.accounts.length) { toast('ไม่มีข้อมูลให้บันทึก'); setBusy(false); return; }
     setBusy(true);
     try {
-      // 1) โหลด base ปัจจุบัน
-      const baseRows = await window.WTPData.fetchSheetRows('pnlBase');
-      const byCode = {};
-      (baseRows || []).forEach(r => { const c = String(r.code || '').trim(); if (c) byCode[c] = Object.assign({}, r); });
-      // 2) upsert ยอดเดือน month ต่อ code
       const now = new Date().toISOString().slice(0, 10);
-      const fileCodes = {};
-      let created = 0, updated = 0;
-      accounts.forEach(a => {
-        const code = String(a.code).trim(); if (!code) return;
-        fileCodes[code] = 1;
-        const grp = newGroupByCode[code] || a.group || PL_inferGroup(a.code, a.name) || '';
-        const amount = Number(a.amount) || 0;
-        let row = byCode[code];
-        if (row) {
-          row[mKey] = amount;
-          if (!String(row.name || '').trim() && a.name) row.name = a.name;
-          if (!String(row.group || '').trim() && grp) row.group = grp;
-          row.updatedAt = now; updated++;
-        } else {
-          row = { code: code, name: a.name || '', group: grp };
-          for (let m = 1; m <= 12; m++) row['m' + m] = (m === month ? amount : 0);
-          row.updatedAt = now;
-          byCode[code] = row; created++;
-        }
-      });
-      // 3) เคลียร์ m{month}=0 ของ code ที่ไม่อยู่ในไฟล์ใหม่ (ยึดไฟล์ใหม่)
-      const cleared = [];
-      Object.keys(byCode).forEach(code => {
-        if (fileCodes[code]) return;
-        const prev = Number(byCode[code][mKey]) || 0;
-        if (Math.abs(prev) > 0.005) { byCode[code][mKey] = 0; byCode[code].updatedAt = now; cleared.push({ code: code, name: byCode[code].name || '', amount: prev }); }
-      });
-      // 4) เขียนทั้งตารางกลับ Supabase (id = code)
-      const out = Object.keys(byCode).map(c => byCode[c]);
-      await window.WTPData.writeTable('pnlBase', out, r => String(r.code));
-      if (cleared.length) {
-        const names = cleared.slice(0, 4).map(a => (a.code || '') + ' ' + (a.name || '')).join(', ');
-        toast('นำเข้าเดือน ' + PL_MONTHS_TH[month - 1] + ' สำเร็จ · ตัด ' + cleared.length + ' บัญชีที่ไม่อยู่ในไฟล์ (' + names + (cleared.length > 4 ? ' …' : '') + ') — กำลังรีเฟรช');
-      } else {
-        toast('นำเข้าเดือน ' + PL_MONTHS_TH[month - 1] + ' สำเร็จ (เพิ่ม ' + created + ' · อัปเดต ' + updated + ') — กำลังรีเฟรช');
-      }
-      setNewAccts(null); setFile(null); setUploadOpen(false);
+      const rows = parsed.accounts.map(a => {
+        const code = String(a.code).trim();
+        const grp = (groupOverride && groupOverride[code]) || PL_inferGroup(code, a.name) || '';
+        const row = { code, name: a.name || '', group: grp, year: parsed.year || PL_YEAR_DEFAULT, updatedAt: now };
+        for (let m = 1; m <= 12; m++) row['m' + m] = Number(a.m[m - 1]) || 0;
+        return row;
+      }).filter(r => r.group);   // กันบัญชีที่จัดกลุ่มไม่ได้หลุดเข้าฐาน (ปกติไม่มี)
+      if (!rows.length) { toast('จัดกลุ่มบัญชีไม่สำเร็จ — โปรดตรวจผังบัญชี'); setBusy(false); return; }
+      await window.WTPData.writeTable('pnlBase', rows, r => String(r.code));
+      toast('นำเข้างบ ' + (parsed.monthsLabel || '') + ' สำเร็จ (' + rows.length + ' บัญชี) — กำลังรีเฟรช');
+      setNewAccts(null); setFile(null); setUploadOpen(false); setLastParsed(null);
       setTimeout(loadData, 600);
     } catch (err) { toast('นำเข้าไม่สำเร็จ: ' + (err && err.message || err)); }
     finally { setBusy(false); }
   };
 
   const confirmNewAccounts = () => {
-    if (!newAccts) return;
+    if (!newAccts || !lastParsed) { toast('กรุณาอัปโหลดไฟล์ใหม่อีกครั้ง'); setNewAccts(null); return; }
     if (newAccts.some(a => !a.group)) { toast('โปรดจัดประเภทให้ครบทุกรายการ'); return; }
-    postImport(newAccts, newAccts);
+    const override = {};
+    newAccts.forEach(a => { const c = String(a.code).trim(); if (c) override[c] = a.group; });
+    postImportFull(lastParsed, override);
   };
 
   // ── derived KPI numbers ──
@@ -604,22 +522,20 @@ function PnLPage({ data, setData, toast }) {
   const d = groups;
   const c = comp;
   const reportRows = [
-    { label: 'Reveneue from sale of goods', arr: d.saleGoods,   indent: true, key: 'saleGoods' },
-    { label: 'Reveneue from service',       arr: d.service,     indent: true, key: 'service' },
-    { label: 'รายได้จากการขาย',             arr: c.salesRevenue, cls: 'pnl-sub' },
-    { label: 'Other income',                arr: d.otherIncome, indent: true, key: 'otherIncome' },
+    { label: 'Revenue from sale of goods (รายได้จากการขาย)', arr: d.saleGoods,   indent: true, key: 'saleGoods' },
+    { label: 'Revenue from service (รายได้จากการให้บริการ)',  arr: d.service,     indent: true, key: 'service' },
+    { label: 'รายได้จากการขายและบริการ',     arr: c.salesRevenue, cls: 'pnl-sub' },
+    { label: 'Other income (รายได้อื่น)',     arr: d.otherIncome, indent: true, key: 'otherIncome' },
     { label: 'รวมรายได้',                   arr: c.totalRevenue, cls: 'pnl-strong' },
-    { label: 'Cost of goods sold',          arr: d.cogs,        indent: true, key: 'cogs' },
-    { label: 'Cost of service',             arr: d.costService, indent: true, key: 'costService' },
-    { label: 'Commission',                  arr: d.commission,  indent: true, key: 'commission' },
-    { label: 'ต้นทุนงานก่อสร้าง',           arr: c.constructCost, cls: 'pnl-strong' },
-    { label: 'Gross Profit',                arr: c.grossProfit, cls: 'pnl-gp' },
+    { label: 'Cost of sales (ต้นทุนขาย)',     arr: d.cogs,        indent: true, key: 'cogs' },
+    { label: 'กำไร(ขาดทุน)ขั้นต้น',          arr: c.grossProfit, cls: 'pnl-gp' },
     { label: '% margin',                    arr: c.gpMargin,    cls: 'pnl-pct', pct: true, totalVal: (PL_sum(c.totalRevenue, lastMonth) ? PL_sum(c.grossProfit, lastMonth) / PL_sum(c.totalRevenue, lastMonth) * 100 : NaN) },
-    { label: 'Selling expenses',            arr: d.selling,     indent: true, key: 'selling' },
-    { label: 'Administrative expenses',     arr: d.admin,       indent: true, key: 'admin' },
-    { label: 'Finance costs',               arr: d.finance,     indent: true, key: 'finance' },
-    { label: 'รวมค่าใช้จ่ายขายและบริหาร',    arr: c.totalSGA,    cls: 'pnl-strong' },
-    { label: 'Net Profit',                  arr: c.netProfit,   cls: 'pnl-net' },
+    { label: 'Selling expenses (ค่าใช้จ่ายในการขาย)',        arr: d.selling,     indent: true, key: 'selling' },
+    { label: 'Administrative expenses (ค่าใช้จ่ายในการบริหาร)', arr: d.admin,    indent: true, key: 'admin' },
+    { label: 'รวมค่าใช้จ่ายในการขายและบริหาร', arr: c.totalSGA,  cls: 'pnl-strong' },
+    { label: 'กำไร(ขาดทุน)ก่อนต้นทุนทางการเงิน', arr: c.profitBeforeFinance, cls: 'pnl-sub' },
+    { label: 'Finance costs (ต้นทุนทางการเงิน)', arr: d.finance, indent: true, key: 'finance' },
+    { label: 'กำไร(ขาดทุน)สุทธิ',            arr: c.netProfit,   cls: 'pnl-net' },
     { label: 'Trend %',                     arr: c.trend,       cls: 'pnl-pct', pct: true, totalVal: NaN },
   ];
 
@@ -629,15 +545,14 @@ function PnLPage({ data, setData, toast }) {
     return <td key={Math.random()} className={'pnl-num' + PL_negCls(v)}>{has ? txt : '—'}</td>;
   };
 
-  // budget 2569 — จากไฟล์ DATA Budget.xlsx (sheet "ประมาณการกำไร ขาดทุน")
-  // เปรียบเทียบ "รวมทั้งปี" (YTD actual) กับงบประมาณประจำปี
-  const budgetRows = [
-    { name: 'รายได้รวม',                actual: k.revenue,                       target: PL_BUDGET_2569.revenue,     dir: 'higher' },
-    { name: 'ต้นทุนรวม',                actual: k.cost,                          target: PL_BUDGET_2569.totalCost,   dir: 'lower'  },
-    { name: 'กำไรขั้นต้น',              actual: k.gp,                            target: PL_BUDGET_2569.grossProfit, dir: 'higher' },
-    { name: 'ค่าใช้จ่ายขายและบริหาร',   actual: PL_sum(c.totalSGA, lastMonth),   target: PL_BUDGET_2569.totalSGA,    dir: 'lower'  },
-    { name: 'กำไร(ขาดทุน)สุทธิ',        actual: k.net,                           target: PL_BUDGET_2569.netProfit,   dir: 'higher' },
-  ].map(r => {
+  // เทียบงบประมาณประจำปี — แสดงเฉพาะเมื่อมี PL_BUDGET (BIO ยังไม่มี → null → ซ่อนส่วนนี้)
+  const budgetRows = (PL_BUDGET ? [
+    { name: 'รายได้รวม',                actual: k.revenue,                       target: PL_BUDGET.revenue,     dir: 'higher' },
+    { name: 'ต้นทุนขาย',                actual: k.cost,                          target: PL_BUDGET.totalCost,   dir: 'lower'  },
+    { name: 'กำไรขั้นต้น',              actual: k.gp,                            target: PL_BUDGET.grossProfit, dir: 'higher' },
+    { name: 'ค่าใช้จ่ายขายและบริหาร',   actual: PL_sum(c.totalSGA, lastMonth),   target: PL_BUDGET.totalSGA,    dir: 'lower'  },
+    { name: 'กำไร(ขาดทุน)สุทธิ',        actual: k.net,                           target: PL_BUDGET.netProfit,   dir: 'higher' },
+  ] : []).map(r => {
     const pct = r.target ? r.actual / r.target * 100 : 0;
     const variance = r.actual - r.target;
     return { ...r, pct, variance };
@@ -693,14 +608,14 @@ function PnLPage({ data, setData, toast }) {
             {isSample && <span style={{ marginLeft: 10, fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(252,211,77,0.3)', verticalAlign: 'middle', fontWeight: 600 }}>ข้อมูลตัวอย่าง</span>}
           </h1>
           <div style={{ fontSize: 12.5, opacity: 0.9 }}>
-            Profit &amp; Loss Statement · ปีบัญชี {PL_BUDGET_2569.year} (สะสมตั้งแต่ต้นปี)
+            Profit &amp; Loss Statement · ปีบัญชี {plYear} (สะสมตั้งแต่ต้นปี)
           </div>
         </div>
         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
           <div>
             <div style={{ fontSize: 10.5, opacity: 0.8, letterSpacing: 0.4 }}>ข้อมูลล่าสุดถึงเดือน</div>
             <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.3 }}>
-              {PL_MONTHS_TH_FULL[Math.max(0, lastMonth - 1)]} {PL_BUDGET_2569.year}
+              {PL_MONTHS_TH_FULL[Math.max(0, lastMonth - 1)]} {plYear}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -716,7 +631,7 @@ function PnLPage({ data, setData, toast }) {
                 background: 'rgba(255,255,255,0.95)', color: '#154524',
                 border: '1px solid rgba(255,255,255,0.5)',
                 fontWeight: 600,
-              }} title="นำเข้า DATA INPUT ของเดือน">
+              }} title="อัปโหลดชีต PL (งบเปรียบเทียบรายเดือน) — แทนที่ข้อมูลทั้งหมด">
                 <Icon name="upload" size={13} /> อัปโหลดข้อมูล
               </button>
             )}
@@ -738,7 +653,7 @@ function PnLPage({ data, setData, toast }) {
             iconSvg: <path d="M3 17l6-6 4 4 7-7M14 8h7v7" />,
             iconBg: '#eff6ff', iconColor: '#2e8b4a',
             badge: 'ยอดสะสม ' + lastMonth + ' เดือน', badgeBg: '#f1f5f9', badgeColor: '#64748b' },
-          { label: 'ต้นทุนรวม', value: k.cost,
+          { label: 'ต้นทุนขาย', value: k.cost,
             iconSvg: <><rect x="4" y="6" width="16" height="14" rx="2"/><path d="M4 10h16M9 6V4h6v2"/></>,
             iconBg: '#f1f5f9', iconColor: '#64748b',
             badge: PL_fmtPct(k.costM) + ' ของรายได้', badgeBg: '#f1f5f9', badgeColor: '#475569' },
@@ -908,9 +823,10 @@ function PnLPage({ data, setData, toast }) {
         </div>
       </div>
 
-      {/* BUDGET vs ACTUAL */}
+      {/* BUDGET vs ACTUAL — แสดงเฉพาะเมื่อตั้ง PL_BUDGET (BIO ยังไม่มีงบประมาณ → ซ่อน) */}
+      {PL_BUDGET && (<>
       <div className="pnl-section-head" style={{ marginTop: 22 }}>
-        <h2>เทียบงบประมาณประจำปี {PL_BUDGET_2569.year} (Budget vs Actual)</h2>
+        <h2>เทียบงบประมาณประจำปี {plYear} (Budget vs Actual)</h2>
         <span className="pnl-tag">YTD สะสมถึงเดือน {PL_MONTHS_TH[Math.max(0, lastMonth - 1)]} เทียบกับเป้ารวมทั้งปี</span>
       </div>
       <div className="card pnl-card">
@@ -944,114 +860,73 @@ function PnLPage({ data, setData, toast }) {
           <span><i className="pnl-dot" style={{ background: 'var(--bad)' }} /> ขาดทุน / ติดลบ</span>
         </div>
       </div>
+      </>)}
 
       {/* ── AI INSIGHTS ─────────────────────────────────────────────────── */}
       {(() => {
+        // วิเคราะห์จากข้อมูล BIO เอง (ไม่มีงบประมาณ) — เน้นโครงสร้างต้นทุน/ตัวฉุดผลประกอบการ
         const insights = [];
-        const elapsed = lastMonth;
-        const elapsedPct = elapsed / 12;
-        const remaining = 12 - elapsed;
-        const B = PL_BUDGET_2569;
-        // 1) Critical: ภาวะขาดทุน vs เป้ากำไร
-        if (k.net < 0 && B.netProfit > 0) {
-          const catchup = B.netProfit - k.net;
-          const perMonth = remaining > 0 ? catchup / remaining : catchup;
+        const elapsed  = lastMonth || 1;
+        const rev      = PL_sum(c.totalRevenue, lastMonth);
+        const cogsYtd  = PL_sum(groups.cogs, lastMonth);
+        const sgaYtd   = PL_sum(c.totalSGA, lastMonth);
+        const adminYtd = PL_sum(groups.admin, lastMonth);
+        const finYtd   = PL_sum(groups.finance, lastMonth);
+        const gpYtd    = PL_sum(c.grossProfit, lastMonth);
+        const pbfYtd   = PL_sum(c.profitBeforeFinance, lastMonth);
+        const pctRev   = (v) => rev ? v / rev * 100 : 0;
+        // 1) ผลสุทธิ
+        if (k.net < 0) {
           insights.push({
-            kind: 'critical', icon: '🚨', title: 'อยู่ในภาวะขาดทุน — ต้องเพิ่มกำไรเพื่อชดเชย',
-            body: 'YTD ขาดทุน ' + PL_fmt(-k.net) + ' บาท · เป้าทั้งปีกำไร ' + PL_fmt(B.netProfit) + ' บาท · ' +
-                  (remaining > 0
-                    ? remaining + ' เดือนที่เหลือต้องทำกำไรรวม ' + PL_fmt(catchup) + ' บาท (เฉลี่ย ' + PL_fmt(perMonth) + ' บาท/เดือน)'
-                    : 'หมดปีแล้ว — ห่างเป้า ' + PL_fmt(catchup) + ' บาท'),
+            kind: 'critical', icon: '🚨', title: 'ขาดทุนสุทธิ ' + PL_fmt(-k.net) + ' บาท (' + PL_fmtPct(Math.abs(pctRev(k.net))) + ' ของรายได้)',
+            body: 'YTD ' + elapsed + ' เดือน · รายได้ ' + PL_fmt(rev) + ' · ค่าใช้จ่ายรวม ' + PL_fmt(cogsYtd + sgaYtd + finYtd) +
+                  ' = ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' + ขาย/บริหาร ' + PL_fmt(sgaYtd) + ' + การเงิน ' + PL_fmt(finYtd),
           });
+        } else if (k.net > 0) {
+          insights.push({ kind: 'good', icon: '✅', title: 'กำไรสุทธิ ' + PL_fmt(k.net) + ' บาท (' + PL_fmtPct(pctRev(k.net)) + ' ของรายได้)', body: 'YTD สะสม ' + elapsed + ' เดือน' });
         }
-        // 2) Revenue gap
-        const revRatio = k.revenue / B.revenue;
-        if (revRatio < elapsedPct * 0.85) {
-          const gap = B.revenue * elapsedPct - k.revenue;
-          insights.push({
-            kind: 'risk', icon: '📉', title: 'รายได้ต่ำกว่าจังหวะที่ควรจะเป็น',
-            body: 'YTD ' + PL_fmtPct(revRatio * 100) + ' ของงบทั้งปี · ควรอยู่ที่ ' + PL_fmtPct(elapsedPct * 100) + ' (' + elapsed + '/12) · ' +
-                  'ขาดจากจังหวะประมาณ ' + PL_fmt(gap) + ' บาท · ต้องเร่งหา deal ก่อสร้างให้ทันเป้า',
-          });
-        } else if (revRatio >= elapsedPct) {
-          insights.push({
-            kind: 'good', icon: '✅', title: 'รายได้เป็นไปตามเป้า / นำเป้า',
-            body: 'YTD ' + PL_fmtPct(revRatio * 100) + ' ของงบทั้งปี · จังหวะที่ควรอยู่ ' + PL_fmtPct(elapsedPct * 100),
-          });
+        // 2) อัตรากำไรขั้นต้น / ต้นทุนขาย
+        if (gpYtd < 0) {
+          insights.push({ kind: 'critical', icon: '⚠️', title: 'ขายต่ำกว่าทุน — กำไรขั้นต้นติดลบ',
+            body: 'ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' > รายได้ ' + PL_fmt(rev) + ' (ต้นทุน = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้) · ทบทวนการตั้งราคา/ต้นทุนต่อหน่วย' });
+        } else if (k.gpM < 20) {
+          insights.push({ kind: 'risk', icon: '📊', title: 'อัตรากำไรขั้นต้นบาง (' + PL_fmtPct(k.gpM) + ')',
+            body: 'ต้นทุนขาย = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้ · เหลือกำไรขั้นต้น ' + PL_fmt(gpYtd) + ' รองรับค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sgaYtd) });
         }
-        // 3) Cost ratio (margin)
-        const actualCostPct = k.revenue ? k.cost / k.revenue * 100 : 0;
-        const budgetCostPct = B.totalCost / B.revenue * 100;
-        if (actualCostPct > budgetCostPct + 2) {
-          insights.push({
-            kind: 'risk', icon: '⚠️', title: 'ต้นทุนงานก่อสร้างสูงกว่าเป้า — gross margin หาย',
-            body: 'ต้นทุน YTD = ' + PL_fmtPct(actualCostPct) + ' ของรายได้ · เป้า ' + PL_fmtPct(budgetCostPct) + ' · ' +
-                  'เกินมา ' + PL_fmtPct(actualCostPct - budgetCostPct) + ' · ' +
-                  'ตรวจสอบ Cost of goods sold + Commission รายโครงการ',
-          });
+        // 3) ค่าใช้จ่ายบริหารเทียบกำไรขั้นต้น (ตัวฉุดหลัก)
+        if (adminYtd > 0 && gpYtd > 0 && adminYtd > gpYtd) {
+          insights.push({ kind: 'risk', icon: '🔴', title: 'ค่าใช้จ่ายบริหารสูงกว่ากำไรขั้นต้น',
+            body: 'บริหาร ' + PL_fmt(adminYtd) + ' (' + PL_fmtPct(pctRev(adminYtd)) + ' ของรายได้) · กำไรขั้นต้นมีแค่ ' + PL_fmt(gpYtd) + ' → ค่าใช้จ่ายคงที่ (เงินเดือน/ค่าเสื่อม) กดดันผลประกอบการ' });
         }
-        // 4) GP margin
-        const actualGpM = k.gpM;
-        const budgetGpM = B.grossProfit / B.revenue * 100;
-        if (actualGpM < budgetGpM - 2) {
-          insights.push({
-            kind: 'risk', icon: '📊', title: 'อัตรากำไรขั้นต้นต่ำกว่าเป้า',
-            body: 'GP margin YTD = ' + PL_fmtPct(actualGpM) + ' · เป้า ' + PL_fmtPct(budgetGpM) + ' · ห่างเป้า ' + PL_fmtPct(budgetGpM - actualGpM) +
-                  ' · ทบทวนการตั้งราคา / negotiate วัสดุ',
-          });
+        // 4) ขาดทุนจากการดำเนินงาน (ก่อนต้นทุนการเงิน)
+        if (pbfYtd < 0) {
+          insights.push({ kind: 'info', icon: '📉', title: 'ขาดทุนจากการดำเนินงานก่อนต้นทุนการเงิน ' + PL_fmt(-pbfYtd),
+            body: 'กำไรขั้นต้น ' + PL_fmt(gpYtd) + ' − ค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sgaYtd) + ' = ' + PL_fmt(pbfYtd) + ' · บวกต้นทุนการเงินอีก ' + PL_fmt(finYtd) });
         }
-        // 5) SGA pace (annualized)
-        const sgaYtd = PL_sum(c.totalSGA, lastMonth);
-        const sgaAnnualized = elapsed > 0 ? sgaYtd / elapsed * 12 : 0;
-        if (sgaAnnualized > B.totalSGA * 1.05) {
-          insights.push({
-            kind: 'risk', icon: '🔴', title: 'ค่าใช้จ่ายขายและบริหารเกินงบ (อัตราปัจจุบัน)',
-            body: 'YTD ใช้ไป ' + PL_fmt(sgaYtd) + ' บาท (' + elapsed + ' เดือน) · อัตรา annualized = ' + PL_fmt(sgaAnnualized) + ' บาท · ' +
-                  'งบทั้งปี ' + PL_fmt(B.totalSGA) + ' บาท · เกินงบ ' + PL_fmt(sgaAnnualized - B.totalSGA) +
-                  ' · ตัด admin/selling ที่ไม่จำเป็น',
-          });
-        } else if (sgaAnnualized < B.totalSGA * 0.9) {
-          insights.push({
-            kind: 'good', icon: '💚', title: 'ค่าใช้จ่ายขายและบริหารต่ำกว่างบ',
-            body: 'อัตรา annualized = ' + PL_fmt(sgaAnnualized) + ' บาท · งบ ' + PL_fmt(B.totalSGA) + ' บาท · ประหยัด ' + PL_fmt(B.totalSGA - sgaAnnualized),
-          });
+        // 5) ต้นทุนการเงิน
+        if (finYtd > 0 && rev > 0 && pctRev(finYtd) >= 5) {
+          insights.push({ kind: 'info', icon: '🏦', title: 'ต้นทุนการเงิน ' + PL_fmt(finYtd) + ' (' + PL_fmtPct(pctRev(finYtd)) + ' ของรายได้)',
+            body: 'ดอกเบี้ยจ่าย/เช่าซื้อสะสม ' + elapsed + ' เดือน · ภาระดอกเบี้ยสูงเมื่อเทียบกับรายได้ปัจจุบัน' });
         }
-        // 6) Trend — quarter-over-quarter Net
-        if (lastMonth >= 6) {
-          const q1Net = PL_sum(c.netProfit.slice(0, 3), 3);
-          const q2Net = PL_sum(c.netProfit.slice(3, 6), 3);
-          if (q2Net < q1Net && q1Net !== 0) {
-            insights.push({
-              kind: 'info', icon: '📉', title: 'แนวโน้มกำไรลดลง Q1 → Q2',
-              body: 'Q1: ' + PL_fmt(q1Net) + ' บาท · Q2: ' + PL_fmt(q2Net) + ' บาท · ลดลง ' + PL_fmt(q1Net - q2Net) +
-                    ' · ตรวจสอบสาเหตุ (รายได้ลด / cost เพิ่ม)',
-            });
+        // 6) แนวโน้มเดือนล่าสุด vs ก่อนหน้า
+        if (lastMonth >= 2) {
+          const cur = c.netProfit[lastMonth - 1] || 0, prev = c.netProfit[lastMonth - 2] || 0;
+          if (prev !== 0) {
+            const diff = cur - prev, better = diff > 0;
+            insights.push({ kind: better ? 'good' : 'info', icon: better ? '📈' : '📉',
+              title: 'ผลเดือน ' + PL_MONTHS_TH[lastMonth - 1] + ' ' + (better ? 'ดีขึ้น' : 'แย่ลง') + ' ' + PL_fmt(Math.abs(diff)) + ' จากเดือนก่อน',
+              body: PL_MONTHS_TH[lastMonth - 2] + ' ' + PL_fmt(prev) + ' → ' + PL_MONTHS_TH[lastMonth - 1] + ' ' + PL_fmt(cur) });
           }
         }
-        // 7) Other income tiny vs budget
-        if (PL_sum(c.totalRevenue, lastMonth) > 0) {
-          const otherRatio = PL_sum(groups.otherIncome, lastMonth) / PL_sum(c.totalRevenue, lastMonth);
-          if (otherRatio < 0) {
-            insights.push({
-              kind: 'info', icon: 'ℹ️', title: 'รายได้อื่นติดลบ YTD',
-              body: 'รวม Other income = ' + PL_fmt(PL_sum(groups.otherIncome, lastMonth)) +
-                    ' (มี contra entry บางเดือน เช่น POC adj) · ตรวจสอบรายการ adjustment',
-            });
-          }
-        }
-        // ถ้าไม่มีอะไรน่ากังวล
         if (insights.length === 0) {
-          insights.push({
-            kind: 'good', icon: '🎉', title: 'ทุกตัวอยู่ในเป้า — รักษาทิศทาง',
-            body: 'ไม่พบประเด็นเสี่ยงสำคัญ',
-          });
+          insights.push({ kind: 'good', icon: '🎉', title: 'ไม่พบประเด็นเสี่ยงสำคัญ', body: 'ผลประกอบการอยู่ในเกณฑ์ปกติ' });
         }
 
         return (
           <>
             <div className="pnl-section-head" style={{ marginTop: 22 }}>
               <h2>🤖 AI วิเคราะห์จุดเสี่ยง / โฟกัส</h2>
-              <span className="pnl-tag">วิเคราะห์ YTD เทียบงบประมาณ + อัตรากำไร + แนวโน้ม</span>
+              <span className="pnl-tag">วิเคราะห์ YTD: โครงสร้างต้นทุน · อัตรากำไร · แนวโน้ม</span>
             </div>
             <div className="card pnl-card" style={{ padding: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1078,7 +953,7 @@ function PnLPage({ data, setData, toast }) {
                 })}
               </div>
               <div style={{ marginTop: 12, fontSize: 10.5, color: '#94a3b8', textAlign: 'center' }}>
-                * วิเคราะห์อัตโนมัติจากข้อมูล YTD เทียบงบประมาณ — เป็น guideline ไม่ใช่คำแนะนำการลงทุน
+                * วิเคราะห์อัตโนมัติจากข้อมูลงบ YTD — เป็น guideline ไม่ใช่คำแนะนำการลงทุน
               </div>
             </div>
           </>
@@ -1087,10 +962,10 @@ function PnLPage({ data, setData, toast }) {
 
       {/* UPLOAD MODAL — เปิดจากปุ่ม "อัปโหลดข้อมูล" บน hero banner */}
       <Modal open={uploadOpen} onClose={() => { setUploadOpen(false); setFile(null); }} wide
-        title="อัปโหลดข้อมูลรายเดือน (DATA INPUT)">
+        title="อัปโหลดงบกำไรขาดทุน (ชีต PL)">
         <div style={{ padding: '8px 20px 18px' }}>
           <div style={{ fontSize: 12.5, color: 'var(--ink-500)', marginBottom: 12 }}>
-            นำเข้าไฟล์ TB ของบัญชี (.xlsx) เพื่ออัปเดตงบประจำเดือนเข้าฐานข้อมูล
+            นำเข้าไฟล์ Excel งบกำไรขาดทุนเปรียบเทียบรายเดือน — ระบบอ่าน <b>ชีต PL</b> (รหัสบัญชี + หัวคอลัมน์เป็นเดือน) ทุกเดือนพร้อมกัน แล้วเขียนทับข้อมูลทั้งหมด
           </div>
           <div className="pnl-upload-row">
             <div className={'pnl-dropzone' + (drag ? ' drag' : '') + (file ? ' has-file' : '')}
@@ -1101,26 +976,23 @@ function PnLPage({ data, setData, toast }) {
               onDrop={onDrop}>
               <div className="pnl-dz-ic"><Icon name="upload" size={22} /></div>
               <div className="pnl-dz-main">{file ? <>เลือกไฟล์แล้ว: <u>{file.name}</u></> : <>ลากไฟล์มาวางที่นี่ หรือ <u>เลือกไฟล์</u></>}</div>
-              <div className="pnl-dz-sub">{file ? (file.size / 1024 / 1024).toFixed(2) + ' MB · พร้อมนำเข้า' : 'รองรับ .xlsx, .csv (ชีต DATA INPUT) ขนาดไม่เกิน 10 MB'}</div>
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" hidden
+              <div className="pnl-dz-sub">{file ? (file.size / 1024 / 1024).toFixed(2) + ' MB · พร้อมนำเข้า' : 'รองรับ .xlsx (ไฟล์งบกำไรขาดทุน) ขนาดไม่เกิน 10 MB'}</div>
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" hidden
                 onChange={(e) => pickFile(e.target.files[0])} />
             </div>
             <div className="pnl-upload-side">
-              <label className="pnl-field"><span>เลือกเดือนที่นำเข้า</span>
-                <select value={impMonth} onChange={(e) => setImpMonth(Number(e.target.value))}>
-                  {PL_MONTHS_TH.map((m, i) => <option key={i} value={i + 1}>{(i + 1)} · {m} {PL_BUDGET_2569.year}</option>)}
-                </select>
-              </label>
-              <label className="pnl-field"><span>สถานะข้อมูล</span>
-                <select value={impAudit} onChange={(e) => setImpAudit(e.target.value)}>
-                  <option value="PRE-CLOSING">PRE-CLOSING · ยังไม่ผ่านการตรวจสอบ</option>
-                  <option value="AUDITED">AUDITED · ตรวจสอบแล้ว</option>
-                </select>
-              </label>
+              <div className="pnl-field" style={{ background: 'var(--ink-50)', borderRadius: 8, padding: '10px 12px' }}>
+                <span style={{ fontWeight: 600, color: 'var(--ink-600)' }}>วิธีนำเข้า</span>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-500)', lineHeight: 1.7, marginTop: 4 }}>
+                  • อ่าน <b>ทุกเดือน</b> จากชีต PL อัตโนมัติ (ไม่ต้องเลือกเดือน)<br/>
+                  • ปี/เดือนอ่านจากหัวคอลัมน์ในไฟล์<br/>
+                  • รอบถัดไป: re-export ไฟล์ที่มีเดือนใหม่แล้วอัปทับได้เลย
+                </div>
+              </div>
               <button className="btn btn-primary" disabled={busy || !file} onClick={handleVerify}>
                 <Icon name="check" size={14} /> {busy ? 'กำลังประมวลผล…' : 'ตรวจสอบและนำเข้า'}
               </button>
-              <div className="pnl-hint"><Icon name="search" size={13} /> ระบบจะเทียบผังบัญชีกับฐานข้อมูล หากพบบัญชีใหม่จะให้จัดประเภทก่อนบันทึก · บัญชีที่ไม่อยู่ในไฟล์จะถูก reset เป็น 0</div>
+              <div className="pnl-hint"><Icon name="search" size={13} /> จัดกลุ่มบัญชีอัตโนมัติจากรหัส (prefix) · หากพบรหัสที่จัดกลุ่มไม่ได้จะให้เลือกกลุ่มก่อนบันทึก · <b>การอัปจะแทนที่ข้อมูลเดิมทั้งหมด</b></div>
             </div>
           </div>
         </div>
