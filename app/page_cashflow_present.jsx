@@ -318,9 +318,22 @@
     });
     let topInflow = { name: '', amt: 0 };
     Object.keys(inflowByCat).forEach(n => { if (inflowByCat[n] > topInflow.amt) topInflow = { name: n, amt: inflowByCat[n] }; });
+    // ── ยอดรายบัญชี (per-account): ต้นงวด (stm.openingByAcct) + Δ รายเดือนจาก txns (รวมทุก actKey
+    //    incl. โอนระหว่างบัญชี/อื่นๆ เพราะกระทบยอดเงินในบัญชีจริง) = ปลายงวด รายบัญชี. ──
+    const monthsAllSet = {}; txns.forEach(t => { if (t.month) monthsAllSet[t.month] = true; });
+    const monthsAll = Object.keys(monthsAllSet).map(Number).sort((a, b) => a - b);
+    const openByName = (stm.openingByAcct && typeof stm.openingByAcct === 'object') ? stm.openingByAcct : {};
+    const last4of = name => (String(name).match(/(\d{3,4})\s*$/) || [])[1] || '';
+    const acctMap = {};
+    const ensureAcct = name => { if (!acctMap[name]) acctMap[name] = { name, last4: last4of(name), opening: cfpNum(openByName[name]), byMonth: {}, flowTotal: 0 }; return acctMap[name]; };
+    Object.keys(openByName).forEach(n => ensureAcct(n));
+    txns.forEach(t => { const x = ensureAcct(t.account); x.byMonth[t.month] = (x.byMonth[t.month] || 0) + t.flow; x.flowTotal += t.flow; });
+    const accountInfo = Object.keys(acctMap).map(n => { const a = acctMap[n]; return { name: a.name, last4: a.last4, opening: a.opening, byMonth: a.byMonth, ending: a.opening + a.flowTotal }; }).sort((a, b) => b.ending - a.ending);
+    const hasOpeningAccts = Object.keys(openByName).length > 0;
     const accounts = {}; txns.forEach(t => { accounts[t.account] = true; });
     return {
       months, monthly, acts, opening, ending, net, transferNet, otherNet,
+      accountInfo, monthsAll, hasOpeningAccts,
       allTxns: txns, txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
       accounts: Object.keys(accounts), interest, payroll, inflowTotal, topInflow,
       summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
@@ -511,6 +524,112 @@
         <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{CFP_ACT_NAME[k]} <span style={{ color: C.faint, fontSize: 11 }}>กดดู ›</span></div>
         <div style={{ fontSize: 22, fontWeight: 800, margin: '7px 0 2px', color: value < 0 ? C.neg : C.pos, letterSpacing: '-.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtM(value)}</div>
         {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
+      </div>
+    );
+  }
+
+  /* ---------- "เงินสดนี้ใช้ได้จริงเท่าไร" — แยกตามบัญชี (ใช้ได้/ผูกพัน) + เพิ่ม-ลดรายเดือนรายบัญชี ----------
+   *  ติดป้ายแต่ละบัญชี = usable/restricted → เก็บใน stored.acctTypes {accountName:'restricted'} (usable=ดีฟอลต์ ไม่ต้องเก็บ)
+   *  ยอดรายบัญชี: ต้นงวด (stm.openingByAcct จาก STM) + Δ รายเดือน (จาก txns รวมโอน/อื่นๆ) = ปลายงวด
+   *  sync ส่วนกลางผ่าน persist (เหมือน catMap). viewer/ผู้บริหาร = อ่านอย่างเดียว.
+   *  ★ persist ไม่ merge ฟิลด์เก่าเอง → saveCatMap/onUpload ต้องส่ง acctTypes มาด้วยทุกครั้ง. */
+  const cfpCard = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
+  function cfpDeltaM(v) { if (!v) return '–'; return (v < 0 ? '-' : '+') + '฿' + (Math.abs(v) / 1e6).toFixed(2) + 'M'; }   // ยอด Δ สั้นในตาราง
+  function CfpCashUsable({ model, acctTypes, canEdit, onSave }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState(null);
+    const accts = (model.accountInfo && model.accountInfo.length) ? model.accountInfo : [];
+    const typeMap = (acctTypes && typeof acctTypes === 'object') ? acctTypes : {};
+    const active = (editing && draft) ? draft : typeMap;
+    const typeOf = name => (active[name] === 'restricted' ? 'restricted' : 'usable');
+
+    // ----- ยังไม่มียอดรายบัญชี -----
+    if (!model.hasOpeningAccts || !accts.length) {
+      if (!canEdit) return null;
+      return (
+        <div className="cfp-card no-print no-present" style={{ ...cfpCard, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'linear-gradient(135deg,rgba(46,139,74,.07),rgba(31,110,58,.10))' }}>
+          <div style={{ fontSize: 13, color: C.ink, flex: 1 }}>💡 <b>แยกเงิน “ใช้ได้/ผูกพัน” ตามบัญชี</b> — อัปโหลดไฟล์ STM <b>อีกครั้ง 1 รอบ</b> เพื่อดึงยอดต้นงวดรายบัญชี จากนั้นจะติดป้ายแต่ละบัญชี (ใช้ได้/ผูกพัน) + เห็นเพิ่ม-ลดรายเดือนรายบัญชีได้</div>
+        </div>
+      );
+    }
+
+    const totalsBy = t => accts.filter(a => typeOf(a.name) === t).reduce((s, a) => s + a.ending, 0);
+    const usableTotal = totalsBy('usable'), restrictedTotal = totalsBy('restricted');
+    const total = usableTotal + restrictedTotal;
+    const pct = v => total > 0 ? Math.round(v / total * 100) : 0;
+    const months = model.monthsAll || [];
+    const restrictedCount = accts.filter(a => typeOf(a.name) === 'restricted').length;
+
+    function startEdit() { setDraft(Object.assign({}, typeMap)); setEditing(true); }
+    function flip(name) { setDraft(d => ({ ...d, [name]: (d[name] === 'restricted' ? 'usable' : 'restricted') })); }
+    function commit() { const out = {}; accts.forEach(a => { if (draft[a.name] === 'restricted') out[a.name] = 'restricted'; }); onSave(out); setEditing(false); }
+
+    // เรียง: ผูกพันก่อน (เน้นเงินใช้ไม่ได้) แล้วยอดมากก่อนในแต่ละกลุ่ม
+    const ordered = accts.slice().sort((a, b) => {
+      const ra = typeOf(a.name) === 'restricted' ? 0 : 1, rb = typeOf(b.name) === 'restricted' ? 0 : 1;
+      return ra !== rb ? ra - rb : b.ending - a.ending;
+    });
+    const cell = { padding: '6px 8px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
+    const th = { padding: '7px 8px', fontWeight: 700, fontSize: 11, color: C.mut, whiteSpace: 'nowrap', textAlign: 'right', position: 'sticky', top: 0, background: C.cardSolid, zIndex: 1 };
+    const Tag = ({ r, click }) => click
+      ? <button onClick={click} title="กดเพื่อสลับ ใช้ได้ ⇄ ผูกพัน" style={{ cursor: 'pointer', border: '1px solid ' + (r ? '#e0a86a' : '#a6dcc0'), background: r ? '#fff3e6' : C.posBg, color: r ? '#a8620a' : C.pos, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{r ? '🔒 ผูกพัน' : '✅ ใช้ได้'}</button>
+      : <span style={{ background: r ? '#fff3e6' : C.posBg, color: r ? '#a8620a' : C.pos, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{r ? '🔒 ผูกพัน' : '✅ ใช้ได้'}</span>;
+
+    return (
+      <div className="cfp-card" style={cfpCard}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>💰 เงินสดนี้ “ใช้ได้จริง” เท่าไร — แยกตามบัญชี</span>
+          {canEdit && (editing
+            ? <span className="no-print no-present" style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setEditing(false)} style={{ border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>ยกเลิก</button>
+                <button onClick={commit} style={{ border: 0, background: C.primary, color: '#fff', borderRadius: 9, padding: '5px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>บันทึก</button>
+              </span>
+            : <button className="no-print no-present" onClick={startEdit} style={{ border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 9, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✏️ จัดประเภทบัญชี</button>)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <span style={{ fontSize: 28, fontWeight: 800, color: C.ink, letterSpacing: '-.5px' }}>{cfpFmtM(total)}</span>
+          <span style={{ fontSize: 13, color: C.mut }}>เงินสดรวมทุกบัญชี — <b style={{ color: C.pos }}>ใช้ได้จริง {cfpFmtM(usableTotal)} ({pct(usableTotal)}%)</b> · <b style={{ color: '#a8620a' }}>ผูกพัน {cfpFmtM(restrictedTotal)} ({pct(restrictedTotal)}%)</b></span>
+        </div>
+        <div style={{ display: 'flex', height: 26, borderRadius: 8, overflow: 'hidden', background: C.soft, marginBottom: 8 }}>
+          {usableTotal > 0 && <div title={'ใช้ได้จริง · ' + cfpFmtB(usableTotal)} style={{ width: (total > 0 ? usableTotal / total * 100 : 0) + '%', background: C.pos, minWidth: 2 }} />}
+          {restrictedTotal > 0 && <div title={'ผูกพัน · ' + cfpFmtB(restrictedTotal)} style={{ width: (total > 0 ? restrictedTotal / total * 100 : 0) + '%', background: '#e08a3c', minWidth: 2 }} />}
+        </div>
+        {editing && <div style={{ fontSize: 12, color: C.primaryD, background: C.soft, borderRadius: 9, padding: '7px 12px', marginBottom: 10 }}>กดป้ายประเภทของแต่ละบัญชีเพื่อสลับ <b>ใช้ได้ ⇄ ผูกพัน</b> แล้วกดบันทึก (บัญชีที่ไม่ติดป้าย = ใช้ได้)</div>}
+        {!editing && restrictedCount === 0 && canEdit && <div className="no-print no-present" style={{ fontSize: 12, color: '#a8620a', background: '#fff7e6', borderRadius: 9, padding: '7px 12px', marginBottom: 10 }}>ยังไม่ได้ติดป้ายบัญชีไหนเป็น “ผูกพัน” — กด ✏️ จัดประเภทบัญชี เพื่อระบุบัญชีค้ำประกัน/เงินกัน (ตอนนี้นับเป็นใช้ได้ทั้งหมด)</div>}
+
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 520, border: '1px solid ' + C.line, borderRadius: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 520 + months.length * 80 }}>
+            <thead><tr>
+              <th style={{ ...th, textAlign: 'left' }}>บัญชี</th>
+              <th style={{ ...th, textAlign: 'center' }}>ประเภท</th>
+              <th style={th}>ต้นงวด</th>
+              {months.map(m => <th key={m} style={th}>{CFP_MONTHS[m] || m}</th>)}
+              <th style={{ ...th, color: C.primaryD }}>ปลายงวด</th>
+            </tr></thead>
+            <tbody>
+              {ordered.map(a => {
+                const r = typeOf(a.name) === 'restricted';
+                return (
+                  <tr key={a.name} style={{ borderTop: '1px solid ' + C.line, background: r ? 'rgba(224,138,60,.06)' : 'transparent' }}>
+                    <td style={{ ...cell, textAlign: 'left' }}><CfpBankPill acct={a.name} /> <span style={{ color: C.mut, fontSize: 11 }}>···{a.last4 || '—'}</span></td>
+                    <td style={{ ...cell, textAlign: 'center' }}><Tag r={r} click={editing ? () => flip(a.name) : null} /></td>
+                    <td style={{ ...cell, textAlign: 'right', color: C.mut }}>{cfpFmtM(a.opening)}</td>
+                    {months.map(m => { const v = a.byMonth[m] || 0; return <td key={m} style={{ ...cell, textAlign: 'right', color: v > 0 ? C.pos : (v < 0 ? C.neg : C.faint) }}>{cfpDeltaM(v)}</td>; })}
+                    <td style={{ ...cell, textAlign: 'right', fontWeight: 800, color: a.ending < 0 ? C.neg : C.ink }}>{cfpFmtM(a.ending)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot><tr style={{ borderTop: '2px solid ' + C.line, fontWeight: 800, background: C.soft }}>
+              <td style={{ ...cell, textAlign: 'left', position: 'sticky', bottom: 0, background: C.soft }}>รวมทุกบัญชี</td>
+              <td style={{ position: 'sticky', bottom: 0, background: C.soft }} />
+              <td style={{ ...cell, textAlign: 'right', color: C.mut, position: 'sticky', bottom: 0, background: C.soft }}>{cfpFmtM(accts.reduce((s, a) => s + a.opening, 0))}</td>
+              {months.map(m => { const v = accts.reduce((s, a) => s + (a.byMonth[m] || 0), 0); return <td key={m} style={{ ...cell, textAlign: 'right', color: v > 0 ? C.pos : (v < 0 ? C.neg : C.faint), position: 'sticky', bottom: 0, background: C.soft }}>{cfpDeltaM(v)}</td>; })}
+              <td style={{ ...cell, textAlign: 'right', color: C.primaryD, position: 'sticky', bottom: 0, background: C.soft }}>{cfpFmtM(total)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+        <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>ต้นงวด = ยอดยกมารายบัญชี · ตัวเลขรายเดือน = เพิ่ม/ลดสุทธิของบัญชีนั้นในเดือนนั้น (รวมเงินโอนระหว่างบัญชี) · ปลายงวด = ยอดคงเหลือล่าสุด</div>
       </div>
     );
   }
@@ -858,10 +977,14 @@
       setModal({ title: row.label, subtitle: sub + ' · ' + txns.length + ' รายการ' + mlab, txns });
     }
     function saveCatMap(newMap) {
-      persist({ stm: stored.stm, summary: stored.summary || null, catMap: newMap }).then(r => {
+      persist({ stm: stored.stm, summary: stored.summary || null, catMap: newMap, acctTypes: (stored && stored.acctTypes) || null }).then(r => {
         toast && toast('บันทึกการจับหมวดแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
       });
       setMapOpen(false);
+    }
+    // บันทึกการจัดประเภทบัญชี (ใช้ได้/ผูกพัน) → เก็บใน acctTypes + push ส่วนกลาง
+    function saveAcctTypes(at) {
+      persist({ stm: stored.stm, summary: (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: at }).then(r => { toast && toast('บันทึกการจัดประเภทบัญชีแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); });
     }
 
     async function readAoa(file) {
@@ -882,11 +1005,11 @@
           else if (kind === 'summary') { summary = cfpParseSummary(aoa); }
           else if (!sawStm) { const guess = cfpParseStm(aoa); if (guess.txns.length) { stm = guess; sawStm = true; } } }
         if (!stm || !stm.txns.length) {
-          if (summary && stored && stored.stm) { const r = await persist({ stm: stored.stm, summary }); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
+          if (summary && stored && stored.stm) { const r = await persist({ stm: stored.stm, summary, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null }); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
           else { toast && toast('ต้องมีไฟล์ STM (รายการเดินบัญชี)', 'error'); }
           setUploading(false); return;
         }
-        const r = await persist({ stm, summary: summary || (stored && stored.summary) || null });
+        const r = await persist({ stm, summary: summary || (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null });
         toast && toast('อ่านข้อมูลสำเร็จ · ' + stm.txns.length + ' รายการ' + (summary ? ' + งบสรุป' : '') + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
       } catch (e) { console.error(e); toast && toast('อ่านไฟล์ไม่สำเร็จ: ' + (e.message || e), 'error'); }
       setUploading(false);
@@ -980,6 +1103,7 @@
               <CfpKpiHero label="กระแสเงินสดสุทธิ" value={cfpFmtSigned(model.net)} color={model.net < 0 ? C.neg : C.pos} sub={model.net >= 0 ? 'เงินสดเพิ่มขึ้น' : 'เงินสดลดลง'} />
               <CfpKpiHero label="เงินสดปลายงวด" value={cfpFmtM(model.ending)} color={C.primaryD} sub={(model.net >= 0 ? '▲ ' : '▼ ') + cfpFmtSigned(model.net) + ' จากต้นงวด'} />
             </div>
+            <CfpCashUsable model={model} acctTypes={stored && stored.acctTypes} canEdit={canEdit} onSave={saveAcctTypes} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14, marginBottom: 16 }}>
               <CfpKpiAct k="op" value={model.acts.op.net} onClick={() => openAct('op')} sub={watchSub('op')} />
               <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} sub={watchSub('inv')} />
