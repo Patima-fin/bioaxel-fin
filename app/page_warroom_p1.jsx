@@ -229,8 +229,10 @@ function WarRoomPage1({ data, setData, toast }) {
       const assignee = String(f.assignee != null ? f.assignee : (p.assignee || p['ผู้รับโอนสิทธิ์'] || '')).trim();
       const isCreditor = assignee && WR1_CREDITORS[assignee];
       const gross = contract;
-      const debtPct = f.debtPct != null ? Number(f.debtPct) : 0;
-      const debt  = isCreditor ? Math.round(contract * debtPct) : 0;
+      // ★ ภาระหนี้จาก Finance Master = "หักหนี้" (debtDeduction) → fallback "ภาระหนี้คงค้าง"
+      //   (outstandingDebt) — ไม่ใช่ f.debtPct ที่ไม่มีอยู่จริง; cap ไม่เกินมูลค่าสัญญา
+      const debtAmt = Number(f.debtDeduction) || Number(f.outstandingDebt) || 0;
+      const debt  = isCreditor ? Math.min(gross, debtAmt) : 0;
       rows.push({ code, gross, debt, net: gross - debt, assignee });
     });
 
@@ -261,8 +263,40 @@ function WarRoomPage1({ data, setData, toast }) {
           <div className="page-sub">การเงินด้านรับ · {meta.companyName} · ข้อมูล ณ {fmtDate(liveToday)}</div>
         </div>
         <div className="page-head-r">
-          <a className="btn btn-ghost" href="#warroom2"><Icon name="arrow" size={14} /> หน้าถัดไป · ประมาณการรายปี</a>
-          <button className="btn btn-ghost no-present"><Icon name="download" size={14} /> ส่งออก PDF</button>
+          <a className="btn btn-ghost no-print" href="#warroom2"><Icon name="arrow" size={14} /> หน้าถัดไป · ประมาณการรายปี</a>
+          <button className="btn btn-ghost no-present" onClick={() => {
+            // ส่งออก PDF — inject print style ซ่อน sidebar/topbar/ปุ่ม + ตั้งชื่อไฟล์จากวันที่กดบันทึก (เบราเซอร์ใช้ document.title เป็นชื่อไฟล์)
+            const styleId = 'wr1-print-style';
+            let style = document.getElementById(styleId);
+            if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+            style.textContent = `
+              @media print {
+                @page { size: A4 portrait; margin: 8mm 10mm; }
+                html, body { background: #fff !important; }
+                .sb, .sb-scrim, .topbar, .no-print, .no-present { display: none !important; }
+                .app { grid-template-columns: 1fr !important; display: block !important; }
+                .page, .main { max-width: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+                .wr-page, .wr-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                .wr-page .card { box-shadow: none !important; break-inside: avoid; }
+                .wr-page table { break-inside: auto; }
+                .wr-page thead { display: table-header-group; }
+                .wr-page tr { break-inside: avoid; }
+              }
+            `;
+            const _d = new Date();
+            const _p2 = (n) => String(n).padStart(2, '0');
+            const _brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
+            const _prevTitle = document.title;
+            document.title = `${_brand}-WARROOM-รายรับ ${_p2(_d.getDate())}.${_p2(_d.getMonth() + 1)}.${_d.getFullYear()}`;
+            const cleanup = () => {
+              document.title = _prevTitle;
+              if (style.parentNode) style.parentNode.removeChild(style);
+              window.removeEventListener('afterprint', cleanup);
+            };
+            window.addEventListener('afterprint', cleanup);
+            setTimeout(cleanup, 60000);
+            setTimeout(() => window.print(), 50);
+          }} title="ส่งออกหน้านี้เป็น PDF (Ctrl+P)"><Icon name="download" size={14} /> ส่งออก PDF</button>
         </div>
       </div>
 

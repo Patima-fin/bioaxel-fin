@@ -1375,9 +1375,17 @@ function CashFlowDashboard({ data, setData, toast }) {
                 html, body { background: #f4f7fb !important; }
               }
             `;
+            // ชื่อไฟล์ PDF = "<BRAND>-FORECAST DD.MM.YYYY" (วันที่กดบันทึก, ค.ศ.) — เบราเซอร์ใช้ document.title เป็นชื่อไฟล์ตอน Save as PDF
+            const _d = new Date();
+            const _p2 = (n) => String(n).padStart(2, '0');
+            const _brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
+            const _pdfName = `${_brand}-FORECAST ${_p2(_d.getDate())}.${_p2(_d.getMonth() + 1)}.${_d.getFullYear()}`;
+            const _prevTitle = document.title;
+            document.title = _pdfName;
             document.body.classList.add('present-mode', 'cf-print-mode');
             const cleanup = () => {
               document.body.classList.remove('present-mode', 'cf-print-mode');
+              document.title = _prevTitle;
               if (style.parentNode) style.parentNode.removeChild(style);
               window.removeEventListener('afterprint', cleanup);
             };
@@ -1908,7 +1916,7 @@ function CashFlowDashboard({ data, setData, toast }) {
           display: 'flex', flexDirection: 'column',
         }}>
           {/* แสงเรืองมุมบนขวา — เพิ่มมิติ ไม่ให้ดูแบนจืด */}
-          <div style={{ position: 'absolute', right: cfScale(-40), top: cfScale(-50), width: cfScale(190), height: cfScale(190), borderRadius: '50%', background: 'radial-gradient(circle, rgba(41,197,255,.28), transparent 70%)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', right: cfScale(-40), top: cfScale(-50), width: cfScale(190), height: cfScale(190), borderRadius: '50%', background: 'radial-gradient(circle, rgba(52,226,154,.28), transparent 70%)', pointerEvents: 'none' }} />
           <div style={{ position: 'relative', padding: `${cfScale(22)} ${cfScale(20)}`, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between', gap: cfScale(15) }}>
             {/* โซนบน — หัวข้อ + ไอคอนในกรอบ */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: cfScale(8) }}>
@@ -1916,7 +1924,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                 <div style={{ fontSize: cfScale(15.5), fontWeight: 800, letterSpacing: '.01em', lineHeight: 1.15 }}>Grand Totals Actual</div>
                 <div style={{ fontSize: cfScale(11), color: 'rgba(255,255,255,.78)', marginTop: cfScale(3) }}>เทียบกับงบประมาณการรวมทั้งเดือน</div>
               </div>
-              <span style={{ display: 'grid', placeItems: 'center', width: cfScale(38), height: cfScale(38), borderRadius: cfScale(11), background: 'rgba(255,255,255,.18)', color: '#eaffff', flex: 'none' }}><Icon name="chart" size={20} /></span>
+              <span style={{ display: 'grid', placeItems: 'center', width: cfScale(38), height: cfScale(38), borderRadius: cfScale(11), background: 'rgba(255,255,255,.18)', color: '#eafff4', flex: 'none' }}><Icon name="chart" size={20} /></span>
             </div>
             {/* โซนกลาง — ยอดจ่ายจริงสะสม (พระเอก) + แถบ % เทียบงบ */}
             <div>
@@ -1929,8 +1937,8 @@ function CashFlowDashboard({ data, setData, toast }) {
               <div style={{ position: 'relative', height: cfScale(30), background: 'rgba(0,0,0,.22)', borderRadius: cfScale(8), overflow: 'hidden', marginTop: cfScale(13) }}>
                 <div style={{
                   position: 'absolute', inset: 0, width: `${Math.max(2, Math.min(100, grandPct))}%`,
-                  background: 'linear-gradient(90deg, #5fe0ff, #b8f4ff)', transition: 'width 800ms',
-                  boxShadow: '0 0 18px color-mix(in oklch, #5fe0ff 70%, transparent)', borderRadius: cfScale(8),
+                  background: 'linear-gradient(90deg, #34e29a, #9af5c8)', transition: 'width 800ms',
+                  boxShadow: '0 0 18px color-mix(in oklch, #34e29a 70%, transparent)', borderRadius: cfScale(8),
                 }} />
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `0 ${cfScale(12)}`, fontSize: cfScale(12.5), fontWeight: 800 }}>
                   <span style={{ color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,.6), 0 0 2px rgba(0,0,0,.55)' }}>{grandPct.toFixed(2)}%</span>
@@ -1950,7 +1958,7 @@ function CashFlowDashboard({ data, setData, toast }) {
               </div>
               <div style={{ background: 'rgba(255,255,255,.12)', borderRadius: cfScale(11), padding: `${cfScale(12)} ${cfScale(13)}` }}>
                 <div style={{ fontSize: cfScale(11), color: 'rgba(255,255,255,.72)' }}>คงเหลือต้องจ่าย</div>
-                <div style={{ fontSize: cfScale(18), fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#cdf3ff', marginTop: cfScale(3) }}>{fmtNum(remaining / 1e6, 2)}M</div>
+                <div style={{ fontSize: cfScale(18), fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#bff3d8', marginTop: cfScale(3) }}>{fmtNum(remaining / 1e6, 2)}M</div>
               </div>
             </div>
           </div>

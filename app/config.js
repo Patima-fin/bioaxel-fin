@@ -31,6 +31,10 @@ window.WTP_CONFIG = {
   //   ★ ค่านี้ต้องตรงกันระหว่าง tools/supabase-auth-setup.html กับ login
   AUTH_EMAIL_DOMAIN: 'bioaxel.app',
 
+  // ── รหัสแบรนด์ (ใช้เป็น prefix ชื่อไฟล์ตอนเซฟ PDF ฯลฯ) ────────────────
+  //   BIOAXEL = 'BIO'  ·  Water POG = 'WTP'  (ฝั่ง POG ต้องตั้งเป็น 'WTP')
+  BRAND_CODE: 'BIO',
+
   // ── โหมด login ────────────────────────────────────────────────────
   //  false = bootstrap: ตรวจ username/รหัสกับ USERS ด้านล่าง (ต้องปิด RLS อยู่)
   //          → ใช้ตอนตั้งระบบครั้งแรก เพื่อทดสอบว่าเว็บต่อ Supabase ใหม่ได้
