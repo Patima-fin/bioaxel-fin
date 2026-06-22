@@ -926,13 +926,14 @@
 
   /* ---------- activity detail (องค์ประกอบ + จุดเฝ้าระวัง รายกิจกรรม) ---------- */
   function CfpActivityDetail({ model, k, onCat, onAll }) {
+    const [expanded, setExpanded] = useState(false);
     const a = model.acts[k]; if (!a) return null;
     const flags = cfpWatch(model, k);
     const cats = a.catList || [];
     const maxAbs = Math.max.apply(null, cats.map(c => Math.abs(c.net)).concat([1]));
     const inTot = cats.filter(c => c.net > 0).reduce((s, c) => s + c.net, 0);
     const outTot = cats.filter(c => c.net < 0).reduce((s, c) => s + Math.abs(c.net), 0);
-    const top = cats.slice(0, 7);
+    const top = expanded ? cats : cats.slice(0, 7);
     return (
       <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, boxShadow: C.shadow, marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ height: 5, background: ACT_COLOR[k] }} />
@@ -949,14 +950,21 @@
           <div className="cfp-act-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.25fr) minmax(0,1fr)', gap: 20 }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
-              {top.map((c, i) => (
-                <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 1fr auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
-                  <span style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
-                  <span><CfpBar amt={c.net} max={maxAbs} /></span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
+              <div style={expanded ? { maxHeight: 420, overflowY: 'auto', paddingRight: 4 } : null}>
+                {top.map((c, i) => (
+                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 1fr auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
+                    <span style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
+                    <span><CfpBar amt={c.net} max={maxAbs} /></span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
+                  </div>
+                ))}
+              </div>
+              {cats.length > 7 && (
+                <div style={{ display: 'flex', gap: 16, marginTop: 9, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span onClick={() => setExpanded(e => !e)} style={{ fontSize: 12, color: C.primary, cursor: 'pointer', fontWeight: 700 }}>{expanded ? '▲ ย่อ' : '▼ ดูอีก ' + (cats.length - 7) + ' หมวด'}</span>
+                  <span onClick={onAll} style={{ fontSize: 12, color: C.mut, cursor: 'pointer' }}>ดูรายการทั้งหมด →</span>
                 </div>
-              ))}
-              {cats.length > 7 && <div onClick={onAll} style={{ fontSize: 12, color: C.primary, cursor: 'pointer', marginTop: 9, fontWeight: 700 }}>ดูทั้งหมด {cats.length} หมวด →</div>}
+              )}
             </div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>🚩 จุดเฝ้าระวัง</div>
