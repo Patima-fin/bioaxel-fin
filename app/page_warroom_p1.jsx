@@ -9,6 +9,7 @@ function WarRoomPage1({ data, setData, toast }) {
   const { warroomP1, meta } = data;
   const [ivTypeFilter, setIvTypeFilter] = wr1State('P'); // 'all' | 'P' | 'O' — default 'P' (โครงการ)
   const [drillModal, setDrillModal]     = wr1State(null);  // { kind: 'month'|'week', title, items }
+  const [wipDrill, setWipDrill]         = wr1State(null);  // §04 WIP: { title, items }
   const wrInvType = iv => ((iv.invType || iv.invtype || 'P').toString().trim().toUpperCase() === 'O' ? 'O' : 'P');
   const matchType = iv => ivTypeFilter === 'all' || wrInvType(iv) === ivTypeFilter;
 
@@ -233,13 +234,17 @@ function WarRoomPage1({ data, setData, toast }) {
       //   (outstandingDebt) — ไม่ใช่ f.debtPct ที่ไม่มีอยู่จริง; cap ไม่เกินมูลค่าสัญญา
       const debtAmt = Number(f.debtDeduction) || Number(f.outstandingDebt) || 0;
       const debt  = isCreditor ? Math.min(gross, debtAmt) : 0;
-      rows.push({ code, gross, debt, net: gross - debt, assignee });
+      rows.push({
+        code, gross, debt, net: gross - debt, assignee,
+        name: p.name || p.site || code, type: p.type || '', province: p.province || '',
+        start: p.start || '', finish: p.finish || '',
+      });
     });
 
-    // 4) จัดกลุ่มตามโอนสิทธิ์
+    // 4) จัดกลุ่มตามโอนสิทธิ์ (เก็บ items ไว้สำหรับ drill-down)
     const groups = {
-      'ไม่โอนสิทธิรับเงิน': { count: 0, gross: 0, debt: 0, net: 0 },
-      'โอนสิทธิรับเงิน':    { count: 0, gross: 0, debt: 0, net: 0 },
+      'ไม่โอนสิทธิรับเงิน': { count: 0, gross: 0, debt: 0, net: 0, items: [] },
+      'โอนสิทธิรับเงิน':    { count: 0, gross: 0, debt: 0, net: 0, items: [] },
     };
     rows.forEach(r => {
       const k = r.assignee ? 'โอนสิทธิรับเงิน' : 'ไม่โอนสิทธิรับเงิน';
@@ -247,12 +252,13 @@ function WarRoomPage1({ data, setData, toast }) {
       groups[k].gross += r.gross;
       groups[k].debt  += r.debt;
       groups[k].net   += r.net;
+      groups[k].items.push(r);
     });
     const wipByTransfer = Object.entries(groups).map(([type, v]) => ({ type, ...v }));
     const wipTotal = rows.reduce((acc, r) => ({
       count: acc.count + 1, gross: acc.gross + r.gross, debt: acc.debt + r.debt, net: acc.net + r.net,
     }), { count: 0, gross: 0, debt: 0, net: 0 });
-    return { wipByTransfer, wipTotal };
+    return { wipByTransfer, wipTotal, items: rows };
   }, [data.projects, data.invoices, data.manualOverrides]);
 
   return (
@@ -287,7 +293,7 @@ function WarRoomPage1({ data, setData, toast }) {
             const _p2 = (n) => String(n).padStart(2, '0');
             const _brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
             const _prevTitle = document.title;
-            document.title = `${_brand}-WARROOM-รายรับ ${_p2(_d.getDate())}.${_p2(_d.getMonth() + 1)}.${_d.getFullYear()}`;
+            document.title = `${_brand} - รายรับสะสมประจำปี ${_p2(_d.getDate())}.${_p2(_d.getMonth() + 1)}.${_d.getFullYear()}`;
             const cleanup = () => {
               document.title = _prevTitle;
               if (style.parentNode) style.parentNode.removeChild(style);
@@ -575,9 +581,13 @@ function WarRoomPage1({ data, setData, toast }) {
               </td></tr>
             )}
             {wipSection.wipByTransfer.map((t, i) => (
-              <tr key={i}>
+              <tr key={i}
+                onClick={() => t.count && setWipDrill({ title: 'งานระหว่างก่อสร้าง · ' + t.type, items: t.items })}
+                style={{ cursor: t.count ? 'pointer' : 'default' }}
+                title={t.count ? 'กดดูรายการโครงการ' : ''}>
                 <td>
                   <Badge kind={t.type.startsWith('โอน') ? 'b-amber' : 'b-blue'} dot={false}>{t.type}</Badge>
+                  {t.count > 0 && <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>▸ ดูรายการ</span>}
                 </td>
                 <td style={{ textAlign: 'center' }}>{t.count}</td>
                 <td className="num">{t.gross ? fmtNum(t.gross, 2) : <span className="muted">-</span>}</td>
@@ -587,8 +597,11 @@ function WarRoomPage1({ data, setData, toast }) {
             ))}
           </tbody>
           <tfoot>
-            <tr>
-              <td>Total</td>
+            <tr
+              onClick={() => wipSection.wipTotal.count && setWipDrill({ title: 'งานระหว่างก่อสร้าง · ทั้งหมด', items: wipSection.items })}
+              style={{ cursor: wipSection.wipTotal.count ? 'pointer' : 'default' }}
+              title={wipSection.wipTotal.count ? 'กดดูรายการทั้งหมด' : ''}>
+              <td>Total{wipSection.wipTotal.count > 0 && <span style={{ marginLeft: 6, fontSize: 11, opacity: .8 }}>▸ ดูทั้งหมด</span>}</td>
               <td style={{ textAlign: 'center' }}>{wipSection.wipTotal.count}</td>
               <td className="num">{fmtNum(wipSection.wipTotal.gross, 2)}</td>
               <td className="num" style={{ color: 'var(--bad)' }}>({fmtNum(Math.abs(wipSection.wipTotal.debt), 2)})</td>
@@ -613,7 +626,59 @@ function WarRoomPage1({ data, setData, toast }) {
         />
       )}
 
+      {/* §04 WIP drill — รายการโครงการระหว่างก่อสร้าง (อ่านอย่างเดียว) */}
+      {wipDrill && (
+        <WipDrillModal title={wipDrill.title} items={wipDrill.items} onClose={() => setWipDrill(null)} />
+      )}
+
     </div>
+  );
+}
+
+/* ── §04 WIP drill modal — รายการโครงการระหว่างก่อสร้าง (read-only) ── */
+function WipDrillModal({ title, items, onClose }) {
+  const tot = (items || []).reduce((a, r) => ({
+    gross: a.gross + (r.gross || 0), debt: a.debt + (r.debt || 0), net: a.net + (r.net || 0),
+  }), { gross: 0, debt: 0, net: 0 });
+  return (
+    <Modal open title={title} onClose={onClose} wide maxWidth={960}>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>โครงการ</th>
+            <th style={{ width: 110 }}>ผู้รับโอนสิทธิ์</th>
+            <th style={{ textAlign: 'right' }}>มูลค่าสัญญา (GROSS)</th>
+            <th style={{ textAlign: 'right' }}>หักภาระหนี้</th>
+            <th style={{ textAlign: 'right' }}>คงเหลือสุทธิ (NET)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(items || []).map((r, i) => (
+            <tr key={i}>
+              <td>
+                <div style={{ fontWeight: 600 }}>{r.name}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{[r.code, r.type, r.province].filter(Boolean).join(' · ')}</div>
+              </td>
+              <td>{r.assignee ? <Badge kind="b-amber" dot={false}>{r.assignee}</Badge> : <span className="muted">ไม่โอนสิทธิ์</span>}</td>
+              <td className="num">{fmtNum(r.gross, 2)}</td>
+              <td className="num" style={{ color: r.debt ? 'var(--bad)' : 'var(--ink-400)' }}>{r.debt ? '(' + fmtNum(r.debt, 2) + ')' : '-'}</td>
+              <td className="num strong">{fmtNum(r.net, 2)}</td>
+            </tr>
+          ))}
+          {(!items || items.length === 0) && (
+            <tr><td colSpan={5} style={{ textAlign: 'center', padding: 18, color: 'var(--ink-400)' }}>ไม่มีรายการ</td></tr>
+          )}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={2}>รวม {(items || []).length} โครงการ</td>
+            <td className="num">{fmtNum(tot.gross, 2)}</td>
+            <td className="num" style={{ color: 'var(--bad)' }}>({fmtNum(tot.debt, 2)})</td>
+            <td className="num strong">{fmtNum(tot.net, 2)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </Modal>
   );
 }
 

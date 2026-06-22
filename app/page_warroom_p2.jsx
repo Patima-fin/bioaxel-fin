@@ -456,8 +456,40 @@ function WarRoomPage2({ data, setData, toast }) {
             📁 เพิ่มจาก Excel
           </button>
           <span className="no-present" style={{ display: 'contents' }}><EditModeToggle value={editMode} onChange={setEditMode} /></span>
-          <a className="btn btn-ghost" href="#warroom1"><Icon name="arrow" size={14} style={{ transform: 'rotate(180deg)' }} /> ย้อนกลับ · หน้า 1</a>
-          <span className="no-present" style={{ display: 'contents' }}><PrintButton label="พิมพ์ / PDF" /></span>
+          <a className="btn btn-ghost no-print" href="#warroom1"><Icon name="arrow" size={14} style={{ transform: 'rotate(180deg)' }} /> ย้อนกลับ · หน้า 1</a>
+          <button className="btn btn-ghost no-present" onClick={() => {
+            // ส่งออก PDF — inject print style ซ่อน sidebar/topbar/ปุ่ม + ตั้งชื่อไฟล์จากวันที่กดบันทึก (เหมือนหน้า 1)
+            const styleId = 'wr2-print-style';
+            let style = document.getElementById(styleId);
+            if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+            style.textContent = `
+              @media print {
+                @page { size: A4 portrait; margin: 8mm 10mm; }
+                html, body { background: #fff !important; }
+                .sb, .sb-scrim, .topbar, .no-print, .no-present { display: none !important; }
+                .app { grid-template-columns: 1fr !important; display: block !important; }
+                .page, .main { max-width: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+                .wr-page, .wr-page * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                .wr-page .card { box-shadow: none !important; break-inside: avoid; }
+                .wr-page table { break-inside: auto; }
+                .wr-page thead { display: table-header-group; }
+                .wr-page tr { break-inside: avoid; }
+              }
+            `;
+            const _d = new Date();
+            const _p2 = (n) => String(n).padStart(2, '0');
+            const _brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
+            const _prevTitle = document.title;
+            document.title = `${_brand} - ประมาณการรับเงินจากโครงการ ${_p2(_d.getDate())}.${_p2(_d.getMonth() + 1)}.${_d.getFullYear()}`;
+            const cleanup = () => {
+              document.title = _prevTitle;
+              if (style.parentNode) style.parentNode.removeChild(style);
+              window.removeEventListener('afterprint', cleanup);
+            };
+            window.addEventListener('afterprint', cleanup);
+            setTimeout(cleanup, 60000);
+            setTimeout(() => window.print(), 50);
+          }} title="ส่งออกหน้านี้เป็น PDF (Ctrl+P)"><Icon name="download" size={14} /> ส่งออก PDF</button>
           <button className="btn btn-ghost no-present" onClick={() => { if (confirm('โหลด JS ใหม่ทั้งหมด (clear cache) ?')) { location.href = location.pathname + '?t=' + Date.now() + '#warroom2'; } }}
             title={'Build: ' + WR2_BUILD + ' · คลิกเพื่อ force reload ทั้ง JS files'}
             style={{ fontSize: 10.5, opacity: 0.7 }}>
