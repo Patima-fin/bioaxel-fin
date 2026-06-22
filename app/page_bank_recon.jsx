@@ -480,7 +480,22 @@ function BankReconPage({ data, setData, toast }) {
     const lineById = {};
     (data.bankReconLines || []).forEach(l => { if (l && l.id != null) lineById[String(l.id)] = l; });
     const todayISO = new Date().toISOString().slice(0, 10);
-    const add = [];
+    // ★ มี PV รองรับอยู่แล้วไหม — ถ้ามี (ยอดตรง ±0.01 + บัญชีตรง + วันใกล้กัน ±31) "ห้าม resurrect"
+    //   เพราะ PV เป็น Actual ในระบบอยู่แล้ว → ปั๊ม BANK_RECON ซ้ำ = นับซ้ำหน้า Cashflow.
+    //   (เคสเลขเอกสาร PV เปลี่ยน → auto-match พลาด → เคยกดบันทึกจ่ายจริง/จับคู่ PV แล้ว แต่ decision
+    //    เด้งกลับ recorded + forecastId ถูกลบ → self-heal เดิมปั๊ม F กลับวนไม่จบ = ยอดซ้ำ)
+    const pvList = (data.pvVouchers || []).map(bdNormPV).filter(p => p.amount > 0);
+    const lineHasPv = (line) => {
+      const amt = Math.abs(Number(line.amount) || 0);
+      if (!amt) return false;
+      return pvList.some(p => {
+        if (Math.abs(p.amount - amt) > 0.01) return false;                                                              // ยอดต้องตรง (สัญญาณหลัก)
+        if (line.accountNo && p.bankAc && bdDigits(p.bankAc) && !bdAcctMatchesCheck(line.accountNo, p.bankAc)) return false;  // เทียบบัญชีได้แล้วไม่ตรง → คนละก้อน
+        if (line.date && p.date && brDateDiff(line.date, p.date) > 31) return false;                                    // วันต้องใกล้กัน
+        return true;
+      });
+    };
+    const add = []; let skippedPv = 0;
     missing.forEach(s => {
       const lineId = String(s.id);
       let line = lineById[lineId];
@@ -493,6 +508,7 @@ function BankReconPage({ data, setData, toast }) {
       }
       const amount = -Math.abs(Number(line.amount) || 0);
       if (!amount) return;
+      if (lineHasPv(line)) { skippedPv++; return; }                     // ★ มี PV รองรับ → ไม่ปั๊มซ้ำ (กันนับซ้ำกับ PV)
       add.push({
         id: s.forecastId, DATE: todayISO, PAYMENT_DATE: line.date, EXPENSE_TYPE: 'BANK_RECON',
         DESCRIPTION: line.desc || ('รายการธนาคาร' + (line.ref ? ' ' + line.ref : '')),
@@ -503,6 +519,7 @@ function BankReconPage({ data, setData, toast }) {
         NOTE: 'กู้คืนอัตโนมัติจากกระทบยอด (self-heal)',
       });
     });
+    if (skippedPv) console.info('[BankRecon] self-heal ข้าม ' + skippedPv + ' รายการ (มี PV รองรับอยู่แล้ว — กันนับซ้ำหน้า Cashflow)');
     if (!add.length) return;
     const sig = add.map(r => r.id).sort().join(',');
     if (sig === brHealRef.current) return;                             // กันยิงซ้ำชุดเดิมระหว่างรอ push/poll
@@ -514,7 +531,7 @@ function BankReconPage({ data, setData, toast }) {
       return { ...d, forecastEntries: [...(d.forecastEntries || []), ...fresh] };
     });
     if (toast) toast('กู้คืน ' + add.length + ' รายการจ่ายจริง (กระทบยอด) ที่หายจากการ sync → เด้งเข้า Actual');
-  }, [data.forecastEntries, data.bankReconState, data.bankReconLines]);
+  }, [data.forecastEntries, data.bankReconState, data.bankReconLines, data.pvVouchers]);
 
   // PV ของบัญชี+เดือนนี้ (outflow) — ผูกบัญชีด้วย bdAcctMatchesCheck (เลขท้าย 4)
   const pvForAcct = brMemo(() => {
@@ -611,8 +628,10 @@ function BankReconPage({ data, setData, toast }) {
   };
   const undoRecord = (line, forecastId) => {
     if (readOnly) return;
+    let nextFe = data.forecastEntries || [];
     if (forecastId) {
       brUndoneRef.current[String(forecastId)] = true;                 // ★ กัน self-heal สร้างแถวนี้กลับ (เจตนาลบ)
+      nextFe = nextFe.filter(e => e.id !== forecastId);
       setData(d => ({ ...d, forecastEntries: (d.forecastEntries || []).filter(e => e.id !== forecastId) }));
       // แถวนี้ STATUS=ACTUAL → diff ลบปกติจะโดนเกราะ protect-ACTUAL ฝั่งเซิร์ฟเวอร์บล็อก (เด้งกลับ)
       //   ดังนั้นสั่งลบจริงด้วย forceDeleteRows (allowShrink) — เป็นการลบที่ผู้ใช้ตั้งใจ
@@ -622,6 +641,10 @@ function BankReconPage({ data, setData, toast }) {
     }
     const ns = { ...reconState }; delete ns[line.id];
     setReconState(ns); BankReconStore.setState(ns); pushReconState(ns);
+    // ★ persist ทันที (ไม่รอ debounce) — กัน decision หาย แล้ว self-heal ปั๊มแถวกลับ
+    if (window.WTPData && typeof WTPData.forceSyncNow === 'function') {
+      WTPData.forceSyncNow({ ...data, forecastEntries: nextFe, bankReconState: brStateToRows(ns) });
+    }
     if (toast) toast('ยกเลิกบันทึก — ลบออกจาก Actual แล้ว');
   };
 
@@ -634,14 +657,21 @@ function BankReconPage({ data, setData, toast }) {
     if (readOnly) { if (toast) toast('สิทธิ์นี้ดูได้อย่างเดียว'); return; }
     if (!pv) return;
     const prev = reconState[line.id];
+    let nextFe = data.forecastEntries || [];
     if (prev && prev.decision === 'recorded' && prev.forecastId) {
       brUndoneRef.current[String(prev.forecastId)] = true;             // กัน self-heal สร้างแถวจ่ายจริงกลับ
+      nextFe = nextFe.filter(e => e.id !== prev.forecastId);
       setData(d => ({ ...d, forecastEntries: (d.forecastEntries || []).filter(e => e.id !== prev.forecastId) }));
       if (window.WTPData && typeof WTPData.forceDeleteRows === 'function') WTPData.forceDeleteRows('forecastEntries', prev.forecastId);
     }
     const pvRef = (pv.id != null && pv.id !== '') ? String(pv.id) : (pv.pvNo || '');
     const ns = { ...reconState, [line.id]: { decision: 'matched', forecastId: '', pvRef } };
     setReconState(ns); BankReconStore.setState(ns); pushReconState(ns);
+    // ★ persist ทันที (ไม่รอ debounce 1.5s) — กัน decision='matched' หายระหว่างทาง แล้วเหลือ
+    //   recorded + F ถูกลบ → self-heal ปั๊ม F กลับ → นับซ้ำ. push ด้วย data ที่ตัด F ออกแล้ว (กัน upsert F คืน)
+    if (window.WTPData && typeof WTPData.forceSyncNow === 'function') {
+      WTPData.forceSyncNow({ ...data, forecastEntries: nextFe, bankReconState: brStateToRows(ns) });
+    }
     setMatchLine(null);
     if (toast) toast('จับคู่ PV เองแล้ว — ไม่สร้างรายการ Actual ซ้ำ (PV เป็น Actual อยู่แล้ว)');
   };
