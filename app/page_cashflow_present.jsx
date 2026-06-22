@@ -952,8 +952,8 @@
               <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
               <div style={expanded ? { maxHeight: 420, overflowY: 'auto', paddingRight: 4 } : null}>
                 {top.map((c, i) => (
-                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) 1fr auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
-                    <span style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cfpShort(c.name)} <span style={{ color: C.faint }}>({c.count})</span></span>
+                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) minmax(0,0.8fr) auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
+                    <span style={{ fontSize: 13, color: C.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{c.name} <span style={{ color: C.faint }}>({c.count})</span></span>
                     <span><CfpBar amt={c.net} max={maxAbs} /></span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
                   </div>
