@@ -222,6 +222,7 @@ function PL_parseRows(rows) {
   const tKey = findKey(['type', 'ประเภท', 'ชนิด']);
   const cKey = findKey(['ac_code', 'code', 'รหัสบัญชี', 'รหัส', 'maincode']);
   const nKey = findKey(['ac_des', 'ชื่อบัญชี', 'name', 'description', 'desc', 'รายการ']);
+  const sKey = findKey(['seq', 'ord', 'order', 'ลำดับ']);   // ลำดับแถวในไฟล์ Excel (ไว้เรียงรายละเอียด)
 
   let used = 0;
   rows.forEach(r => {
@@ -249,7 +250,8 @@ function PL_parseRows(rows) {
     });
     if (arr.every(v => v === 0) && (code == null || code === '')) return; // blank row
     groups[g] = PL_addArr(groups[g], arr);
-    accounts[g].push({ code: String(code || ''), name: String((nKey ? r[nKey] : '') || ''), arr });
+    const seqVal = sKey != null ? Number(r[sKey]) : NaN;
+    accounts[g].push({ code: String(code || ''), name: String((nKey ? r[nKey] : '') || ''), arr, seq: isNaN(seqVal) ? undefined : seqVal });
     used++;
   });
   if (!used) return null;
@@ -340,8 +342,12 @@ function PnLPage({ data, setData, toast }) {
   // ── detail rows for a group (real accounts; sorted desc by YTD) ──
   const detailFor = (key) => {
     const accts = (model && model.accounts && model.accounts[key]) || [];
-    const rows = accts.map(a => ({ code: a.code, name: a.name, arr: a.arr, total: PL_invTotal(a.code, a.arr, lastMonth) }))
-      .sort((x, y) => Math.abs(y.total) - Math.abs(x.total));
+    const rows = accts.map(a => ({ code: a.code, name: a.name, arr: a.arr, seq: a.seq, total: PL_invTotal(a.code, a.arr, lastMonth) }))
+      .sort((x, y) => {                       // เรียงตามลำดับในไฟล์ Excel (seq) — fallback = รหัสบัญชี
+        const sx = (x.seq == null ? Infinity : x.seq), sy = (y.seq == null ? Infinity : y.seq);
+        if (sx !== sy) return sx - sy;
+        return String(x.code).localeCompare(String(y.code), 'en', { numeric: true });
+      });
     return { key, ...PL_GROUP_META[key], accounts: rows, total: PL_sum(groups[key], lastMonth) };
   };
 
@@ -431,7 +437,9 @@ function PnLPage({ data, setData, toast }) {
         };
 
         // 3) อ่านรายบัญชี (aggregate ถ้ารหัสซ้ำ — เช่น 7100-01 โผล่ 2 แถว)
+        //    seq = ลำดับที่เจอครั้งแรกในชีต → เก็บไว้เรียงรายละเอียดให้ "เหมือนไฟล์ Excel"
         const byCode = {};
+        let seq = 0;
         for (let i = hdrIdx + 1; i < aoa.length; i++) {
           const row = aoa[i] || [];
           let code = String(row[codeCol] == null ? '' : row[codeCol]).trim();
@@ -444,7 +452,7 @@ function PnLPage({ data, setData, toast }) {
             else continue;                       // section header / subtotal (รวม.../กำไร...) — ข้าม
           }
           let rec = byCode[code];
-          if (!rec) rec = byCode[code] = { code, name, m: new Array(12).fill(0), group: invGroup };
+          if (!rec) rec = byCode[code] = { code, name, m: new Array(12).fill(0), group: invGroup, seq: seq++ };
           if (!rec.name && name) rec.name = name;
           if (invGroup && !rec.group) rec.group = invGroup;
           monthCols.forEach(mc => { rec.m[mc.month - 1] += num(row[mc.col]); });
@@ -536,7 +544,7 @@ function PnLPage({ data, setData, toast }) {
       const rows = parsed.accounts.map(a => {
         const code = String(a.code).trim();
         const grp = (groupOverride && groupOverride[code]) || a.group || PL_inferGroup(code, a.name) || '';
-        const row = { code, name: a.name || '', group: grp, year: parsed.year || PL_YEAR_DEFAULT, updatedAt: now };
+        const row = { code, name: a.name || '', group: grp, year: parsed.year || PL_YEAR_DEFAULT, seq: (typeof a.seq === 'number' ? a.seq : 0), updatedAt: now };
         for (let m = 1; m <= 12; m++) row['m' + m] = Number(a.m[m - 1]) || 0;
         return row;
       }).filter(r => r.group);   // กันบัญชีที่จัดกลุ่มไม่ได้หลุดเข้าฐาน (ปกติไม่มี)
