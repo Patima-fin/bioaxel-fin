@@ -1719,6 +1719,8 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
 .pnl-det-tbl th.r, .pnl-det-tbl td.r { text-align: right; }
 .pnl-det-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--line-soft); color: var(--ink-700); white-space: nowrap; }
 .pnl-det-tbl tr.pnl-det-total td { font-weight: 700; color: var(--ink-900); background: var(--ink-100); border-top: 1px solid var(--line); }
+/* ค่าติดลบในตารางรายละเอียด = แดง (override .pnl-det-tbl td/total ที่ตั้งสี ink-700/900) */
+.pnl-det-tbl td.pnl-neg, .pnl-det-tbl tr.pnl-det-total td.pnl-neg { color: var(--bad); }
 .pnl-modal-note { margin-top: 14px; font-size: 12px; color: var(--ink-400); }
 
 /* ── group accordion (map modal) ── */
