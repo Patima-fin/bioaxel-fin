@@ -103,10 +103,38 @@ const PL_negCls = (v) => (typeof v === 'number' && v < 0) ? ' pnl-neg' : '';
 //   52xx          → ค่าใช้จ่ายในการขาย (selling)
 //   53xx/54xx/55xx→ ค่าใช้จ่ายในการบริหาร (admin)        [รวมค่าเสื่อม 5410 / ตัดจำหน่าย 5420 / FX 5500]
 //   71xx / 72xx   → ต้นทุนทางการเงิน (finance)          [ดอกเบี้ยจ่าย / ดบ.เช่าซื้อ]
+// ── สินค้า/วัตถุดิบคงเหลือ ต้นงวด/ปลายงวด (บรรทัด "ไม่มีรหัสบัญชี" ในงบ) ──
+// งบ BIO คิดต้นทุนขาย = สต๊อกต้นงวด + ซื้อ/ผลิต − สต๊อกปลายงวด → บรรทัดสต๊อกพวกนี้
+// ต้องนับรวมในต้นทุนขายด้วย (ไม่งั้นต้นทุนขายต่ำกว่างบจริง) + กดดูรายละเอียดได้เหมือนบัญชีอื่น
+// สังเคราะห์รหัส (id) คงที่จากชื่อ → re-import ไฟล์เดิมได้ id เดิม (upsert ทับ ไม่ซ้ำแถว)
+function PL_invCode(name) {
+  const n = String(name || '');
+  let mat = 'OTH';
+  if (/วัตถุดิบ/.test(n)) mat = 'RM';            // วัตถุดิบคงเหลือ
+  else if (/วัสด/.test(n)) mat = 'SUP';          // วัสดุสิ้นเปลือง (สะกดได้หลายแบบ)
+  else if (/สำเร็จรูป/.test(n)) mat = 'FG';       // สินค้าสำเร็จรูป
+  else if (/สินค้า/.test(n)) mat = 'GOODS';
+  const phase = /ต้นงวด/.test(n) ? 'OPEN' : (/ปลายงวด/.test(n) ? 'CLOSE' : 'X');
+  return 'INV-' + mat + '-' + phase;
+}
+const PL_isInvCode = (code) => /^INV-/i.test(String(code || '').trim());
+const PL_isInvName = (name) => /ต้นงวด|ปลายงวด/.test(String(name || ''));
+// ยอด "สะสม" ของบรรทัดสต๊อก = ต้นงวดของงวด (เดือนแรกที่มีค่า) / ปลายงวด (เดือนสุดท้าย)
+// — ไม่ใช่ผลรวมรายเดือน (สต๊อกยกมาแต่ละเดือนเป็น roll-forward) ให้ตรงคอลัมน์ "รวม" ในงบจริง
+function PL_invTotal(code, arr, lastMonth) {
+  const a = arr || [];
+  const lim = lastMonth || a.length;
+  if (/-CLOSE$/i.test(code)) { for (let i = lim - 1; i >= 0; i--) if (Math.abs(a[i] || 0) > 0.005) return a[i]; return 0; }
+  if (/-OPEN$/i.test(code))  { for (let i = 0; i < lim; i++)      if (Math.abs(a[i] || 0) > 0.005) return a[i]; return 0; }
+  return PL_sum(a, lim);
+}
+
 function PL_inferGroup(code, name) {
   const raw = String(code || '').trim();
   const c = raw.replace(/[^0-9]/g, '');
   const n = String(name || '');
+  // สต๊อกต้นงวด/ปลายงวด (ไม่มีรหัส) หรือรหัสสังเคราะห์ INV- → รวมเป็นต้นทุนขาย
+  if (PL_isInvName(n) || PL_isInvCode(raw)) return 'cogs';
   if (!c) return null;
   // override รายตัว (ถ้ามี) — รองรับทั้งมี/ไม่มีขีด
   if (PL_KNOWN_ACCOUNTS[raw]) return PL_KNOWN_ACCOUNTS[raw];
@@ -293,7 +321,7 @@ function PnLPage({ data, setData, toast }) {
   // ── detail rows for a group (real accounts; sorted desc by YTD) ──
   const detailFor = (key) => {
     const accts = (model && model.accounts && model.accounts[key]) || [];
-    const rows = accts.map(a => ({ code: a.code, name: a.name, arr: a.arr, total: PL_sum(a.arr, lastMonth) }))
+    const rows = accts.map(a => ({ code: a.code, name: a.name, arr: a.arr, total: PL_invTotal(a.code, a.arr, lastMonth) }))
       .sort((x, y) => Math.abs(y.total) - Math.abs(x.total));
     return { key, ...PL_GROUP_META[key], accounts: rows, total: PL_sum(groups[key], lastMonth) };
   };
@@ -387,12 +415,19 @@ function PnLPage({ data, setData, toast }) {
         const byCode = {};
         for (let i = hdrIdx + 1; i < aoa.length; i++) {
           const row = aoa[i] || [];
-          const code = String(row[codeCol] == null ? '' : row[codeCol]).trim();
-          if (!isCode(code)) continue;           // ข้ามแถว section/subtotal (ไม่มีรหัส)
+          let code = String(row[codeCol] == null ? '' : row[codeCol]).trim();
           const name = String(row[nameCol] == null ? '' : row[nameCol]).trim();
+          let invGroup = '';
+          if (!isCode(code)) {
+            // บรรทัดสต๊อกต้นงวด/ปลายงวด ในงบ "ไม่มีรหัสบัญชี" → เก็บเป็นต้นทุนขาย
+            // (รหัสสังเคราะห์คงที่) ให้ยอดต้นทุนขาย + รายละเอียดตรงกับงบจริง
+            if (PL_isInvName(name)) { code = PL_invCode(name); invGroup = 'cogs'; }
+            else continue;                       // section header / subtotal (รวม.../กำไร...) — ข้าม
+          }
           let rec = byCode[code];
-          if (!rec) rec = byCode[code] = { code, name, m: new Array(12).fill(0) };
+          if (!rec) rec = byCode[code] = { code, name, m: new Array(12).fill(0), group: invGroup };
           if (!rec.name && name) rec.name = name;
+          if (invGroup && !rec.group) rec.group = invGroup;
           monthCols.forEach(mc => { rec.m[mc.month - 1] += num(row[mc.col]); });
         }
         const accounts = Object.keys(byCode).map(c => byCode[c]);
@@ -419,7 +454,8 @@ function PnLPage({ data, setData, toast }) {
       }
       setLastParsed(parsed);
       // "ใหม่" = บัญชีที่ prefix จัดกลุ่มอัตโนมัติไม่ได้ (ปกติ = 0 สำหรับผังบัญชี BIO)
-      const unknown = parsed.accounts.filter(a => !PL_inferGroup(a.code, a.name));
+      // (แถวสต๊อก a.group='cogs' มาแล้ว — ไม่ต้องให้ผู้ใช้จัดกลุ่ม)
+      const unknown = parsed.accounts.filter(a => !a.group && !PL_inferGroup(a.code, a.name));
       if (unknown.length) {
         setNewAccts(unknown.map(a => ({ code: a.code, name: a.name, amount: PL_sum(a.m, 12), group: '' })));
         toast('พบผังบัญชีที่จัดกลุ่มอัตโนมัติไม่ได้ ' + unknown.length + ' รายการ — โปรดจัดประเภท (อีก ' + (parsed.accounts.length - unknown.length) + ' รายการ ระบบจัดให้แล้ว)');
@@ -441,7 +477,7 @@ function PnLPage({ data, setData, toast }) {
       const now = new Date().toISOString().slice(0, 10);
       const rows = parsed.accounts.map(a => {
         const code = String(a.code).trim();
-        const grp = (groupOverride && groupOverride[code]) || PL_inferGroup(code, a.name) || '';
+        const grp = (groupOverride && groupOverride[code]) || a.group || PL_inferGroup(code, a.name) || '';
         const row = { code, name: a.name || '', group: grp, year: parsed.year || PL_YEAR_DEFAULT, updatedAt: now };
         for (let m = 1; m <= 12; m++) row['m' + m] = Number(a.m[m - 1]) || 0;
         return row;
@@ -714,7 +750,9 @@ function PnLPage({ data, setData, toast }) {
               <tbody>
                 {newAccts.map((a, i) => (
                   <tr key={i}>
-                    <td><span className="pnl-acc-code">{a.code}</span></td>
+                    <td>{PL_isInvCode(a.code)
+                              ? <span style={{ fontSize: 10.5, fontWeight: 600, color: '#c2410c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' }}>สต๊อก</span>
+                              : <span className="pnl-acc-code">{a.code}</span>}</td>
                     <td>{a.name || <span className="muted">—</span>}</td>
                     <td className={'r pnl-num' + PL_negCls(a.amount)}>{PL_fmt(a.amount)}</td>
                     <td>
@@ -1004,7 +1042,9 @@ function PnLPage({ data, setData, toast }) {
                       <tbody>
                         {det.accounts.map((a, i) => (
                           <tr key={i}>
-                            <td><span className="pnl-acc-code">{a.code}</span></td>
+                            <td>{PL_isInvCode(a.code)
+                              ? <span style={{ fontSize: 10.5, fontWeight: 600, color: '#c2410c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' }}>สต๊อก</span>
+                              : <span className="pnl-acc-code">{a.code}</span>}</td>
                             <td>{a.name || '—'}</td>
                             {a.arr.slice(0, lastMonth).map((v, m) => <td key={m} className={'r pnl-num' + PL_negCls(v)}>{PL_fmt(v, { blankZero: true })}</td>)}
                             <td className={'r pnl-num' + PL_negCls(a.total)}>{PL_fmt(a.total)}</td>
@@ -1028,7 +1068,7 @@ function PnLPage({ data, setData, toast }) {
       {/* GROUP-MAP MODAL (all 9 groups accordion) */}
       <Modal open={mapOpen} onClose={() => setMapOpen(false)} wide title="ผังการจัดกลุ่มบัญชี">
         <div style={{ padding: '4px 20px 18px' }}>
-          <div className="pnl-modal-note" style={{ marginTop: 0, marginBottom: 12 }}>ระบบจัดบัญชีแยกประเภท (GL) เข้า 9 กลุ่มตามนี้ — คลิกแต่ละกลุ่มเพื่อดูบัญชีย่อย</div>
+          <div className="pnl-modal-note" style={{ marginTop: 0, marginBottom: 12 }}>ระบบจัดบัญชีแยกประเภท (GL) เข้า 6 กลุ่มตามนี้ — คลิกแต่ละกลุ่มเพื่อดูบัญชีย่อย (สต๊อกต้นงวด/ปลายงวด รวมอยู่ในต้นทุนขาย)</div>
           {PL_GROUP_ORDER.map(key => {
             const det = detailFor(key);
             const open = openGrp === key;
@@ -1050,7 +1090,9 @@ function PnLPage({ data, setData, toast }) {
                           <thead><tr><th style={{ width: 92 }}>รหัส</th><th>ชื่อบัญชี</th><th className="r" style={{ width: 130 }}>ยอดสะสม</th></tr></thead>
                           <tbody>
                             {det.accounts.map((a, i) => (
-                              <tr key={i}><td><span className="pnl-acc-code">{a.code}</span></td><td>{a.name || '—'}</td><td className={'r pnl-num' + PL_negCls(a.total)}>{PL_fmt(a.total)}</td></tr>
+                              <tr key={i}><td>{PL_isInvCode(a.code)
+                              ? <span style={{ fontSize: 10.5, fontWeight: 600, color: '#c2410c', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '1px 7px', whiteSpace: 'nowrap' }}>สต๊อก</span>
+                              : <span className="pnl-acc-code">{a.code}</span>}</td><td>{a.name || '—'}</td><td className={'r pnl-num' + PL_negCls(a.total)}>{PL_fmt(a.total)}</td></tr>
                             ))}
                           </tbody>
                         </table>
@@ -1060,7 +1102,7 @@ function PnLPage({ data, setData, toast }) {
               </div>
             );
           })}
-          <div className="pnl-modal-note">รวม 9 กลุ่ม · หน่วย: บาท · ยอดสะสม {lastMonth} เดือน</div>
+          <div className="pnl-modal-note">รวม 6 กลุ่ม · หน่วย: บาท · ยอดสะสม {lastMonth} เดือน</div>
         </div>
       </Modal>
     </div>
