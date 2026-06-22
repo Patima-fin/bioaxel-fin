@@ -158,6 +158,24 @@ function PL_inferGroup(code, name) {
   return null;
 }
 
+// แปลงวันที่จากชีต "ต้นทุน" → DD/MM/YYYY (ค.ศ.) — รองรับ serial / "27/01/69" (พ.ศ. 2 หลัก) / พ.ศ. เต็ม
+function PL_costDate(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && v > 30000 && v < 80000) {
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return ('0' + d.getUTCDate()).slice(-2) + '/' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '/' + d.getUTCFullYear();
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let y = Number(m[3]);
+    if (y < 100) y += 2500;     // "69" → 2569 (พ.ศ.)
+    if (y > 2400) y -= 543;     // พ.ศ. → ค.ศ.
+    return ('0' + m[1]).slice(-2) + '/' + ('0' + m[2]).slice(-2) + '/' + y;
+  }
+  return s;
+}
+
 // Sample data (design mock) — used ONLY when ฐาน DATA can't be read yet.
 const PL_SAMPLE = {
   year: 2569,
@@ -271,6 +289,7 @@ function PnLPage({ data, setData, toast }) {
   const [detailKey, setDetailKey] = plState(null); // open group-detail modal
   const [mapOpen, setMapOpen]   = plState(false);   // group-map modal
   const [openGrp, setOpenGrp]   = plState(PL_GROUP_ORDER[0]); // accordion expanded key
+  const [costOpen, setCostOpen] = plState(false);   // การ์ด "ต้นทุนเครื่อง BA" กางดู
   const reportRef = plRef(null);
   const pageRef   = plRef(null);   // capture ทั้งหน้าตอน "บันทึกเป็นรูป"
 
@@ -437,7 +456,46 @@ function PnLPage({ data, setData, toast }) {
         const monthsLabel = mn.length
           ? (mn.length > 1 ? PL_MONTHS_TH[mn[0] - 1] + '–' + PL_MONTHS_TH[mn[mn.length - 1] - 1] : PL_MONTHS_TH[mn[0] - 1]) + (year ? ' ' + year : '')
           : '';
-        resolve({ accounts, monthsPresent, year, monthsLabel });
+
+        // ── ข้อมูลเสริม: ชีต "ต้นทุน" (ต้นทุน/กำไรต่อเครื่อง BA รายเครื่อง) ──
+        // ตารางแยกต่างหากในไฟล์งบ (รายเครื่อง: ราคาขาย/ต้นทุนเครื่อง/โสหุ้ย/ค่าแรง/กำไร)
+        // ผลรวม "ต้นทุนรวม" = บรรทัด "ต้นทุนขาย-เครื่อง BA (5101-01)" ในงบ → โชว์เป็นการ์ดกดดูได้
+        let costBA = [];
+        try {
+          const csn = wb.SheetNames.find(n => String(n).trim() === 'ต้นทุน');
+          if (csn) {
+            const caoa = aoaOf(csn);
+            let chi = -1;
+            for (let i = 0; i < Math.min(caoa.length, 12); i++) {
+              const r = (caoa[i] || []).map(x => String(x == null ? '' : x));
+              if (r.some(c => /ราคาขาย/.test(c)) && r.some(c => /ต้นทุนรวม/.test(c))) { chi = i; break; }
+            }
+            if (chi >= 0) {
+              const hdr = (caoa[chi] || []).map(x => String(x == null ? '' : x).trim());
+              const fc = (re) => hdr.findIndex(h => re.test(h));
+              const col = {
+                date: fc(/ว\.?ด\.?ป|วันที่/), item: fc(/รายการ/), price: fc(/ราคาขาย/),
+                machine: fc(/ต้นทุนเครื่อง/), overhead: fc(/โสหุ้ย/), labor: fc(/ค่าแรง/),
+                cost: fc(/ต้นทุนรวม/), profit: fc(/กำไร|ขาดทุน/),
+              };
+              const cv = (row, c) => (c >= 0 && row[c] != null) ? row[c] : '';
+              for (let i = chi + 1; i < caoa.length; i++) {
+                const row = caoa[i] || [];
+                const item = String(cv(row, col.item)).trim();
+                if (!item || /^รวม|^total/i.test(item)) continue;   // ข้ามแถวว่าง/แถวรวม
+                const price = num(cv(row, col.price)), cost = num(cv(row, col.cost));
+                if (!price && !cost) continue;
+                costBA.push({
+                  date: PL_costDate(cv(row, col.date)), item,
+                  price, machine: num(cv(row, col.machine)), overhead: num(cv(row, col.overhead)),
+                  labor: num(cv(row, col.labor)), cost, profit: num(cv(row, col.profit)),
+                });
+              }
+            }
+          }
+        } catch (_) { costBA = []; }
+
+        resolve({ accounts, monthsPresent, year, monthsLabel, costBA });
       } catch (err) { reject(err); }
     };
     reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
@@ -484,7 +542,14 @@ function PnLPage({ data, setData, toast }) {
       }).filter(r => r.group);   // กันบัญชีที่จัดกลุ่มไม่ได้หลุดเข้าฐาน (ปกติไม่มี)
       if (!rows.length) { toast('จัดกลุ่มบัญชีไม่สำเร็จ — โปรดตรวจผังบัญชี'); setBusy(false); return; }
       await window.WTPData.writeTable('pnlBase', rows, r => String(r.code));
-      toast('นำเข้างบ ' + (parsed.monthsLabel || '') + ' สำเร็จ (' + rows.length + ' บัญชี) — กำลังรีเฟรช');
+      // ข้อมูลเสริม: ต้นทุน/กำไรต่อเครื่อง BA (ชีต "ต้นทุน") — เก็บใน manualOverrides (sync ทั้งทีม, ไม่ต้องมีตารางใหม่)
+      try {
+        if (window.WTPOverride) {
+          const cb = Array.isArray(parsed.costBA) ? parsed.costBA : [];
+          WTPOverride.setRaw('pnl.costBA', JSON.stringify({ rows: cb, monthsLabel: parsed.monthsLabel || '', updatedAt: now }));
+        }
+      } catch (_) {}
+      toast('นำเข้างบ ' + (parsed.monthsLabel || '') + ' สำเร็จ (' + rows.length + ' บัญชี' + (parsed.costBA && parsed.costBA.length ? ' + ต้นทุนเครื่อง ' + parsed.costBA.length + ' รายการ' : '') + ') — กำลังรีเฟรช');
       setNewAccts(null); setFile(null); setUploadOpen(false); setLastParsed(null);
       setTimeout(loadData, 600);
     } catch (err) { toast('นำเข้าไม่สำเร็จ: ' + (err && err.message || err)); }
@@ -508,6 +573,25 @@ function PnLPage({ data, setData, toast }) {
     const net     = PL_sum(comp.netProfit, lastMonth);
     return { revenue, cost, gp, net, gpM: revenue ? gp / revenue * 100 : 0, netM: revenue ? net / revenue * 100 : 0, costM: revenue ? cost / revenue * 100 : 0 };
   }, [comp, lastMonth]);
+
+  // ── ข้อมูลเสริม: ต้นทุน/กำไรต่อเครื่อง BA (ชีต "ต้นทุน") — อ่านจาก manualOverrides (sync ทั้งทีม) ──
+  const costBA = plMemo(() => {
+    try {
+      const arr = (data && data.manualOverrides) || [];
+      const row = arr.find(r => r && r.key === 'pnl.costBA');
+      if (!row || row.value == null || row.value === '') return { rows: [] };
+      const v = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+      if (Array.isArray(v)) return { rows: v };
+      return (v && Array.isArray(v.rows)) ? v : { rows: [] };
+    } catch (_) { return { rows: [] }; }
+  }, [data && data.manualOverrides]);
+
+  const cb = plMemo(() => {
+    const rows = (costBA && costBA.rows) || [];
+    const sum = (f) => rows.reduce((s, m) => s + (Number(m[f]) || 0), 0);
+    const price = sum('price'), cost = sum('cost'), profit = sum('profit');
+    return { rows, count: rows.length, price, cost, machine: sum('machine'), overhead: sum('overhead'), labor: sum('labor'), profit, margin: price ? profit / price * 100 : NaN };
+  }, [costBA]);
 
   const saveImage = () => {
     if (!window.html2canvas) { toast('ระบบบันทึกรูปยังไม่พร้อม — โหลด html2canvas ไม่สำเร็จ'); return; }
@@ -848,6 +932,85 @@ function PnLPage({ data, setData, toast }) {
           </table>
         </div>
       </div>
+
+      {/* ── ข้อมูลเสริม: ต้นทุน/กำไร ต่อเครื่อง BA (ชีต "ต้นทุน") — กดดูได้ ── */}
+      {cb.count > 0 && (
+        <>
+          <div className="pnl-section-head" style={{ marginTop: 22 }}>
+            <h2>🏭 ต้นทุน/กำไร ต่อเครื่อง BA (รายเครื่อง)</h2>
+            <span className="pnl-tag">{costBA.monthsLabel || ('สะสม ' + lastMonth + ' เดือน')} · ข้อมูลเสริมจากชีต “ต้นทุน”</span>
+          </div>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {/* แถบหัว — กดเพื่อกาง/ย่อ (สรุปเห็นตลอด) */}
+            <div onClick={() => setCostOpen(o => !o)} title="กดเพื่อดูรายละเอียดต่อเครื่อง"
+              style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', flexWrap: 'wrap',
+                background: costOpen ? '#f0fdf4' : 'white', borderBottom: costOpen ? '1px solid #dcfce7' : 'none' }}>
+              <span style={{ fontSize: 15, color: '#16a34a', transition: 'transform .15s ease', transform: costOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>ดูต้นทุน/กำไรต่อเครื่อง · {cb.count} เครื่อง</div>
+                <div style={{ fontSize: 11.5, color: '#64748b' }}>{costOpen ? 'กดเพื่อย่อ' : 'กดเพื่อกางดูรายละเอียด'} · ต้นทุนรวมตรงกับบรรทัด “ต้นทุนขาย-เครื่อง BA”</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {[
+                  { label: 'ราคาขายรวม', val: PL_fmt(cb.price), color: '#0f172a' },
+                  { label: 'ต้นทุนรวม', val: PL_fmt(cb.cost), color: '#64748b' },
+                  { label: 'กำไรรวม', val: PL_fmt(cb.profit), color: cb.profit >= 0 ? '#16a34a' : '#dc2626' },
+                  { label: 'กำไรเฉลี่ย', val: PL_fmtPct(cb.margin), color: cb.margin >= 0 ? '#16a34a' : '#dc2626' },
+                ].map((c2, i) => (
+                  <div key={i} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '4px 10px', textAlign: 'right', minWidth: 92 }}>
+                    <div style={{ fontSize: 9.5, color: '#94a3b8', fontWeight: 600 }}>{c2.label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: c2.color }}>{c2.val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* ตารางรายเครื่อง */}
+            {costOpen && (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="pnl-det-tbl" style={{ minWidth: 860 }}>
+                  <thead><tr>
+                    <th style={{ width: 96 }}>ว.ด.ป.</th><th>รายการ</th>
+                    <th className="r">ราคาขาย</th><th className="r">ต้นทุนเครื่อง</th>
+                    <th className="r">ค่าโสหุ้ย</th><th className="r">ค่าแรง 15%</th>
+                    <th className="r">ต้นทุนรวม</th><th className="r">กำไร(ขาดทุน)</th><th className="r">% กำไร</th>
+                  </tr></thead>
+                  <tbody>
+                    {cb.rows.map((m, i) => {
+                      const mg = m.price ? m.profit / m.price * 100 : NaN;
+                      return (
+                        <tr key={i}>
+                          <td style={{ whiteSpace: 'nowrap' }}>{m.date || '—'}</td>
+                          <td>{m.item || '—'}</td>
+                          <td className="r pnl-num">{PL_fmt(m.price)}</td>
+                          <td className="r pnl-num">{PL_fmt(m.machine)}</td>
+                          <td className="r pnl-num">{PL_fmt(m.overhead)}</td>
+                          <td className="r pnl-num">{PL_fmt(m.labor)}</td>
+                          <td className="r pnl-num">{PL_fmt(m.cost)}</td>
+                          <td className={'r pnl-num' + PL_negCls(m.profit)} style={{ fontWeight: 700 }}>{PL_fmt(m.profit)}</td>
+                          <td className={'r pnl-num' + PL_negCls(mg)}>{PL_fmtPct(mg)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="pnl-det-total">
+                      <td></td><td>รวม {cb.count} เครื่อง</td>
+                      <td className="r pnl-num">{PL_fmt(cb.price)}</td>
+                      <td className="r pnl-num">{PL_fmt(cb.machine)}</td>
+                      <td className="r pnl-num">{PL_fmt(cb.overhead)}</td>
+                      <td className="r pnl-num">{PL_fmt(cb.labor)}</td>
+                      <td className="r pnl-num">{PL_fmt(cb.cost)}</td>
+                      <td className={'r pnl-num' + PL_negCls(cb.profit)}>{PL_fmt(cb.profit)}</td>
+                      <td className={'r pnl-num' + PL_negCls(cb.margin)}>{PL_fmtPct(cb.margin)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="pnl-modal-note" style={{ padding: '8px 16px 14px', marginTop: 0 }}>
+                  ที่มา: ชีต “ต้นทุน” ในไฟล์งบ · หน่วย: บาท · ผลรวม “ต้นทุนรวม” = บรรทัด “ต้นทุนขาย-เครื่อง BA (5101-01)” ในงบ
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* BUDGET vs ACTUAL — แสดงเฉพาะเมื่อตั้ง PL_BUDGET (BIO ยังไม่มีงบประมาณ → ซ่อน) */}
       {PL_BUDGET && (<>
