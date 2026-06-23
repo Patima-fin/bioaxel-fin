@@ -7,21 +7,16 @@
 
 const DL_CATEGORY_COLOR = {
   'WCI':       '#2e8b4a',
-  'Non-WCI':   '#0d9488',
-  'กรรมการ':    '#7c3aed',
-  'LockWood':  '#0369a1',
-  'Zigo':      '#b45309',
-  'Employyim': '#be185d',
-  'ลีซอิท':     '#c2410c',
   'STS':       '#15803d',
-  'FS':        '#9d174d',
+  'BHG':       '#4f46e5',
+  'กรรมการ':    '#7c3aed',
+  'ตปท.':       '#b45309',
   'ธนาคาร':     '#475569',
   'อื่นๆ':       '#525252',
 };
 const DL_CATEGORY_BG = {
-  'WCI':       '#ebf8ff', 'Non-WCI':   '#f0fdfa', 'กรรมการ':    '#f5f3ff',
-  'LockWood':  '#f0f9ff', 'Zigo':      '#fffbeb', 'Employyim': '#fdf2f8',
-  'ลีซอิท':     '#fff7ed', 'STS':       '#f0fdf4', 'FS':        '#fdf2f8',
+  'WCI':       '#ebf8ff', 'STS':       '#f0fdf4', 'BHG':       '#eef2ff',
+  'กรรมการ':    '#f5f3ff', 'ตปท.':       '#fffbeb',
   'ธนาคาร':     '#f1f5f9', 'อื่นๆ':       '#f5f5f5',
 };
 

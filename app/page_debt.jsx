@@ -6,14 +6,10 @@
 
 const CATEGORY_META = {
   'WCI':       { color: '#2e8b4a', bg: '#ebf8ff', label: 'WCI (นักลงทุนรายบุคคล)' },
-  'Non-WCI':   { color: '#0d9488', bg: '#f0fdfa', label: 'Non-WCI (รายบุคคลอื่น)' },
-  'กรรมการ':    { color: '#7c3aed', bg: '#f5f3ff', label: 'เงินกู้กรรมการ' },
-  'LockWood':  { color: '#0369a1', bg: '#f0f9ff', label: 'LockWood (ไทย)' },
-  'Zigo':      { color: '#b45309', bg: '#fffbeb', label: 'Zigo (ต่างประเทศ)' },
-  'Employyim': { color: '#be185d', bg: '#fdf2f8', label: 'Employyim' },
-  'ลีซอิท':     { color: '#c2410c', bg: '#fff7ed', label: 'ลีซอิท (โอนสิทธิ)' },
   'STS':       { color: '#15803d', bg: '#f0fdf4', label: 'STS (โอนสิทธิ)' },
-  'FS':        { color: '#9d174d', bg: '#fdf2f8', label: 'FS' },
+  'BHG':       { color: '#4f46e5', bg: '#eef2ff', label: 'BHG (นักลงทุน)' },
+  'กรรมการ':    { color: '#7c3aed', bg: '#f5f3ff', label: 'เงินกู้กรรมการ' },
+  'ตปท.':       { color: '#b45309', bg: '#fffbeb', label: 'ตปท. (ต่างประเทศ)' },
   'ธนาคาร':     { color: '#475569', bg: '#f1f5f9', label: 'ธนาคาร / OD / LG' },
   'อื่นๆ':       { color: '#525252', bg: '#f5f5f5', label: 'อื่นๆ' },
 };
@@ -21,13 +17,12 @@ const DEBT_CATEGORIES = Object.keys(CATEGORY_META);
 // กลุ่มใหญ่ BANK / NON-BANK (ผู้ใช้เคาะ: BANK = ธนาคารอย่างเดียว · ที่เหลือทั้งหมด = NON-BANK)
 const DEBT_BANK_CATS = ['ธนาคาร'];
 const isDebtBankCat = (cat) => DEBT_BANK_CATS.includes(cat);
-// NON-BANK แยกเป็น 2 กลุ่มย่อย: "สินเชื่อโอนสิทธิ์" (LIT/ลีซอิท, STS, WCI, Project, FS) vs "นักลงทุน" (ที่เหลือ)
+// NON-BANK แยกเป็น 2 กลุ่มย่อย: "สินเชื่อโอนสิทธิ์" (STS, WCI, Project) vs "นักลงทุน" (Non-WCI, กรรมการ, LockWood, Zigo, Employyim, BHG, ที่เหลือ)
 function isAssignmentDebtCat(cat) {
   const c = String(cat || '').trim();
   if (/non-?wci/i.test(c)) return false;                 // Non-WCI = นักลงทุน
-  return /ลีซอิท/.test(c) || /\blit\b/i.test(c)
-      || /\bsts\b/i.test(c) || /\bwci\b/i.test(c)
-      || /project/i.test(c) || /\bfs\b/i.test(c) || /โอนสิทธิ/.test(c);
+  return /\bsts\b/i.test(c) || /\bwci\b/i.test(c)
+      || /project/i.test(c) || /โอนสิทธิ/.test(c);
 }
 function metaFor(cat) {
   return CATEGORY_META[cat] || { color: '#525252', bg: '#f5f5f5', label: cat || '—' };
@@ -315,10 +310,13 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
       }}>
         <span style={{ fontSize: 11, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.4 }}>หมวด</span>
-        <select className="select input" value={draft.debtCategory} onChange={e => set('debtCategory', e.target.value)}
-          style={{ minWidth: 200, height: 32, borderColor: m.color, color: m.color, fontWeight: 600 }}>
+        <input className="input" list="debt-cat-list" value={draft.debtCategory}
+          onChange={e => set('debtCategory', e.target.value)}
+          placeholder="เลือกหรือพิมพ์ชื่อหมวด / บริษัทใหม่"
+          style={{ minWidth: 240, height: 32, borderColor: m.color, color: m.color, fontWeight: 600 }} />
+        <datalist id="debt-cat-list">
           {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_META[c].label}</option>)}
-        </select>
+        </datalist>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>สถานะ</span>
         <select className="select input" value={draft.status} onChange={e => set('status', e.target.value)} style={{ height: 32 }}>
