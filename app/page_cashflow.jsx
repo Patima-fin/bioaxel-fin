@@ -1912,7 +1912,7 @@ function CashFlowDashboard({ data, setData, toast }) {
         return (
         <div className="card cf-grand-card" style={{
           padding: 0, overflow: 'hidden', border: 'none', color: '#fff', position: 'relative',
-          background: 'linear-gradient(150deg, var(--brand-500) 0%, var(--brand-600) 55%, var(--brand-700) 100%)',
+          background: 'linear-gradient(150deg, oklch(65% 0.16 152) 0%, oklch(50% 0.16 152) 100%)',
           display: 'flex', flexDirection: 'column',
         }}>
           {/* แสงเรืองมุมบนขวา — เพิ่มมิติ ไม่ให้ดูแบนจืด */}
