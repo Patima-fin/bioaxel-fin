@@ -1373,6 +1373,8 @@ function CashFlowDashboard({ data, setData, toast }) {
               @media print {
                 @page { size: A4 portrait; margin: 8mm 10mm; }
                 html, body { background: #f4f7fb !important; }
+                /* บังคับพิมพ์สีพื้นหลัง/gradient ทุกองค์ประกอบ (เบราเซอร์ default ตัดทิ้ง = การ์ดสีหาย) */
+                * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
               }
             `;
             // ชื่อไฟล์ PDF = "<BRAND>-FORECAST DD.MM.YYYY" (วันที่กดบันทึก, ค.ศ.) — เบราเซอร์ใช้ document.title เป็นชื่อไฟล์ตอน Save as PDF
@@ -1912,7 +1914,8 @@ function CashFlowDashboard({ data, setData, toast }) {
         return (
         <div className="card cf-grand-card" style={{
           padding: 0, overflow: 'hidden', border: 'none', color: '#fff', position: 'relative',
-          background: 'linear-gradient(150deg, oklch(65% 0.16 152) 0%, oklch(50% 0.16 152) 100%)',
+          background: 'linear-gradient(150deg, #23aa5b 0%, #007b2f 100%)',
+          WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact',
           display: 'flex', flexDirection: 'column',
         }}>
           {/* แสงเรืองมุมบนขวา — เพิ่มมิติ ไม่ให้ดูแบนจืด */}
