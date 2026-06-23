@@ -1021,7 +1021,7 @@ body.present-mode .present-page.cfp-page .cfp-grid table { font-size: 14px !impo
     display: flex !important;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #1a4490 0%, #1f56b8 50%, #2a6fdb 100%) !important;
+    background: linear-gradient(135deg, #1a592f 0%, #21703a 50%, #2e8b4a 100%) !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color: white !important;
@@ -1119,9 +1119,10 @@ body.present-mode .present-page.cfp-page .cfp-grid table { font-size: 14px !impo
   body.cf-print-mode .cf-page .cf-section-01 { break-inside: avoid; page-break-inside: avoid; }
   body.cf-print-mode .cf-page .cf-section-01 > .card { margin-bottom: 0 !important; }
 
-  /* Grand Totals (dark navy) */
+  /* Grand Totals (เขียว — ตรงกับการ์ดบนจอ; เดิม #0f244d navy ตกค้างจาก Water POG) */
   body.cf-print-mode .cf-page .cf-grand-card {
-    background: #0f244d !important; color: #fff !important;
+    background: linear-gradient(150deg, #23aa5b 0%, #007b2f 100%) !important; color: #fff !important;
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
     break-inside: avoid; page-break-inside: avoid;
   }
   body.cf-print-mode .cf-page .cf-grand-card * { color: #fff !important; }
