@@ -568,14 +568,10 @@ function BankReconPage({ data, setData, toast }) {
     }).catch(err => {
       const msg = String((err && err.message) || err).toLowerCase();
       const needsPwd = /password|encrypt|protect/.test(msg);
-      const wrongPwd = password && /incorrect|wrong|invalid|password/.test(msg);
-      if (needsPwd && !password) {
-        setPwdPrompt({ file, error: '', unsupported: false });           // ครั้งแรก → ขอรหัส
-      } else if (password && wrongPwd) {
-        setPwdPrompt({ file, error: 'รหัสไม่ถูกต้อง — ลองใหม่อีกครั้ง', unsupported: false });
-      } else if (password) {
-        // ใส่รหัสแล้วแต่ถอดไม่ได้ (เช่น .xls เข้ารหัสแบบที่ SheetJS ไม่รองรับ) → แนะ Save As
-        setPwdPrompt({ file, error: 'ถอดรหัสไฟล์นี้ไม่สำเร็จ (รูปแบบเข้ารหัสที่เบราว์เซอร์อ่านไม่ได้)', unsupported: true });
+      if (needsPwd) {
+        // เบราว์เซอร์ถอดรหัสไฟล์ Excel ที่เข้ารหัสไม่ได้ (SheetJS รองรับแค่ RC4 เก่า)
+        // → แสดงคำแนะนำ Save As ทันที ไม่ถามรหัส
+        setPwdPrompt({ file, error: '', unsupported: true });
       } else if (toast) { toast('อ่านไฟล์ไม่สำเร็จ: ' + msg); }
     });
   };
@@ -816,7 +812,7 @@ function BankReconPage({ data, setData, toast }) {
           <div style={{ fontWeight: 600, color: 'var(--ink-700)', marginBottom: 4 }}>ยังไม่มีรายการเดินบัญชีของ {brFmtMonth(month)}</div>
           <div style={{ fontSize: 12.5, marginBottom: 14 }}>นำเข้าไฟล์ statement (CSV/Excel) จากธนาคาร แล้วระบบจะกระทบกับ PV ในระบบให้</div>
           {!readOnly && <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>📥 นำเข้า statement</button>}
-          {pvForAcct.length > 0 && <div style={{ fontSize: 12, marginTop: 14, color: 'var(--ink-600)' }}>เดือนนี้มี PV ในระบบ <b>{pvForAcct.length}</b> รายการ (รวม {fmtNum(recon.stats.unmatchedPvAmt, 0)} ฿) รอกระทบ</div>}
+          {pvForAcct.length > 0 && <div style={{ fontSize: 12, marginTop: 14, color: 'var(--ink-600)' }}>เดือนนี้มี PV ในระบบ <b>{pvForAcct.length}</b> รายการ (รวม {fmtNum(recon.stats.unmatchedPvAmt, 0)}) รอกระทบ</div>}
         </div>
       ) : (
         <BRReconcileSection recon={recon} acct={acct} readOnly={readOnly}
@@ -850,7 +846,7 @@ function BankReconPage({ data, setData, toast }) {
 
       {/* Password modal — ไฟล์มีรหัส (เช่น KTB .xls) ใส่รหัสเปิดแล้วดึงข้อมูลในแอปได้เลย */}
       {pwdPrompt && (
-        <BRPasswordModal prompt={pwdPrompt} onSubmit={(pwd) => parseAndPreview(pwdPrompt.file, pwd)} onClose={() => setPwdPrompt(null)} />
+        <BRPasswordModal prompt={pwdPrompt} onClose={() => setPwdPrompt(null)} />
       )}
 
       {/* footer note */}
@@ -908,7 +904,7 @@ function BRMissingTable({ rows, readOnly, onRecord, onMatch, onMarkTransfer, isL
       <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>เงินออกจากบัญชีจริง แต่ยังไม่มี PV รองรับใน statement — กด <b>🔗 จับคู่ PV</b> (ถ้ามี PV ในระบบแต่เลขไม่ตรง เช่นแก้เอกสาร) · <b>บันทึกจ่ายจริง</b> (ยังไม่มี PV เลย) · <b>🔁 โอนระหว่างบัญชี</b> (โอนเข้าบัญชีตัวเอง)</div>
       <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 110 }}>อ้างอิง/เช็ค</th><th style={{ width: 120, textAlign: 'right' }}>จำนวน (฿)</th><th style={{ width: 280, textAlign: 'center' }}>จัดการ</th></tr>
+          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 110 }}>อ้างอิง/เช็ค</th><th style={{ width: 120, textAlign: 'right' }}>จำนวน</th><th style={{ width: 280, textAlign: 'center' }}>จัดการ</th></tr>
         </thead>
         <tbody>
           {rows.map(l => {
@@ -949,7 +945,7 @@ function BRTransfersTable({ rows, readOnly, onUndo }) {
       <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>รายการโอนเงินระหว่างบัญชีตัวเอง — ไม่นับเป็นรายจ่าย ไม่เข้า Actual</div>
       <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 110 }}>อ้างอิง/เช็ค</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน (฿)</th><th style={{ width: 110, textAlign: 'center' }}>จัดการ</th></tr>
+          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 110 }}>อ้างอิง/เช็ค</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th><th style={{ width: 110, textAlign: 'center' }}>จัดการ</th></tr>
         </thead>
         <tbody>
           {rows.map(l => (
@@ -979,7 +975,7 @@ function BRPvTable({ rows }) {
       <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>มี PV ในระบบ แต่ยังไม่เจอรายการตรงกันใน statement (เช็คยังไม่ขึ้นเงิน / ยังไม่ถึงรอบ / เลขไม่ตรง)</div>
       <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-          <tr><th style={{ width: 100 }}>วันที่จ่าย</th><th style={{ width: 120 }}>เลขที่ PV</th><th>ผู้รับเงิน</th><th style={{ width: 100 }}>เช็ค</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน (฿)</th></tr>
+          <tr><th style={{ width: 100 }}>วันที่จ่าย</th><th style={{ width: 120 }}>เลขที่ PV</th><th>ผู้รับเงิน</th><th style={{ width: 100 }}>เช็ค</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th></tr>
         </thead>
         <tbody>
           {rows.map(p => (
@@ -1005,7 +1001,7 @@ function BRMatchedTable({ rows, readOnly, onUndo }) {
     <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
       <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-          <tr><th style={{ width: 100 }}>วันที่</th><th>รายการ statement</th><th style={{ width: 150 }}>PV</th><th style={{ width: 64, textAlign: 'center' }}>วิธี</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน (฿)</th>{hasManual && <th style={{ width: 90, textAlign: 'center' }}>จัดการ</th>}</tr>
+          <tr><th style={{ width: 100 }}>วันที่</th><th>รายการ statement</th><th style={{ width: 150 }}>PV</th><th style={{ width: 64, textAlign: 'center' }}>วิธี</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th>{hasManual && <th style={{ width: 90, textAlign: 'center' }}>จัดการ</th>}</tr>
         </thead>
         <tbody>
           {rows.map((m, i) => {
@@ -1044,7 +1040,7 @@ function BRRecordedTable({ rows, readOnly, onUndo, onMatch }) {
       <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>บันทึกเป็น "จ่ายจริง" จาก statement แล้ว (เป็น Actual หน้า Cashflow) — ถ้าจริงๆ มี <b>PV ในระบบ</b> รองรับอยู่แล้ว (เลขเอกสารเปลี่ยนเลย auto-match ไม่เจอ) ให้กด <b>🔗 จับคู่ PV แทน</b> เพื่อกันยอดนับซ้ำ</div>
       <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน (฿)</th><th style={{ width: 210, textAlign: 'center' }}>จัดการ</th></tr>
+          <tr><th style={{ width: 100 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th><th style={{ width: 210, textAlign: 'center' }}>จัดการ</th></tr>
         </thead>
         <tbody>
           {rows.map(r => (
@@ -1183,7 +1179,7 @@ function BRRecordModal({ line, onSave, onClose }) {
           <tr><td style={{ color: 'var(--ink-500)', width: 110 }}>วันที่</td><td style={{ fontWeight: 600 }}>{fmtDate(line.date) || line.date}</td></tr>
           <tr><td style={{ color: 'var(--ink-500)' }}>รายละเอียด</td><td style={{ fontWeight: 600 }}>{line.desc || '—'}</td></tr>
           <tr><td style={{ color: 'var(--ink-500)' }}>อ้างอิง/เช็ค</td><td>{line.ref || '—'}</td></tr>
-          <tr><td style={{ color: 'var(--ink-500)' }}>จำนวน</td><td style={{ fontWeight: 700, color: 'var(--bad)' }}>{fmtNum(Math.abs(line.amount), 2)} ฿</td></tr>
+          <tr><td style={{ color: 'var(--ink-500)' }}>จำนวน</td><td style={{ fontWeight: 700, color: 'var(--bad)' }}>{fmtNum(Math.abs(line.amount), 2)}</td></tr>
         </tbody>
       </table>
       <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>หมวดค่าใช้จ่าย</label>
@@ -1231,7 +1227,7 @@ function BRMatchModal({ line, candidates, allPvs, onMatch, onClose }) {
       <div style={{ background: 'var(--ink-50)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 12.5 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
           <span style={{ color: 'var(--ink-600)' }}>{fmtDate(line.date) || line.date} · {line.desc || '—'}{line.ref ? ' · ' + line.ref : ''}</span>
-          <b style={{ color: 'var(--bad)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(target, 2)} ฿</b>
+          <b style={{ color: 'var(--bad)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(target, 2)}</b>
         </div>
       </div>
       <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 ค้นทุก PV ในระบบ (เลขที่ PV / ผู้รับเงิน / ยอด)…"
@@ -1261,7 +1257,7 @@ function BRMatchModal({ line, candidates, allPvs, onMatch, onClose }) {
                   <span style={{ color: 'var(--ink-600)' }}> · {p.payee || '—'}</span>
                   {p.chqNo ? <span style={{ color: 'var(--ink-400)', fontFamily: 'ui-monospace', fontSize: 11 }}> · เช็ค {p.chqNo}</span> : null}
                 </span>
-                <b style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: exact ? 'var(--good)' : 'var(--ink-700)' }}>{fmtNum(amt, 2)} ฿</b>
+                <b style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: exact ? 'var(--good)' : 'var(--ink-700)' }}>{fmtNum(amt, 2)}</b>
               </div>
               <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 2 }}>
                 {fmtDate(p.date) || p.date || '—'}
@@ -1278,35 +1274,19 @@ function BRMatchModal({ line, candidates, allPvs, onMatch, onClose }) {
 }
 
 // ── Modal ใส่รหัสไฟล์ statement ที่เข้ารหัส (เช่น KTB .xls) ──
-function BRPasswordModal({ prompt, onSubmit, onClose }) {
-  const [pwd, setPwd] = brState('');
-  const [show, setShow] = brState(false);
-  const submit = () => { if (pwd) onSubmit(pwd); };
+function BRPasswordModal({ prompt, onClose }) {
   return (
-    <Modal open title="🔒 ไฟล์มีรหัสผ่าน" maxWidth={440} onClose={onClose}
-      footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
-        <button className="btn btn-primary" disabled={!pwd} onClick={submit}>เปิดไฟล์ + ดึงข้อมูล</button>
-      </>}>
+    <Modal open title="🔒 ไฟล์นี้มีรหัสผ่าน — เปิดในเบราว์เซอร์ไม่ได้" maxWidth={440} onClose={onClose}
+      footer={<button className="btn btn-ghost" onClick={onClose}>ปิด</button>}>
       <div style={{ fontSize: 12.5, color: 'var(--ink-600)', marginBottom: 12 }}>
-        ไฟล์ <b style={{ color: 'var(--ink-800)' }}>{prompt.file && prompt.file.name}</b> ถูกตั้งรหัสผ่าน — ใส่รหัสเพื่อเปิดและนำเข้าข้อมูลได้เลย
+        ไฟล์ <b style={{ color: 'var(--ink-800)' }}>{prompt.file && prompt.file.name}</b> ถูกเข้ารหัสแบบที่เบราว์เซอร์ถอดไม่ได้
       </div>
-      <div style={{ position: 'relative' }}>
-        <input className="input" type={show ? 'text' : 'password'} autoFocus value={pwd}
-          onChange={e => setPwd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-          placeholder="รหัสผ่านไฟล์" style={{ width: '100%', paddingRight: 64, fontSize: 13 }} />
-        <button type="button" onClick={() => setShow(s => !s)}
-          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 0, color: 'var(--ink-500)', cursor: 'pointer', fontSize: 11 }}>
-          {show ? 'ซ่อน' : 'แสดง'}
-        </button>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-700)', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', lineHeight: 2 }}>
+        <b>วิธีแก้ (3 ขั้นตอน):</b><br/>
+        1. เปิดไฟล์ใน <b>Excel</b> บนเครื่อง แล้วใส่รหัสผ่าน<br/>
+        2. <b>Save As</b> เป็น <b>.xlsx</b> หรือ <b>.csv</b> (อย่าใส่รหัสผ่าน)<br/>
+        3. อัปโหลดไฟล์ใหม่นั้นแทน
       </div>
-      {prompt.error && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--bad)', fontWeight: 600 }}>⚠️ {prompt.error}</div>}
-      {prompt.unsupported && (
-        <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--ink-600)', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '8px 10px', lineHeight: 1.6 }}>
-          ทางเลือกที่ชัวร์: เปิดไฟล์ใน Excel ด้วยรหัส → <b>Save As</b> เป็น <b>.xlsx</b> หรือ <b>.csv</b> (ไม่ใส่รหัส) → นำเข้าไฟล์นั้นแทน
-        </div>
-      )}
-      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink-400)' }}>🔐 รหัสใช้ถอดไฟล์ในเครื่องนี้เท่านั้น — ไม่ถูกบันทึก/ส่งขึ้น cloud</div>
     </Modal>
   );
 }
