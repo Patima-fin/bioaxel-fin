@@ -1594,7 +1594,7 @@ function ForecastEntriesPage({ data, setData, toast }) {
         }},
         { key: 'JOB_NO',        label: 'Job No.', width: 95, mono: true },
         { key: 'CATEGORY',      label: 'หมวด', width: 90, render: r => r.CATEGORY ? <Badge kind="b-gray" dot={false}>{r.CATEGORY}</Badge> : <span className="muted">—</span> },
-        { key: 'AMOUNT',        label: 'จำนวนเงิน (฿)', align: 'right', width: 135, render: r => {
+        { key: 'AMOUNT',        label: 'จำนวนเงิน', align: 'right', width: 135, render: r => {
           const v = Number(r.AMOUNT || r.amount || 0);
           return <span style={{ color: v < 0 ? 'var(--bad)' : 'var(--good)', fontWeight: 700 }}>{v > 0 ? '+' : ''}{fmtNum(v, 0)}</span>;
         }},
@@ -1696,12 +1696,12 @@ function DataBankPage({ data, setData, toast }) {
       columns: [
         { key: 'BANK_NAME',          label: 'ธนาคาร', width: 175, render: r => <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontWeight: 700, color: 'var(--brand-700)' }}><HpBankLogo name={r.BANK_NAME || r.bankName} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.BANK_NAME || r.bankName}</span></div> },
         { key: 'Bank_AC',            label: 'เลขที่บัญชี', width: 160, mono: true },
-        { key: 'BALANCE',            label: 'ยอดคงเหลือ (฿)', align: 'right', width: 160, render: r => {
+        { key: 'BALANCE',            label: 'ยอดคงเหลือ', align: 'right', width: 160, render: r => {
           const v = Number(r.BALANCE ?? r.balance ?? 0);
           return <span style={{ color: v < 0 ? 'var(--bad)' : 'inherit', fontWeight: 600 }}>{fmtNum(v, 2)}</span>;
         }},
-        { key: 'AVAILABLE_BALANCE',  label: 'วงเงินใช้ได้ (฿)', align: 'right', width: 160, render: r => <span>{fmtNum(Number(r.AVAILABLE_BALANCE||0), 2)}</span> },
-        { key: 'HOLD_AMOUNT',        label: 'ยอด Hold (฿)', align: 'right', width: 120, render: r => <span className="muted">{fmtNum(Number(r.HOLD_AMOUNT||0), 2)}</span> },
+        { key: 'AVAILABLE_BALANCE',  label: 'วงเงินใช้ได้', align: 'right', width: 160, render: r => <span>{fmtNum(Number(r.AVAILABLE_BALANCE||0), 2)}</span> },
+        { key: 'HOLD_AMOUNT',        label: 'ยอด Hold', align: 'right', width: 120, render: r => <span className="muted">{fmtNum(Number(r.HOLD_AMOUNT||0), 2)}</span> },
         { key: 'DATE',               label: 'วันที่อัปเดต', type: 'date', width: 110 },
         { key: 'NOTE',               label: 'หมายเหตุ' },
       ],
@@ -1735,7 +1735,7 @@ function DataBankPage({ data, setData, toast }) {
               <div style={{ textAlign: 'right' }}>
                 <div className="muted" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5 }}>BALANCE</div>
                 <div style={{ fontWeight: 700, fontSize: 20, color: bal < 0 ? 'var(--bad)' : 'var(--good)' }}>
-                  {fmtNum(bal, 2)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>฿</span>
+                  {fmtNum(bal, 2)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}></span>
                 </div>
               </div>
             </div>
@@ -1758,9 +1758,9 @@ function DataBankPage({ data, setData, toast }) {
         { key: 'Bank_AC',           label: 'เลขที่บัญชี (Bank_AC)', type: 'text',   required: true, placeholder: '0000000000', hint: 'ไม่ต้องใส่ขีดคั่น' },
 
         { type: 'section', label: 'ยอดเงิน', icon: 'coin' },
-        { key: 'BALANCE',           label: 'BALANCE (ยอดคงเหลือ)', type: 'number', suffix: '฿', required: true, hint: 'ยอดบัญชีรวม — ติดลบหมายถึง OD' },
-        { key: 'AVAILABLE_BALANCE', label: 'AVAILABLE (ใช้ได้)',    type: 'number', suffix: '฿', hint: 'ยอดที่เบิกใช้ได้จริง' },
-        { key: 'HOLD_AMOUNT',       label: 'HOLD (ติด hold)',       type: 'number', suffix: '฿', hint: 'จำนวนที่ถูก hold ไว้' },
+        { key: 'BALANCE',           label: 'BALANCE (ยอดคงเหลือ)', type: 'number', suffix: '', required: true, hint: 'ยอดบัญชีรวม — ติดลบหมายถึง OD' },
+        { key: 'AVAILABLE_BALANCE', label: 'AVAILABLE (ใช้ได้)',    type: 'number', suffix: '', hint: 'ยอดที่เบิกใช้ได้จริง' },
+        { key: 'HOLD_AMOUNT',       label: 'HOLD (ติด hold)',       type: 'number', suffix: '', hint: 'จำนวนที่ถูก hold ไว้' },
 
         { type: 'section', label: 'อื่นๆ', icon: 'edit' },
         { key: 'DATE',              label: 'DATE (วันที่อัปเดต)',  type: 'date',   hint: 'วันที่ดึงยอดล่าสุด' },
@@ -1819,7 +1819,7 @@ function DataPVPage({ data, setData, toast }) {
         { key: 'PL_PV_No',   label: 'เลขที่ PV',    width: 120, mono: true, align: 'center' },
         { key: 'AP_No',      label: 'เลขที่ AP',    width: 120, mono: true, align: 'center' },
         { key: 'Payee',      label: 'ผู้รับเงิน' },
-        { key: 'Net_Amount', label: 'ยอดสุทธิ (฿)', align: 'right', headerAlign: 'right', width: 130, sortValue: r => parseNum(r.Net_Amount),
+        { key: 'Net_Amount', label: 'ยอดสุทธิ', align: 'right', headerAlign: 'right', width: 130, sortValue: r => parseNum(r.Net_Amount),
           render: r => <span style={{ fontWeight: 700, color: parseNum(r.Net_Amount) < 0 ? 'var(--bad)' : 'var(--ink-800)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(parseNum(r.Net_Amount), 2)}</span> },
         { key: 'cc_remark',  label: 'หมายเหตุ' },
       ],
@@ -1900,7 +1900,7 @@ function AmountInput({ value, onChange, label, required }) {
           onBlur={() => { onChange(parseNum(raw)); setFocused(false); }}
           style={{ textAlign: 'right', paddingRight: 26, fontWeight: 600, fontFamily: 'ui-monospace', color: numVal < 0 ? 'var(--bad)' : 'inherit' }}
         />
-        <span style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-400)', pointerEvents: 'none' }}>฿</span>
+        <span style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-400)', pointerEvents: 'none' }}></span>
       </div>
     </div>
   );
@@ -1958,7 +1958,7 @@ function APEditModal({ row, onClose, onSave, onDelete }) {
         <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>{label}</label>
         <div style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '0 28px 0 10px', fontSize: 13, fontFamily: 'ui-monospace', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative', cursor: 'default', userSelect: 'text', color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...(highlight ? totalStyle : {}) }}>
           {display}
-          <span style={{ position: 'absolute', right: 8, fontSize: 11, color: highlight ? 'color-mix(in oklch, var(--bad) 55%, transparent)' : 'var(--ink-400)' }}>฿</span>
+          <span style={{ position: 'absolute', right: 8, fontSize: 11, color: highlight ? 'color-mix(in oklch, var(--bad) 55%, transparent)' : 'var(--ink-400)' }}></span>
         </div>
       </div>
     );
@@ -2562,7 +2562,7 @@ function DataPayablePage({ data, setData, toast }) {
     { key: 'cf_category',label: 'หมวด CF',           w: 110, noSort: true, align: 'center' },
     { key: 'due2',       label: 'วันครบกำหนด',       w: 105                         },
     { key: '_overdue',   label: 'เกินกำหนด',         w: 88,  noSort: true, align: 'center' },
-    { key: 'netpayment', label: 'Net Payment (฿)',   w: 148, align: 'right'         },
+    { key: 'netpayment', label: 'Net Payment',   w: 148, align: 'right'         },
     { key: 'remark',     label: 'หมายเหตุ',           w: 280                         },
   ];
 

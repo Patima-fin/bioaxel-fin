@@ -526,7 +526,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
               <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 4 }}>ใบ</span>
             </div>
             <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 4, color: overdueForecast.length > 0 ? '#e53e3e' : '#a0aec0', fontWeight: 600 }}>
-              {fmtNum(sumBal(overdueForecast), 0)} ฿
+              {fmtNum(sumBal(overdueForecast), 0)}
             </div>
             {overdueForecast.length > 0 && <div style={{ fontSize: 10.5, color: '#fc8181', marginTop: 3 }}>คลิกดูรายละเอียด →</div>}
           </div>
@@ -548,7 +548,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
               <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 4 }}>ใบ</span>
             </div>
             <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 4, color: todayForecast.length > 0 ? '#276749' : '#a0aec0', fontWeight: 600 }}>
-              {fmtNum(sumBal(todayForecast), 0)} ฿
+              {fmtNum(sumBal(todayForecast), 0)}
             </div>
             {todayForecast.length > 0 && <div style={{ fontSize: 10.5, color: '#68d391', marginTop: 3 }}>คลิกดูรายละเอียด →</div>}
           </div>
@@ -570,7 +570,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
               <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 4 }}>ใบ</span>
             </div>
             <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 4, color: weekForecast.length > 0 ? '#2b6cb0' : '#a0aec0', fontWeight: 600 }}>
-              {fmtNum(sumBal(weekForecast), 0)} ฿
+              {fmtNum(sumBal(weekForecast), 0)}
             </div>
             {weekForecast.length > 0 && <div style={{ fontSize: 10.5, color: '#63b3ed', marginTop: 3 }}>คลิกดูรายละเอียด →</div>}
           </div>
@@ -592,7 +592,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
               <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 4 }}>ใบ</span>
             </div>
             <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: 4, color: thisMonthForecast.length > 0 ? '#6b46c1' : '#a0aec0', fontWeight: 600 }}>
-              {fmtNum(sumBal(thisMonthForecast), 0)} ฿
+              {fmtNum(sumBal(thisMonthForecast), 0)}
             </div>
             {thisMonthForecast.length > 0 && <div style={{ fontSize: 10.5, color: '#b794f4', marginTop: 3 }}>คลิกดูรายละเอียด →</div>}
           </div>
@@ -606,7 +606,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
           <div>
             <div className="card-title">ใบแจ้งหนี้คงค้างทั้งหมด</div>
             <div className="card-sub">
-              {outstandingRows.length} ใบ · Balance {fmtNum(sumBal(outstandingRows))} ฿ · คาดรับสุทธิ <strong style={{ color: 'var(--good)' }}>{fmtNum(sumNet(outstandingRows))}</strong> ฿
+              {outstandingRows.length} ใบ · Balance {fmtNum(sumBal(outstandingRows))} · คาดรับสุทธิ <strong style={{ color: 'var(--good)' }}>{fmtNum(sumNet(outstandingRows))}</strong>
             </div>
           </div>
         </div>
@@ -700,7 +700,7 @@ function DailyPillCard({ title, subtitle, icon, count, value, gradient, accent, 
           position: 'relative', zIndex: 1, textAlign: 'right',
         }}>
           <AnimatedNumber value={value} digits={2} />
-          <span className="dpc-unit" style={{ fontSize: 15, opacity: 0.82, fontWeight: 500, marginLeft: 4 }}>฿</span>
+          <span className="dpc-unit" style={{ fontSize: 15, opacity: 0.82, fontWeight: 500, marginLeft: 4 }}></span>
         </div>
 
         {/* Count — fixed-width, right-aligned numeric (width คงที่ → ขอบขวาของ value ตรงทุกแถว) */}
@@ -769,7 +769,7 @@ function DailyPillCard({ title, subtitle, icon, count, value, gradient, accent, 
       <div className="dpc-body" style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div className="dpc-value" style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', lineHeight: 1.1 }}>
           <AnimatedNumber value={value} digits={2} />
-          <span className="dpc-unit" style={{ fontSize: 12, opacity: 0.82, fontWeight: 500, marginLeft: 3 }}>฿</span>
+          <span className="dpc-unit" style={{ fontSize: 12, opacity: 0.82, fontWeight: 500, marginLeft: 3 }}></span>
         </div>
         <div className="dpc-count" style={{ display: 'flex', alignItems: 'baseline', gap: 4, opacity: 0.88 }}>
           <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
@@ -873,8 +873,8 @@ function ForecastTable({ list, todayStr, empty }) {
           <th style={{ width: 120 }}>เลข IV</th>
           <th>ชื่อโครงการ</th>
           <th style={{ width: 80, textAlign: 'center', whiteSpace: 'nowrap' }}>งวด</th>
-          <th style={{ width: 140, textAlign: 'right' }}>Balance (฿)</th>
-          <th style={{ width: 135, textAlign: 'right' }}>คาดรับสุทธิ (฿)</th>
+          <th style={{ width: 140, textAlign: 'right' }}>Balance</th>
+          <th style={{ width: 135, textAlign: 'right' }}>คาดรับสุทธิ</th>
           <th style={{ width: 110, textAlign: 'center' }}>วันคาดรับ</th>
           <th style={{ width: 100, textAlign: 'center' }}>สถานะ</th>
         </tr>

@@ -2141,7 +2141,7 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
             { key: 'checkDate',  label: 'วันที่ครบกำหนด', type: 'date' },
             { key: 'payee',      label: 'ผู้รับ' },
             { key: 'checkNo',    label: 'เลขที่เช็ค' },
-            { key: 'amount',     label: 'จำนวนเงิน (฿)', type: 'number' },
+            { key: 'amount',     label: 'จำนวนเงิน', type: 'number' },
             { key: 'referenceNo',label: 'อ้างอิง' },
             { key: 'status',     label: 'สถานะ' },
           ]}

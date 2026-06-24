@@ -362,7 +362,7 @@ function StsCalcDrawer({ projectReceipts, match, calcResult, isOpen, onClose, on
           <div>
             <div style={{ fontWeight: 700, fontSize: 17 }}>STS Calculator · {match.jobNo || contract.contractNo || '—'}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>
-              คำนวณดอกเบี้ย STS+WCI และค่าบริการเอนคอมพาส · {c.receiptCount} ใบรับ · ยอดรวม {bMoney(c.baseAmount)} ฿
+              คำนวณดอกเบี้ย STS+WCI และค่าบริการเอนคอมพาส · {c.receiptCount} ใบรับ · ยอดรวม {bMoney(c.baseAmount)}
             </div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--ink-400)', lineHeight: 1, padding: 4 }}>×</button>
@@ -962,10 +962,10 @@ function StsWorkflowPage({ data, setData, toast }) {
                   <th style={{ width: 60, textAlign: 'right' }}>ใบรับ</th>
                   <th style={{ width: 110 }}>รับเงินล่าสุด</th>
                   <th>สัญญา STS</th>
-                  <th style={{ textAlign: 'right', width: 130 }}>ยอดรวมที่รับ (฿)</th>
+                  <th style={{ textAlign: 'right', width: 130 }}>ยอดรวมที่รับ</th>
                   <th style={{ textAlign: 'right', width: 70 }}>จำนวนวัน</th>
-                  <th style={{ textAlign: 'right', width: 120 }}>ดอกเบี้ยรวม (฿)</th>
-                  <th style={{ textAlign: 'right', width: 120 }}>ค่าบริการ (฿)</th>
+                  <th style={{ textAlign: 'right', width: 120 }}>ดอกเบี้ยรวม</th>
+                  <th style={{ textAlign: 'right', width: 120 }}>ค่าบริการ</th>
                   <th style={{ width: 130 }}>สถานะ</th>
                 </tr>
               </thead>
@@ -993,7 +993,7 @@ function StsWorkflowPage({ data, setData, toast }) {
                         {/* ★ guard sts undefined — match อาจผ่าน WCI อย่างเดียว → sts ว่าง (เคยทำจอ STS Workflow พัง) */}
                         <div style={{ fontWeight: 600 }}>{sts ? sts.contractNo : ((g.match.wci && g.match.wci.contractNo) || '—')}</div>
                         <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>
-                          STS {bMoney(sts ? sts.principalAmount : 0)} ฿{stsCount > 1 ? ' (' + stsCount + ' งวด)' : ''} · WCI {wciCount} งวด
+                          STS {bMoney(sts ? sts.principalAmount : 0)} {stsCount > 1 ? ' (' + stsCount + ' งวด)' : ''} · WCI {wciCount} งวด
                         </div>
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{bMoney(c.baseAmount)}</td>

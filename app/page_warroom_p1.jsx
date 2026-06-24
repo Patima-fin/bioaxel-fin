@@ -761,7 +761,7 @@ function WarroomDrillModal({ drill, data, setData, toast, thisMthByWeek, liveMon
           <div>
             <div className="modal-title" style={{ fontSize: 16 }}>{title}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 2 }}>
-              {totals.count} {isMonth ? 'ใบรับ' : 'ใบแจ้งหนี้'} · Gross {fmtNum(totals.gross, 2)} ฿ · NET <strong>{fmtNum(totals.net, 2)}</strong> ฿
+              {totals.count} {isMonth ? 'ใบรับ' : 'ใบแจ้งหนี้'} · Gross {fmtNum(totals.gross, 2)} · NET <strong>{fmtNum(totals.net, 2)}</strong>
               {isMonth && <span style={{ marginLeft: 8, color: 'var(--brand-600)', fontStyle: 'italic' }}>· คลิกที่หักสิทธิ์/ประเภท เพื่อแก้ไข</span>}
             </div>
           </div>

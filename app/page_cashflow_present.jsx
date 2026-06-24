@@ -81,9 +81,9 @@
     return String(y).padStart(4, '0') + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
   }
   const cfpMonth = iso => (iso && iso.length >= 7) ? +iso.slice(5, 7) : 0;
-  function cfpFmtB(v) { const n = Math.round(Math.abs(v || 0)); return (v < 0 ? '-' : '') + '฿' + n.toLocaleString('en-US'); }
-  function cfpFmtM(v) { return (v < 0 ? '-' : '') + '฿' + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
-  function cfpFmtSigned(v) { return (v < 0 ? '-' : '+') + '฿' + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
+  function cfpFmtB(v) { const n = Math.round(Math.abs(v || 0)); return (v < 0 ? '-' : '') + n.toLocaleString('en-US'); }
+  function cfpFmtM(v) { return (v < 0 ? '-' : '') + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
+  function cfpFmtSigned(v) { return (v < 0 ? '-' : '+') + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
   function cfpFmtPlain(v) { return Math.round(Math.abs(v || 0)).toLocaleString('en-US'); }
   function cfpThaiDate(iso) {
     if (!iso || iso.length < 10) return iso || '';
@@ -536,7 +536,7 @@
    *  การ์ดย่อ → กดยอด/ชิปประเภท → modal ที่มา (รายบัญชี+รายเดือน). viewer อ่านอย่างเดียว.
    *  ★ persist ไม่ merge ฟิลด์เก่าเอง → saveCatMap/onUpload ต้องส่ง acctTypes มาด้วยทุกครั้ง. */
   const cfpCard = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
-  function cfpDeltaM(v) { if (!v) return '–'; return (v < 0 ? '-' : '+') + '฿' + (Math.abs(v) / 1e6).toFixed(2) + 'M'; }   // ยอด Δ สั้นในตาราง
+  function cfpDeltaM(v) { if (!v) return '–'; return (v < 0 ? '-' : '+') + (Math.abs(v) / 1e6).toFixed(2) + 'M'; }   // ยอด Δ สั้นในตาราง
   // 5 ประเภทบัญชี — "ใช้ได้จริง" = 'usable' เท่านั้น; ที่เหลือ = เงินที่ติดเงื่อนไข/ใช้ไม่ได้อิสระ
   const CFP_ACCT_TYPES = [
     { key: 'usable', label: 'สามารถใช้ได้', short: 'ใช้ได้', icon: '✅', color: C.pos },
@@ -952,7 +952,7 @@
               <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
               <div style={expanded ? { maxHeight: 420, overflowY: 'auto', paddingRight: 4 } : null}>
                 {top.map((c, i) => (
-                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) minmax(0,0.8fr) auto', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
+                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) minmax(0,0.8fr) 92px', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
                     <span style={{ fontSize: 13, color: C.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{c.name} <span style={{ color: C.faint }}>({c.count})</span></span>
                     <span><CfpBar amt={c.net} max={maxAbs} /></span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>

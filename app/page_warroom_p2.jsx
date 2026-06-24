@@ -284,7 +284,7 @@ function WarRoomPage2({ data, setData, toast }) {
       { key: 'code', label: 'Contract No.', width: 110 },
       { key: 'name', label: 'ชื่อโครงการ / พื้นที่' },
       { key: 'province', label: 'จังหวัด', width: 100 },
-      { key: 'value', label: 'มูลค่าใบจัดสรร (฿)', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
+      { key: 'value', label: 'มูลค่าใบจัดสรร', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
     ],
   });
   const openInvForwardDrill = () => setDrill({
@@ -297,7 +297,7 @@ function WarRoomPage2({ data, setData, toast }) {
       { key: 'code', label: 'Job No.', width: 110 },
       { key: 'name', label: 'โครงการ / ลูกค้า' },
       { key: 'expectedReceive', label: 'คาดรับ', width: 100, fmt: (v) => v ? fmtDate(v) : '—' },
-      { key: 'value', label: 'ยอดคงค้าง (฿)', align: 'right', width: 140, fmt: (v) => fmtT0(v), isMoney: true },
+      { key: 'value', label: 'ยอดคงค้าง', align: 'right', width: 140, fmt: (v) => fmtT0(v), isMoney: true },
     ],
   });
   const openWipDrill = () => setDrill({
@@ -308,11 +308,11 @@ function WarRoomPage2({ data, setData, toast }) {
     columns: [
       { key: 'code', label: 'Contract No.', width: 110 },
       { key: 'name', label: 'ชื่อโครงการ' },
-      { key: 'contract', label: 'สัญญา (฿)', align: 'right', width: 110, fmt: (v) => fmtT0(v) },
+      { key: 'contract', label: 'สัญญา', align: 'right', width: 110, fmt: (v) => fmtT0(v) },
       { key: 'pct1', label: 'งวด 1', align: 'center', width: 70, fmt: (v, row) => v + '%' + (row.delivered1 ? ' ✓' : '') },
       { key: 'pct2', label: 'งวด 2', align: 'center', width: 70, fmt: (v, row) => v + '%' + (row.delivered2 ? ' ✓' : '') },
       { key: 'wipPct', label: 'WIP %', align: 'center', width: 70, fmt: (v) => v + '%' },
-      { key: 'wip', label: 'WIP (฿)', align: 'right', width: 120, fmt: (v) => fmtT0(v), isMoney: true },
+      { key: 'wip', label: 'WIP', align: 'right', width: 120, fmt: (v) => fmtT0(v), isMoney: true },
     ],
   });
   const openSignedDrill = () => setDrill({
@@ -326,7 +326,7 @@ function WarRoomPage2({ data, setData, toast }) {
     columns: [
       { key: 'label', label: 'รายการ' },
       { key: 'sub', label: 'รายละเอียด' },
-      { key: 'value', label: 'มูลค่า (฿)', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
+      { key: 'value', label: 'มูลค่า', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
     ],
   });
   const openGrandTotalDrill = () => setDrill({
@@ -341,7 +341,7 @@ function WarRoomPage2({ data, setData, toast }) {
     columns: [
       { key: 'label', label: 'หมวด' },
       { key: 'sub', label: 'รายละเอียด' },
-      { key: 'value', label: 'มูลค่า (฿)', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
+      { key: 'value', label: 'มูลค่า', align: 'right', width: 150, fmt: (v) => fmtT0(v), isMoney: true },
     ],
   });
 

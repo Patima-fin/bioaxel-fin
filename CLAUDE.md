@@ -575,5 +575,17 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **verify (preview 8010, inject `bio-session` manager → #debt, build h):** ช่องหมวด = `<input list>` (combobox จริง ไม่ใช่ select) · datalist = 7 หมวด BIO เป๊ะ (WCI/STS/BHG/กรรมการ/ตปท./ธนาคาร/อื่นๆ ไม่มีของ POG) · พิมพ์ชื่อ บ.ใหม่ "บริษัท สินเชื่อใหม่ XYZ จำกัด" → value ติด + ชิปเป็นสีเทา fallback (`#525252`/`#f5f5f5`) สด · `isAssignmentDebtCat('BHG')=false` (build g) · ไม่มี console error/ErrorBoundary. *(screenshot timeout = flakiness ปกติ in-browser-Babel → ใช้ DOM inspection.)*
 - **bio-only** ([[bio-only-scope]]) — ไม่แตะ Water POG.
 
+## 2026-06-23 — เอาสัญลักษณ์เงินบาท ฿ ออกจากทุกหน้า (ทำคู่กับ POG) — build `20260623i`
+- **คำขอผู้ใช้:** "ทุกหน้าที่มีรูปสัญลักษณ์เงินบาท ฿ เอาออกจากทุกหน้าเลย ทั้ง POG และ BIO" → ลบ ฿ ที่ **แสดงผลบนจอ** ทุกจุด (ตัวเลขเงินเหลือไว้ ตัด ฿ ทิ้ง). ทำชุดเดียวกับ POG ด้วยสคริปต์ตัวเดียวกัน (รัน 2 repo).
+- **ขอบเขต:** 20 ไฟล์ · 252 จุด. ลบ: ป้าย `(฿)` · ต่อท้ายค่า `{fmtNum(x)} ฿` · prefix `'฿' + x`/`฿${x}`(template)/`฿{x}`(JSX) · `'−฿'`/`'+฿'`→`'−'`/`'+'` · literal `'฿958M'`→`'958M'` · glyph เดี่ยว `<span>฿</span>`→`<span></span>` · `icon = ...?'◆':'฿'`→`:''` · `suffix:'฿'`→`''`.
+- **★ ฿ ที่เก็บไว้โดยตั้งใจ (ไม่ render — grep `฿` เหลือ 9 บรรทัด):** (1) **regex แกะค่า** `replace(/[..฿..]/,'')` ใน `data_extras`(3)·`warroom_p2`·`data_sync`·`bank_recon`·`pc_engine`·`cashflow_present` (strip ฿ จาก input string — ฟังก์ชัน ไม่แสดงผล). (2) **คอมเมนต์** `data_extras:1876`·`data_sync:784`·`investor:601`. **ห้ามแตะ 9 บรรทัดนี้.**
+- **วิธี:** สคริปต์ PowerShell (`%TEMP%\debaht_wtp.ps1`, ASCII-only char-code, UTF-8 รักษา BOM/line-ending) กฎ regex เรียงลำดับ ข้ามบรรทัด `//` + `replace(/[`. **★ การเว้นวรรค hybrid:** ` ฿` หน้า closing-quote (concat `'ป้าย ฿'+เลข`) → คงสเปซ; ` ฿` suffix อื่น → ลบสเปซด้วย (กัน "(เลข )" + double-space ใน toast/template). `฿{`/`฿${` ลบเฉพาะ ฿ คงตัวหน้าไว้.
+- **verify:** 252 ลบครบ, เหลือ ฿ 9 บรรทัด non-display; ทั้ง 20 ไฟล์ผ่าน `Babel.transform` (preview 8010). โน้ต: BIO เป็น fork ของ POG (ไฟล์เวอร์ชันต่างกันเล็กน้อย เช่น สีแบรนด์เขียว) แต่รูปแบบ ฿ เหมือนกันทุกจุด → สคริปต์เดียวครอบคลุม. POG ทำพร้อมกัน build `20260623d`.
+
+## 2026-06-23 — Cash Flow Present: บาร์ "องค์ประกอบหลัก" จุดเริ่มไม่ตรงกัน (ทำคู่กับ POG) — build `page_cashflow_present 20260623j` (POG `20260623e`)
+- **อาการ:** `#cashflow_present` แท็บ "สรุปกิจกรรม" การ์ด `CfpActivityDetail` ส่วน "องค์ประกอบหลัก" — บาร์แนวนอนแต่ละแถวจุดเริ่ม (ซ้าย) ไม่ตรงกัน (~6px).
+- **ROOT CAUSE:** แต่ละแถวเป็น grid แยก `gridTemplateColumns: 'minmax(0,2.4fr) minmax(0,0.8fr) auto'`; คอลัมน์ยอดเงิน `auto` กว้างตามความยาวตัวเลข → ยอดยาว ("−36,693,644" 75.7px) ดันคอลัมน์ `fr` (ชื่อ+บาร์) แคบลง บาร์เลื่อนซ้าย; ยอดสั้นบาร์เลื่อนขวา → จุดเริ่มต่างกันทุกแถว.
+- **FIX:** `auto` → **`92px`** (ตรึงคอลัมน์ยอดเงิน) → คอลัมน์ชื่อ+บาร์เท่ากันทุกแถว → บาร์เริ่มจุดเดียว; เลขยังชิดขวา (ขอบขวาตรงกันด้วย). **verify สด (BIO 21 แถว):** barLeft 349/353/355 → **337 จุดเดียว**, เลขชิดขวาที่ 507, ไม่มีเลขล้นคอลัมน์. POG = component+fix เดียวกัน build `20260623e`.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

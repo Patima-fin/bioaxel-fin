@@ -236,7 +236,7 @@ const ChecksPage = ({ data: propData, setData, toast }) => {
               { key: 'checkNo',           label: 'เลขที่เช็ค' },
               { key: 'checkDate',         label: 'วันที่เช็ค', type: 'date' },
               { key: 'payee',             label: 'ผู้รับเงิน' },
-              { key: 'amount',            label: 'จำนวนเงิน (฿)', type: 'number' },
+              { key: 'amount',            label: 'จำนวนเงิน', type: 'number' },
               { key: 'bankName',          label: 'ธนาคาร' },
               { key: 'accountNo',         label: 'เลขที่บัญชี' },
               { key: 'referenceNo',       label: 'เลขอ้างอิง' },
@@ -306,7 +306,7 @@ const ChecksPage = ({ data: propData, setData, toast }) => {
                 <FilterableColHeader label="เลขที่เช็ค"    sortKey="checkNo"   colKey="checkNo"   sort={sort} sortToggle={requestSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
                 <FilterableColHeader label="วันที่เช็ค"    sortKey="checkDate" colKey="checkDate" sort={sort} sortToggle={requestSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
                 <FilterableColHeader label="ผู้รับเงิน"    sortKey="payee"     colKey="payee"     sort={sort} sortToggle={requestSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
-                <FilterableColHeader label="จำนวนเงิน (฿)" sortKey="amount"   colKey="amount"    sort={sort} sortToggle={requestSort} align="right" colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
+                <FilterableColHeader label="จำนวนเงิน" sortKey="amount"   colKey="amount"    sort={sort} sortToggle={requestSort} align="right" colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
                 <FilterableColHeader label="ธนาคาร"        sortKey="bankName" colKey="bankName"  sort={sort} sortToggle={requestSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
                 <FilterableColHeader label="เลขที่บัญชี"   colKey="accountNo"   sort={sort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
                 <FilterableColHeader label="เลขอ้างอิง"   colKey="referenceNo" sort={sort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={sorted} getValue={colDisplay} />
@@ -388,7 +388,7 @@ const ChecksPage = ({ data: propData, setData, toast }) => {
               { key: 'checkNo',     label: 'เลขที่เช็ค' },
               { key: 'checkDate',   label: 'วันที่เช็ค', type: 'date' },
               { key: 'payee',       label: 'ผู้รับเงิน' },
-              { key: 'amount',      label: 'จำนวนเงิน (฿)', type: 'number' },
+              { key: 'amount',      label: 'จำนวนเงิน', type: 'number' },
               { key: 'bankName',    label: 'ธนาคาร' },
               { key: 'status',      label: 'สถานะ' },
             ]}
@@ -563,7 +563,7 @@ const ChecksPage = ({ data: propData, setData, toast }) => {
                 <div style={{ textAlign:'right' }}>
                   <div style={{ fontSize: 11, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>จำนวนเงิน</div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--bad)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtMoney(view.amount)} <span style={{ fontSize: 12, color:'var(--ink-500)' }}>฿</span>
+                    {fmtMoney(view.amount)} <span style={{ fontSize: 12, color:'var(--ink-500)' }}></span>
                   </div>
                 </div>
               </div>

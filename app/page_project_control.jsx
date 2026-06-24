@@ -108,14 +108,14 @@ function PcKpiSection({ summary, filterStatus, onFilterStatus }) {
   };
   return (
     <div className="pc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(8,minmax(0,1fr))', gap: 10 }}>
-      {card('all', <PcI.building size={15} />, 'โครงการทั้งหมด', 'All Projects', summary.count.toLocaleString(), '฿' + PCU.fmtCompact(summary.contractTotal), '#2e8b4a', null)}
-      {card('wip', <PcI.refresh size={15} />, 'กำลังดำเนินการ', 'Work in Progress', summary.wip.toLocaleString(), '฿' + PCU.fmtCompact(summary.wipAmt), '#2e8b4a', 'Work in progress')}
-      {card('await', <PcI.clock size={15} />, 'รอลงนาม', 'Awaiting Sign', summary.awaiting.toLocaleString(), '฿' + PCU.fmtCompact(summary.awaitAmt), '#f97316', 'ยังไม่ลงนาม')}
-      {card('fin', <PcI.check size={15} />, 'เสร็จสิ้น', 'Finished', summary.finish.toLocaleString(), '฿' + PCU.fmtCompact(summary.finishAmt), '#16a34a', 'Finish')}
-      {card('cancel', <PcI.close size={15} />, 'ยกเลิก', 'Cancelled', summary.cancelled.toLocaleString(), '฿' + PCU.fmtCompact(summary.cancelAmt), '#ef4444', 'ยกเลิก')}
-      {card('contract', <PcI.money size={15} />, 'มูลค่าสัญญารวม', 'Contract Value', '฿' + PCU.fmtCompact(summary.contractTotal), 'รับแล้ว ฿' + PCU.fmtCompact(summary.received), '#0e9f9a', null)}
-      {card('ar', <PcI.alert size={15} />, 'ยอดค้างรับ', 'Outstanding AR', '฿' + PCU.fmtCompact(summary.outstandingAR), null, '#b45309', null)}
-      {card('f30', <PcI.clock size={15} />, 'คาดรับ 30 วัน', 'Forecast 30d', '฿' + PCU.fmtCompact(summary.forecast30), '60d ฿' + PCU.fmtCompact(summary.forecast60), '#2e8b4a', null)}
+      {card('all', <PcI.building size={15} />, 'โครงการทั้งหมด', 'All Projects', summary.count.toLocaleString(), PCU.fmtCompact(summary.contractTotal), '#2e8b4a', null)}
+      {card('wip', <PcI.refresh size={15} />, 'กำลังดำเนินการ', 'Work in Progress', summary.wip.toLocaleString(), PCU.fmtCompact(summary.wipAmt), '#2e8b4a', 'Work in progress')}
+      {card('await', <PcI.clock size={15} />, 'รอลงนาม', 'Awaiting Sign', summary.awaiting.toLocaleString(), PCU.fmtCompact(summary.awaitAmt), '#f97316', 'ยังไม่ลงนาม')}
+      {card('fin', <PcI.check size={15} />, 'เสร็จสิ้น', 'Finished', summary.finish.toLocaleString(), PCU.fmtCompact(summary.finishAmt), '#16a34a', 'Finish')}
+      {card('cancel', <PcI.close size={15} />, 'ยกเลิก', 'Cancelled', summary.cancelled.toLocaleString(), PCU.fmtCompact(summary.cancelAmt), '#ef4444', 'ยกเลิก')}
+      {card('contract', <PcI.money size={15} />, 'มูลค่าสัญญารวม', 'Contract Value', PCU.fmtCompact(summary.contractTotal), 'รับแล้ว ' + PCU.fmtCompact(summary.received), '#0e9f9a', null)}
+      {card('ar', <PcI.alert size={15} />, 'ยอดค้างรับ', 'Outstanding AR', PCU.fmtCompact(summary.outstandingAR), null, '#b45309', null)}
+      {card('f30', <PcI.clock size={15} />, 'คาดรับ 30 วัน', 'Forecast 30d', PCU.fmtCompact(summary.forecast30), '60d ' + PCU.fmtCompact(summary.forecast60), '#2e8b4a', null)}
     </div>
   );
 }
@@ -155,8 +155,8 @@ function PcCashflow({ rows }) {
     <div style={{ ...pcCard, padding: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <div style={{ display: 'flex', gap: 14, fontSize: 11 }}>
-          <span><b className="num" style={{ color: 'var(--brand-700)' }}>฿{PCU.fmtCompact(total.gross)}</b> <span style={{ color: '#94a3b8' }}>Gross</span></span>
-          <span><b className="num" style={{ color: '#16a34a' }}>฿{PCU.fmtCompact(total.net)}</b> <span style={{ color: '#94a3b8' }}>Net</span></span>
+          <span><b className="num" style={{ color: 'var(--brand-700)' }}>{PCU.fmtCompact(total.gross)}</b> <span style={{ color: '#94a3b8' }}>Gross</span></span>
+          <span><b className="num" style={{ color: '#16a34a' }}>{PCU.fmtCompact(total.net)}</b> <span style={{ color: '#94a3b8' }}>Net</span></span>
           <span style={{ color: '#cbd5e1' }}>· คลิกแท่งเพื่อดูรายโครงการ/งวด</span>
         </div>
         {years.length > 1 && (
@@ -170,7 +170,7 @@ function PcCashflow({ rows }) {
           const gh = (m.gross / max) * 110, nh = (m.net / max) * 110;
           const has = m.count > 0;
           return (
-            <div key={i} onClick={has ? () => setDrill(m) : undefined} title={`${m.month} · คาดรับ ฿${PCU.fmtBaht(m.gross)} · ${m.count} งวด`}
+            <div key={i} onClick={has ? () => setDrill(m) : undefined} title={`${m.month} · คาดรับ ${PCU.fmtBaht(m.gross)} · ${m.count} งวด`}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: has ? 'pointer' : 'default' }}>
               <div style={{ width: '100%', height: 112, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 2 }}>
                 <div style={{ width: '60%', height: Math.max(1, gh), background: has ? 'var(--brand-500)' : '#e7edf4', borderRadius: '3px 3px 0 0', transition: 'background .15s' }} />
@@ -186,7 +186,7 @@ function PcCashflow({ rows }) {
             <div style={{ background: 'linear-gradient(135deg,var(--brand-600),var(--brand-500))', color: '#fff', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 10.5, opacity: .8 }}>กระแสเงินสดคาดการณ์ · {yr}</div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>{drill.month} · คาดรับ ฿{PCU.fmtBaht(drill.gross)} <span style={{ fontSize: 12, fontWeight: 500, opacity: .85 }}>({drill.count} งวด)</span></div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{drill.month} · คาดรับ {PCU.fmtBaht(drill.gross)} <span style={{ fontSize: 12, fontWeight: 500, opacity: .85 }}>({drill.count} งวด)</span></div>
               </div>
               <button onClick={() => setDrill(null)} style={{ border: 'none', background: 'rgba(255,255,255,.18)', color: '#fff', borderRadius: 8, width: 30, height: 30, display: 'grid', placeItems: 'center', cursor: 'pointer' }}><PcI.close size={16} /></button>
             </div>
@@ -203,14 +203,14 @@ function PcCashflow({ rows }) {
                         <div style={{ fontSize: 10, color: '#94a3b8' }}>{[/^(XL|WS)-/i.test(ln.row.contractNo) ? null : ln.row.contractNo, ln.row.province].filter(Boolean).join(' · ')}</div>
                       </td>
                       <td style={{ padding: '8px 12px' }}><span style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 100 }}>งวด {ln.no}</span></td>
-                      <td className="num" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#0e9f9a' }}>฿{PCU.fmtBaht(ln.amount)}</td>
+                      <td className="num" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#0e9f9a' }}>{PCU.fmtBaht(ln.amount)}</td>
                       <td className="num" style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>{PCU.fmtDate(ln.date)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot><tr style={{ background: '#eaf2ff', fontWeight: 800 }}>
                   <td style={{ padding: '9px 12px' }} colSpan={2}>รวม {drill.month}</td>
-                  <td className="num" style={{ padding: '9px 12px', textAlign: 'right', color: 'var(--brand-700)' }}>฿{PCU.fmtBaht(drill.gross)}</td>
+                  <td className="num" style={{ padding: '9px 12px', textAlign: 'right', color: 'var(--brand-700)' }}>{PCU.fmtBaht(drill.gross)}</td>
                   <td />
                 </tr></tfoot>
               </table>
@@ -229,13 +229,13 @@ function PcLgSection({ rows }) {
   if (!banks.length) return <div style={{ ...pcCard, padding: 18, color: '#94a3b8', fontSize: 12, textAlign: 'center' }}>ยังไม่มีข้อมูล LG · กรอกใน Finance Master (drawer) เพื่อแสดงผล</div>;
   return (
     <div style={{ ...pcCard, padding: 14, display: 'flex', gap: 16, alignItems: 'center' }}>
-      <PcDonut segments={banks.map(b => ({ value: b.amount, color: b.color }))} center={<><div style={{ fontSize: 9, color: '#94a3b8' }}>LG รวม</div><div className="num" style={{ fontSize: 14, fontWeight: 800 }}>฿{PCU.fmtCompact(total)}</div></>} />
+      <PcDonut segments={banks.map(b => ({ value: b.amount, color: b.color }))} center={<><div style={{ fontSize: 9, color: '#94a3b8' }}>LG รวม</div><div className="num" style={{ fontSize: 14, fontWeight: 800 }}>{PCU.fmtCompact(total)}</div></>} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
         {banks.map(b => (
           <div key={b.bank} style={{ display: 'grid', gridTemplateColumns: '50px 1fr auto', gap: 8, alignItems: 'center', fontSize: 11.5 }}>
             <span style={{ fontWeight: 700, color: b.color }}>{b.bank}</span>
             <span style={{ height: 6, background: '#eff3f8', borderRadius: 6 }}><span style={{ display: 'block', height: '100%', width: (b.amount / (banks[0].amount || 1) * 100) + '%', background: b.color, borderRadius: 6 }} /></span>
-            <span className="num" style={{ fontWeight: 600 }}>฿{PCU.fmtCompact(b.amount)}</span>
+            <span className="num" style={{ fontWeight: 600 }}>{PCU.fmtCompact(b.amount)}</span>
           </div>
         ))}
       </div>
@@ -250,9 +250,9 @@ function PcDebtSection({ rows }) {
   return (
     <div style={{ ...pcCard, padding: 14 }}>
       <div style={{ display: 'flex', gap: 18, marginBottom: 10 }}>
-        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>หนี้รวม</div><div className="num" style={{ fontSize: 16, fontWeight: 800 }}>฿{PCU.fmtCompact(total)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>คงเหลือ</div><div className="num" style={{ fontSize: 16, fontWeight: 800, color: '#b45309' }}>฿{PCU.fmtCompact(remaining)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>หักแล้ว</div><div className="num" style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>฿{PCU.fmtCompact(total - remaining)}</div></div>
+        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>หนี้รวม</div><div className="num" style={{ fontSize: 16, fontWeight: 800 }}>{PCU.fmtCompact(total)}</div></div>
+        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>คงเหลือ</div><div className="num" style={{ fontSize: 16, fontWeight: 800, color: '#b45309' }}>{PCU.fmtCompact(remaining)}</div></div>
+        <div><div style={{ fontSize: 10, color: '#94a3b8' }}>หักแล้ว</div><div className="num" style={{ fontSize: 16, fontWeight: 800, color: '#16a34a' }}>{PCU.fmtCompact(total - remaining)}</div></div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {creds.map(c => { const pctDed = c.total > 0 ? (c.deducted / c.total * 100) : 0;
@@ -260,7 +260,7 @@ function PcDebtSection({ rows }) {
             <div key={c.creditor} style={{ fontSize: 11.5 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                 <span style={{ fontWeight: 600 }}>{c.name} <span style={{ color: '#94a3b8' }}>· {c.count}</span></span>
-                <span className="num">฿{PCU.fmtCompact(c.remaining)} <span style={{ color: '#94a3b8' }}>/ {PCU.fmtCompact(c.total)}</span></span>
+                <span className="num">{PCU.fmtCompact(c.remaining)} <span style={{ color: '#94a3b8' }}>/ {PCU.fmtCompact(c.total)}</span></span>
               </div>
               <div style={{ height: 6, background: '#eff3f8', borderRadius: 6 }}><span style={{ display: 'block', height: '100%', width: pctDed + '%', background: '#16a34a', borderRadius: 6 }} /></div>
             </div>
@@ -286,29 +286,29 @@ function PcCellRender(col, r) {
     case 'fy': return r.fy ? <span className="num">FY{r.fy}</span> : '—';
     case 'region': return r.regionEn ? <span style={{ fontSize: 11 }}>{r.regionEn}<span style={{ color: '#94a3b8' }}> · {r.region}</span></span> : '—';
     case 'type': return r.type ? <span style={{ background: '#eff3f8', color: '#475569', fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 100 }}>{r.type}</span> : '—';
-    case 'contractAmt': return <span className="num" style={{ fontWeight: 600 }}>{r.contractAmt ? '฿' + U.fmtBaht(r.contractAmt) : '—'}</span>;
+    case 'contractAmt': return <span className="num" style={{ fontWeight: 600 }}>{r.contractAmt ? U.fmtBaht(r.contractAmt) : '—'}</span>;
     case 'progress': return <PcProgress value={r.progress} />;
     case 'status': return <PcStatusBadge status={r.status} />;
     case 'projectStatus': return <span style={{ fontSize: 11, color: '#33425a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{r.projectStatus}</span>;
-    case 'outstandingAR': return <span className="num" style={{ fontWeight: 600, color: r.outstandingAR > 0 ? '#b45309' : '#cbd5e1' }}>{r.outstandingAR > 0 ? '฿' + U.fmtBaht(r.outstandingAR) : '—'}</span>;
-    case 'received': return <span className="num" style={{ color: r.received > 0 ? '#15803d' : '#cbd5e1' }}>{r.received > 0 ? '฿' + U.fmtBaht(r.received) : '—'}</span>;
-    case 'forecastReceive': return <span className="num" style={{ color: r.forecastReceive > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.forecastReceive > 0 ? '฿' + U.fmtBaht(r.forecastReceive) : '—'}</span>;
+    case 'outstandingAR': return <span className="num" style={{ fontWeight: 600, color: r.outstandingAR > 0 ? '#b45309' : '#cbd5e1' }}>{r.outstandingAR > 0 ? U.fmtBaht(r.outstandingAR) : '—'}</span>;
+    case 'received': return <span className="num" style={{ color: r.received > 0 ? '#15803d' : '#cbd5e1' }}>{r.received > 0 ? U.fmtBaht(r.received) : '—'}</span>;
+    case 'forecastReceive': return <span className="num" style={{ color: r.forecastReceive > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.forecastReceive > 0 ? U.fmtBaht(r.forecastReceive) : '—'}</span>;
     case 'forecastDate': { const dd = U.daysFromToday(r.forecastDate); const over = dd != null && dd < 0;
       return r.forecastDate ? <span className="num" style={{ fontSize: 11, color: over ? '#dc2626' : '#475569' }}>{U.fmtDate(r.forecastDate)}{dd != null && dd >= 0 && dd <= 30 ? <span style={{ color: '#d97706' }}> ·{dd}d</span> : ''}</span> : '—'; }
-    case 'fc1Amount': return <span className="num" style={{ color: r.fc1Amount > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.fc1Amount > 0 ? '฿' + U.fmtBaht(r.fc1Amount) : '—'}</span>;
-    case 'fc2Amount': return <span className="num" style={{ color: r.fc2Amount > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.fc2Amount > 0 ? '฿' + U.fmtBaht(r.fc2Amount) : '—'}</span>;
+    case 'fc1Amount': return <span className="num" style={{ color: r.fc1Amount > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.fc1Amount > 0 ? U.fmtBaht(r.fc1Amount) : '—'}</span>;
+    case 'fc2Amount': return <span className="num" style={{ color: r.fc2Amount > 0 ? '#0e9f9a' : '#cbd5e1' }}>{r.fc2Amount > 0 ? U.fmtBaht(r.fc2Amount) : '—'}</span>;
     case 'fc1Date': case 'fc2Date': { const iso = col.id === 'fc1Date' ? r.fc1Date : r.fc2Date; const dd = U.daysFromToday(iso); const over = dd != null && dd < 0;
       return iso ? <span className="num" style={{ fontSize: 11, color: over ? '#dc2626' : '#475569' }}>{U.fmtDate(iso)}{dd != null && dd >= 0 && dd <= 30 ? <span style={{ color: '#d97706' }}> ·{dd}d</span> : ''}</span> : '—'; }
-    case 'forecastNet': return <span className="num" style={{ color: r.forecastNet > 0 ? 'var(--ink-900)' : '#cbd5e1' }}>{r.forecastNet > 0 ? '฿' + U.fmtBaht(r.forecastNet) : '—'}</span>;
+    case 'forecastNet': return <span className="num" style={{ color: r.forecastNet > 0 ? 'var(--ink-900)' : '#cbd5e1' }}>{r.forecastNet > 0 ? U.fmtBaht(r.forecastNet) : '—'}</span>;
     case 'assignee': return r.assignee ? <span style={{ background: 'var(--brand-50)', color: 'var(--brand-700)', fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 100 }}>{r.assignee}</span> : '—';
     case 'lgBank': return r.lg && r.lg.bank ? <span style={{ fontWeight: 700, fontSize: 11, color: U.BANK_COLORS[r.lg.bank] || 'var(--brand-700)' }}>{r.lg.bank}</span> : '—';
-    case 'lgAmount': return r.lg ? <span className="num">฿{U.fmtBaht(r.lg.amount)}</span> : '—';
+    case 'lgAmount': return r.lg ? <span className="num">{U.fmtBaht(r.lg.amount)}</span> : '—';
     case 'start': return r.start ? <span className="num" style={{ fontSize: 11 }}>{U.fmtDate(r.start)}</span> : '—';
     case 'finish': return r.finish ? <span className="num" style={{ fontSize: 11 }}>{U.fmtDate(r.finish)}</span> : '—';
     default: {
       const v = col.value(r);
       // raw engineer columns carry col.kind (money/date/pct/text) for nice formatting
-      if (col.kind === 'money') return <span className="num">{v == null || v === '' ? '—' : '฿' + U.fmtBaht(v)}</span>;
+      if (col.kind === 'money') return <span className="num">{v == null || v === '' ? '—' : U.fmtBaht(v)}</span>;
       if (col.kind === 'pct') return <span className="num">{v == null || v === '' ? '—' : Math.round(+v) + '%'}</span>;
       if (col.kind === 'date') return v ? <span className="num" style={{ fontSize: 11 }}>{U.fmtDate(v)}</span> : '—';
       return v == null || v === '' ? '—' : <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }} title={String(v)}>{String(v)}</span>;
@@ -650,7 +650,7 @@ function PcExportModal({ rows, scopeLabel, onClose }) {
                           <label key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', fontSize: 11.5, cursor: 'pointer', minWidth: 0 }}>
                             <input type="checkbox" checked={sel.has(c.key)} onChange={() => toggle(c.key)} />
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.label}>{c.label}</span>
-                            {c.type !== 'text' && <span style={{ fontSize: 9, color: '#cbd5e1', flex: '0 0 auto' }}>{c.type === 'money' ? '฿' : c.type === 'date' ? '📅' : '%'}</span>}
+                            {c.type !== 'text' && <span style={{ fontSize: 9, color: '#cbd5e1', flex: '0 0 auto' }}>{c.type === 'money' ? '' : c.type === 'date' ? '📅' : '%'}</span>}
                           </label>
                         ))}
                       </div>
@@ -728,7 +728,7 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                   note = `ความคืบหน้างานก่อสร้างจริงจากฝ่ายงาน — ${which}`;
                 }
                 else if (pd.total > 0) note = `ไม่มีค่า % งานก่อสร้าง → คำนวณจากงวดงาน ถ่วงน้ำหนักตาม % งวด — ส่งมอบ ${pd.delivered}/${pd.total} งวด · ตรวจรับ ${pd.accepted} งวด · รับเงิน ${pd.paid} งวด (เกณฑ์: ส่งมอบ = 75% · ตรวจรับ = 90% · รับเงิน = 100% ของน้ำหนักงวดนั้น)`;
-                else if (row.received > 0 && row.contractAmt > 0) note = `ไม่มีข้อมูลงวดงาน → คำนวณจาก รับแล้ว ฿${U.fmtBaht(row.received)} ÷ มูลค่าสัญญา ฿${U.fmtBaht(row.contractAmt)}`;
+                else if (row.received > 0 && row.contractAmt > 0) note = `ไม่มีข้อมูลงวดงาน → คำนวณจาก รับแล้ว ${U.fmtBaht(row.received)} ÷ มูลค่าสัญญา ${U.fmtBaht(row.contractAmt)}`;
                 else note = 'ลงนาม/เริ่มงานแล้ว แต่ยังไม่มีค่า % งานก่อสร้าง → ตั้งต้นที่ระดับเริ่มต้น';
                 return (
                   <div style={{ gridColumn: '1 / -1', margin: '2px 0 8px', padding: '11px 13px', background: 'var(--brand-50)', border: '1px solid var(--brand-100)', borderRadius: 10 }}>
@@ -740,11 +740,11 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                   </div>
                 );
               })()}
-              <Field label="มูลค่าสัญญา (รวม VAT)" value={row.contractAmt ? '฿' + U.fmtBaht(row.contractAmt) : null} mono />
-              <Field label="เงินตามใบจัดสรร" value={row.allocation ? '฿' + U.fmtBaht(row.allocation) : null} mono />
-              <Field label="รับแล้ว" value={row.received ? '฿' + U.fmtBaht(row.received) : null} mono />
-              <Field label="ยอดค้างรับ (Outstanding AR)" value={row.outstandingAR ? '฿' + U.fmtBaht(row.outstandingAR) : null} mono />
-              <Field label="คาดว่าจะรับ (Forecast)" value={row.forecastReceive ? '฿' + U.fmtBaht(row.forecastReceive) : null} mono />
+              <Field label="มูลค่าสัญญา (รวม VAT)" value={row.contractAmt ? U.fmtBaht(row.contractAmt) : null} mono />
+              <Field label="เงินตามใบจัดสรร" value={row.allocation ? U.fmtBaht(row.allocation) : null} mono />
+              <Field label="รับแล้ว" value={row.received ? U.fmtBaht(row.received) : null} mono />
+              <Field label="ยอดค้างรับ (Outstanding AR)" value={row.outstandingAR ? U.fmtBaht(row.outstandingAR) : null} mono />
+              <Field label="คาดว่าจะรับ (Forecast)" value={row.forecastReceive ? U.fmtBaht(row.forecastReceive) : null} mono />
               <Field label="กำหนดรับเงิน" value={row.forecastDate ? U.fmtDate(row.forecastDate, 'long') : null} mono />
               <Field label="เริ่มงาน → สิ้นสุด" value={row.start || row.finish ? `${U.fmtDate(row.start)} → ${U.fmtDate(row.finish)}` : null} mono />
               <Field label="ผู้รับโอนสิทธิ" value={row.assignee} />
@@ -780,7 +780,7 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                   </div>
                   {i.absorbed && <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 6 }}>ไม่ได้ส่งงวดนี้แยก — ยกไปรวมจ่ายในงวด {i.absorbedInto} (ส่งงวดเดียว 100%)</div>}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 12px', fontSize: 11.5 }}>
-                    <span style={{ color: '#64748b' }}>มูลค่า{i.mergedFull ? ' (จ่ายจริง)' : i.absorbed ? ' (ตามแผน)' : ''}: <b className="num" style={{ color: 'var(--ink-900)' }}>฿{U.fmtBaht(i.amount)}</b></span>
+                    <span style={{ color: '#64748b' }}>มูลค่า{i.mergedFull ? ' (จ่ายจริง)' : i.absorbed ? ' (ตามแผน)' : ''}: <b className="num" style={{ color: 'var(--ink-900)' }}>{U.fmtBaht(i.amount)}</b></span>
                     <span style={{ color: '#64748b' }}>ส่งมอบ: <span className="num">{U.fmtDate(i.deliveryDate)}</span></span>
                     <span style={{ color: '#64748b' }}>ตรวจรับ: <span className="num">{U.fmtDate(i.acceptDate)}</span></span>
                     <span style={{ color: '#64748b' }}>คาดรับเงิน: <span className="num" style={{ color: '#0e9f9a' }}>{U.fmtDate(i.forecastDate)}</span></span>
@@ -804,7 +804,7 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
                         <span style={{ color: '#64748b' }}>สถานะ IV: <span style={{ fontWeight: 600, padding: '1px 8px', borderRadius: 100, background: badgeColor.bg, color: badgeColor.c }}>{sm.label}</span></span>
                         {iv.invoiceDate && <span style={{ color: '#64748b' }}>วันที่วางบิล: <span className="num">{U.fmtDate(iv.invoiceDate)}</span></span>}
                         {iv.receivedNet > 0
-                          ? <span style={{ color: '#64748b' }}>รับเงินจริง: <b className="num" style={{ color: '#15803d' }}>฿{U.fmtBaht(iv.receivedNet)}</b>{iv.receivedDate ? <span className="num" style={{ color: '#94a3b8' }}> · {U.fmtDate(iv.receivedDate)}</span> : ''}</span>
+                          ? <span style={{ color: '#64748b' }}>รับเงินจริง: <b className="num" style={{ color: '#15803d' }}>{U.fmtBaht(iv.receivedNet)}</b>{iv.receivedDate ? <span className="num" style={{ color: '#94a3b8' }}> · {U.fmtDate(iv.receivedDate)}</span> : ''}</span>
                           : <span style={{ color: '#64748b' }}>รับเงินจริง: <span style={{ color: '#cbd5e1' }}>ยังไม่รับ</span></span>}
                       </div>
                     );
@@ -846,7 +846,7 @@ function PcFinanceEditor({ row, canEdit, onSave }) {
           <input type="number" value={f.creditTerm} disabled={!canEdit} onChange={e => set('creditTerm', e.target.value)} style={pcInp} /></div>
         <div><label style={lbl}>LG Bank</label>
           <select value={f.lgBank} disabled={!canEdit} onChange={e => set('lgBank', e.target.value)} style={pcInp}>{banks.map(b => <option key={b} value={b}>{b || '— ไม่มี —'}</option>)}</select></div>
-        <div><label style={lbl}>LG Amount (฿)</label>
+        <div><label style={lbl}>LG Amount</label>
           <input type="number" value={f.lgAmount} disabled={!canEdit} onChange={e => set('lgAmount', e.target.value)} style={pcInp} /></div>
         <div><label style={lbl}>LG ออกเมื่อ</label>
           <input type="date" value={f.lgIssue} disabled={!canEdit} onChange={e => set('lgIssue', e.target.value)} style={pcInp} /></div>
@@ -878,9 +878,9 @@ function pcAdvFields() {
     { key: 'province', label: 'จังหวัด', type: 'enum', get: r => r.province || '' },
     { key: 'type', label: 'ประเภท', type: 'enum', get: r => r.type || '' },
     { key: 'lgBank', label: 'ธนาคาร LG', type: 'enum', get: r => (r.lg && r.lg.bank) || '' },
-    { key: 'contractAmt', label: 'มูลค่าสัญญา (฿)', type: 'num', get: r => r.contractAmt || 0 },
-    { key: 'outstandingAR', label: 'ยอดค้างรับ (฿)', type: 'num', get: r => r.outstandingAR || 0 },
-    { key: 'received', label: 'รับแล้ว (฿)', type: 'num', get: r => r.received || 0 },
+    { key: 'contractAmt', label: 'มูลค่าสัญญา', type: 'num', get: r => r.contractAmt || 0 },
+    { key: 'outstandingAR', label: 'ยอดค้างรับ', type: 'num', get: r => r.outstandingAR || 0 },
+    { key: 'received', label: 'รับแล้ว', type: 'num', get: r => r.received || 0 },
     { key: 'progress', label: 'ความคืบหน้า (%)', type: 'num', get: r => r.progress || 0 },
     { key: 'd1', label: 'ส่งมอบงวด 1 แล้ว', type: 'bool', get: r => !!r.d1 },
     { key: 'a1', label: 'ได้ใบตรวจรับ งวด 1', type: 'bool', get: r => !!r.a1 },

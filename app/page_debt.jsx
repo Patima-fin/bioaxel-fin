@@ -333,7 +333,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
         <div className="field">
           <label>สกุลเงิน</label>
           <select className="select input" value={draft.currency} onChange={e => set('currency', e.target.value)}>
-            <option value="THB">THB (฿)</option>
+            <option value="THB">THB</option>
             <option value="USD">USD ($)</option>
           </select>
         </div>
@@ -707,9 +707,9 @@ function DebtPage({ data, setData, toast }) {
               { key: 'status',          label: 'สถานะ' },
               { key: 'receiveDate',     label: 'วันรับเงิน',   type: 'date' },
               { key: 'maturityDate',    label: 'วันครบกำหนด', type: 'date' },
-              { key: 'principalAmount', label: 'วงเงิน (฿)',   type: 'number' },
+              { key: 'principalAmount', label: 'วงเงิน',   type: 'number' },
               { key: 'interestRate',    label: 'อัตราดอกเบี้ย/ปี', type: 'number' },
-              { key: 'balance',         label: 'คงเหลือ (฿)',  type: 'number' },
+              { key: 'balance',         label: 'คงเหลือ',  type: 'number' },
               { key: 'currency',        label: 'สกุลเงิน' },
               { key: 'bankName',        label: 'ธนาคาร' },
               { key: 'projectCode',     label: 'รหัสโครงการ' },
@@ -1099,13 +1099,13 @@ function DebtPage({ data, setData, toast }) {
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ยอดคงเหลือ (เงินต้น)</div>
                   <div style={{ fontWeight: 700, fontSize: 22, color: bal > 0 ? 'var(--bad)' : 'var(--ink-400)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(bal, 0)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{isUSD ? 'USD' : '฿'}</span>
+                    {fmtNum(bal, 0)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{isUSD ? 'USD' : ''}</span>
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยรวม</div>
                   <div style={{ fontWeight: 600, fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(interestTotal, 0)} ฿
+                    {fmtNum(interestTotal, 0)}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--good)' }}>ชำระแล้ว {fmtNum(interestPaid, 0)}</div>
                 </div>
@@ -1113,7 +1113,7 @@ function DebtPage({ data, setData, toast }) {
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยค้างจ่าย</div>
                   <div style={{ fontWeight: 700, fontSize: 18, fontVariantNumeric: 'tabular-nums',
                                 color: interestDue > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-                    {fmtNum(interestDue, 0)} ฿
+                    {fmtNum(interestDue, 0)}
                   </div>
                 </div>
               </div>

@@ -853,14 +853,14 @@
     sections.push(aoa.length); aoa.push(['ภาพรวม (Executive KPI)']);
     ths.push(aoa.length); aoa.push(['รายการ', 'มูลค่า / จำนวน', 'หมายเหตุ']);
     const kpi = [
-      ['โครงการทั้งหมด', sum.count, 'มูลค่าสัญญารวม ฿' + fmtBaht(sum.contractTotal)],
-      ['กำลังดำเนินการ', sum.wip, '฿' + fmtBaht(sum.wipAmt)],
-      ['เสร็จสิ้น', sum.finish, '฿' + fmtBaht(sum.finishAmt)],
-      ['ยังไม่ลงนาม', sum.awaiting, '฿' + fmtBaht(sum.awaitAmt)],
-      ['ยกเลิก', sum.cancelled, '฿' + fmtBaht(sum.cancelAmt)],
+      ['โครงการทั้งหมด', sum.count, 'มูลค่าสัญญารวม ' + fmtBaht(sum.contractTotal)],
+      ['กำลังดำเนินการ', sum.wip, fmtBaht(sum.wipAmt)],
+      ['เสร็จสิ้น', sum.finish, fmtBaht(sum.finishAmt)],
+      ['ยังไม่ลงนาม', sum.awaiting, fmtBaht(sum.awaitAmt)],
+      ['ยกเลิก', sum.cancelled, fmtBaht(sum.cancelAmt)],
       ['รับแล้ว (Received) — บาท', sum.received, ''],
       ['ยอดค้างรับ (AR) — บาท', sum.outstandingAR, ''],
-      ['คาดรับใน 30 วัน — บาท', sum.forecast30, '60 วัน ฿' + fmtBaht(sum.forecast60) + ' · 90 วัน ฿' + fmtBaht(sum.forecast90)],
+      ['คาดรับใน 30 วัน — บาท', sum.forecast30, '60 วัน ' + fmtBaht(sum.forecast60) + ' · 90 วัน ' + fmtBaht(sum.forecast90)],
       ['วงเงิน LG รวม — บาท', sum.lgTotal, ''],
     ];
     kpi.forEach(row => { moneyCells.push([aoa.length, 1]); aoa.push(row); });
@@ -1131,14 +1131,14 @@
       const years = forecastYears(rows);
       const lg = lgByBank(rows);
       body += `<h2>ภาพรวม (Executive KPI)</h2><div class="kpis">
-        <div class="kpi"><div class="lbl">โครงการทั้งหมด</div><div class="v num">${sum.count.toLocaleString()}</div><div class="s">มูลค่าสัญญารวม ฿${fmtCompact(sum.contractTotal)}</div></div>
-        <div class="kpi"><div class="lbl">กำลังดำเนินการ</div><div class="v num" style="color:#21703a">${sum.wip.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.wipAmt)}</div></div>
-        <div class="kpi"><div class="lbl">เสร็จสิ้น</div><div class="v num" style="color:#16a34a">${sum.finish.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.finishAmt)}</div></div>
-        <div class="kpi"><div class="lbl">ยกเลิก</div><div class="v num" style="color:#ef4444">${sum.cancelled.toLocaleString()}</div><div class="s">฿${fmtCompact(sum.cancelAmt)}</div></div>
-        <div class="kpi"><div class="lbl">รับแล้ว (Received)</div><div class="v num" style="color:#15803d">฿${fmtCompact(sum.received)}</div></div>
-        <div class="kpi"><div class="lbl">ยอดค้างรับ (AR)</div><div class="v num" style="color:#b45309">฿${fmtCompact(sum.outstandingAR)}</div></div>
-        <div class="kpi"><div class="lbl">คาดรับใน 30 วัน</div><div class="v num" style="color:#2e8b4a">฿${fmtCompact(sum.forecast30)}</div><div class="s">60 วัน ฿${fmtCompact(sum.forecast60)}</div></div>
-        <div class="kpi"><div class="lbl">วงเงิน LG รวม</div><div class="v num">฿${fmtCompact(sum.lgTotal)}</div></div>
+        <div class="kpi"><div class="lbl">โครงการทั้งหมด</div><div class="v num">${sum.count.toLocaleString()}</div><div class="s">มูลค่าสัญญารวม ${fmtCompact(sum.contractTotal)}</div></div>
+        <div class="kpi"><div class="lbl">กำลังดำเนินการ</div><div class="v num" style="color:#21703a">${sum.wip.toLocaleString()}</div><div class="s">${fmtCompact(sum.wipAmt)}</div></div>
+        <div class="kpi"><div class="lbl">เสร็จสิ้น</div><div class="v num" style="color:#16a34a">${sum.finish.toLocaleString()}</div><div class="s">${fmtCompact(sum.finishAmt)}</div></div>
+        <div class="kpi"><div class="lbl">ยกเลิก</div><div class="v num" style="color:#ef4444">${sum.cancelled.toLocaleString()}</div><div class="s">${fmtCompact(sum.cancelAmt)}</div></div>
+        <div class="kpi"><div class="lbl">รับแล้ว (Received)</div><div class="v num" style="color:#15803d">${fmtCompact(sum.received)}</div></div>
+        <div class="kpi"><div class="lbl">ยอดค้างรับ (AR)</div><div class="v num" style="color:#b45309">${fmtCompact(sum.outstandingAR)}</div></div>
+        <div class="kpi"><div class="lbl">คาดรับใน 30 วัน</div><div class="v num" style="color:#2e8b4a">${fmtCompact(sum.forecast30)}</div><div class="s">60 วัน ${fmtCompact(sum.forecast60)}</div></div>
+        <div class="kpi"><div class="lbl">วงเงิน LG รวม</div><div class="v num">${fmtCompact(sum.lgTotal)}</div></div>
       </div>`;
       body += `<h2>สถานะโครงการ (Pipeline)</h2><table><thead><tr><th>สถานะย่อย</th><th class="r">จำนวน</th></tr></thead><tbody>
         ${pcs.map(p => `<tr><td>${esc(p.th)} <span style="color:#94a3b8">· ${esc(p.en)}</span></td><td class="r num">${p.count}</td></tr>`).join('')}</tbody></table>`;
@@ -1147,12 +1147,12 @@
         if (!ms.length) return;
         const tot = ms.reduce((s, m) => s + m.gross, 0);
         body += `<h2>กระแสเงินสดคาดการณ์ ปี ${y}</h2><table><thead><tr><th>เดือน</th><th class="r">คาดรับ (Gross)</th><th class="c">จำนวนงวด</th></tr></thead><tbody>
-          ${ms.map(m => `<tr><td>${m.month} ${y}</td><td class="r num">฿${fmtBaht(m.gross)}</td><td class="c num">${m.count}</td></tr>`).join('')}
-          <tr style="font-weight:800;background:#eaf2ff"><td>รวม</td><td class="r num">฿${fmtBaht(tot)}</td><td></td></tr></tbody></table>`;
+          ${ms.map(m => `<tr><td>${m.month} ${y}</td><td class="r num">${fmtBaht(m.gross)}</td><td class="c num">${m.count}</td></tr>`).join('')}
+          <tr style="font-weight:800;background:#eaf2ff"><td>รวม</td><td class="r num">${fmtBaht(tot)}</td><td></td></tr></tbody></table>`;
       });
       if (lg.length) {
         body += `<h2>หลักประกัน (LG Monitoring)</h2><table><thead><tr><th>ธนาคาร</th><th class="c">จำนวน</th><th class="r">วงเงิน</th></tr></thead><tbody>
-          ${lg.map(b => `<tr><td><b style="color:${b.color}">${esc(b.bank)}</b></td><td class="c num">${b.count}</td><td class="r num">฿${fmtBaht(b.amount)}</td></tr>`).join('')}</tbody></table>`;
+          ${lg.map(b => `<tr><td><b style="color:${b.color}">${esc(b.bank)}</b></td><td class="c num">${b.count}</td><td class="r num">${fmtBaht(b.amount)}</td></tr>`).join('')}</tbody></table>`;
       }
       return body;
     };
@@ -1163,8 +1163,8 @@
       const align = (t) => t === 'money' ? ' class="r"' : (t === 'pct' || t === 'date') ? ' class="c"' : '';
       const cellHtml = (c, r) => {
         const txt = pcCellText(c, r);
-        if (c.key === '__ar') return `<td class="r num" style="color:#b45309">${txt ? '฿' + txt : '—'}</td>`;
-        if (c.type === 'money') return `<td class="r num">${txt ? '฿' + txt : '—'}</td>`;
+        if (c.key === '__ar') return `<td class="r num" style="color:#b45309">${txt ? txt : '—'}</td>`;
+        if (c.type === 'money') return `<td class="r num">${txt ? txt : '—'}</td>`;
         if (c.type === 'pct') return `<td class="c num">${txt || '—'}</td>`;
         if (c.type === 'date') return `<td class="c num">${txt || '—'}</td>`;
         return `<td>${esc(txt || '—')}</td>`;

@@ -29,7 +29,7 @@ function hpDays(from, to) {
 function hpNum(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
 function hpBaht(n) {
   const v = hpNum(n);
-  return '฿' + (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('th-TH');
+  return (v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('th-TH');
 }
 function hpMlnSigned(n) {
   const v = hpNum(n);

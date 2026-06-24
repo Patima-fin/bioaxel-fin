@@ -157,9 +157,9 @@ const ReceiptsPage = ({ data }) => {
               { key: 'invoiceNo',          label: 'เลขที่ IV' },
               { key: 'projectCode',        label: 'รหัสโครงการ' },
               { key: 'projectName',        label: 'ชื่อโครงการ' },
-              { key: 'grossAmount',        label: 'ยอดรับ Gross (฿)', type: 'number' },
-              { key: 'transferDeduction',  label: 'หักโอนสิทธิ (฿)',  type: 'number' },
-              { key: 'netAmount',          label: 'เงินเข้าจริง Net (฿)', type: 'number' },
+              { key: 'grossAmount',        label: 'ยอดรับ Gross', type: 'number' },
+              { key: 'transferDeduction',  label: 'หักโอนสิทธิ',  type: 'number' },
+              { key: 'netAmount',          label: 'เงินเข้าจริง Net', type: 'number' },
               { key: 'bankName',           label: 'ธนาคารที่รับ' },
               { key: 'remark',             label: 'หมายเหตุ' },
             ]}

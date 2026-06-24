@@ -588,10 +588,10 @@ function InvoicesPage({ data, setData, toast }) {
               { key: 'ivNo',            label: 'เลขที่ IV' },
               { key: 'invoiceDate',     label: 'วันที่ออก IV',   type: 'date' },
               { key: 'projectName',     label: 'ชื่อโครงการ' },
-              { key: 'balance',         label: 'ยอดค้างชำระ (฿)', type: 'number' },
+              { key: 'balance',         label: 'ยอดค้างชำระ', type: 'number' },
               { key: 'assignee',        label: 'ผู้รับโอนสิทธิ์' },
-              { key: 'debt',            label: 'ภาระหนี้ (฿)',   type: 'number' },
-              { key: 'netExpected',     label: 'คาดรับสุทธิ (฿)', type: 'number' },
+              { key: 'debt',            label: 'ภาระหนี้',   type: 'number' },
+              { key: 'netExpected',     label: 'คาดรับสุทธิ', type: 'number' },
               { key: 'expectedReceive', label: 'วันคาดรับเงิน', type: 'date' },
               { key: 'status',          label: 'สถานะ' },
             ]}
@@ -761,7 +761,7 @@ function InvoicesPage({ data, setData, toast }) {
                         </div>
                         <div style={{ textAlign: 'right', minWidth: 90 }}>
                           <div style={{ fontFamily: 'ui-monospace', fontSize: 11.5, fontWeight: 600 }}>
-                            {fmtNum(iv.balance, 0)} ฿
+                            {fmtNum(iv.balance, 0)}
                           </div>
                           <Badge kind={sMeta.badge}>{sMeta.label}</Badge>
                         </div>
@@ -819,10 +819,10 @@ function InvoicesPage({ data, setData, toast }) {
               <IvColHeader label="เลข IV"          sortKey="ivNo"            colKey="ivNo"            sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  98 : 92}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="วันที่ IV"        sortKey="invoiceDate"     colKey="invoiceDate"     sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  92 : 84}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="ชื่อโครงการ"      sortKey="projectName"     colKey="projectName"     sort={sort} sortToggle={toggle} align="center"             colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
-              <IvColHeader label="ยอดค้าง (฿)"     sortKey="balance"         colKey="balance"         sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 118 : 108} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
+              <IvColHeader label="ยอดค้าง"     sortKey="balance"         colKey="balance"         sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 118 : 108} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="ผู้รับโอนสิทธิ์"   sortKey="assignee"        colKey="assignee"        sort={sort} sortToggle={toggle} align="center" width={fullscreen ? 110 : 86}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
-              <IvColHeader label="ภาระหนี้ (฿)"    sortKey="debt"            colKey="debt"            sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 108 : 92}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
-              <IvColHeader label="สุทธิ (฿)"         sortKey="netExpected"     colKey="netExpected"     sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 118 : 104} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
+              <IvColHeader label="ภาระหนี้"    sortKey="debt"            colKey="debt"            sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 108 : 92}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
+              <IvColHeader label="สุทธิ"         sortKey="netExpected"     colKey="netExpected"     sort={sort} sortToggle={toggle} align="right"  width={fullscreen ? 118 : 104} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="วันที่"            sortKey="expectedReceive" colKey="expectedReceive" sort={sort} sortToggle={toggle} align="center" width={fullscreen ? 108 : 92}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="สถานะ"            sortKey="status"          colKey="status"          sort={sort} sortToggle={toggle} align="center" width={fullscreen ? 168 : 132} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
             </tr>
@@ -1266,7 +1266,7 @@ function IvReportView({ rows, onOpen }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, position: 'relative' }}>
               <div style={{ fontWeight: 800, fontSize: 23, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                {fmtNum(k.amt, 0)} <span style={{ fontSize: 12, fontWeight: 700, opacity: .82 }}>฿</span>
+                {fmtNum(k.amt, 0)} <span style={{ fontSize: 12, fontWeight: 700, opacity: .82 }}></span>
               </div>
               <div style={{ fontSize: 11.5, fontWeight: 700, background: 'rgba(255,255,255,.22)', padding: '3px 10px', borderRadius: 10 }}>
                 {k.count} ใบ
@@ -1297,7 +1297,7 @@ function IvReportView({ rows, onOpen }) {
                 </span>
               </div>
               <div style={{ textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-                <span style={{ fontWeight: 800 }}>{fmtNum(secTotal, 0)} ฿</span>
+                <span style={{ fontWeight: 800 }}>{fmtNum(secTotal, 0)}</span>
                 {secNet !== secTotal && (
                   <span style={{ opacity: .8, marginLeft: 6, fontWeight: 600 }}>· สุทธิ {fmtNum(secNet, 0)}</span>
                 )}
@@ -1388,7 +1388,7 @@ function IvAmountInput({ value, onChange }) {
         placeholder="0.00"
         style={{ textAlign: 'right', paddingRight: 24, fontFamily: 'ui-monospace', fontWeight: 600 }}
       />
-      <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-400)', pointerEvents: 'none' }}>฿</span>
+      <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-400)', pointerEvents: 'none' }}></span>
     </div>
   );
 }
@@ -1498,7 +1498,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
         color: !value ? 'var(--ink-300)' : negative ? 'var(--bad)' : 'var(--ink-800)',
       }}>
         {!value ? '—' : (negative ? '-' : '') + fmtNum(Math.abs(value), 0)}
-        {!!value && <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>฿</span>}
+        {!!value && <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}></span>}
       </div>
     </div>
   );
@@ -1603,7 +1603,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
                 <div style={{ height: 32, borderRadius: 7, padding: '0 22px 0 9px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', background: 'color-mix(in oklch, var(--bad) 7%, transparent)', border: '1px solid color-mix(in oklch, var(--bad) 22%, transparent)', fontFamily: 'ui-monospace', fontSize: 12.5, fontWeight: 600, color: 'var(--bad)' }}
                   title="WHT 1% บน Balance ก่อน VAT — สูตร: balance ÷ 107">
                   {wht > 0 ? '(' + fmtNum(wht, 2) + ')' : '—'}
-                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>฿</span>
+                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}></span>
                 </div>
               </div>
               <div className="field">
@@ -1613,7 +1613,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
                 <div style={{ height: 32, borderRadius: 7, padding: '0 22px 0 9px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', background: 'color-mix(in oklch, var(--brand-500) 7%, transparent)', border: '1px solid color-mix(in oklch, var(--brand-500) 25%, transparent)', fontFamily: 'ui-monospace', fontSize: 13, fontWeight: 700, color: 'var(--brand-700)' }}
                   title="สูตร: balance × 106 ÷ 107">
                   {fmtNum(balanceAfterWHT, 2)}
-                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>฿</span>
+                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}></span>
                 </div>
               </div>
             </div>
@@ -1687,7 +1687,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
                 </label>
                 <div style={{ height: 32, borderRadius: 7, padding: '0 22px 0 9px', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', background: 'color-mix(in oklch, var(--good) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--good) 25%, transparent)', fontFamily: 'ui-monospace', fontSize: 13, fontWeight: 700, color: 'var(--good)' }}>
                   {fmtNum(netExpected, 2)}
-                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>฿</span>
+                  <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}></span>
                 </div>
               </div>
             </div>
@@ -1835,7 +1835,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
                   <div className="field"><label style={{ fontSize: 12, color: 'var(--ink-600)' }}>เงินเข้าบัญชีสุทธิ <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--ink-400)' }}>(คำนวณ)</span></label>
                     <div style={{ height: 34, borderRadius: 7, position: 'relative', background: 'color-mix(in oklch, var(--good) 10%, transparent)', border: '1px solid color-mix(in oklch, var(--good) 22%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 24px 0 10px', fontFamily: 'ui-monospace', fontSize: 14, fontWeight: 700, color: netCash < 0 ? 'var(--bad)' : 'var(--good)' }}>
                       {fmtNum(netCash, 0)}
-                      <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>฿</span>
+                      <span style={{ position: 'absolute', right: 7, fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}></span>
                     </div>
                   </div>
                   <div className="field"><label style={{ fontSize: 12 }}>เข้าบัญชี</label>
@@ -1890,7 +1890,7 @@ function QuickPayModal({ open, iv, draft, bankAccounts, onChangeDraft, onConfirm
               {iv.ivNo} · {iv.projectName}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 4, fontFamily: 'ui-monospace' }}>
-              Balance <strong>{fmtNum(bal, 2)}</strong> − WHT 1% <span style={{ color: 'var(--bad)' }}>({fmtNum(wht, 2)})</span> = หลังหัก <strong style={{ color: 'var(--brand-700)' }}>{fmtNum(balanceAfterWHT, 2)}</strong> ฿
+              Balance <strong>{fmtNum(bal, 2)}</strong> − WHT 1% <span style={{ color: 'var(--bad)' }}>({fmtNum(wht, 2)})</span> = หลังหัก <strong style={{ color: 'var(--brand-700)' }}>{fmtNum(balanceAfterWHT, 2)}</strong>
             </div>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onCancel}><Icon name="x" size={16} /></button>
@@ -1904,22 +1904,22 @@ function QuickPayModal({ open, iv, draft, bankAccounts, onChangeDraft, onConfirm
           </div>
 
           <div className="field" style={{ gridColumn: '1/-1' }}>
-            <label>จำนวนเงินที่ได้รับจริง <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>(หลัง WHT)</span> (฿)</label>
+            <label>จำนวนเงินที่ได้รับจริง <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>(หลัง WHT)</span></label>
             <input className="input" type="number" value={draft.amount ?? ''} onChange={(e) => onChangeDraft({ amount: Number(e.target.value) })} style={{ fontFamily: 'ui-monospace', textAlign: 'right' }} />
           </div>
 
           <div className="field">
-            <label>ค่าธรรมเนียมธนาคาร (฿)</label>
+            <label>ค่าธรรมเนียมธนาคาร</label>
             <input className="input" type="number" value={draft.bankFee ?? 0} onChange={(e) => onChangeDraft({ bankFee: Number(e.target.value) })} style={{ fontFamily: 'ui-monospace', textAlign: 'right' }} />
           </div>
 
           <div className="field">
-            <label>ภาระหนี้ <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>(โอนสิทธิ์)</span> (฿)</label>
+            <label>ภาระหนี้ <span style={{ fontSize: 10, color: 'var(--ink-400)' }}>(โอนสิทธิ์)</span></label>
             <input className="input" type="number" value={draft.debtDeduct ?? 0} onChange={(e) => onChangeDraft({ debtDeduct: Number(e.target.value) })} style={{ fontFamily: 'ui-monospace', textAlign: 'right' }} />
           </div>
 
           <div className="field" style={{ gridColumn: '1/-1' }}>
-            <label>ค่าใช้จ่ายอื่น ๆ (฿)</label>
+            <label>ค่าใช้จ่ายอื่น ๆ</label>
             <input className="input" type="number" value={draft.otherFee ?? 0} onChange={(e) => onChangeDraft({ otherFee: Number(e.target.value) })} style={{ fontFamily: 'ui-monospace', textAlign: 'right' }} />
           </div>
 
@@ -1939,7 +1939,7 @@ function QuickPayModal({ open, iv, draft, bankAccounts, onChangeDraft, onConfirm
           <div style={{ gridColumn: '1/-1', background: 'color-mix(in oklch, var(--good) 9%, transparent)', border: '1px solid color-mix(in oklch, var(--good) 22%, transparent)', borderRadius: 9, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: 'var(--ink-400)' }}>เงินเข้าบัญชีสุทธิ</span>
             <span style={{ fontFamily: 'ui-monospace', fontWeight: 700, fontSize: 16, color: netCash < 0 ? 'var(--bad)' : 'var(--good)' }}>
-              {fmtNum(netCash, 0)} ฿
+              {fmtNum(netCash, 0)}
             </span>
           </div>
         </div>
@@ -2799,10 +2799,10 @@ function IvReportStandalonePage({ data, setData, toast }) {
               { key: 'ivNo',            label: 'เลขที่ IV' },
               { key: 'invoiceDate',     label: 'วันที่ออก IV',   type: 'date' },
               { key: 'projectName',     label: 'ชื่อโครงการ' },
-              { key: 'balance',         label: 'ยอดค้างชำระ (฿)', type: 'number' },
+              { key: 'balance',         label: 'ยอดค้างชำระ', type: 'number' },
               { key: 'assignee',        label: 'ผู้รับโอนสิทธิ์' },
-              { key: 'debt',            label: 'ภาระหนี้ (฿)',   type: 'number' },
-              { key: 'netExpected',     label: 'คาดรับสุทธิ (฿)', type: 'number' },
+              { key: 'debt',            label: 'ภาระหนี้',   type: 'number' },
+              { key: 'netExpected',     label: 'คาดรับสุทธิ', type: 'number' },
               { key: 'expectedReceive', label: 'วันคาดรับเงิน', type: 'date' },
               { key: 'status',          label: 'สถานะ' },
             ]}

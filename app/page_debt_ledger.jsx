@@ -370,7 +370,7 @@ function PaymentConfirmPopup({ open, selectedRows, master, onClose, onConfirm })
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
         <button className="btn btn-primary" onClick={() => onConfirm({ payDate, note })}>
-          <Icon name="check" size={14} /> ยืนยันการจ่าย {fmtNum(total, 2)} ฿
+          <Icon name="check" size={14} /> ยืนยันการจ่าย {fmtNum(total, 2)}
         </button>
       </>}
     >
@@ -386,7 +386,7 @@ function PaymentConfirmPopup({ open, selectedRows, master, onClose, onConfirm })
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginTop: 4 }}>
           <span>รวมจำนวนเงิน</span>
-          <strong style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(total, 2)} ฿</strong>
+          <strong style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(total, 2)}</strong>
         </div>
       </div>
 
@@ -467,7 +467,7 @@ function InterestOverridePopup({ open, row, onClose, onSave }) {
             background: 'var(--ink-50)', padding: '0 9px',
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
             fontFamily: 'ui-monospace', fontSize: 13, fontWeight: 600, color: 'var(--ink-700)',
-          }}>{fmtNum(computed, 2)} ฿</div>
+          }}>{fmtNum(computed, 2)}</div>
         </div>
         <div>
           <label style={{ fontSize: 11, color: 'var(--ink-500)' }}>ผลต่าง</label>
@@ -535,7 +535,7 @@ function PrincipalEventModal({ open, kind, master, editEvent, onClose, onSave })
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
         <button className="btn btn-primary" disabled={!num || tooMuch} onClick={() => onSave({ date, amount: num, note, kind, closeContract: closeContract || wouldClose })}>
-          <Icon name="check" size={14} /> {isEdit ? 'บันทึกการแก้ไข' : 'บันทึก'} {c.label} {fmtNum(num, 2)} ฿
+          <Icon name="check" size={14} /> {isEdit ? 'บันทึกการแก้ไข' : 'บันทึก'} {c.label} {fmtNum(num, 2)}
         </button>
       </>}
     >
@@ -566,7 +566,7 @@ function PrincipalEventModal({ open, kind, master, editEvent, onClose, onSave })
 
       {tooMuch && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '6px 12px', borderRadius: 7, fontSize: 12, marginBottom: 10 }}>
-          ⚠️ จำนวนเงินที่คืนเกินกว่ายอดคงเหลือ ({fmtNum(balance, 2)} ฿) — กรุณาตรวจสอบ
+          ⚠️ จำนวนเงินที่คืนเกินกว่ายอดคงเหลือ ({fmtNum(balance, 2)}) — กรุณาตรวจสอบ
         </div>
       )}
 
@@ -743,8 +743,8 @@ function RolloverModal({ open, master, onClose, onSave }) {
       onClose={onClose}
       footer={<>
         <span style={{ marginRight: 'auto', fontSize: 11.5, color: tooMuch ? 'var(--bad)' : 'var(--ink-500)' }}>
-          วงเงินเดิม <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(oldBalance, 0)}</strong> ฿ ·
-          วงเงินรวมใหม่ <strong style={{ fontVariantNumeric: 'tabular-nums', color: tooMuch ? 'var(--bad)' : 'var(--ink-700)' }}>{fmtNum(sumNew, 0)}</strong> ฿
+          วงเงินเดิม <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(oldBalance, 0)}</strong> ·
+          วงเงินรวมใหม่ <strong style={{ fontVariantNumeric: 'tabular-nums', color: tooMuch ? 'var(--bad)' : 'var(--ink-700)' }}>{fmtNum(sumNew, 0)}</strong>
           {diff !== 0 && (
             <span style={{ marginLeft: 6, color: diff < 0 ? 'var(--good)' : 'var(--bad)' }}>
               ({diff > 0 ? '+' : ''}{fmtNum(diff, 0)})
@@ -792,8 +792,8 @@ function RolloverModal({ open, master, onClose, onSave }) {
           <div><strong style={{ fontFamily: 'ui-monospace' }}>{master.contractNo}</strong></div>
           {master.facilityType && <FacilityChip type={master.facilityType} />}
           <div>{master.borrowerName}</div>
-          <div>วงเงิน {fmtNum(Number(master.principalAmount) || 0, 0)} ฿</div>
-          <div>คงเหลือ <strong>{fmtNum(oldBalance, 0)}</strong> ฿</div>
+          <div>วงเงิน {fmtNum(Number(master.principalAmount) || 0, 0)}</div>
+          <div>คงเหลือ <strong>{fmtNum(oldBalance, 0)}</strong></div>
           <div>อัตรา {((Number(master.interestRate) || 0) * 100).toFixed(2)}%/ปี</div>
         </div>
         <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10 }}>
@@ -902,7 +902,7 @@ function RolloverModal({ open, master, onClose, onSave }) {
 
       {tooMuch && (
         <div style={{ marginTop: 12, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '8px 12px', borderRadius: 7, fontSize: 12 }}>
-          ⚠️ วงเงินรวมใหม่ ({fmtNum(sumNew, 0)} ฿) <strong>เกิน</strong> ยอดคงเหลือเดิม ({fmtNum(oldBalance, 0)} ฿) — ต้องไม่เกิน
+          ⚠️ วงเงินรวมใหม่ ({fmtNum(sumNew, 0)}) <strong>เกิน</strong> ยอดคงเหลือเดิม ({fmtNum(oldBalance, 0)}) — ต้องไม่เกิน
         </div>
       )}
     </Modal>
@@ -995,7 +995,7 @@ function useDebtContractActions(setData, toast) {
       });
       syncAfter(updated);
       const action = kind === 'repayment' ? 'คืนเงินต้น' : 'เบิกเงินกู้เพิ่ม';
-      toast(closedFlag ? `${action} ${fmtNum(amount, 0)} ฿ + ปิดสัญญาแล้ว` : `${action} ${fmtNum(amount, 0)} ฿ แล้ว`);
+      toast(closedFlag ? `${action} ${fmtNum(amount, 0)} + ปิดสัญญาแล้ว` : `${action} ${fmtNum(amount, 0)} แล้ว`);
     },
     // แก้ไขรายการรับ/คืนเงินกู้ที่คีย์ผิด — คำนวณยอดคงเหลือใหม่จาก events ทั้งหมด
     editPrincipalEvent(eventId, master, { date, amount, note, kind }) {
@@ -1572,7 +1572,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
             <>
               <span style={{ marginRight: 'auto', fontSize: 12, color: 'var(--ink-500)' }}>
                 เลือก <strong style={{ color: 'var(--brand-700)' }}>{selectedIds.size}</strong> เดือน · รวม{' '}
-                <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(selectedTotal, 2)}</strong> ฿
+                <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(selectedTotal, 2)}</strong>
               </span>
               <button className="btn btn-ghost" onClick={() => setSelectedIds(new Set())}>ล้างที่เลือก</button>
               <button className="btn btn-primary" onClick={() => setConfirmOpen(true)}>
@@ -1797,7 +1797,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                                 <Icon name="edit" size={12} />
                               </button>
                               <button onClick={() => {
-                                  if (confirm(`ลบรายการ ${isRepay ? 'คืนเงินต้น' : 'เบิกเพิ่ม'} ${fmtNum(Number(e.amount), 0)} ฿ วันที่ ${fmtDate(e.eventDate)}?\nระบบจะคำนวณยอดคงเหลือเงินต้นใหม่ให้`)) {
+                                  if (confirm(`ลบรายการ ${isRepay ? 'คืนเงินต้น' : 'เบิกเพิ่ม'} ${fmtNum(Number(e.amount), 0)} วันที่ ${fmtDate(e.eventDate)}?\nระบบจะคำนวณยอดคงเหลือเงินต้นใหม่ให้`)) {
                                     onDeleteEvent && onDeleteEvent(e.id, master);
                                   }
                                 }}
@@ -2640,7 +2640,7 @@ function DebtLedgerPage({ data, setData, toast }) {
                   <FilterableColHeader label="เลขที่สัญญา" sortKey="contractNo" colKey="contractNo" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={150} align="center" />
                   <FilterableColHeader label="ผู้กู้ / ผู้รับสินเชื่อ" sortKey="borrowerName" colKey="borrowerName" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} align="center" />
                   <FilterableColHeader label="สถานะ" sortKey="status" colKey="status" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={80} align="center" />
-                  <SortHeader label="วงเงิน (฿)" sortKey="principalAmount"     sort={sort} toggle={toggleSort} align="right" width={120} />
+                  <SortHeader label="วงเงิน" sortKey="principalAmount"     sort={sort} toggle={toggleSort} align="right" width={120} />
                   <SortHeader label="อัตรา"       sortKey="interestRate"        sort={sort} toggle={toggleSort} align="right" width={80} />
                   <SortHeader label="ดอกเบี้ยรวม" sortKey="totalInterest"       sort={sort} toggle={toggleSort} align="right" width={120} />
                   <SortHeader label="ชำระแล้ว"    sortKey="paidInterest"        sort={sort} toggle={toggleSort} align="right" width={120} />

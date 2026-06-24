@@ -307,15 +307,15 @@ const ALL_COLS = {
   signedDate:     { label: 'วันที่ลงนาม',    width: 90 },
   start:          { label: 'เริ่มงาน',        width: 90 },
   finish:         { label: 'สิ้นสุด',         width: 90 },
-  contractValue:  { label: 'มูลค่าสัญญา (รวม VAT) ฿', width: 150, align: 'right' },
+  contractValue:  { label: 'มูลค่าสัญญา (รวม VAT) ', width: 150, align: 'right' },
   statusDetail:   { label: 'สถานะงาน',       width: 140 },
   progressPct:    { label: '% Progress',     width: 110, align: 'right' },
   milestoneCount: { label: 'งวดส่งมอบ',      width: 80, align: 'center' },
   latestDelivery: { label: 'ส่งมอบล่าสุด',   width: 100 },
-  totalInvoiced:  { label: 'Invoice รวม (฿)', width: 130, align: 'right' },
-  totalReceived:  { label: 'รับเงินรวม (฿)',  width: 130, align: 'right' },
-  outstanding:    { label: 'AR คงค้าง (฿)',  width: 130, align: 'right' },
-  backlog:        { label: 'Backlog (฿)',    width: 130, align: 'right' },
+  totalInvoiced:  { label: 'Invoice รวม', width: 130, align: 'right' },
+  totalReceived:  { label: 'รับเงินรวม',  width: 130, align: 'right' },
+  outstanding:    { label: 'AR คงค้าง',  width: 130, align: 'right' },
+  backlog:        { label: 'Backlog',    width: 130, align: 'right' },
   collectionPct:  { label: 'Collection %',   width: 110, align: 'right' },
   invoiceCount:   { label: '# IV',           width: 60,  align: 'center' },
   latestIv:       { label: 'IV ล่าสุด',       width: 110 },
@@ -2144,7 +2144,7 @@ function InvoicesTab({ p }) {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: '#475569' }}>งวด {iv.period} · {iv.status}</span>
-              <strong style={{ fontSize: 13 }}>{pjFmtMoney(iv.balance)} ฿</strong>
+              <strong style={{ fontSize: 13 }}>{pjFmtMoney(iv.balance)}</strong>
             </div>
           </div>
         ))}
@@ -2161,7 +2161,7 @@ function InvoicesTab({ p }) {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: 11, color: '#475569' }}>{r.invoiceNo} · งวด {r.period}</span>
-              <strong style={{ fontSize: 13, color: '#16a34a' }}>{pjFmtMoney(r.netReceived || r.grossAmount)} ฿</strong>
+              <strong style={{ fontSize: 13, color: '#16a34a' }}>{pjFmtMoney(r.netReceived || r.grossAmount)}</strong>
             </div>
             {r.transferDeduction > 0 && (
               <div style={{ marginTop: 4, fontSize: 10.5, color: '#94a3b8' }}>

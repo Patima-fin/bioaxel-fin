@@ -229,7 +229,7 @@
       items.map((it, i) => R.createElement('div', { key: i },
         R.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 12, color: p.sub, marginBottom: 3 } },
           R.createElement('span', null, it.label),
-          R.createElement('span', { style: { fontWeight: 700, color: p.ink, fontVariantNumeric: 'tabular-nums' } }, money ? '฿' + invCompact(it.value) : (invFmt(it.value) + (suffix || '')))),
+          R.createElement('span', { style: { fontWeight: 700, color: p.ink, fontVariantNumeric: 'tabular-nums' } }, money ? invCompact(it.value) : (invFmt(it.value) + (suffix || '')))),
         R.createElement('div', { style: { height: 9, background: p.card2, borderRadius: 99, overflow: 'hidden' } },
           R.createElement('div', { style: { height: '100%', width: Math.max(2, Math.abs(it.value) / max * 100) + '%', background: 'linear-gradient(90deg,' + (color || p.brand) + ',' + p.brand2 + ')', borderRadius: 99 } }))
       ))
@@ -327,11 +327,11 @@
       R.createElement('div', { style: { background: 'linear-gradient(135deg,' + p.brand + ',' + p.brand2 + ')', borderRadius: 18, padding: '26px 28px', color: '#fff', marginBottom: 16, boxShadow: p.shadow } },
         R.createElement('div', { style: { fontSize: 13, opacity: .9, fontWeight: 600 } }, lang === 'th' ? 'ระบบผลิตน้ำประปาชุมชนครบวงจร All-in-One' : 'All-in-One Village-Scale Water Supply System'),
         R.createElement('div', { style: { fontSize: 30, fontWeight: 800, letterSpacing: '-.5px', marginTop: 6, lineHeight: 1.2 } }, tt.tagline),
-        R.createElement('div', { style: { fontSize: 13, opacity: .92, marginTop: 10 } }, tt.contractValue + ' ฿' + invFmt(m.contractTotal) + ' · ' + tt.projects + ' ' + invFmt(m.count))),
+        R.createElement('div', { style: { fontSize: 13, opacity: .92, marginTop: 10 } }, tt.contractValue + ' ' + invFmt(m.contractTotal) + ' · ' + tt.projects + ' ' + invFmt(m.count))),
       R.createElement('div', { style: Object.assign(gridR(4), { marginBottom: 16 }) },
-        R.createElement(InvKpi, { p, label: tt.revenue + ' 2025A', value: '฿958M', sub: tt.growth + ' 70.3% YoY', accent: p.brand }),
+        R.createElement(InvKpi, { p, label: tt.revenue + ' 2025A', value: '958M', sub: tt.growth + ' 70.3% YoY', accent: p.brand }),
         R.createElement(InvKpi, { p, label: tt.projects + ' (ในระบบ)', value: invFmt(m.count), accent: p.accent }),
-        R.createElement(InvKpi, { p, label: tt.backlog, value: '฿' + invCompact(m.backlog), accent: p.gold }),
+        R.createElement(InvKpi, { p, label: tt.backlog, value: invCompact(m.backlog), accent: p.gold }),
         R.createElement(InvKpi, { p, label: tt.products, value: INV_PRODUCTS.length + (lang === 'th' ? ' รุ่น' : ''), sub: 'POG TANK · SOLVE · Drink', accent: p.brand2 })),
       R.createElement(InvCard, { p, title: tt.hiTitle, style: { marginBottom: 14 } },
         R.createElement('div', { style: gridR(3) },
@@ -420,7 +420,7 @@
           R.createElement('div', { style: { maxHeight: 300, overflow: 'auto' } },
             INV_PRODUCTS.map((pr, i) => R.createElement('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid ' + p.line } },
               R.createElement('div', null, R.createElement('span', { style: { fontWeight: 700, fontSize: 12.5 } }, pr.code), R.createElement('span', { style: { color: p.sub, fontSize: 11.5, marginLeft: 8 } }, pr.name + (m.prodCount[pr.code] ? ' · ' + m.prodCount[pr.code] + (lang === 'th' ? ' โครง' : '') : ''))),
-              R.createElement('span', { style: { fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: p.brand } }, '฿' + invFmt(pr.price)))))))
+              R.createElement('span', { style: { fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: p.brand } }, invFmt(pr.price)))))))
     );
   }
 
@@ -463,9 +463,9 @@
     const finRows = INV_FIN.map(r => ({ bold: r.bold, cells: [(lang === 'th' ? r.th : r.en)].concat(r.v.map(x => ({ t: r.pct ? (x.toFixed(1) + '%') : invMn(x), neg: x < 0 }))) }));
     return R.createElement('div', null,
       R.createElement('div', { style: Object.assign(gridR(4), { marginBottom: 16 }) },
-        R.createElement(InvKpi, { p, label: tt.revenue + ' 2025A', value: '฿958.3M', sub: tt.growth + ' 70.3% YoY', accent: p.brand }),
-        R.createElement(InvKpi, { p, label: 'EBITDA 2025A', value: '฿88.5M', sub: '9.2% margin', accent: p.accent }),
-        R.createElement(InvKpi, { p, label: (lang === 'th' ? 'กำไรสุทธิ' : 'Net Profit') + ' 2025A', value: '฿17.3M', sub: '1.8% NPM', accent: p.good }),
+        R.createElement(InvKpi, { p, label: tt.revenue + ' 2025A', value: '958.3M', sub: tt.growth + ' 70.3% YoY', accent: p.brand }),
+        R.createElement(InvKpi, { p, label: 'EBITDA 2025A', value: '88.5M', sub: '9.2% margin', accent: p.accent }),
+        R.createElement(InvKpi, { p, label: (lang === 'th' ? 'กำไรสุทธิ' : 'Net Profit') + ' 2025A', value: '17.3M', sub: '1.8% NPM', accent: p.good }),
         R.createElement(InvKpi, { p, label: (lang === 'th' ? 'อัตรากำไรขั้นต้น' : 'Gross Margin') + ' 2025A', value: '27.3%', sub: lang === 'th' ? 'สูงขึ้นต่อเนื่อง' : 'improving trend', accent: p.gold })),
       R.createElement('div', { style: Object.assign(gridR(2), { marginBottom: 14 }) },
         R.createElement(InvCard, { p, title: tt.revenue + ' (2023A–2025A)', note: tt.finUnit }, R.createElement(InvBars, { p, items: revBars, money: true })),
@@ -602,7 +602,7 @@
     const buildEventCard = (gd, L, big) => {
       const { g, i, type, inn, out, bal } = gd;
       const col = type === 'out' ? p.bad : (type === 'in' ? p.good : p.brand);
-      const icon = type === 'event' ? '◆' : '฿';
+      const icon = type === 'event' ? '◆' : '';
       const prim = g.items[0];
       const title = (lang === 'th' ? prim.th : prim.en)[0];
       const enLine = (lang === 'th' ? prim.en : prim.th)[0];
@@ -619,7 +619,7 @@
       // headline — read-only standard amount
       const headline = type === 'event'
         ? el('div', { style: { fontSize: L.val - 5, fontWeight: 800, color: p.sub } }, lang === 'th' ? 'เริ่มต้น' : 'Start')
-        : el('div', { style: { fontSize: L.val, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' } }, (type === 'out' ? '−' : '+') + '฿' + invCompact(flow));
+        : el('div', { style: { fontSize: L.val, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' } }, (type === 'out' ? '−' : '+') + invCompact(flow));
       return el('div', { style: { position: 'relative', padding: big ? '14px 6px 8px' : '12px 5px 6px' } },
         badge ? el('div', { style: { position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', fontSize: 9.5, fontWeight: 800, padding: '3px 11px', borderRadius: 7, background: badgeCol, color: '#fff', boxShadow: '0 6px 16px -3px ' + invRgba(badgeCol, 0.6) } }, badge) : null,
         el('div', { style: { display: 'flex', alignItems: 'center', gap: 7 } },
@@ -637,13 +637,13 @@
             ? el('div', { style: { marginTop: 7, paddingTop: 6, borderTop: '1px dashed ' + invRgba(col, 0.3), display: 'flex', flexDirection: 'column', gap: 4 } },
                 flowItems.map((it, j) => el('div', { key: j, style: { display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: big ? 11.5 : 10.5 } },
                   el('span', { style: { color: p.sub, fontWeight: 600 } }, (lang === 'th' ? it.tag[0] : it.tag[1])),
-                  el('span', { style: { color: col, fontWeight: 800, fontVariantNumeric: 'tabular-nums' } }, (type === 'in' ? '+' : '−') + '฿' + invCompact(it.amt) + ' · ' + pctOf(it.amt) + '%'))))
+                  el('span', { style: { color: col, fontWeight: 800, fontVariantNumeric: 'tabular-nums' } }, (type === 'in' ? '+' : '−') + invCompact(it.amt) + ' · ' + pctOf(it.amt) + '%'))))
             : (flowItems.length === 1 && flowItems[0].tag ? el('div', { style: { marginTop: 5, fontSize: big ? 11.5 : 10.5, color: col, fontWeight: 700 } }, (lang === 'th' ? flowItems[0].tag[0] : flowItems[0].tag[1]) + ' · ' + pctOf(flowItems[0].amt) + '% ' + (lang === 'th' ? 'ของสัญญา' : 'of contract')) : null),
           type === 'event' ? null : el('div', { style: { marginTop: 6, height: 4, borderRadius: 2, background: invRgba(p.ink, 0.07), overflow: 'hidden' } },
             el('div', { style: { height: '100%', borderRadius: 2, width: pctNum.toFixed(1) + '%', background: 'linear-gradient(90deg,' + invRgba(col, 0.6) + ',' + col + ')' } }))),
         el('div', { style: { marginTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
           el('span', { style: { fontSize: 9.5, color: p.sub } }, lang === 'th' ? 'คงเหลือสะสม' : 'Cumulative'),
-          el('span', { style: { fontSize: 13, fontWeight: 800, color: bal < 0 ? p.bad : (bal > 0 ? p.good : p.sub), fontVariantNumeric: 'tabular-nums' } }, (bal < 0 ? '−' : (bal > 0 ? '+' : '')) + '฿' + invCompact(Math.abs(bal)))),
+          el('span', { style: { fontSize: 13, fontWeight: 800, color: bal < 0 ? p.bad : (bal > 0 ? p.good : p.sub), fontVariantNumeric: 'tabular-nums' } }, (bal < 0 ? '−' : (bal > 0 ? '+' : '')) + invCompact(Math.abs(bal)))),
         el('div', { style: { marginTop: 5, position: 'relative', height: 6, borderRadius: 4, background: invRgba(p.ink, 0.06), overflow: 'hidden' } },
           el('div', { style: { position: 'absolute', top: 0, bottom: 0, left: 0, borderRadius: 4, width: depthPct.toFixed(1) + '%', background: bal < 0 ? 'linear-gradient(90deg,' + invRgba(p.bad, 0.4) + ',' + p.bad + ')' : (bal > 0 ? 'linear-gradient(90deg,' + p.good + ',' + invRgba(p.good, 0.4) + ')' : 'transparent') } })));
     };
@@ -678,14 +678,14 @@
         el('div', { style: { display: 'inline-block', minWidth: '100%' } },
           el('div', { style: { display: 'inline-flex', width: totW, padding: '0 8px 14px' } },
             phaseBar(p.bad, invN, 'ระยะลงทุน · Investment', 'Investment phase',
-              (lang === 'th' ? 'จ่ายสะสม ' : 'Outflow ') + '฿' + invCompact(totOut) + ' · ' + (lang === 'th' ? 'ขุดลึกสุด ' : 'deepest ') + '−฿' + invCompact(peak), '↓', true),
+              (lang === 'th' ? 'จ่ายสะสม ' : 'Outflow ') + invCompact(totOut) + ' · ' + (lang === 'th' ? 'ขุดลึกสุด ' : 'deepest ') + '−' + invCompact(peak), '↓', true),
             colN > 0 ? phaseBar(p.good, colN, 'ระยะเก็บเงิน · Collection', 'Collection phase',
-              (lang === 'th' ? 'รับกลับ ' : 'Inflow ') + '฿' + invCompact(totIn) + ' · ' + (lang === 'th' ? 'พลิกเป็นกำไร ' : 'profit ') + '฿' + invCompact(margin), '↑', false) : null),
+              (lang === 'th' ? 'รับกลับ ' : 'Inflow ') + invCompact(totIn) + ' · ' + (lang === 'th' ? 'พลิกเป็นกำไร ' : 'profit ') + invCompact(margin), '↑', false) : null),
           el('div', { style: { position: 'relative', display: 'inline-flex', alignItems: 'flex-start', width: totW } },
             el('div', { style: { position: 'absolute', left: L.w / 2, right: L.w / 2, top: L.lineY - 3, height: 6, borderRadius: 4, background: 'linear-gradient(90deg,' + invRgba(p.bad, 0.65) + ' 0%,' + invRgba(p.gold, 0.6) + ' 52%,' + invRgba(p.good, 0.7) + ' 100%)', boxShadow: '0 3px 16px ' + invRgba(p.brand, 0.22), zIndex: 0 } }),
             gs.map(column(big))))); };
 
-    const products = INV_PRODUCTS.map(pr => el('option', { key: pr.code, value: pr.code }, pr.code + ' · ' + pr.name + ' (฿' + invCompact(pr.price) + ')'));
+    const products = INV_PRODUCTS.map(pr => el('option', { key: pr.code, value: pr.code }, pr.code + ' · ' + pr.name + ' (' + invCompact(pr.price) + ')'));
     const productSelect = (w) => el('select', { value: code, onChange: e => setCode(e.target.value), style: { height: 34, minWidth: w || 240, border: '1px solid ' + p.line, borderRadius: 8, padding: '0 10px', background: p.card2, color: p.ink, fontSize: 12.5, fontWeight: 600 } }, products);
     const pipe = lang === 'th'
       ? [['งบประมาณรัฐที่ยืนยันแล้ว', 300], ['งานใน Backlog', 900], ['รวมทั้งหมด', 1200, true], ['เงินทุนที่ต้องใช้ทุกโครงการ', 900], ['สินเชื่อที่คาดว่าต้องใช้', '200–300']]
@@ -699,26 +699,26 @@
         el('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(110deg,transparent 35%,' + invRgba('#ffffff', 0.5) + ' 50%,transparent 65%)', backgroundSize: '200% 100%', animation: 'invShimmer 6.5s linear infinite', pointerEvents: 'none' } }),
         el('div', { style: { fontSize: 12, color: p.gold, fontWeight: 700 } }, '▼ ' + (lang === 'th' ? 'จุดต่ำสุด — ต้องสำรองเงินทุน' : 'Lowest point — capital reserve needed')),
         el('div', { style: { display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 9 } },
-          el('div', { style: { fontSize: 42, fontWeight: 800, lineHeight: 1, color: p.gold, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, '฿' + invCompact(peak)),
+          el('div', { style: { fontSize: 42, fontWeight: 800, lineHeight: 1, color: p.gold, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, invCompact(peak)),
           el('div', { style: { fontSize: 11.5, color: p.sub, lineHeight: 1.25, whiteSpace: 'pre-line' } }, lang === 'th' ? 'เงินทุนสูงสุด\nที่ต้องสำรอง' : 'Peak capital\nneed')),
         el('div', { style: { marginTop: 13, height: 6, borderRadius: 4, background: invRgba(p.gold, 0.18), overflow: 'hidden' } },
           el('div', { style: { width: Math.min(100, C ? peak / C * 100 : 0).toFixed(1) + '%', height: '100%', borderRadius: 4, background: 'linear-gradient(90deg,' + invRgba(p.gold, 0.7) + ',' + p.gold + ')' } })),
         el('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 7, fontSize: 11, color: p.sub } },
           el('span', null, pctOf(peak) + (lang === 'th' ? '% ของมูลค่าสัญญา' : '% of contract')),
-          el('span', null, (lang === 'th' ? 'จ่ายก่อนรับงวดแรก ฿' : 'before 1st receipt ฿') + invCompact(beforeRecv1)))),
+          el('span', null, (lang === 'th' ? 'จ่ายก่อนรับงวดแรก ' : 'before 1st receipt ') + invCompact(beforeRecv1)))),
       el('div', { style: { borderRadius: 18, padding: '20px 22px', background: p.card, border: '1px solid ' + invRgba(p.good, 0.3), boxShadow: p.shadow } },
         el('div', { style: { fontSize: 12, color: p.good, fontWeight: 700 } }, lang === 'th' ? 'กำไรขั้นต้น · Gross Profit' : 'Gross Profit'),
-        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.good, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, '฿' + invCompact(margin)),
+        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.good, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, invCompact(margin)),
         el('div', { style: { display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 12, background: invRgba(p.good, 0.1), border: '1px solid ' + invRgba(p.good, 0.22), color: p.good, fontSize: 12, fontWeight: 700, padding: '3px 9px', borderRadius: 7 } }, '▲ ' + (lang === 'th' ? 'อัตรากำไร ' : 'margin ') + pctOf(margin) + '%')),
       el('div', { style: { borderRadius: 18, padding: '20px 22px', background: p.card, border: '1px solid ' + p.line, boxShadow: p.shadow } },
         el('div', { style: { fontSize: 12, color: p.sub, fontWeight: 700 } }, lang === 'th' ? 'มูลค่าสัญญา · Contract' : 'Contract value'),
-        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.ink, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, '฿' + invCompact(C)),
+        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.ink, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, invCompact(C)),
         el('div', { style: { fontSize: 11.5, color: p.sub, marginTop: 12 } },
-          (lang === 'th' ? 'รวมรับ ' : 'in '), el('b', { style: { color: p.good } }, '฿' + invCompact(totIn)),
-          (lang === 'th' ? ' · จ่าย ' : ' · out '), el('b', { style: { color: p.bad } }, '฿' + invCompact(totOut)))),
+          (lang === 'th' ? 'รวมรับ ' : 'in '), el('b', { style: { color: p.good } }, invCompact(totIn)),
+          (lang === 'th' ? ' · จ่าย ' : ' · out '), el('b', { style: { color: p.bad } }, invCompact(totOut)))),
       el('div', { style: { borderRadius: 18, padding: '20px 22px', background: p.card, border: '1px solid ' + invRgba(p.brand, 0.25), boxShadow: p.shadow } },
         el('div', { style: { fontSize: 12, color: p.brand, fontWeight: 700 } }, lang === 'th' ? 'คงเหลือเมื่อจบ · Net at close' : 'Net at close'),
-        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.brand, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, '฿' + invCompact(netAtClose)),
+        el('div', { style: { fontSize: 34, fontWeight: 800, lineHeight: 1, marginTop: 11, color: p.brand, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' } }, invCompact(netAtClose)),
         el('div', { style: { fontSize: 11.5, color: p.sub, marginTop: 12 } }, lang === 'th' ? 'หลังคืน LG · ระยะเวลา ~2 ปี' : 'after LG returned · ~2 yr horizon')));
     // step-by-step cash table — numbered chips, red/green balance bars, gold total row
     const stepTable = () => {
@@ -744,7 +744,7 @@
                   ? el('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 } },
                       cashIts.map((it, j) => { const ic = it.k === 'in' ? p.good : p.bad;
                         return el('span', { key: j, style: { fontSize: 12.5, fontWeight: 700, padding: '2px 9px', borderRadius: 7, background: invRgba(ic, 0.1), color: ic, whiteSpace: 'nowrap' } },
-                          (lang === 'th' ? it.tag[0] : it.tag[1]) + ' · ' + pctOf(it.amt) + '% · ' + (it.k === 'in' ? '+' : '−') + '฿' + invCompact(it.amt)); }))
+                          (lang === 'th' ? it.tag[0] : it.tag[1]) + ' · ' + pctOf(it.amt) + '% · ' + (it.k === 'in' ? '+' : '−') + invCompact(it.amt)); }))
                   : el('div', { style: { marginTop: 7, fontSize: 12.5, color: p.sub, fontWeight: 600 } }, lang === 'th' ? '◆ เหตุการณ์ (ไม่มีกระแสเงิน)' : '◆ Milestone (no cash)');
                 return el('tr', { key: gd.i, onClick: () => setDrill(gd.i), title: lang === 'th' ? 'คลิกเพื่อแจกแจงรายละเอียด' : 'Click for breakdown', style: { background: rowBg, borderLeft: '3px solid ' + (isValley ? p.gold : (isFlip ? p.good : 'transparent')), cursor: 'pointer' } },
                   el('td', { style: { padding: '15px 14px', borderBottom: '1px solid ' + invRgba(p.ink, 0.06) } },
@@ -754,27 +754,27 @@
                         el('span', { style: { fontSize: 18, fontWeight: 700, color: p.ink } }, (lang === 'th' ? prim.th : prim.en)[0]),
                         el('span', { style: { display: 'block', fontSize: 14, color: p.sub, marginTop: 2 } }, invDayPill(gd.g.d, lang) + ' · ' + (lang === 'th' ? gd.g.t[0] : gd.g.t[1])),
                         chips))),
-                  cell(gd.inn ? '฿' + invCompact(gd.inn) : '—', gd.inn ? p.good : invRgba(p.ink, 0.3)),
-                  cell(gd.out ? '฿' + invCompact(gd.out) : '—', gd.out ? p.bad : invRgba(p.ink, 0.3)),
-                  cell((gd.net >= 0 ? '+' : '−') + '฿' + invCompact(Math.abs(gd.net)), gd.net < 0 ? p.bad : (gd.net > 0 ? p.good : p.sub), 700),
+                  cell(gd.inn ? invCompact(gd.inn) : '—', gd.inn ? p.good : invRgba(p.ink, 0.3)),
+                  cell(gd.out ? invCompact(gd.out) : '—', gd.out ? p.bad : invRgba(p.ink, 0.3)),
+                  cell((gd.net >= 0 ? '+' : '−') + invCompact(Math.abs(gd.net)), gd.net < 0 ? p.bad : (gd.net > 0 ? p.good : p.sub), 700),
                   el('td', { style: { padding: '13px 16px', borderBottom: '1px solid ' + invRgba(p.ink, 0.06) } },
                     el('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 } },
                       el('div', { style: { position: 'relative', flex: 1, height: 11, background: invRgba(p.ink, 0.06), borderRadius: 6 } },
                         el('div', { style: { position: 'absolute', top: '50%', left: '50%', width: 1, height: 16, transform: 'translate(-50%,-50%)', background: invRgba(p.ink, 0.18) } }),
                         el('div', { style: barStyle })),
-                      el('span', { style: { fontWeight: 800, fontSize: 18, minWidth: 96, textAlign: 'right', color: gd.bal < 0 ? p.bad : (gd.bal > 0 ? p.good : p.sub), fontVariantNumeric: 'tabular-nums' } }, (gd.bal < 0 ? '−' : (gd.bal > 0 ? '+' : '')) + '฿' + invCompact(Math.abs(gd.bal))))));
+                      el('span', { style: { fontWeight: 800, fontSize: 18, minWidth: 96, textAlign: 'right', color: gd.bal < 0 ? p.bad : (gd.bal > 0 ? p.good : p.sub), fontVariantNumeric: 'tabular-nums' } }, (gd.bal < 0 ? '−' : (gd.bal > 0 ? '+' : '')) + invCompact(Math.abs(gd.bal))))));
               }),
               el('tr', { style: { background: invRgba(p.gold, 0.1), borderTop: '2px solid ' + invRgba(p.gold, 0.4) } },
                 el('td', { style: { padding: '16px 14px', fontWeight: 800, fontSize: 18.5, color: p.gold } }, lang === 'th' ? 'รวมทั้งหมด' : 'Total'),
-                cell('฿' + invFmt(totIn), p.good, 800, 18),
-                cell('฿' + invFmt(totOut), p.bad, 800, 18),
-                cell((netAtClose >= 0 ? '+' : '−') + '฿' + invFmt(Math.abs(netAtClose)), netAtClose < 0 ? p.bad : p.good, 800, 18),
-                cell((netAtClose < 0 ? '−' : '') + '฿' + invFmt(Math.abs(netAtClose)), p.gold, 800, 19)))),
+                cell(invFmt(totIn), p.good, 800, 18),
+                cell(invFmt(totOut), p.bad, 800, 18),
+                cell((netAtClose >= 0 ? '+' : '−') + invFmt(Math.abs(netAtClose)), netAtClose < 0 ? p.bad : p.good, 800, 18),
+                cell((netAtClose < 0 ? '−' : '') + invFmt(Math.abs(netAtClose)), p.gold, 800, 19)))),
         ),
         el('div', { style: { marginTop: 14, padding: '13px 16px', borderRadius: 12, background: p.card2, border: '1px solid ' + p.line, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 13, color: p.sub } },
-          el('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, el('span', { style: { width: 9, height: 9, borderRadius: '50%', background: p.gold } }), (lang === 'th' ? 'จุดต่ำสุด (ต้องใช้เงินทุน) ' : 'Lowest point '), el('b', { style: { color: p.gold } }, '฿' + invCompact(peak))),
+          el('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, el('span', { style: { width: 9, height: 9, borderRadius: '50%', background: p.gold } }), (lang === 'th' ? 'จุดต่ำสุด (ต้องใช้เงินทุน) ' : 'Lowest point '), el('b', { style: { color: p.gold } }, invCompact(peak))),
           el('span', { style: { width: 1, height: 16, background: p.line } }),
-          el('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, el('span', { style: { width: 9, height: 9, borderRadius: '50%', background: p.good } }), (lang === 'th' ? 'กำไรขั้นต้นเมื่อจบโครงการ ' : 'Gross margin at close '), el('b', { style: { color: p.good } }, '฿' + invCompact(margin) + ' (' + pctOf(margin) + '%)'))));
+          el('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, el('span', { style: { width: 9, height: 9, borderRadius: '50%', background: p.good } }), (lang === 'th' ? 'กำไรขั้นต้นเมื่อจบโครงการ ' : 'Gross margin at close '), el('b', { style: { color: p.good } }, invCompact(margin) + ' (' + pctOf(margin) + '%)'))));
     };
 
     // click-through breakdown — แจกแจงแต่ละสเต็ปว่าเป็น "ค่าอะไร · งวดไหน · กี่% · กี่บาท"
@@ -819,17 +819,17 @@
                   el('span', { style: { display: 'block', fontSize: 15, fontWeight: 700, color: p.ink } }, (lang === 'th' ? it.th : it.en)[0]),
                   el('span', { style: { display: 'block', fontSize: 12.5, color: p.sub, marginTop: 2 } }, (isIn ? (lang === 'th' ? 'รับเข้า' : 'cash in') : (lang === 'th' ? 'จ่ายออก' : 'cash out')) + ' · ' + pctOf(it.amt) + (lang === 'th' ? '% ของมูลค่าสัญญา' : '% of contract'))),
                 el('span', { style: { flex: '0 0 auto', textAlign: 'right' } },
-                  el('span', { style: { display: 'block', fontSize: 17, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums' } }, (isIn ? '+' : '−') + '฿' + invFmt(it.amt)),
+                  el('span', { style: { display: 'block', fontSize: 17, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums' } }, (isIn ? '+' : '−') + invFmt(it.amt)),
                   el('span', { style: { display: 'block', fontSize: 11.5, color: p.sub, marginTop: 1 } }, pctOf(it.amt) + '%')));
             })),
           el('div', { style: { marginTop: 16, padding: '14px 16px', borderRadius: 13, background: p.card2, border: '1px solid ' + p.line, display: 'flex', flexDirection: 'column', gap: 8 } },
-            sumRow(lang === 'th' ? 'รับเข้า' : 'Cash in', gd.inn ? '+฿' + invFmt(gd.inn) : '—', gd.inn ? p.good : p.sub),
-            sumRow(lang === 'th' ? 'จ่ายออก' : 'Cash out', gd.out ? '−฿' + invFmt(gd.out) : '—', gd.out ? p.bad : p.sub),
-            sumRow(lang === 'th' ? 'สุทธิสเต็ปนี้' : 'Net this step', (gd.net >= 0 ? '+' : '−') + '฿' + invFmt(Math.abs(gd.net)), gd.net < 0 ? p.bad : (gd.net > 0 ? p.good : p.sub)),
+            sumRow(lang === 'th' ? 'รับเข้า' : 'Cash in', gd.inn ? '+' + invFmt(gd.inn) : '—', gd.inn ? p.good : p.sub),
+            sumRow(lang === 'th' ? 'จ่ายออก' : 'Cash out', gd.out ? '−' + invFmt(gd.out) : '—', gd.out ? p.bad : p.sub),
+            sumRow(lang === 'th' ? 'สุทธิสเต็ปนี้' : 'Net this step', (gd.net >= 0 ? '+' : '−') + invFmt(Math.abs(gd.net)), gd.net < 0 ? p.bad : (gd.net > 0 ? p.good : p.sub)),
             el('div', { style: { height: 1, background: p.line, margin: '2px 0' } }),
-            sumRow(lang === 'th' ? 'คงเหลือสะสม' : 'Cumulative balance', (gd.bal < 0 ? '−' : '+') + '฿' + invFmt(Math.abs(gd.bal)), gd.bal < 0 ? p.bad : p.good)),
+            sumRow(lang === 'th' ? 'คงเหลือสะสม' : 'Cumulative balance', (gd.bal < 0 ? '−' : '+') + invFmt(Math.abs(gd.bal)), gd.bal < 0 ? p.bad : p.good)),
           el('div', { style: { marginTop: 12, fontSize: 11.5, color: p.sub, lineHeight: 1.5 } },
-            lang === 'th' ? ('% คิดจากมูลค่าสัญญา ฿' + invFmt(C) + ' · ตัวเลขต้นทุนอ้างอิงราคาต้นทุนมาตรฐานของรุ่น ' + code) : ('% of contract ฿' + invFmt(C) + ' · cost figures from product ' + code + ' standard cost data'))));
+            lang === 'th' ? ('% คิดจากมูลค่าสัญญา ' + invFmt(C) + ' · ตัวเลขต้นทุนอ้างอิงราคาต้นทุนมาตรฐานของรุ่น ' + code) : ('% of contract ' + invFmt(C) + ' · cost figures from product ' + code + ' standard cost data'))));
     };
 
     return el('div', null,
@@ -850,7 +850,7 @@
           productSelect(240)),
         el('div', null,
           el('div', { style: { fontSize: 11, color: p.sub, fontWeight: 600, marginBottom: 4 } }, lang === 'th' ? 'มูลค่าสัญญา' : 'Contract value'),
-          el('div', { style: { height: 34, display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: 8, background: p.card2, border: '1px solid ' + p.line, fontSize: 16, fontWeight: 800, color: p.ink, fontVariantNumeric: 'tabular-nums' } }, '฿' + invFmt(C))),
+          el('div', { style: { height: 34, display: 'flex', alignItems: 'center', padding: '0 14px', borderRadius: 8, background: p.card2, border: '1px solid ' + p.line, fontSize: 16, fontWeight: 800, color: p.ink, fontVariantNumeric: 'tabular-nums' } }, invFmt(C))),
         el('div', { style: { marginLeft: 'auto', fontSize: 11, color: p.sub, maxWidth: 280, lineHeight: 1.45 } }, lang === 'th' ? 'ตัวเลขอ้างอิงต้นทุนมาตรฐานของแต่ละผลิตภัณฑ์ (ข้อมูลราคาต้นทุน) — เปลี่ยนผลิตภัณฑ์เพื่อดูกระแสเงินสดของรุ่นนั้น' : 'Figures use each product’s standard cost data — switch product to see its cash flow')),
       kpiRow(14),
       // timeline (HERO) — premium event sequence with phase bars + node axis
@@ -868,7 +868,7 @@
       stepTable(),
       // cost structure + pipeline + loans
       el('div', { style: gridR(2) },
-        el(InvCard, { p, title: lang === 'th' ? 'โครงสร้างต้นทุนโครงการ (คำนวณจากที่กรอก)' : 'Project Cost Structure (computed)', note: '฿' + invCompact(C) },
+        el(InvCard, { p, title: lang === 'th' ? 'โครงสร้างต้นทุนโครงการ (คำนวณจากที่กรอก)' : 'Project Cost Structure (computed)', note: invCompact(C) },
           el(InvSeg, { p, lang, items: costSeg }),
           el('div', { style: { fontSize: 12, color: p.sub, marginTop: 12, lineHeight: 1.6 } }, lang === 'th' ? 'ค่าของ+ค่าติดตั้ง = ส่วนที่ต้องใช้เงินทุนหมุนเวียน · LG คืนภายใน 2 ปี' : 'Inventory + installation = the working-capital portion · LG returned within 2 years')),
         el('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } },

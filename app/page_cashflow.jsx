@@ -886,7 +886,7 @@ function CashFlowDashboard({ data, setData, toast }) {
           ['เลขที่ AP', ref || '—'],
           ['วันที่ตั้งจ่าย', fmtDate(date) || date],
           ['หมวด', cat + ' · ' + (CATEGORY_LABELS_SHORT[cat] || '—')],
-          ['ยอด', fmtNum(Math.abs(amt), 2) + ' ฿'],
+          ['ยอด', fmtNum(Math.abs(amt), 2) + ' '],
           ['บัญชี', fe.Bank_AC || '—'],
           ['สถานะ', 'เลือกจ่ายไว้ (ยังไม่จ่ายจริง)'],
         ],
@@ -979,9 +979,9 @@ function CashFlowDashboard({ data, setData, toast }) {
               ['โครงการ', iv ? (iv.projectName || iv.PROJECT_NAME || '—') : '—'],
               ['เลขที่ IV', iv ? (iv.ivNo || iv.IV_NO || iv.invoiceNo || '—') : it.safe],
               ['สัปดาห์ที่วางแผนรับ', weeks[it.wk]?.label || '—'],
-              ['ยอดแผน (freeze ต้นเดือน)', fmtNum(it.net, 0) + ' ฿'],
-              ['คาดรับสุทธิ ณ ตอนนี้', iv ? fmtNum(liveNet, 0) + ' ฿' : '—'],
-              ['รับจริงแล้ว', (paid && ad) ? `${fmtNum(liveNet, 0)} ฿ (${fmtDate(ad)})` : 'ยังไม่รับ'],
+              ['ยอดแผน (freeze ต้นเดือน)', fmtNum(it.net, 0) + ' '],
+              ['คาดรับสุทธิ ณ ตอนนี้', iv ? fmtNum(liveNet, 0) + ' ' : '—'],
+              ['รับจริงแล้ว', (paid && ad) ? `${fmtNum(liveNet, 0)} (${fmtDate(ad)})` : 'ยังไม่รับ'],
               ['สถานะปัจจุบัน', statusTxt],
             ],
           });
@@ -1003,7 +1003,7 @@ function CashFlowDashboard({ data, setData, toast }) {
               detail: [
                 ['เลขที่ IV', iv.ivNo || iv.IV_NO || iv.invoiceNo || '—'],
                 ['วันคาดรับ', fmtDate(iv.expectedReceive) || '—'],
-                ['คาดรับสุทธิ', fmtNum(ivNetExpected(iv, financeByCode), 0) + ' ฿'],
+                ['คาดรับสุทธิ', fmtNum(ivNetExpected(iv, financeByCode), 0) + ' '],
                 ['หมายเหตุ', 'แผนเดือนถัดไป — ยังไม่ถูกล็อก'],
               ],
             });
@@ -1029,8 +1029,8 @@ function CashFlowDashboard({ data, setData, toast }) {
               ['ลูกค้า', iv.customer || '—'],
               ['เลขที่ IV', iv.ivNo || iv.IV_NO || iv.invoiceNo || '—'],
               ['วันคาดรับ', fmtDate(d) || d],
-              ['ยอดคงค้าง', fmtNum(Number(iv.balance) || 0, 0) + ' ฿'],
-              ['คาดรับสุทธิ (หัก WHT/หนี้)', fmtNum(ivNetExpected(iv, financeByCode), 0) + ' ฿'],
+              ['ยอดคงค้าง', fmtNum(Number(iv.balance) || 0, 0) + ' '],
+              ['คาดรับสุทธิ (หัก WHT/หนี้)', fmtNum(ivNetExpected(iv, financeByCode), 0) + ' '],
               ['สถานะ', ivStatusShort],
               ['หมายเหตุ', iv.note || '—'],
             ],
@@ -1065,7 +1065,7 @@ function CashFlowDashboard({ data, setData, toast }) {
             ['Job No.', fe.JOB_NO || '—'],
             ['โครงการ', fe.PROJECT_NAME || '—'],
             ['วันที่คาดรับ', fmtDate(fe.PAYMENT_DATE || fe.DATE) || '—'],
-            ['ยอดประมาณการ', fmtNum(Math.abs(amt), 0) + ' ฿'],
+            ['ยอดประมาณการ', fmtNum(Math.abs(amt), 0) + ' '],
             ['สถานะ', status || 'PLANNED'],
             ['บัญชี', fe.Bank_AC || '—'],
             ['หมายเหตุ', fe.NOTE || '—'],
@@ -1106,7 +1106,7 @@ function CashFlowDashboard({ data, setData, toast }) {
             ['Job No.', fe.JOB_NO || '—'],
             ['โครงการ', fe.PROJECT_NAME || '—'],
             ['วันที่จ่าย', fmtDate(fe.PAYMENT_DATE || fe.DATE) || '—'],
-            ['ยอดประมาณการ', fmtNum(Math.abs(amt), 0) + ' ฿'],
+            ['ยอดประมาณการ', fmtNum(Math.abs(amt), 0) + ' '],
             ['หมวด', `${cat} · ${CATEGORY_LABELS_SHORT[cat] || '—'}`],
             ['สถานะ', status || 'PLANNED'],
             ['บัญชี', fe.Bank_AC || '—'],
@@ -1160,10 +1160,10 @@ function CashFlowDashboard({ data, setData, toast }) {
           ['เลขที่ AP (อ้างอิง)', pv.AP_No || '—'],
           ['วันที่จ่าย', fmtDate(date) || date],
           ['หมวด', `${c} · ${CATEGORY_LABELS_SHORT[c] || '—'}`],
-          ['ยอดก่อนหัก', fmtNum(Number(pv.Amount) || 0, 2) + ' ฿'],
-          ['WHT', fmtNum(Number(pv.WHT) || 0, 2) + ' ฿'],
-          ['VAT', fmtNum(Number(pv.Vat) || 0, 2) + ' ฿'],
-          ['ยอดจ่ายสุทธิ', fmtNum(Math.abs(amt), 2) + ' ฿'],
+          ['ยอดก่อนหัก', fmtNum(Number(pv.Amount) || 0, 2) + ' '],
+          ['WHT', fmtNum(Number(pv.WHT) || 0, 2) + ' '],
+          ['VAT', fmtNum(Number(pv.Vat) || 0, 2) + ' '],
+          ['ยอดจ่ายสุทธิ', fmtNum(Math.abs(amt), 2) + ' '],
           ['บัญชีธนาคาร', pv.Bank_AC || '—'],
           ['ประเภทการจ่าย', pv.Type_of_Pmt || '—'],
           ['หมายเหตุ', pv.cc_remark || '—'],
@@ -1197,7 +1197,7 @@ function CashFlowDashboard({ data, setData, toast }) {
           ['โครงการ', fe.PROJECT_NAME || '—'],
           ['วันที่จ่ายจริง', fmtDate(date) || date],
           ['หมวด', `${c} · ${CATEGORY_LABELS_SHORT[c] || '—'}`],
-          ['ยอดจ่ายจริง', fmtNum(Math.abs(amt), 2) + ' ฿'],
+          ['ยอดจ่ายจริง', fmtNum(Math.abs(amt), 2) + ' '],
           ['สถานะ', isRecon ? `${status} · กระทบยอด` : status],
           ['บัญชี', fe.Bank_AC || '—'],
           ['หมายเหตุ', fe.NOTE || '—'],
@@ -1243,7 +1243,7 @@ function CashFlowDashboard({ data, setData, toast }) {
           ['โครงการ', fe.PROJECT_NAME || '—'],
           ['วันที่ตั้งจ่าย', fmtDate(date) || date],
           ['หมวด', `${c} · ${CATEGORY_LABELS_SHORT[c] || '—'}`],
-          ['ยอดประมาณการ', fmtNum(Math.abs(amt), 2) + ' ฿'],
+          ['ยอดประมาณการ', fmtNum(Math.abs(amt), 2) + ' '],
           ['สถานะ', status || 'PLANNED'],
           ['บัญชี', fe.Bank_AC || '—'],
           ['หมายเหตุ', fe.NOTE || '—'],
@@ -1862,7 +1862,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                           fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: over ? 'var(--bad)' : 'var(--good)',
                           background: over ? 'var(--bad-bg)' : 'var(--good-bg)', padding: `${cfScale(2)} ${cfScale(8)}`,
                           borderRadius: 999, whiteSpace: 'nowrap' }}>
-                          {over ? '▲ เกินแผน' : '▼ เหลือ'} ฿{fmtNum(Math.abs(diff), 0)}
+                          {over ? '▲ เกินแผน' : '▼ เหลือ'} {fmtNum(Math.abs(diff), 0)}
                         </span>
                       );
                     })()}
@@ -2034,7 +2034,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                           <th style={{ width: 96 }}>วันที่จ่าย</th>
                           <th style={{ width: 130 }}>เลขที่ AP</th>
                           <th>ผู้รับเงิน/รายการ</th>
-                          <th style={{ width: 120, textAlign: 'right' }}>จำนวน (฿)</th>
+                          <th style={{ width: 120, textAlign: 'right' }}>จำนวน</th>
                           <th style={{ width: 60, textAlign: 'center' }}>ดู</th>
                         </tr>
                       </thead>
@@ -2069,7 +2069,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                           <th style={{ width: 56, textAlign: 'center' }}>รวม</th>
                           <th style={{ width: 96 }}>วันที่จ่าย</th>
                           <th>รายการ</th>
-                          <th style={{ width: 120, textAlign: 'right' }}>จำนวน (฿)</th>
+                          <th style={{ width: 120, textAlign: 'right' }}>จำนวน</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2114,7 +2114,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>{drillDown.mode === 'forecast' ? 'ยอดประมาณการรวม' : 'ยอดจ่ายจริงรวม'}</div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--brand-700)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(Math.abs(drillDown.items.reduce((s, x) => s + x.amount, 0)), 2)} ฿
+                    {fmtNum(Math.abs(drillDown.items.reduce((s, x) => s + x.amount, 0)), 2)}
                   </div>
                 </div>
               </div>
@@ -2126,7 +2126,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                       <th style={{ width: 96 }}>วันที่</th>
                       <th style={{ width: 120 }}>เลขที่</th>
                       <th>ผู้รับเงิน/รายการ</th>
-                      <th style={{ width: 130, textAlign: 'right' }}>{drillDown.mode === 'forecast' ? 'ประมาณการ (฿)' : 'จ่ายจริง (฿)'}</th>
+                      <th style={{ width: 130, textAlign: 'right' }}>{drillDown.mode === 'forecast' ? 'ประมาณการ' : 'จ่ายจริง'}</th>
                       <th style={{ width: 90, textAlign: 'center' }}>{drillDown.mode === 'forecast' ? 'แก้/ดู' : 'ดู'}</th>
                     </tr>
                   </thead>
@@ -2187,14 +2187,14 @@ function CashFlowDashboard({ data, setData, toast }) {
                   <div style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>ยอดรวม</div>
                   <div style={{ fontSize: 18, fontWeight: 700,
                     color: drillDown.items.reduce((s, x) => s + x.amount, 0) < 0 ? 'var(--bad)' : 'var(--good)' }}>
-                    {fmtNum(drillDown.items.reduce((s, x) => s + x.amount, 0), 0)} ฿
+                    {fmtNum(drillDown.items.reduce((s, x) => s + x.amount, 0), 0)}
                   </div>
                 </div>
               </div>
               )}
               {drillDown.outRecon && (
                 <div style={{ fontSize: 11, color: 'var(--ink-500)', margin: '-4px 0 12px', lineHeight: 1.6 }}>
-                  💡 รายการด้านล่าง = <strong>ประมาณการเต็ม</strong>ของช่วงนี้ · ส่วนที่ <strong>จ่ายจริงแล้ว</strong> ({fmtNum(drillDown.outRecon.actual, 0)} ฿) ดูรายตัวได้ที่หัวข้อ <strong>02 ติดตามจ่ายจริง</strong> (คลิกยอด Actual)
+                  💡 รายการด้านล่าง = <strong>ประมาณการเต็ม</strong>ของช่วงนี้ · ส่วนที่ <strong>จ่ายจริงแล้ว</strong> ({fmtNum(drillDown.outRecon.actual, 0)}) ดูรายตัวได้ที่หัวข้อ <strong>02 ติดตามจ่ายจริง</strong> (คลิกยอด Actual)
                 </div>
               )}
               {(() => {
@@ -2208,7 +2208,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                         <th style={{ width: 100 }}>วันที่</th>
                         <th style={{ width: 130 }}>เลขที่</th>
                         <th>ชื่อ/รายการ</th>
-                        <th style={{ width: 140, textAlign: 'right' }}>จำนวน (฿)</th>
+                        <th style={{ width: 140, textAlign: 'right' }}>จำนวน</th>
                         <th style={{ width: 150, textAlign: 'center' }}>จัดการ</th>
                       </tr>
                     </thead>
@@ -2289,7 +2289,7 @@ function CashFlowDashboard({ data, setData, toast }) {
             }}>{detailItem.source}</span>
             <span style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
               color: detailItem.amount < 0 ? 'var(--bad)' : 'var(--good)' }}>
-              {fmtNum(detailItem.amount, Number.isInteger(detailItem.amount) ? 0 : 2)} ฿
+              {fmtNum(detailItem.amount, Number.isInteger(detailItem.amount) ? 0 : 2)}
             </span>
           </div>
           {(detailItem.pvNo || detailItem.feId || (detailItem.source === 'AP' && detailItem.vchno)) && (
@@ -2467,7 +2467,7 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
         ].map(({ label, value, color, sign }) => (
           <div key={label} style={{ textAlign: 'center', padding: '10px 8px', background: 'var(--ink-50)', borderRadius: 10 }}>
             <div style={{ fontSize: 11, color: 'var(--ink-500)', marginBottom: 4 }}>{label}</div>
-            <div style={{ fontSize: 17, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{sign}฿{fmtM(value)}</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{sign}{fmtM(value)}</div>
           </div>
         ))}
       </div>
@@ -2495,14 +2495,14 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
                     <th style={{ ...thStyle, width: 120 }}>เลขที่ IV</th>
                     <th style={{ ...thStyle }}>โครงการ</th>
                     <th style={{ ...thStyle, width: 130 }}>ลูกค้า</th>
-                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>แผน (฿)</th>
+                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>แผน</th>
                     <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>วันคาดรับ</th>
                     <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>สถานะ</th>
                   </> : <>
                     <th style={{ ...thStyle, width: 120 }}>เลขที่ IV</th>
                     <th style={{ ...thStyle }}>โครงการ</th>
                     <th style={{ ...thStyle, width: 130 }}>ลูกค้า</th>
-                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>รับจริง (฿)</th>
+                    <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>รับจริง</th>
                     <th style={{ ...thStyle, width: 95, textAlign: 'center' }}>วันรับจริง</th>
                     {tab === 'extra' && <th style={{ ...thStyle, width: 75, textAlign: 'center' }}>หมายเหตุ</th>}
                   </>}

@@ -37,7 +37,7 @@
 
   // ── number formatters (ported from design BudgetFmt) ──
   const Fmt = {
-    baht(n) { return '฿' + Math.round(n).toLocaleString('en-US'); },
+    baht(n) { return Math.round(n).toLocaleString('en-US'); },
     bahtPlain(n) { return Math.round(n).toLocaleString('en-US'); },
     compact(n) {
       const a = Math.abs(n);
@@ -46,7 +46,7 @@
       if (a >= 1e3) return (n / 1e3).toFixed(0) + 'K';
       return Math.round(n).toString();
     },
-    compactBaht(n) { return (n < 0 ? '−฿' : '฿') + Fmt.compact(Math.abs(n)); },
+    compactBaht(n) { return (n < 0 ? '−' : '') + Fmt.compact(Math.abs(n)); },
     pct(n) { return (n * 100).toFixed(1) + '%'; },
   };
 
