@@ -469,6 +469,141 @@ function brFindSubset(cand, target, tol, maxN) {
   return found;
 }
 
+// ─── ใบรับเงิน (receipt) accessors — robust กับ seed/synced (UPPER) ───────────
+function brRcDate(r)  { return brToISO(r.receiptDate || r.RECEIPT_DATE || r.date || ''); }
+function brRcNet(r)   { return Number(r.netReceived) || Number(r.grossAmount) || Number(r.amount) || 0; }
+function brRcGross(r) { return Number(r.grossAmount) || Number(r.netReceived) || Number(r.amount) || 0; }
+function brRcBank(r)  { return String(r.bankAccount || r.BANK_ACCOUNT || r.Bank_AC || ''); }
+
+// ─── Reconcile ฝั่งรับ — statement (เงินเข้าจริง = credit) ↔ ใบรับเงินในระบบ ─────
+//   ตอบโจทย์ "เงินที่เข้ามามีรายการเกิดขึ้นจริงตามยอดที่ดึงเข้ามามั้ย" — เทียบ
+//   เงินเข้าจริง (statement) กับ "ยอดที่ระบบบันทึกรับ" (receipts) รายตัว. 3 ถัง:
+//     matched          = เงินเข้าจริง ↔ ใบรับ (ยอด net หรือ gross ±tol + วัน ±window)
+//     receiptNoDeposit = ระบบบันทึกรับแล้ว แต่ไม่มีเงินเข้าจริง (= ยอดที่ดึงมา "ไม่จริง") ★ สำคัญสุด
+//     depositNoReceipt = เงินเข้าจริง แต่ระบบยังไม่มีใบรับ (เงินเข้าอื่น/IV ที่ยังไม่บันทึก)
+//   ★ ลองทั้ง netReceived (เงินเข้าหลังหักโอนสิทธิ — ปกติเข้าบัญชีจริง) และ grossAmount
+//     (เผื่อเงินเข้าเต็มแล้วโอนออกแยก) — ตัวใดตรง statement ก็ถือว่าเจอ
+function brReconcileAr(opts) {
+  const inLines = (opts.inLines || []).slice();
+  const receipts = (opts.receipts || []).slice();
+  const tol = opts.amtTol != null ? opts.amtTol : 0.01;
+  const win = opts.dateWindow != null ? opts.dateWindow : 7;   // เงินเข้าอาจ clear ช้ากว่าวันออกใบรับ
+  const avail = inLines.map((l, i) => ({ l, i, used: false }));
+  const matched = [], receiptNoDeposit = [];
+  // เรียงใบรับตามวัน (deterministic) แล้วจับ 1:1 best score
+  receipts.sort((a, b) => (brRcDate(a) < brRcDate(b) ? -1 : 1));
+  receipts.forEach(rc => {
+    const net = brRcNet(rc), gross = brRcGross(rc), rd = brRcDate(rc);
+    let best = null, bestScore = -1, bestVia = 'net';
+    avail.forEach(c => {
+      if (c.used) return;
+      const amt = c.l.amount;                                  // > 0 (เงินเข้า)
+      const okNet   = Math.abs(amt - net) <= tol;
+      const okGross = gross !== net && Math.abs(amt - gross) <= tol;
+      if (!okNet && !okGross) return;
+      const dd = rd ? brDateDiff(rd, c.l.date) : 999;
+      if (dd > win) return;
+      let score = 50 - dd;
+      if (okNet) score += 5;                                   // net = เงินเข้าจริงน่าจะตรงกว่า
+      if (score > bestScore) { bestScore = score; best = c; bestVia = okNet ? 'net' : 'gross'; }
+    });
+    if (best) { best.used = true; matched.push({ line: best.l, receipt: rc, via: bestVia, score: bestScore }); }
+    else receiptNoDeposit.push(rc);
+  });
+  const depositNoReceipt = avail.filter(c => !c.used).map(c => c.l);
+  const stats = {
+    matched: matched.length,
+    receiptNoDeposit: receiptNoDeposit.length,
+    depositNoReceipt: depositNoReceipt.length,
+    receiptNoDepositAmt: receiptNoDeposit.reduce((s, r) => s + brRcNet(r), 0),
+    depositNoReceiptAmt: depositNoReceipt.reduce((s, l) => s + Math.abs(l.amount), 0),
+  };
+  return { matched, receiptNoDeposit, depositNoReceipt, stats };
+}
+
+// ─── Parser งบกระทบยอด Mango ERP — แยก 2 ส่วน (เคลื่อนไหว + Outstanding Cheque) ──
+//   ไฟล์: "MM.YYYY งบกระทบยอด Mango-XXXX.xlsx" (XXXX=เลขบัญชี). โครงสร้าง:
+//     R1 header · R2 Balance Forward · R3..=รายการ · "Bank as Date"=ยอด book ปลายเดือน
+//     · "Outstanding Cheque"=หัวส่วน 2 · ส่วน 2=เช็ค/รายการค้างยังไม่ขึ้นธนาคาร
+//   Debit=เงินเข้า(+) Credit=เงินออก(ค่าลบ) → amount = Debit+Credit (sign ตรงกับ STM: +เข้า −ออก)
+function brParseMango(aoa, fileName) {
+  const out = { account: '', ok: false, error: '', opening: null, bankAsDate: '', bankAsDateBal: null, movements: [], outstanding: [] };
+  const nm = String(fileName || '');
+  const am = nm.replace(/\.[^.]*$/, '').match(/(\d{4})(?!.*\d)/);   // เลขบัญชี 4 หลักท้าย (ก่อน .xlsx)
+  out.account = am ? am[1] : '';
+  if (!Array.isArray(aoa) || !aoa.length) { out.error = 'ไฟล์ว่าง'; return out; }
+  // หาแถว header (มี "voucher" + "debit"/"credit")
+  let hr = -1;
+  for (let i = 0; i < Math.min(aoa.length, 15); i++) {
+    const j = (aoa[i] || []).map(c => String(c || '').toLowerCase()).join('|');
+    if (j.includes('voucher') && (j.includes('debit') || j.includes('credit'))) { hr = i; break; }
+  }
+  if (hr < 0) { out.error = 'ไม่พบหัวตาราง (Voucher No./Debit/Credit) — ตรวจว่าเป็นไฟล์งบกระทบยอด Mango'; return out; }
+  const H = (aoa[hr] || []).map(c => String(c || '').trim().toLowerCase());
+  const col = (...keys) => { for (let i = 0; i < H.length; i++) if (keys.some(k => H[i].includes(k))) return i; return -1; };
+  const cBk = col('bk. date', 'bk.date', 'bk date'), cVno = col('voucher no'), cVdt = col('voucher date'),
+        cVen = col('vendor'), cChq = col('cheque no'), cChqD = col('cheque date'), cRem = col('remark'),
+        cDr = col('debit'), cCr = col('credit'), cBal = col('balance');
+  const gv = (row, i) => i >= 0 ? row[i] : '';
+  let phase = 'move';   // move → (เจอ Bank as Date) → (เจอ Outstanding Cheque) → out
+  for (let i = hr + 1; i < aoa.length; i++) {
+    const row = aoa[i] || [];
+    const ven = String(gv(row, cVen) || '').trim();
+    const venL = ven.toLowerCase();
+    if (venL.includes('balance forward')) { out.opening = brNum(gv(row, cBal)); continue; }
+    if (venL.includes('bank as date')) {
+      out.bankAsDate = brToISO((ven.match(/\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/) || [''])[0]);
+      out.bankAsDateBal = brNum(gv(row, cBal)); continue;
+    }
+    if (venL.includes('outstanding')) { phase = 'out'; continue; }
+    const vno = String(gv(row, cVno) || '').trim();
+    if (!vno) continue;                                          // แถวว่าง/ผู้รวม
+    const debit = brNum(gv(row, cDr)), credit = brNum(gv(row, cCr));
+    const rec = {
+      bkDate: brToISO(gv(row, cBk)), vno, vdate: brToISO(gv(row, cVdt)), vendor: ven,
+      chqNo: String(gv(row, cChq) || '').trim(), chqDate: brToISO(gv(row, cChqD)),
+      remark: String(gv(row, cRem) || '').trim(), debit, credit, amount: debit + credit, balance: brNum(gv(row, cBal)),
+    };
+    (phase === 'out' ? out.outstanding : out.movements).push(rec);
+  }
+  out.ok = true;
+  return out;
+}
+
+// ─── Reconcile Mango (book) ↔ STM (bank) — หารายการลงบัญชี ขาด/เกิน เทียบ STM จริง ──
+//   matched  = Mango ↔ STM (amount รวม sign ±tol + วัน ±win + เลขเช็ค)
+//   stmOnly  = มีใน STM ไม่มีใน Mango = ธนาคารหักแล้ว "บัญชียังไม่ลง" (ลงไม่ครบ/ขาด)
+//   bookOnly = มีใน Mango ไม่มีใน STM = บัญชีลงแล้ว "ธนาคารยังไม่มี" (ลงเกิน / เช็คยังไม่ขึ้น)
+//   เฉพาะรายการเงินจริง (|amount| > tol) — ตัด JV ตัดมัดจำ/รับสินค้า (Debit=Credit=0) ที่ไม่กระทบเงินสด
+function brReconcileMango(opts) {
+  const tol = opts.amtTol != null ? opts.amtTol : 0.01;
+  const win = opts.dateWindow != null ? opts.dateWindow : 5;
+  const moves = (opts.movements || []).filter(m => Math.abs(m.amount) > tol);
+  const stmAvail = (opts.stmLines || []).map(l => ({ l, used: false }));
+  const matched = [], bookOnly = [];
+  moves.slice().sort((a, b) => (a.bkDate < b.bkDate ? -1 : 1)).forEach(m => {
+    let best = null, bestScore = -1;
+    stmAvail.forEach(c => {
+      if (c.used) return;
+      if (Math.abs(c.l.amount - m.amount) > tol) return;        // amount ต้องตรง (รวม sign +เข้า/−ออก)
+      const dd = (m.bkDate && c.l.date) ? brDateDiff(m.bkDate, c.l.date) : 999;
+      if (dd > win) return;
+      let score = 50 - dd;
+      if (m.chqNo && c.l.ref && bdDigits(m.chqNo) && bdDigits(m.chqNo) === bdDigits(c.l.ref)) score += 100;
+      if (score > bestScore) { bestScore = score; best = c; }
+    });
+    if (best) { best.used = true; matched.push({ mango: m, stm: best.l, score: bestScore }); }
+    else bookOnly.push(m);
+  });
+  const stmOnly = stmAvail.filter(c => !c.used).map(c => c.l);
+  const stats = {
+    matched: matched.length, bookOnly: bookOnly.length, stmOnly: stmOnly.length, moves: moves.length,
+    bookOnlyAmt: bookOnly.reduce((s, m) => s + Math.abs(m.amount), 0),
+    stmOnlyAmt: stmOnly.reduce((s, l) => s + Math.abs(l.amount), 0),
+  };
+  return { matched, bookOnly, stmOnly, stats };
+}
+
 // ─── สี/ป้ายแบงก์บนหัวบัญชี ────────────────────────────────────────────────────
 function brBrandChip(acct) {
   const b = bdBrand(brBrandKey(acct));
@@ -495,6 +630,7 @@ function BankReconPage({ data, setData, toast }) {
   const [importOpen, setImportOpen] = brState(false); // popup นำเข้าหลายไฟล์ (โยนไฟล์ + สรุป)
   const [recordLine, setRecordLine] = brState(null); // line ในถัง missing → modal บันทึกจ่ายจริง
   const [matchLine, setMatchLine]   = brState(null); // line → modal จับคู่ PV เอง
+  const [mainTab, setMainTab]       = brState('forecast'); // หน้าย่อย: 'forecast' (PV/ใบรับ) | 'mango' (Mango ERP ↔ STM)
 
   // default account = อันแรก
   brEffect(() => { if (!accountNo && accounts.length) setAccountNo(accounts[0].accountNo); }, [accounts]);
@@ -612,6 +748,21 @@ function BankReconPage({ data, setData, toast }) {
   const lines = brMemo(() => ((linesAll[accountNo] || {})[month]) || [], [linesAll, accountNo, month]);
   const monthly = brMemo(() => brMonthlyView(lines), [lines]);
   const recon = brMemo(() => brReconcile({ lines, pvs: pvForAcct, refPool: pvRefPool, reconState }), [lines, pvForAcct, pvRefPool, reconState]);
+
+  // ── ฝั่งรับ (AR): ใบรับเงินของบัญชี+เดือนนี้ ↔ เงินเข้าจริงใน statement ──────────
+  //   "เงินเข้าที่ระบบบันทึก" = receipts (ใบรับเงิน) ที่ receiptDate ตกเดือนนี้ + บัญชีตรง
+  //   (receipt.bankAccount มีเลขบัญชี → เทียบเลขท้าย 4; ไม่มีเลข → รวมไว้ เทียบยอด/วัน)
+  const receiptsForAcct = brMemo(() => {
+    if (!acct) return [];
+    return (data.receipts || []).filter(r => {
+      const d = brRcDate(r);
+      if (!d || brMonthOf(d) !== month) return false;
+      const ba = brRcBank(r);
+      if (ba && bdDigits(ba).length >= 4) return bdAcctMatchesCheck(acct.accountNo, ba);
+      return true;   // ใบรับไม่ระบุบัญชี → เทียบยอด/วันอย่างเดียว
+    });
+  }, [data.receipts, acct && acct.accountNo, month]);
+  const arRecon = brMemo(() => brReconcileAr({ inLines: recon.inLines || [], receipts: receiptsForAcct }), [recon.inLines, receiptsForAcct]);
 
   // เดือนที่มีข้อมูล statement ของบัญชีนี้ (ไว้สลับเร็ว)
   const monthsWithData = brMemo(() => Object.keys(linesAll[accountNo] || {}).sort().reverse(), [linesAll, accountNo]);
@@ -741,6 +892,39 @@ function BankReconPage({ data, setData, toast }) {
     if (toast) toast('ทำเครื่องหมาย "โอนระหว่างบัญชี" — ไม่นับเป็นรายจ่าย');
   };
 
+  // ── "แถวผี" = forecastEntries BANK_RECON ที่ไม่มี reconState entry ไหนชี้หา (id ไม่ใช่ forecastId
+  //    ปัจจุบันของใคร) + มี "ตัวจริง" (live twin) content เดียวกันอยู่ → ตกค้างจากการ record ซ้ำ/นำเข้าทับ
+  //    → Cashflow นับเบิ้ล. ★ ไม่จับ LG จ่ายซ้ำจริง (คนละบรรทัด statement → คนละ reconState entry → live
+  //    ทั้งคู่). ★ ไม่จับ orphan โดดเดี่ยว (ไม่มี twin) เผื่อ reconState หาย — กันลบรายการจริง.
+  const brOrphanRows = brMemo(() => {
+    const fes = (data.forecastEntries || []).filter(fe => String(fe.EXPENSE_TYPE || '').toUpperCase() === 'BANK_RECON');
+    if (!fes.length) return [];
+    const validIds = new Set();
+    (data.bankReconState || []).forEach(r => { if (r && String(r.decision || '') === 'recorded' && r.forecastId) validIds.add(String(r.forecastId)); });
+    if (!validIds.size) return [];
+    const keyOf = fe => {
+      const d = fe.ACTUAL_DATE || fe.PAYMENT_DATE || fe.DATE;
+      const a = Number(fe.ACTUAL_AMOUNT || fe.AMOUNT || fe.amount || 0);
+      return String(fe.Bank_AC || '').trim() + '|' + d + '|' + a + '|' + String(fe.DESCRIPTION || '').trim();
+    };
+    const liveKeys = new Set();
+    fes.forEach(fe => { if (validIds.has(String(fe.id))) liveKeys.add(keyOf(fe)); });
+    return fes.filter(fe => !validIds.has(String(fe.id)) && liveKeys.has(keyOf(fe)));
+  }, [data.forecastEntries, data.bankReconState]);
+  const brOrphanTotal = brOrphanRows.reduce((s, r) => s + Math.abs(Number(r.ACTUAL_AMOUNT || r.AMOUNT || 0)), 0);
+  const purgeReconOrphans = () => {
+    if (readOnly || !brOrphanRows.length) return;
+    if (!confirm(`ลบ "แถวผี" (รายการจ่ายจริงที่ระบบสร้างซ้ำ) ${brOrphanRows.length} รายการ รวม ${fmtNum(brOrphanTotal, 2)} ออกถาวร?\n\n• ตัวจริงยังอยู่ครบ — ยอดจ่ายจริงไม่หาย\n• ไม่แตะ LG/ค่าธรรมเนียมที่จ่ายซ้ำจริง (คนละบรรทัด statement)`)) return;
+    const ids = brOrphanRows.map(r => r.id);
+    if (window.WTPData && typeof WTPData.forceDeleteRows === 'function') {
+      WTPData.forceDeleteRows('forecastEntries', ids);   // ข้ามเกราะ protect-ACTUAL (ลบตามเจตนา)
+    } else if (setData) {
+      const del = new Set(ids.map(String));
+      setData(d => ({ ...d, forecastEntries: (d.forecastEntries || []).filter(e => !del.has(String(e.id))) }));
+    }
+    if (toast) toast(`ลบแถวผี ${ids.length} รายการแล้ว — Cashflow ไม่นับเบิ้ลอีก`);
+  };
+
   // เดาว่าเป็นโอนระหว่างบัญชีตัวเอง: desc มีคำว่าโอน + (ชื่อบริษัทตัวเอง หรือเลขท้ายบัญชีตัวเองในระบบ)
   const ownLast4 = brMemo(() => new Set((data.bankAccounts || []).map(a => bdLast4(bdAcct(a).accountNo)).filter(Boolean)), [data.bankAccounts]);
   const companyKey = (data.meta && (data.meta.shortName || data.meta.companyName)) || '';
@@ -797,7 +981,7 @@ function BankReconPage({ data, setData, toast }) {
       <div className="page-head anim-in">
         <div>
           <h1 className="page-title">กระทบยอดธนาคาร</h1>
-          <div className="page-sub">Bank Reconciliation · เทียบ PV ในระบบ กับรายการเดินบัญชีจริง · {brFmtMonth(month)}</div>
+          <div className="page-sub">Bank Reconciliation · จ่าย: PV ↔ statement · รับ: เงินเข้า ↔ ใบรับเงิน · {brFmtMonth(month)}</div>
         </div>
         <div className="page-head-r" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-ghost" onClick={() => goMonth(-1)} title="เดือนก่อน">‹</button>
@@ -849,6 +1033,42 @@ function BankReconPage({ data, setData, toast }) {
         )}
       </div>
 
+      {/* sub-nav: 2 หน้าย่อย — ใช้บัญชี/เดือน/STM ร่วมกัน */}
+      <div className="card anim-in" style={{ padding: 6, marginBottom: 16, display: 'flex', gap: 6 }}>
+        {[
+          { key: 'forecast', label: '📥 เทียบ PV / ใบรับเงิน', sub: 'Weekly Forecast — เทียบกับระบบ WTP' },
+          { key: 'mango',    label: '📒 เทียบ Mango ERP',      sub: 'งบกระทบยอด ERP ↔ STM — หาลงบัญชี ขาด/เกิน' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setMainTab(t.key)}
+            style={{ flex: '1 1 0', border: 'none', cursor: 'pointer', borderRadius: 9, padding: '10px 12px', textAlign: 'left', fontFamily: 'inherit',
+              background: mainTab === t.key ? 'linear-gradient(135deg, var(--brand-500), var(--brand-700))' : 'var(--ink-50)',
+              color: mainTab === t.key ? '#fff' : 'var(--ink-700)',
+              boxShadow: mainTab === t.key ? '0 4px 14px color-mix(in oklch, var(--brand-500) 30%, transparent)' : 'none', transition: 'all .14s' }}>
+            <div style={{ fontSize: 14, fontWeight: 800 }}>{t.label}</div>
+            <div style={{ fontSize: 11, opacity: mainTab === t.key ? .9 : .6, marginTop: 2 }}>{t.sub}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* 🧹 แถวผี (BANK_RECON ที่ระบบสร้างซ้ำ) → Cashflow นับเบิ้ล — ลบออกจริง (ตัวจริง+LG จ่ายซ้ำไม่โดน) */}
+      {!readOnly && brOrphanRows.length > 0 && (
+        <div className="card no-print" style={{ padding: '12px 16px', marginBottom: 16, borderLeft: '4px solid var(--bad)',
+          background: 'color-mix(in oklch, var(--bad) 5%, var(--surface))', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--ink-800)' }}>
+              🧹 พบรายการจ่ายจริง "ซ้ำ" (แถวผี) {brOrphanRows.length} รายการ — ทำให้ Cashflow นับเบิ้ล
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 2 }}>
+              เกิดจากบันทึกจ่ายจริงซ้ำ/นำเข้าทับ · ตัวจริงยังอยู่ครบ ยอดไม่หาย · ไม่กระทบ LG/ค่าธรรมเนียมที่จ่ายซ้ำจริง · รวม {fmtNum(brOrphanTotal, 2)}
+            </div>
+          </div>
+          <button className="btn" style={{ background: 'var(--bad)', color: '#fff', border: 'none' }} onClick={purgeReconOrphans}>
+            <Icon name="trash" size={14} /> ลบแถวผี ({brOrphanRows.length})
+          </button>
+        </div>
+      )}
+
+      {mainTab === 'forecast' && (<React.Fragment>
       {/* โน้ตไฟล์ที่ใช้นำเข้า + นำเข้าหลายไฟล์พร้อมกัน (พับเก็บได้) */}
       {!readOnly && <BRImportHelp />}
 
@@ -883,8 +1103,17 @@ function BankReconPage({ data, setData, toast }) {
           onMarkTransfer={markTransfer} isLikelyTransfer={isLikelyTransfer} />
       )}
 
+      {/* ฝั่งรับ (AR) — เงินเข้าจริงใน statement ↔ ใบรับเงินในระบบ (ตรวจว่าเงินเข้ามีจริงไหม) */}
+      {monthly.count > 0 && <BRArSection arRecon={arRecon} acct={acct} />}
+
       {/* รายการเดินบัญชี (statement) — ยกมา → เคลื่อนไหว → คงเหลือ */}
       {monthly.count > 0 && <BRStatementTable monthly={monthly} />}
+      </React.Fragment>)}
+
+      {/* ── หน้าย่อย 2: เทียบ Mango ERP ↔ STM ── */}
+      {mainTab === 'mango' && (
+        <BRMangoTab acct={acct} month={month} stmLines={lines} readOnly={readOnly} toast={toast} />
+      )}
 
       {/* Import modal — popup โยนไฟล์หลายไฟล์ + สรุป → นำเข้าทีเดียว */}
       {importOpen && (
@@ -949,6 +1178,354 @@ function BRReconcileSection({ recon, acct, readOnly, onRecord, onUndo, onMatch, 
 }
 
 function BREmpty({ text }) { return <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-400)', fontSize: 12.5 }}>{text}</div>; }
+
+// ─── ฝั่งรับ (AR) — ตรวจว่า "เงินเข้าที่ระบบดึงมา" มีรายการเกิดขึ้นจริงในธนาคารไหม ───
+//   เทียบเงินเข้าจริง (statement credit) ↔ ใบรับเงินในระบบ (receipts). read-only (ดูอย่างเดียว)
+function BRArSection({ arRecon, acct }) {
+  const [tab, setTab] = brState('receiptNoDeposit');
+  const { matched, receiptNoDeposit, depositNoReceipt, stats } = arRecon;
+  const tabs = [
+    { key: 'receiptNoDeposit', label: 'บันทึกรับ · ยังไม่เจอเงินเข้า', n: receiptNoDeposit.length, color: 'var(--bad)' },
+    { key: 'matched',          label: 'ตรงกัน',                       n: matched.length,          color: 'var(--good)' },
+    { key: 'depositNoReceipt', label: 'เงินเข้า · ยังไม่มีใบรับ',     n: depositNoReceipt.length, color: 'oklch(60% 0.13 250)' },
+  ];
+  const bankShort = ba => String(ba || '').split(' ')[0] || '—';
+  return (
+    <div className="card anim-in" style={{ padding: 0, marginBottom: 16, overflow: 'hidden' }}>
+      <div style={{ padding: '11px 16px', borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: 14, color: 'var(--ink-800)', background: 'color-mix(in oklch, var(--good) 5%, transparent)' }}>
+        💰 กระทบยอดเงินเข้า (รับจริง)
+        <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--ink-500)', marginLeft: 8 }}>
+          เงินเข้าจริงใน statement ⟷ ใบรับเงินในระบบ — ตรวจว่ายอดที่ดึงมามีเงินเข้าจริงไหม
+        </span>
+      </div>
+      {/* tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{ flex: '1 1 0', minWidth: 150, border: 'none', background: tab === t.key ? 'var(--surface)' : 'var(--ink-50)',
+              borderBottom: tab === t.key ? '2px solid ' + t.color : '2px solid transparent', cursor: 'pointer', padding: '12px 10px', textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: t.color, fontVariantNumeric: 'tabular-nums' }}>{t.n}</div>
+            <div style={{ fontSize: 12, color: 'var(--ink-600)', fontWeight: 600 }}>{t.label}</div>
+          </button>
+        ))}
+      </div>
+      <div style={{ padding: 14 }}>
+        {/* ── ระบบบันทึกรับแล้ว แต่ไม่เจอเงินเข้าจริง (= ยอดที่ดึงมาอาจไม่จริง) ── */}
+        {tab === 'receiptNoDeposit' && (
+          receiptNoDeposit.length === 0
+            ? <BREmpty text="✓ ใบรับเงินทุกใบเจอเงินเข้าจริงใน statement แล้ว" />
+            : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>
+                  ⚠️ ระบบบันทึก<b>รับเงินแล้ว</b> แต่<b>ไม่เจอเงินเข้าจริง</b>ในรายการเดินบัญชีเดือนนี้ — ตรวจว่าเงินเข้าจริงไหม / ยอดถูกไหม / เข้าบัญชีอื่นหรือเดือนอื่น
+                </div>
+                <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                    <tr><th style={{ width: 96 }}>วันที่รับ</th><th style={{ width: 110 }}>เลขที่ใบรับ</th><th>IV / โครงการ</th><th style={{ width: 90 }}>บัญชี</th><th style={{ width: 130, textAlign: 'right' }}>ยอดที่บันทึก</th></tr>
+                  </thead>
+                  <tbody>
+                    {receiptNoDeposit.map((r, i) => (
+                      <tr key={r.id || r.receiptNo || i}>
+                        <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(brRcDate(r)) || brRcDate(r) || '—'}</td>
+                        <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{r.receiptNo || '—'}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--brand-700)' }}>{r.invoiceNo || '—'}</div>
+                          <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>{r.projectName || ''}</div>
+                        </td>
+                        <td style={{ fontSize: 11.5, color: 'var(--ink-600)' }}>{bankShort(brRcBank(r))}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--bad)' }}>
+                          {fmtNum(brRcNet(r), 2)}
+                          {Number(r.transferDeduction) > 0 && <div style={{ fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>เต็ม {fmtNum(brRcGross(r), 0)} · หักโอน {fmtNum(Number(r.transferDeduction), 0)}</div>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop: '2px solid var(--line)' }}>
+                    <td colSpan={4} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--ink-600)', padding: '6px 8px' }}>รวม {receiptNoDeposit.length} ใบ</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 800, color: 'var(--bad)' }}>{fmtNum(stats.receiptNoDepositAmt, 2)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+        )}
+        {/* ── ตรงกัน — เงินเข้าจริง ↔ ใบรับ ── */}
+        {tab === 'matched' && (
+          matched.length === 0
+            ? <BREmpty text="ยังไม่มีรายการเงินเข้าที่จับคู่กับใบรับเงินได้" />
+            : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>✓ เงินเข้าจริงในธนาคาร ตรงกับใบรับเงินในระบบ (ยอด ±0.01 + วัน ±7 วัน)</div>
+                <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                    <tr><th style={{ width: 96 }}>วันเงินเข้า</th><th style={{ width: 130, textAlign: 'right' }}>เงินเข้าจริง</th><th style={{ width: 110 }}>เลขที่ใบรับ</th><th>IV / โครงการ</th><th style={{ width: 70, textAlign: 'center' }}>เทียบ</th></tr>
+                  </thead>
+                  <tbody>
+                    {matched.map((m, i) => (
+                      <tr key={m.line.id || i}>
+                        <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(m.line.date) || m.line.date}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--good)' }}>{fmtNum(Math.abs(m.line.amount), 2)}</td>
+                        <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{m.receipt.receiptNo || '—'}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--brand-700)' }}>{m.receipt.invoiceNo || '—'}</div>
+                          <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>{m.receipt.projectName || ''}</div>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--good)', background: 'var(--good-bg)', borderRadius: 10, padding: '1px 7px' }}>{m.via === 'gross' ? 'เต็ม' : 'สุทธิ'}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+        )}
+        {/* ── เงินเข้าจริง แต่ยังไม่มีใบรับ (เงินเข้าอื่น / ยังไม่บันทึก) ── */}
+        {tab === 'depositNoReceipt' && (
+          depositNoReceipt.length === 0
+            ? <BREmpty text="✓ เงินเข้าจริงทุกรายการมีใบรับเงินรองรับแล้ว" />
+            : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>
+                  เงินเข้าธนาคารจริง แต่<b>ยังไม่มีใบรับเงิน</b>ในระบบ — อาจเป็นเงินเข้าอื่น (ดอกเบี้ย / เงินกู้ / โอนเข้า / คืนเงิน) หรือ IV ที่ยังไม่บันทึกรับ
+                </div>
+                <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                    <tr><th style={{ width: 96 }}>วันที่</th><th>รายละเอียด</th><th style={{ width: 110 }}>อ้างอิง</th><th style={{ width: 130, textAlign: 'right' }}>เงินเข้าจริง</th></tr>
+                  </thead>
+                  <tbody>
+                    {depositNoReceipt.map((l, i) => (
+                      <tr key={l.id || i}>
+                        <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(l.date) || l.date}</td>
+                        <td>{l.desc || '—'}</td>
+                        <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5, color: 'var(--brand-700)' }}>{l.ref || '—'}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'oklch(50% 0.13 250)' }}>{fmtNum(Math.abs(l.amount), 2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop: '2px solid var(--line)' }}>
+                    <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--ink-600)', padding: '6px 8px' }}>รวม {depositNoReceipt.length} รายการ</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 800, color: 'oklch(50% 0.13 250)' }}>{fmtNum(stats.depositNoReceiptAmt, 2)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── หน้าย่อย: เทียบงบกระทบยอด Mango ERP ↔ STM (หารายการลงบัญชี ขาด/เกิน) ────────
+function BRMangoTab({ acct, month, stmLines, readOnly, toast }) {
+  const [parsed, setParsed] = brState(null);
+  const [fileName, setFileName] = brState('');
+  const [busy, setBusy] = brState(false);
+  const [tab, setTab] = brState('stmOnly');
+  const fileRef = brRef(null);
+
+  const onFile = (file) => {
+    if (!file) return;
+    setBusy(true);
+    brParseFile(file).then(({ sheetNames, sheets }) => {
+      let best = null;
+      for (let i = 0; i < sheetNames.length; i++) {
+        const p = brParseMango(sheets[sheetNames[i]] || [], file.name);
+        if (p.ok && p.movements.length) { best = p; break; }
+        if (p.ok && !best) best = p;
+        if (!best) best = p;
+      }
+      setParsed(best); setFileName(file.name); setBusy(false);
+      if (best && !best.ok && toast) toast('อ่านไฟล์ Mango ไม่ได้: ' + best.error);
+    }).catch(e => { setBusy(false); if (toast) toast('อ่านไฟล์ไม่ได้: ' + (e.message || e)); });
+  };
+
+  const recon = brMemo(() => (parsed && parsed.ok)
+    ? brReconcileMango({ movements: parsed.movements, stmLines: stmLines || [] }) : null,
+    [parsed, stmLines]);
+  const acctMismatch = !!(parsed && parsed.account && acct && bdDigits(acct.accountNo).length >= 4
+    && !bdAcctMatchesCheck(acct.accountNo, parsed.account));
+  const noStm = !stmLines || !stmLines.length;
+
+  const amtCell = (v) => {
+    const n = Number(v) || 0;
+    return <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: n >= 0 ? 'var(--good)' : 'var(--bad)' }}>
+      {n >= 0 ? '' : '−'}{fmtNum(Math.abs(n), 2)}
+    </span>;
+  };
+
+  return (
+    <div>
+      {/* header + อัปโหลด */}
+      <div className="card anim-in" style={{ padding: 14, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--ink-800)' }}>📒 เทียบงบกระทบยอด Mango ERP ↔ STM</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>
+            เทียบสมุดบัญชีจาก ERP กับรายการเดินบัญชีจริง — หารายการที่ลงบัญชี <b>ขาด</b> (ธนาคารหักแล้วบัญชีไม่ลง) / <b>เกิน</b> (บัญชีลงแล้วธนาคารยังไม่มี)
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {fileName && <span style={{ fontSize: 12, color: 'var(--ink-600)' }}>📄 {fileName}</span>}
+          {!readOnly && <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>
+            {busy ? 'กำลังอ่าน…' : (parsed ? '📂 เปลี่ยนไฟล์' : '📂 เลือกไฟล์ Mango')}
+          </button>}
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }} />
+        </div>
+      </div>
+
+      {/* ⏳ รอแก้ไข — BIOAXEL ใช้ EXPRESS (รูปแบบไฟล์ต่างจาก Mango) */}
+      <div className="card anim-in" style={{ padding: '12px 16px', marginBottom: 16, background: '#fffbeb', borderLeft: '4px solid #f59e0b', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 22, flex: 'none' }}>⏳</span>
+        <div style={{ fontSize: 13, color: 'var(--ink-700)', lineHeight: 1.6 }}>
+          <b style={{ color: '#b45309' }}>รอแก้ไข</b> — หน้านี้รองรับไฟล์งบกระทบยอด <b>Mango</b> · BIOAXEL ใช้ข้อมูลจาก <b>EXPRESS</b> รูปแบบไฟล์ต่างกัน กำลังปรับ parser ให้รองรับ (ตอนนี้ใช้ทดสอบโครงสร้างได้แต่ตัวเลขอาจยังไม่ตรง)
+        </div>
+      </div>
+
+      {/* ยังไม่อัปโหลด */}
+      {!parsed && (
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--ink-500)' }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>📒</div>
+          <div style={{ fontWeight: 600, color: 'var(--ink-700)', marginBottom: 4 }}>นำเข้าไฟล์งบกระทบยอด Mango ERP</div>
+          <div style={{ fontSize: 12.5, marginBottom: 14 }}>ไฟล์ <b>"MM.YYYY งบกระทบยอด Mango-XXXX.xlsx"</b> (XXXX = เลขบัญชี) — ระบบจะเทียบกับ STM ของบัญชี <b>{acct ? bdLast4(acct.accountNo) : '—'}</b> เดือน <b>{brFmtMonth(month)}</b> ที่นำเข้าไว้</div>
+          {!readOnly && <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>📂 เลือกไฟล์ Mango</button>}
+          {noStm && <div style={{ fontSize: 12, marginTop: 14, color: 'var(--warn)' }}>⚠️ ยังไม่มี STM ของเดือนนี้ — ไปแท็บ "เทียบ PV / ใบรับเงิน" เพื่อนำเข้า statement ก่อน</div>}
+        </div>
+      )}
+
+      {/* อ่านไฟล์ไม่สำเร็จ */}
+      {parsed && !parsed.ok && (
+        <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--bad)' }}>
+          ⚠️ {parsed.error || 'อ่านไฟล์ Mango ไม่ได้'}
+        </div>
+      )}
+
+      {/* อ่านสำเร็จ */}
+      {parsed && parsed.ok && recon && (
+        <div>
+          {acctMismatch && (
+            <div className="card" style={{ padding: '10px 14px', marginBottom: 12, background: 'var(--bad-bg)', border: '1px solid var(--bad)', fontSize: 12.5, color: 'var(--ink-700)' }}>
+              ⚠️ ไฟล์นี้เป็นบัญชี <b>{parsed.account}</b> แต่กำลังดูบัญชี <b>{acct ? bdLast4(acct.accountNo) : '—'}</b> — เลือกบัญชีให้ตรงด้านบน (ปุ่มแบงค์) ก่อนเทียบ
+            </div>
+          )}
+          {noStm && (
+            <div className="card" style={{ padding: '10px 14px', marginBottom: 12, background: '#fffbeb', borderLeft: '4px solid #f6ad55', fontSize: 12.5, color: 'var(--ink-700)' }}>
+              ⚠️ ยังไม่มี STM ของ {brFmtMonth(month)} — รายการ Mango ทั้งหมดจะขึ้นเป็น "เกิน" จนกว่าจะนำเข้า statement (แท็บ "เทียบ PV / ใบรับเงิน")
+            </div>
+          )}
+
+          {/* KPI */}
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12, marginBottom: 14 }}>
+            <KpiTile label="ยอดตาม Mango (Bank as Date)" value={parsed.bankAsDateBal != null ? parsed.bankAsDateBal : 0} digits={0} accent="var(--brand-600)" icon="bank" />
+            <KpiTile label="ตรงกับ STM" value={recon.stats.matched} digits={0} accent="var(--good)" icon="check" />
+            <KpiTile label="ขาด (บัญชียังไม่ลง)" value={recon.stats.stmOnlyAmt} digits={0} accent="var(--bad)" icon="arrow_down" />
+            <KpiTile label="เกิน (ธนาคารยังไม่มี)" value={recon.stats.bookOnlyAmt} digits={0} accent="var(--warn)" icon="arrow_up" />
+          </div>
+
+          {/* tabs */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+              {[
+                { key: 'stmOnly',  label: 'ขาด — บัญชียังไม่ลง',  n: recon.stmOnly.length,  color: 'var(--bad)' },
+                { key: 'bookOnly', label: 'เกิน — ธนาคารยังไม่มี', n: recon.bookOnly.length, color: 'var(--warn)' },
+                { key: 'matched',  label: 'ตรงกัน',                n: recon.matched.length,  color: 'var(--good)' },
+                { key: 'outstanding', label: 'Outstanding (เช็คค้าง)', n: parsed.outstanding.length, color: 'oklch(60% 0.13 250)' },
+              ].map(t => (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  style={{ flex: '1 1 0', minWidth: 140, border: 'none', background: tab === t.key ? 'var(--surface)' : 'var(--ink-50)',
+                    borderBottom: tab === t.key ? '2px solid ' + t.color : '2px solid transparent', cursor: 'pointer', padding: '12px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: t.color, fontVariantNumeric: 'tabular-nums' }}>{t.n}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-600)', fontWeight: 600 }}>{t.label}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ padding: 14 }}>
+              {/* ขาด — มีใน STM ไม่มีใน Mango */}
+              {tab === 'stmOnly' && (recon.stmOnly.length === 0
+                ? <BREmpty text="✓ STM ทุกรายการลงบัญชีใน Mango ครบแล้ว" />
+                : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>⚠️ ธนาคาร<b>หักจริงแล้ว</b> แต่<b>ยังไม่มีในบัญชี Mango</b> — ต้องไปลงบัญชีให้ครบ</div>
+                    <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                        <tr><th style={{ width: 96 }}>วันที่</th><th>รายละเอียด (STM)</th><th style={{ width: 110 }}>อ้างอิง</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th></tr>
+                      </thead>
+                      <tbody>{recon.stmOnly.map((l, i) => (
+                        <tr key={l.id || i}>
+                          <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(l.date) || l.date}</td>
+                          <td>{l.desc || '—'}</td>
+                          <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5, color: 'var(--brand-700)' }}>{l.ref || '—'}</td>
+                          <td style={{ textAlign: 'right' }}>{amtCell(l.amount)}</td>
+                        </tr>
+                      ))}</tbody>
+                      <tfoot><tr style={{ borderTop: '2px solid var(--line)' }}>
+                        <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--ink-600)', padding: '6px 8px' }}>รวม {recon.stmOnly.length} รายการ</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 800, color: 'var(--bad)' }}>{fmtNum(recon.stats.stmOnlyAmt, 2)}</td>
+                      </tr></tfoot>
+                    </table>
+                  </div>)}
+
+              {/* เกิน — มีใน Mango ไม่มีใน STM */}
+              {tab === 'bookOnly' && (recon.bookOnly.length === 0
+                ? <BREmpty text="✓ รายการ Mango ทุกตัวเจอใน STM แล้ว" />
+                : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>บัญชี Mango <b>ลงแล้ว</b> แต่<b>ยังไม่เจอใน STM</b> — อาจเป็นเช็คที่ยังไม่ขึ้น (ดูแท็บ Outstanding) หรือลงบัญชีเกิน/ผิด</div>
+                    <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                        <tr><th style={{ width: 96 }}>วันที่</th><th style={{ width: 130 }}>เลขที่</th><th>ผู้รับ/รายการ</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th></tr>
+                      </thead>
+                      <tbody>{recon.bookOnly.map((m, i) => (
+                        <tr key={m.vno || i}>
+                          <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(m.bkDate) || m.bkDate}</td>
+                          <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{m.vno}</td>
+                          <td><div>{m.vendor || '—'}</div>{m.remark && <div style={{ fontSize: 11, color: 'var(--ink-500)' }} title={m.remark}>{m.remark.length > 70 ? m.remark.slice(0, 70) + '…' : m.remark}</div>}</td>
+                          <td style={{ textAlign: 'right' }}>{amtCell(m.amount)}</td>
+                        </tr>
+                      ))}</tbody>
+                      <tfoot><tr style={{ borderTop: '2px solid var(--line)' }}>
+                        <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700, color: 'var(--ink-600)', padding: '6px 8px' }}>รวม {recon.bookOnly.length} รายการ</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 800, color: 'var(--warn)' }}>{fmtNum(recon.stats.bookOnlyAmt, 2)}</td>
+                      </tr></tfoot>
+                    </table>
+                  </div>)}
+
+              {/* ตรงกัน */}
+              {tab === 'matched' && (recon.matched.length === 0
+                ? <BREmpty text="ยังไม่มีรายการที่จับคู่ได้" />
+                : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>✓ Mango ↔ STM ตรงกัน (ยอด ±0.01 + วัน ±5 วัน + เลขเช็ค)</div>
+                    <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                        <tr><th style={{ width: 96 }}>วันที่</th><th style={{ width: 130 }}>เลขที่ (Mango)</th><th>ผู้รับ/รายการ</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th></tr>
+                      </thead>
+                      <tbody>{recon.matched.map((x, i) => (
+                        <tr key={x.mango.vno || i}>
+                          <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(x.mango.bkDate) || x.mango.bkDate}</td>
+                          <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{x.mango.vno}</td>
+                          <td>{x.mango.vendor || '—'}</td>
+                          <td style={{ textAlign: 'right' }}>{amtCell(x.mango.amount)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>)}
+
+              {/* Outstanding Cheque (จากไฟล์ Mango ส่วน 2) */}
+              {tab === 'outstanding' && (parsed.outstanding.length === 0
+                ? <BREmpty text="ไม่มีรายการ Outstanding Cheque ในไฟล์" />
+                : <div style={{ maxHeight: '52vh', overflow: 'auto' }}>
+                    <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>เช็ค/รายการที่ Mango บันทึกแล้ว แต่<b>ยังไม่ขึ้นธนาคาร</b> (ค้างจากเดือนก่อนๆ) — ตามไฟล์งบกระทบยอด</div>
+                    <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+                      <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+                        <tr><th style={{ width: 130 }}>เลขที่</th><th>ผู้รับ/รายการ</th><th style={{ width: 130, textAlign: 'right' }}>จำนวน</th></tr>
+                      </thead>
+                      <tbody>{parsed.outstanding.map((o, i) => (
+                        <tr key={o.vno || i}>
+                          <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{o.vno}</td>
+                          <td>{o.vendor || '—'}</td>
+                          <td style={{ textAlign: 'right' }}>{o.amount ? amtCell(o.amount) : <span style={{ color: 'var(--ink-300)' }}>—</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>)}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ถัง (b) — statement ออก แต่ไม่มี PV → กดบันทึกจ่ายจริง
 function BRMissingTable({ rows, readOnly, onRecord, onMatch, onMarkTransfer, isLikelyTransfer }) {

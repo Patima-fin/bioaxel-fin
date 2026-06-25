@@ -610,5 +610,13 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
   - **`BDDayItemGroup`** คำนวณ `kinds` เอง: ชนิดเดียว → ป้ายชนิดนั้น; หลายชนิด → ป้าย **"รวม"** (`#eef2ff`). หัวโชว์ "· N รายการ". กาง = `BDItemRow` แต่ละรายการ **โชว์ป้ายชนิด (ไม่ hideTag)** + title เต็ม + sub (เลขที่ AP/PV/เช็ค) → เห็นว่ามาจากแหล่งไหน. (เดิม hideTag + label=refDoc → เลิก เพราะตอนนี้ต้องเห็นแหล่งที่มา.)
 - **verify (Babel parse BIO source ผ่าน preview server):** ไฟล์ compile ผ่าน · 4 helper (`bdVendorCanon`/`bdItemTag`/`BDDayItemGroup`/`BDDayGroup`) define ครั้งเดียวทั้งไฟล์ ไม่ชนกัน. logic การจับกลุ่ม + render ทดสอบไว้บนฝั่ง POG แล้ว (โค้ดเหมือนเป๊ะ); ฝั่ง BIO ใช้ DOM/eval ตรวจไม่ได้เพราะ login-gate+RLS.
 
+## 2026-06-24 — Bank Recon: แบ่ง 2 หน้าย่อย (sub-nav) + ฝั่งรับ AR + เทียบ Mango ERP (พอร์ตจาก POG, build `page_bank_recon 20260624e`)
+- **พอร์ตจาก POG `20260624f`** (ดูรายละเอียดเต็มใน CLAUDE.md ของ POG) — โค้ดเหมือนกันทุกจุด ต่างแค่ brand 3 จุด (localStorage `bio-bankrecon-*`, isLikelyTransfer `ไบโอแอ็กซ์เซลล์|bioaxel|...`, คอมเมนต์) + **โน้ต EXPRESS** (ดูด้านล่าง).
+- **sub-nav 2 หน้าย่อย (`mainTab`):** "📥 เทียบ PV/ใบรับ (Weekly Forecast)" [เดิม + ฝั่งรับ AR] | "📒 เทียบ Mango ERP" [ใหม่] — ใช้บัญชี/เดือน/STM ร่วมกัน.
+- **ฝั่งรับ (AR):** `brReconcileAr` + `BRArSection` — เทียบเงินเข้าจริง (STM credit) ↔ ใบรับเงิน → ตรงกัน/บันทึกรับแต่ไม่มีเงินเข้า/เงินเข้าแต่ไม่มีใบรับ.
+- **เทียบ Mango:** `brParseMango` (แยกส่วน เคลื่อนไหว/Outstanding Cheque, amount=Debit+Credit, ตัด JV 0/0) + `brReconcileMango` (book↔STM → ขาด/เกิน/ตรงกัน) + `BRMangoTab`.
+- **★ โน้ต EXPRESS (ต่างจาก POG):** BIOAXEL ใช้ **EXPRESS** ไม่ใช่ Mango — แท็บ "เทียบ Mango ERP" มี**แบนเนอร์สีส้ม "⏳ รอแก้ไข — ข้อมูลจาก EXPRESS รูปแบบไฟล์ต่างกัน กำลังปรับ parser"** บนสุด (โชว์เสมอ). โครง parser/engine พอร์ตมาก่อนใช้ทดสอบโครงสร้างได้ แต่ **parser ยังเป็น Mango format — ต้องปรับให้รองรับ Express ก่อนใช้จริง** (งานค้าง).
+- **verify (Babel parse BIO source ผ่าน preview server):** compile ผ่าน 0 error · fragment balance 1/1 · มี `brReconcileAr`/`BRArSection`/`brParseMango`/`BRMangoTab`/`mainTab` ครบ · brand = `bio-bankrecon-*` ไม่มี POG leak (วอเทอร์ป๊อก/กฤตวัฒน์) · มีโน้ต EXPRESS. logic parser/engine ทดสอบบนฝั่ง POG แล้ว (โค้ดเหมือนเป๊ะ); ฝั่ง BIO DOM/eval ตรวจไม่ได้เพราะ login-gate+RLS.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
