@@ -303,6 +303,13 @@ function cfIsReadOnly() {
     return role === 'owner' || role === 'viewer';
   } catch (_) { return false; }
 }
+// เฉพาะ manager — ใช้ gate การ์ด "ตรวจสอบยอดดิบ" (Section 03) ที่คนอื่นไม่ต้องเห็น
+function cfIsManager() {
+  try {
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
+    return ((s && s.role) || '') === 'manager';
+  } catch (_) { return false; }
+}
 
 // ─── AP-PV match (filter out paid AP) ─────────────────────────────────────
 function buildPaidVchnoSet(pvVouchers) {
@@ -332,6 +339,223 @@ function openingBalanceAt(snapshots, cutoffISO, liveBalance) {
   const hasInMonth = (snapshots || []).some(s =>
     s.date && String(s.date).slice(0, 7) === ym && s.date <= cutoffISO);
   return hasInMonth ? getBalanceAtDate(snapshots, cutoffISO) : liveBalance;
+}
+
+// ─── Section 03 — ตรวจสอบยอดดิบ (Cash Reconciliation, manager-only) ──────────
+//   หลักการ (วิธีที่เตยทำใน Excel): ยกมา + รับโครงการ + เงินกู้ − ค่าใช้จ่าย
+//   = ยอดสุทธิใช้ได้ → ต้องตรงกับ "เงินในธนาคารจริง" ถ้าไม่ตรง = มีรายการตกหล่น
+//   ตารางรายสัปดาห์เปิดแต่ละสัปดาห์ด้วย "ยอดจริงสิ้นสัปดาห์ก่อน" → ส่วนต่างจะโผล่
+//   เฉพาะสัปดาห์ที่ผิดจริง (ผลรวมส่วนต่างรายสัปดาห์ = ส่วนต่างรวม — telescoping)
+//   ★ BIO ไม่มี HOLD รายวัน (getHoldAtDate) — ใช้ liveHold (ปัจจุบัน) หักทุกสัปดาห์
+//     ให้สอดคล้องกับ monthBFAvailable/liveAvailable (ที่หัก liveHold เดียวกัน) → telescoping ยังถูก
+function CfReconCard({
+  bf, bankActual, ivActual, loanActual, outflowActual,
+  ivWeekActual, loanWeekActual, outflowGrid,
+  weeks, nowWeek, snapshots, liveHold, monthNames, month,
+}) {
+  const [collapsed, setCollapsed] = cfState(true);  // ย่อไว้ default — ไม่โชว์รายการจนกว่าจะกดเปิด
+  const EPS = 1;  // ±1 บาท = ถือว่าตรง (กัน rounding เศษสตางค์)
+  const calculated = bf + ivActual + loanActual - outflowActual;
+  const grandDiff  = calculated - bankActual;
+  const grandPass  = Math.abs(grandDiff) <= EPS;
+  const okCol = 'var(--good)', badCol = 'var(--bad)';
+
+  // ── ตารางตรวจรายสัปดาห์ ──────────────────────────────────────────────
+  const rows = [];
+  let prevClose = bf;
+  weeks.forEach((w, i) => {
+    const weekEndISO = w.toISO;
+    let actualBal;
+    if (i < nowWeek) {
+      const anySnap = (snapshots || []).some(s => s.date && s.date <= weekEndISO);
+      actualBal = anySnap ? (getBalanceAtDate(snapshots, weekEndISO) - liveHold) : null;
+    } else if (i === nowWeek) {
+      actualBal = bankActual;     // สัปดาห์ปัจจุบัน = ยอดสดวันนี้
+    } else {
+      actualBal = null;           // อนาคต — ยังไม่มียอดจริงให้เทียบ
+    }
+    const inflow  = (ivWeekActual[i] || 0) + (loanWeekActual[i] || 0);
+    const outflow = [1, 2, 3, 4].reduce((s, c) => s + ((outflowGrid[i] && outflowGrid[i][c]) || 0), 0);
+    const opening = (i === 0) ? bf : prevClose;
+    const calc    = opening + inflow - outflow;
+    const diff    = (actualBal != null) ? (calc - actualBal) : null;
+    rows.push({ label: w.label, from: w.from, to: w.to, opening, inflow, outflow, calc, actualBal, diff });
+    prevClose = (actualBal != null) ? actualBal : calc;   // สัปดาห์ถัดไปเปิดด้วยยอดจริงสิ้นสัปดาห์นี้
+  });
+  const firstBreak = rows.findIndex(r => r.diff != null && Math.abs(r.diff) > EPS);
+
+  const num = (v, bold, col) => (
+    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: bold ? 800 : 600, color: col || 'var(--ink-800)' }}>
+      {fmtNum(v, 2)}
+    </span>
+  );
+
+  return (
+    <div className="cf-section-03 no-present" style={{ marginTop: 26 }}>
+      <div onClick={() => setCollapsed(c => !c)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: cfScale(14), padding: `${cfScale(8)} 0 ${cfScale(14)}` }}>
+        <div style={{ width: cfScale(38), height: cfScale(38), borderRadius: cfScale(10), background: 'linear-gradient(135deg, var(--brand-500), var(--brand-700))', color: 'white', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: cfScale(14), flex: 'none' }}>03</div>
+        <div style={{ flex: 1 }}>
+          <h2 style={{ margin: 0, fontSize: cfScale(17), fontWeight: 700, color: 'var(--ink-900)' }}>ตรวจสอบยอดดิบ</h2>
+          <div style={{ fontSize: cfScale(12), color: 'var(--ink-500)', marginTop: 2 }}>Cash Reconciliation · ยกมา + รับโครงการ + เงินกู้ − ค่าใช้จ่าย = เงินในธนาคารจริง · 🔒 เฉพาะผู้จัดการ</div>
+        </div>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: cfScale(6), flex: 'none', fontSize: cfScale(12.5), fontWeight: 700, color: 'var(--brand-600)' }}>
+          {collapsed ? 'กดเพื่อดู' : 'ย่อ'}
+          <span style={{ display: 'inline-block', transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform .15s' }}>▶</span>
+        </span>
+      </div>
+
+      {!collapsed && (<React.Fragment>
+      <div className="card anim-in" style={{ padding: cfScale(18), marginBottom: 16 }}>
+        {/* ── แถบสถานะ เขียว/แดง ── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: cfScale(13), padding: `${cfScale(13)} ${cfScale(16)}`,
+          borderRadius: cfScale(12), marginBottom: cfScale(16),
+          background: grandPass ? 'var(--good-bg)' : 'var(--bad-bg)',
+          border: `1.5px solid ${grandPass ? okCol : badCol}`,
+        }}>
+          <div style={{
+            width: cfScale(40), height: cfScale(40), borderRadius: '50%', flex: 'none',
+            display: 'grid', placeItems: 'center', color: '#fff', fontSize: cfScale(22), fontWeight: 800,
+            background: grandPass ? okCol : badCol,
+          }}>{grandPass ? '✓' : '⚠'}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: cfScale(17), fontWeight: 800, color: grandPass ? okCol : badCol }}>
+              {grandPass ? 'ยอดตรงกัน' : 'ยอดไม่ตรง'}
+            </div>
+            <div style={{ fontSize: cfScale(12), color: 'var(--ink-600)', marginTop: 2 }}>
+              {grandPass
+                ? 'ยอดคำนวณ = ยอดธนาคารจริง — ข้อมูลสอดคล้องครบถ้วน'
+                : 'ยอดคำนวณไม่ตรงกับธนาคารจริง — มีรายการตกหล่น ดูตารางรายสัปดาห์ด้านล่างเพื่อหาจุดที่ขาด'}
+            </div>
+          </div>
+          {!grandPass && (
+            <div style={{ textAlign: 'right', flex: 'none' }}>
+              <div style={{ fontSize: cfScale(11), color: 'var(--ink-500)' }}>ส่วนต่าง</div>
+              <div style={{ fontSize: cfScale(22), fontWeight: 800, color: badCol, fontVariantNumeric: 'tabular-nums' }}>
+                {grandDiff > 0 ? '+' : ''}{fmtNum(grandDiff, 2)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── กล่องสูตร ── */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: cfScale(8),
+          padding: cfScale(15), background: 'var(--ink-50)', borderRadius: cfScale(12), marginBottom: cfScale(14),
+        }}>
+          {[
+            { label: 'ยอดยกมา (B/F)', value: bf,            sign: '',  col: 'var(--ink-800)' },
+            { label: 'รับโครงการ',     value: ivActual,      sign: '+', col: okCol },
+            { label: 'เงินกู้',         value: loanActual,    sign: '+', col: okCol },
+            { label: 'ค่าใช้จ่าย',      value: outflowActual, sign: '−', col: badCol },
+          ].map((it, i) => (
+            <React.Fragment key={it.label}>
+              {i > 0 && <span style={{ fontSize: cfScale(22), fontWeight: 700, color: it.sign === '−' ? badCol : 'var(--ink-400)' }}>{it.sign}</span>}
+              <div style={{ textAlign: 'center', minWidth: cfScale(110) }}>
+                <div style={{ fontSize: cfScale(11.5), color: 'var(--ink-500)', marginBottom: 3 }}>{it.label}</div>
+                <div style={{ fontSize: cfScale(16), fontWeight: 700, color: it.col, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(it.value, 2)}</div>
+              </div>
+            </React.Fragment>
+          ))}
+          <span style={{ fontSize: cfScale(22), fontWeight: 700, color: 'var(--brand-500)' }}>=</span>
+          <div style={{ textAlign: 'center', minWidth: cfScale(140) }}>
+            <div style={{ fontSize: cfScale(11.5), color: 'var(--ink-500)', marginBottom: 3 }}>ยอดสุทธิใช้ได้ (คำนวณ)</div>
+            <div style={{ fontSize: cfScale(18), fontWeight: 800, color: 'var(--brand-700)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(calculated, 2)}</div>
+          </div>
+        </div>
+
+        {/* ── 3 ช่องเทียบ ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: cfScale(12) }}>
+          {[
+            { label: 'คำนวณได้', value: calculated, col: 'var(--brand-700)', bg: 'var(--brand-50)', bd: 'var(--brand-200)' },
+            { label: 'ธนาคารจริง', value: bankActual, col: 'var(--ink-900)', bg: 'var(--ink-50)', bd: 'var(--line)' },
+            { label: 'ส่วนต่าง', value: grandDiff, col: grandPass ? okCol : badCol, bg: grandPass ? 'var(--good-bg)' : 'var(--bad-bg)', bd: grandPass ? okCol : badCol, signed: true },
+          ].map(b => (
+            <div key={b.label} style={{
+              textAlign: 'center', padding: `${cfScale(12)} ${cfScale(10)}`, borderRadius: cfScale(10),
+              background: b.bg, border: `1px solid ${b.bd}`,
+            }}>
+              <div style={{ fontSize: cfScale(12), color: 'var(--ink-500)', marginBottom: cfScale(4) }}>{b.label}</div>
+              <div style={{ fontSize: cfScale(20), fontWeight: 800, color: b.col, fontVariantNumeric: 'tabular-nums' }}>
+                {b.signed && b.value > 0 ? '+' : ''}{fmtNum(b.value, 2)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── ตารางตรวจรายสัปดาห์ ── */}
+      <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: `${cfScale(11)} ${cfScale(16)}`, borderBottom: '1px solid var(--line)', fontWeight: 700, fontSize: cfScale(14), color: 'var(--ink-800)' }}>
+          ตรวจสอบต่อเนื่องรายสัปดาห์
+          <span style={{ fontWeight: 400, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
+            แต่ละสัปดาห์เปิดด้วยยอดจริงสิ้นสัปดาห์ก่อน — ส่วนต่างจะชี้สัปดาห์ที่ยอดเริ่มขาด
+          </span>
+        </div>
+        <table className="tbl" style={{ width: '100%', fontSize: cfScale(13) }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>สัปดาห์</th>
+              <th style={{ textAlign: 'right' }}>ยอดยกมา</th>
+              <th style={{ textAlign: 'right', color: okCol }}>+ เงินเข้า</th>
+              <th style={{ textAlign: 'right', color: badCol }}>− เงินออก</th>
+              <th style={{ textAlign: 'right' }}>= คงเหลือ (คำนวณ)</th>
+              <th style={{ textAlign: 'right' }}>ยอดในตาราง (จริง)</th>
+              <th style={{ textAlign: 'right' }}>ส่วนต่าง</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const future = r.actualBal == null;
+              const hasDiff = !future && Math.abs(r.diff) > EPS;
+              const isBreak = i === firstBreak;
+              return (
+                <tr key={i} style={{
+                  background: isBreak ? 'var(--bad-bg)' : (hasDiff ? 'color-mix(in oklch, var(--bad) 6%, transparent)' : 'transparent'),
+                  borderLeft: isBreak ? `3px solid ${badCol}` : '3px solid transparent',
+                }}>
+                  <td style={{ fontWeight: 700, color: 'var(--ink-800)', whiteSpace: 'nowrap' }}>
+                    {r.label}
+                    <span style={{ fontWeight: 400, color: 'var(--ink-400)', fontSize: cfScale(11), marginLeft: cfScale(5) }}>
+                      {r.from}–{r.to} {monthNames[month - 1]}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{num(r.opening)}</td>
+                  <td style={{ textAlign: 'right' }}>{r.inflow > 0 ? num(r.inflow, false, okCol) : <span style={{ color: 'var(--ink-300)' }}>–</span>}</td>
+                  <td style={{ textAlign: 'right' }}>{r.outflow > 0 ? num(r.outflow, false, badCol) : <span style={{ color: 'var(--ink-300)' }}>–</span>}</td>
+                  <td style={{ textAlign: 'right' }}>{num(r.calc, true)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {future
+                      ? <span style={{ color: 'var(--ink-300)' }}>—</span>
+                      : num(r.actualBal, true)}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {future
+                      ? <span style={{ color: 'var(--ink-300)', fontSize: cfScale(11) }}>รออนาคต</span>
+                      : (hasDiff
+                          ? <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: cfScale(3),
+                              fontWeight: 800, color: '#fff', background: badCol,
+                              padding: `${cfScale(2)} ${cfScale(9)}`, borderRadius: 999, fontVariantNumeric: 'tabular-nums',
+                            }}>
+                              ⚠ {r.diff > 0 ? '+' : ''}{fmtNum(r.diff, 2)}
+                            </span>
+                          : <span style={{ color: okCol, fontWeight: 800 }}>✓ 0.00</span>)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {firstBreak >= 0 && (
+          <div style={{ padding: `${cfScale(10)} ${cfScale(16)}`, background: 'var(--bad-bg)', borderTop: `1px solid ${badCol}`, fontSize: cfScale(12.5), color: 'var(--ink-700)' }}>
+            🔎 ยอดเริ่มขาดที่ <strong style={{ color: badCol }}>{rows[firstBreak].label}</strong> — ไปไล่ดูรายการรับ/จ่ายของสัปดาห์นั้น (PV / IV / เงินกู้ ที่อาจยังไม่ได้บันทึก หรือยอดธนาคารที่ยังไม่อัปเดต)
+          </div>
+        )}
+      </div>
+      </React.Fragment>)}
+    </div>
+  );
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────
@@ -1990,6 +2214,26 @@ function CashFlowDashboard({ data, setData, toast }) {
         </ul>
         )}
       </div>
+
+      {/* ═════ SECTION 03 — ตรวจสอบยอดดิบ (manager-only) ═══════════════════ */}
+      {cfIsManager() && (
+        <CfReconCard
+          bf={monthBFAvailable}
+          bankActual={liveAvailable}
+          ivActual={ivActual}
+          loanActual={loanActual}
+          outflowActual={outflowActual}
+          ivWeekActual={ivInflowByWeek.actual}
+          loanWeekActual={loanByWeek.actual}
+          outflowGrid={pvActualByWeekCat}
+          weeks={weeks}
+          nowWeek={nowWeek}
+          snapshots={snapshots}
+          liveHold={liveHold}
+          monthNames={monthNames}
+          month={month}
+        />
+      )}
 
       {/* ═════ Drill-down modal — verify which rows make up each cell ═══════ */}
       {drillDown && (
