@@ -621,6 +621,39 @@ function CashFlowDashboard({ data, setData, toast }) {
   const snapshots      = data.cashflowSnapshots || [];
   const bankAccounts   = data.bankAccounts || [];
 
+  // ── BANK_RECON (จ่ายจริงจากกระทบยอด) — กัน "แถวผี" นับเบิ้ล โดยไม่ทำ LG จ่ายซ้ำจริงหาย ──────────
+  //   bankReconState = 1 entry ต่อ 1 บรรทัด statement ที่กดจ่ายจริง (decision='recorded' → forecastId).
+  //   ★ ห้าม dedup ด้วย "เนื้อหา" (LG จ่ายซ้ำจริง ยอด+วัน+desc เหมือนกันเป๊ะ = ของจริง 2 ใบ = 2 statement
+  //     line = 2 reconState entry → ต้องนับทั้งคู่). ใช้ reconState เป็นตัวตัดสิน: นับเฉพาะแถวที่ id เป็น
+  //     forecastId ปัจจุบันของ reconState; "แถวผี" = forecastEntries BANK_RECON ที่ไม่มี entry ไหนชี้หา
+  //     (ตกค้างจากการ record ซ้ำ → reconState ชี้ id ใหม่ แถวเก่าลอย). ตัดเฉพาะแถวผีที่มี "ตัวจริง" (live twin)
+  //     content เดียวกันอยู่ → กันยอดหาย (แถวผีโดดเดี่ยวไม่มี twin ยังนับ).
+  const reconValidity = cfMemo(() => {
+    const validIds = new Set();
+    (data.bankReconState || []).forEach(r => {
+      if (r && String(r.decision || '') === 'recorded' && r.forecastId) validIds.add(String(r.forecastId));
+    });
+    const liveKeys = new Set();
+    if (validIds.size > 0) {
+      (data.forecastEntries || []).forEach(fe => {
+        if (String(fe.EXPENSE_TYPE || '').toUpperCase() !== 'BANK_RECON') return;
+        if (!validIds.has(String(fe.id))) return;
+        const d = fe.ACTUAL_DATE || fe.PAYMENT_DATE || fe.DATE;
+        const a = Number(fe.ACTUAL_AMOUNT || fe.AMOUNT || fe.amount || 0);
+        liveKeys.add(String(fe.Bank_AC || '').trim() + '|' + d + '|' + a + '|' + String(fe.DESCRIPTION || '').trim());
+      });
+    }
+    return { validIds, liveKeys };
+  }, [data.bankReconState, data.forecastEntries]);
+  // true = แถว BANK_RECON นี้เป็น "ผีซ้ำ" (orphan + มี live twin) → ไม่ต้องนับ
+  const isReconDupOrphan = (fe, date, amt) => {
+    const { validIds, liveKeys } = reconValidity;
+    if (validIds.size === 0) return false;                 // reconState ยังไม่โหลด/ไม่ใช้ → นับทุกแถว (กันยอดหาย)
+    if (validIds.has(String(fe.id))) return false;         // ตัวจริง (ถูกอ้างใน reconState)
+    const rk = String(fe.Bank_AC || '').trim() + '|' + date + '|' + amt + '|' + String(fe.DESCRIPTION || '').trim();
+    return liveKeys.has(rk);                                // orphan + มี live twin → re-record ซ้ำ
+  };
+
   // ── financeByCode lookup (เหมือนหน้า IV) — ใช้คำนวณ debt + netExpected ──
   const financeByCode = cfMemo(() => {
     if (window.WTPData && typeof window.WTPData.buildLookups === 'function') {
@@ -698,7 +731,9 @@ function CashFlowDashboard({ data, setData, toast }) {
       // จัดหมวด: override ราย PV (cf.pvCat) > AP ที่ผูก > vendor/keyword — ต้องตรงกับ drill-down (openActualDrill)
       const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
       const cat = resolvePvCategory(pv, ap);
-      const amt = Number(pv.Net_Amount || pv.Amount || 0);
+      // ★ ห้ามใช้ ||: Net_Amount=0 (ตัดมัดจำ/เคลียร์เงินทดรอง = ไม่มีเงินออก) เป็น falsy ใน JS
+      //   → fallback ไป Amount (ก่อนหัก) → นับซ้ำเป็นเงินออกเต็มก้อน. ต้องเช็ค null/'' แทน.
+      const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
       grid[wIdx][cat] += amt;
     });
     // Also include forecastEntries with STATUS in {ACTUAL, BOOKED} as actuals
@@ -713,11 +748,12 @@ function CashFlowDashboard({ data, setData, toast }) {
       if (!inMonth(date, year, month)) return;
       const wIdx = findWeekIdx(date, weeks);
       if (wIdx < 0) return;
+      if (isReconDupOrphan(fe, date, amt)) return;   // แถวผี BANK_RECON ที่ซ้ำกับตัวจริง → ไม่นับ (LG จ่ายซ้ำจริงไม่โดน)
       const cat = categorizeForecastEntry(fe);
       grid[wIdx][cat] += Math.abs(amt);
     });
     return grid;
-  }, [pvVouchers, payables, forecastEntries, ovTick, weeks, year, month]);
+  }, [pvVouchers, payables, forecastEntries, ovTick, weeks, year, month, reconValidity]);
 
   // ── ประมาณการรายจ่าย "คงเหลือ" = forecast − จ่ายจริงแล้ว (ราย week × cat, floor 0) ──────
   //   ตารางประมาณการรายสัปดาห์ (Section 01) แสดง "ยอดที่ยังต้องจ่าย" — หักส่วนที่จ่าย Actual (PV) ไปแล้ว
@@ -1371,7 +1407,8 @@ function CashFlowDashboard({ data, setData, toast }) {
       const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
       const c = resolvePvCategory(pv, ap);
       if (!wantCat(c)) return;
-      const amt = Number(pv.Net_Amount || pv.Amount || 0);
+      // ★ ห้ามใช้ ||: Net_Amount=0 (ตัดมัดจำ) เป็น falsy → fallback ไป Amount → drill โชว์ยอดก่อนหัก
+      const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
       items.push({
         source: 'PV', date, pvNo: pv.PL_PV_No || '', cat: c,
         name: pv.Payee || (ap && (ap.cust_name || ap.vendor)) || '—',
@@ -1407,6 +1444,7 @@ function CashFlowDashboard({ data, setData, toast }) {
       if (findWeekIdx(date, weeks) !== weekIdx) return;
       const c = categorizeForecastEntry(fe);
       if (!wantCat(c)) return;
+      if (isReconDupOrphan(fe, date, amt)) return;   // แถวผี BANK_RECON ที่ซ้ำกับตัวจริง → ไม่แสดง (ตรงกับ sum)
       // รายการที่บันทึกจ่ายจริงผ่านหน้ากระทบยอด (BANK_RECON) → ป้าย "STM" ไม่ใช่ "Forecast" (มันคือจ่ายจริง ไม่ใช่ประมาณการ)
       const isRecon = String(fe.EXPENSE_TYPE || '').toUpperCase() === 'BANK_RECON';
       items.push({
