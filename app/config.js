@@ -40,7 +40,9 @@ window.WTP_CONFIG = {
   //          → ใช้ตอนตั้งระบบครั้งแรก เพื่อทดสอบว่าเว็บต่อ Supabase ใหม่ได้
   //  true  = production: login ผ่าน Supabase Auth (รหัส hash ฝั่ง server, role จาก
   //          app_metadata) — เปิดหลังสร้าง Auth users + รัน rls-phase4.sql แล้ว
-  USE_SUPABASE_AUTH: false,
+  //  ★ 2026-06-25 go-live: RLS เปิดอยู่ + สร้าง Auth user (patima/manager) แล้ว → ต้องเป็น true
+  //    ไม่งั้น login bootstrap จะวิ่งเป็น anon → RLS บล็อก → จอว่าง (ดู CLAUDE.md 2026-06-25)
+  USE_SUPABASE_AUTH: true,
 
   // P&L / Budget / Audit Log ย้ายเข้า Supabase แล้ว (Phase 5) → ไม่ใช้ Google Sheet
   //   เว้นว่างได้ทั้งคู่ (ไม่มี entity ไหนวิ่งไป gviz/Apps Script อีก)
@@ -55,13 +57,16 @@ window.WTP_CONFIG = {
   //    login ต้องมี password" ในนี้. หลังเปิด Supabase Auth ให้ "ลบ password ออก"
   //    แล้วสร้างผู้ใช้+รหัสผ่าน tools/supabase-auth-setup.html แทน (อย่าทิ้งรหัสไว้ใน repo public)
   //  Roles: viewer (ดู) · staff (แก้ได้ ลบไม่ได้) · manager (ทุกอย่าง+users) · owner (ดูอย่างเดียว)
+  //  USE_SUPABASE_AUTH:true แล้ว → "ไม่เช็ค password ที่นี่" (login ผ่าน Supabase Auth)
+  //  รายการนี้เหลือไว้เป็น "directory" (ชื่อ/role) ให้บางหน้ารู้จักผู้ใช้ — ห้ามใส่ password กลับ
   USERS: [
-    { username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'manager', password: 'bioaxel-setup-2026' },
+    { username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'manager' },
+    { username: 'patima', displayName: 'Patima', role: 'manager' },
   ],
 
   SESSION_TTL_MS: 8 * 60 * 60 * 1000,   // 8 ชั่วโมง
   IDLE_LOGOUT_MS: 30 * 60 * 1000,       // 30 นาที — เด้งออกเมื่อไม่ได้ใช้งาน
-  FORCE_LOGOUT_BEFORE: 1781773499469,   // 2026-06-18 — บังคับทุกคน re-login รอบล้างข้อมูล POG ออกจากฐาน (ดู CLAUDE.md)
+  FORCE_LOGOUT_BEFORE: 1782380425413,   // 2026-06-25 — Phase 4 go-live: บังคับทุกคน re-login ผ่าน Supabase Auth (รหัสใหม่) หลังเปิด RLS+Auth
   PRESENCE_HEARTBEAT_MS: 5 * 60 * 1000, // 5 นาที — "ใครออนไลน์"
 
   // auto-push เฉพาะตอนผู้ใช้แก้จริง (กันแท็บค้างดันข้อมูลหาย) — ปุ่มบันทึก (forceSyncNow) ข้าม gate นี้เสมอ
