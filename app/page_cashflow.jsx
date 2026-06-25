@@ -1187,6 +1187,7 @@ function CashFlowDashboard({ data, setData, toast }) {
       const isRecon = String(fe.EXPENSE_TYPE || '').toUpperCase() === 'BANK_RECON';
       items.push({
         source: isRecon ? 'STM' : 'Forecast', date,
+        feId: fe.id || '', cat: c,
         name: fe.DESCRIPTION || '—',
         ref: fe.JOB_NO || '',
         amount: -Math.abs(amt), isPaid: true,
@@ -1277,7 +1278,7 @@ function CashFlowDashboard({ data, setData, toast }) {
   const setItemCategory = (item, cat) => {
     cat = parseInt(cat, 10);
     if (!item || !(cat >= 1 && cat <= 4)) return;
-    if (item.source === 'Forecast' && item.feId) {
+    if ((item.source === 'Forecast' || item.source === 'STM') && item.feId) {
       setData(d => ({ ...d, forecastEntries: (d.forecastEntries || []).map(fe => fe.id === item.feId ? { ...fe, CATEGORY: cat } : fe) }));
     } else if (item.source === 'PV' && item.pvNo) {
       WTPOverride.set(cfPvCatKey(item.pvNo), cat);
@@ -1296,7 +1297,7 @@ function CashFlowDashboard({ data, setData, toast }) {
     if (!Array.isArray(items) || !items.length || !(cat >= 1 && cat <= 4)) return;
     const feIds = new Set(), vchnos = new Set(), pvNos = [];
     items.forEach(it => {
-      if (it.source === 'Forecast' && it.feId) feIds.add(it.feId);
+      if ((it.source === 'Forecast' || it.source === 'STM') && it.feId) feIds.add(it.feId);
       else if (it.source === 'PV' && it.pvNo) pvNos.push(it.pvNo);
       else if (it.source === 'AP' && it.vchno) vchnos.add(it.vchno);
     });
