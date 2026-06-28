@@ -2355,11 +2355,9 @@ function DataPayablePage({ data, setData, toast }) {
     if (v.startsWith('APO')) return 'APO';
     if (v.startsWith('APS')) return 'APS';
     if (v.startsWith('APV')) return 'APV';
-    if (v.startsWith('AP'))  return 'AP';   // EXPRESS
-    if (v.startsWith('RS'))  return 'RS';   // EXPRESS ใบรับสินค้า
-    if (v.startsWith('AD'))  return 'AD';   // EXPRESS ทดรองจ่าย
-    if (v.startsWith('CV'))  return 'CV';   // EXPRESS
-    return 'other';
+    // EXPRESS prefix ที่เหลือ = ตัวอักษรหน้าเลข (AP/RS/RR/CV/CC/RO/RC/AD/C …) — data-driven
+    const m = v.match(/^([A-Z]{1,3})/);
+    return m ? m[1] : 'other';
   };
 
   const dptCodes = dxMemo(() =>
@@ -2419,9 +2417,10 @@ function DataPayablePage({ data, setData, toast }) {
   filtered.forEach(r => { const k = r.dpt_code || '?'; byDpt[k] = (byDpt[k]||0) + parseNum(r.netpayment); });
   const topDpt = Object.entries(byDpt).sort((a,b)=>b[1]-a[1])[0] || ['—', 0];
 
-  // Doc-type counts
-  const dtCount = { APO: 0, APS: 0, APV: 0, AP: 0, RS: 0, AD: 0, CV: 0 };
-  rows.forEach(r => { const t = getDocType(r.vchno); if (dtCount[t] !== undefined) dtCount[t]++; });
+  // Doc-type counts — data-driven (chips ปรับตาม prefix ที่มีจริงในไฟล์)
+  const dtCount = {};
+  rows.forEach(r => { const t = getDocType(r.vchno); dtCount[t] = (dtCount[t] || 0) + 1; });
+  const docTypes = Object.keys(dtCount).filter(t => t !== 'other').sort((a, b) => dtCount[b] - dtCount[a]);
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -2599,7 +2598,7 @@ function DataPayablePage({ data, setData, toast }) {
             <Icon name="refresh" size={14} /> รีเฟรชจาก Sheet
           </button>
           <button className="btn btn-ghost" onClick={() => setShowImport(true)}>
-            <Icon name="upload" size={14} /> นำเข้า Excel
+            <Icon name="upload" size={14} /> นำเข้าไฟล์ (XML / Excel)
           </button>
         </div>
       </div>
@@ -2637,9 +2636,12 @@ function DataPayablePage({ data, setData, toast }) {
       <div className="card" style={{ padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div className="tabnav" style={{ flex: '0 0 auto' }}>
           <button className={docFilter === 'all' ? 'active' : ''} onClick={() => setDocFilter('all')}>ทั้งหมด ({rows.length})</button>
-          {['APO','APS','APV','AP','RS','AD','CV'].filter(t => dtCount[t] > 0).map(t => (
+          {docTypes.map(t => (
             <button key={t} className={docFilter === t ? 'active' : ''} onClick={() => setDocFilter(t)}>{t} ({dtCount[t]})</button>
           ))}
+          {dtCount.other > 0 && (
+            <button className={docFilter === 'other' ? 'active' : ''} onClick={() => setDocFilter('other')}>อื่นๆ ({dtCount.other})</button>
+          )}
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2763,7 +2765,7 @@ function DataPayablePage({ data, setData, toast }) {
         <Modal open={showImport} maxWidth={680}
           title={
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span>นำเข้า Excel · AP Outstanding</span>
+              <span>นำเข้าเจ้าหนี้คงค้าง · XML (EXPRESS) / Excel</span>
               <button type="button" onClick={() => setImportHelpOpen(o => !o)}
                 title={importHelpOpen ? 'ซ่อนคำอธิบาย' : 'ดูคำอธิบาย / กฎการนำเข้า'}
                 aria-label="help"
@@ -2796,7 +2798,7 @@ function DataPayablePage({ data, setData, toast }) {
               background: '#fefce8', border: '1px solid #fde68a', borderLeft: '3px solid #f6ad55',
               borderRadius: 7, color: 'var(--ink-700)', lineHeight: 1.65,
             }}>
-              <div>📊 <strong>ไฟล์ .xml จากโปรแกรม EXPRESS</strong> — รายงาน "เจ้าหนี้คงค้างแบบละเอียด" รองรับทุก prefix (RS/AP/AD/CV)</div>
+              <div>📊 <strong>ไฟล์ .xml จากโปรแกรม EXPRESS</strong> — รายงาน "เจ้าหนี้คงค้างแบบละเอียด" รองรับทุก prefix (CV/RS/RR/CC/RO/RC/AP/AD …) ครบทุกประเภทผู้จำหน่าย</div>
               <div>📥 หรือ <strong>อัปโหลด .xlsx/.csv</strong> / <strong>วาง TSV</strong>. แถวแรกต้องเป็นชื่อคอลัมน์ (header)</div>
               <div>🧹 <strong>แถวสรุปยอด/หัวหมวด</strong> ถูกตัดออกอัตโนมัติ — นำเข้าเฉพาะรายการจริง</div>
               <div>🔁 รายการที่ <strong>vchno ซ้ำ</strong> แต่ค่าเปลี่ยน (ยอด/วันครบกำหนด) จะ <strong>แจ้งเตือนให้ตรวจทาน</strong> ก่อนอัปเดต</div>
