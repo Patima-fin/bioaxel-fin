@@ -45,7 +45,7 @@ const ROLE_PERMS = {
   },
   // ฝ่ายการเงิน — ทำงานปกติ เพิ่ม/แก้ได้ แต่ลบไม่ได้ + ไม่เห็น audit + users
   staff: {
-    pages: '*', excludePages: new Set(['users', 'audit_log']),
+    pages: '*', excludePages: new Set(['users', 'audit_log', 'backup']),
     canEdit: true, canDelete: false, canApprove: true, canManageUsers: false,
   },
   // หัวหน้า — ทำได้ทุกอย่าง รวมจัดการ users + ดู audit log
@@ -55,7 +55,7 @@ const ROLE_PERMS = {
   },
   // เจ้าของ — ดูได้ทุกหน้า แต่แก้/ลบไม่ได้ + ไม่เห็น audit + users + บันทึก/บัญชีธนาคาร
   owner: {
-    pages: '*', excludePages: new Set(['users', 'audit_log', 'daily_balance', 'data_bank', 'bank_diary', 'bank_recon']),
+    pages: '*', excludePages: new Set(['users', 'audit_log', 'backup', 'daily_balance', 'data_bank', 'bank_diary', 'bank_recon']),
     canEdit: false, canDelete: false, canApprove: false, canManageUsers: false,
   },
 };
@@ -517,6 +517,7 @@ function App() {
     data_pv:       { label: 'DATA PV', title: 'Payment Vouchers', icon: 'money' },
     data_payable:  { label: 'DATA เจ้าหนี้คงค้าง', title: 'Accounts Payable', icon: 'invoice' },
     audit_log:     { label: 'Audit Log',           title: 'Audit Log — ประวัติแก้ไข', icon: 'settings' },
+    backup:        { label: 'สำรอง / กู้คืนข้อมูล', title: 'สำรอง / กู้คืนข้อมูล (Backup)', icon: 'settings' },
     users:         { label: 'จัดการผู้ใช้',         title: 'Users · จัดการผู้ใช้ระบบ', icon: 'settings' },
     daily_balance: { label: 'บันทึกยอดธนาคาร',     title: 'บันทึกยอดธนาคารรายวัน', icon: 'bank' },
     pnl:           { label: 'งบกำไรขาดทุน (P&L)',   title: 'Profit & Loss Statement', icon: 'forecast' },
@@ -549,6 +550,7 @@ function App() {
     case 'data_pv':        page = <DataPVPage data={data} setData={setData} toast={pushToast} />; break;
     case 'data_payable':   page = <DataPayablePage data={data} setData={setData} toast={pushToast} />; break;
     case 'audit_log':      page = <AuditLogPage data={data} toast={pushToast} />; break;
+    case 'backup':         page = <BackupPage toast={pushToast} />; break;
     case 'users':          page = <UsersPage data={data} setData={setData} toast={pushToast} />; break;
     case 'daily_balance':  page = <DailyBalancePage data={data} setData={setData} toast={pushToast} />; break;
     case 'pnl':            page = <PnLPage data={data} setData={setData} toast={pushToast} />; break;
@@ -822,6 +824,7 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
             </div>
             {(sec.system !== false || collapsed) && navItems([
               ['audit_log',     'Audit Log',         'settings'],
+              ['backup',        'สำรอง / กู้คืนข้อมูล', 'settings'],
               ['users',         'จัดการผู้ใช้',     'settings'],
             ])}
           </div>

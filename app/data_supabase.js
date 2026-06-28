@@ -418,6 +418,79 @@
     });
   };
 
+  /* ── backupExport: อ่านทุกตารางจาก Supabase → object {app,exportedAt,tables} ──
+   *   ใช้โดยหน้า "สำรอง/กู้คืน" (#backup) — แทน tools/supabase-backup.html ที่ต้อง login แยก.
+   *   อ่าน ALL_TABLES + SHEET_TABLES (P&L/Budget/cashflowPresent).
+   *   onProgress(table, count, idx, total, errMsg?) เรียกต่อตาราง (count=-1 = error). */
+  WTPData.backupExport = function (onProgress) {
+    if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
+    var tables = ALL_TABLES.concat(SHEET_TABLES);
+    var out = { app: 'bioaxel-fin', exportedAt: new Date().toISOString(), tables: {} };
+    var i = 0;
+    function nx() {
+      if (i >= tables.length) return out;
+      var t = tables[i++];
+      return selectAll(t).then(function (recs) {
+        out.tables[t] = (recs || []).map(function (r) { return (r && r.data) || r; });
+        if (onProgress) { try { onProgress(t, out.tables[t].length, i, tables.length); } catch (_) {} }
+        return nx();
+      }, function (err) {
+        out.tables[t] = [];
+        if (onProgress) { try { onProgress(t, -1, i, tables.length, err && err.message); } catch (_) {} }
+        return nx();
+      });
+    }
+    return Promise.resolve().then(nx);
+  };
+
+  /* ── restoreUpsert: กู้คืนจากไฟล์ backup — upsert ตาม id (non-destructive) ──
+   *   ★ ไม่ลบแถวที่มีใน DB แต่ไม่มีในไฟล์ → เหมาะกับ "กู้แถวที่หาย" ไม่ใช่ rollback ทั้งระบบ
+   *     (ต่างจาก writeTable ที่ลบ id ที่หายไป). batch 500. คืน Promise<{restored,skipped}>. */
+  WTPData.restoreUpsert = function (tables, onProgress) {
+    if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
+    var known = {}; ALL_TABLES.concat(SHEET_TABLES).forEach(function (t) { known[t] = true; });
+    var BATCH = 500;
+    var keys = Object.keys(tables || {});
+    var summary = { restored: {}, skipped: [] };
+    function upsertAll(t, recs) {
+      var j = 0;
+      function step() {
+        if (j >= recs.length) return Promise.resolve();
+        return sb.from(t).upsert(recs.slice(j, j + BATCH)).then(chk).then(function () { j += BATCH; return step(); });
+      }
+      return step();
+    }
+    var i = 0;
+    function nx() {
+      if (i >= keys.length) {
+        try {
+          var m = _currentMeta();
+          var nT = Object.keys(summary.restored).length;
+          var nR = Object.keys(summary.restored).reduce(function (s, k) { return s + Math.max(0, summary.restored[k]); }, 0);
+          sb.from('audit_log').insert([{ username: m.user, display_name: m.displayName, role: m.role,
+            action: 'restore', entity: 'backup', summary: 'กู้คืน ' + nT + ' ตาราง รวม ' + nR + ' แถว' }])
+            .then(function () {}, function () {});
+        } catch (_) {}
+        return summary;
+      }
+      var t = keys[i++];
+      if (!known[t]) { summary.skipped.push(t); if (onProgress) { try { onProgress(t, -2, i, keys.length); } catch (_) {} } return nx(); }
+      var rows = (tables[t] || []).filter(function (r) { return r && r.id != null; });
+      if (!rows.length) { summary.restored[t] = 0; if (onProgress) { try { onProgress(t, 0, i, keys.length); } catch (_) {} } return nx(); }
+      var recs = rows.map(function (r) { return { id: String(r.id), data: r }; });
+      return upsertAll(t, recs).then(function () {
+        summary.restored[t] = recs.length;
+        if (onProgress) { try { onProgress(t, recs.length, i, keys.length); } catch (_) {} }
+        return nx();
+      }, function (err) {
+        summary.restored[t] = -1;
+        if (onProgress) { try { onProgress(t, -1, i, keys.length, err && err.message); } catch (_) {} }
+        return nx();
+      });
+    }
+    return Promise.resolve().then(nx);
+  };
+
   /* ── pushPresence: upsert แถว presence (best-effort, แยกจาก diff loop) ──── */
   WTPData.pushPresence = function (row) {
     if (!_hasValidSession()) return;
