@@ -645,5 +645,8 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 ## 2026-06-28 — กล่องยืนยันก่อน "ยกเลิกบันทึกจ่ายจริง" (undoRecord, port จาก WTP) — build `page_bank_recon 20260628a`
 - ออดิตทุกหน้า (ฝั่ง WTP): destructive action เกือบทั้งหมดมี `window.confirm` แล้ว — จุดเดียวที่ขาด = `undoRecord` ([page_bank_recon.jsx:837](app/page_bank_recon.jsx)) ปุ่ม "↩ ยกเลิก" ที่ `forceDeleteRows('forecastEntries', forecastId)` (ข้ามเกราะ protect-ACTUAL) + `forceSyncNow` = ลบรายการ "จ่ายจริง" (ACTUAL) ออกจาก Cashflow ถาวร + sync ทั้งทีม โดยไม่ถาม. เพิ่ม `window.confirm('ยกเลิกการบันทึกจ่ายจริงรายการนี้?…')` ต้นฟังก์ชัน (ครอบ 3 call-site). verify: Babel transform ผ่าน.
 
+## 2026-06-28 — Loading state ตอนดึงข้อมูล server รอบแรก (port จาก WTP) — build `app.jsx 20260628b` / `styles.css 20260628a`
+- หลัง splash หาย ข้อมูลจริงยังโหลดไม่เสร็จ → หน้าโชว์ศูนย์/ว่าง ดูเหมือนพัง. FIX (`app.jsx`): state `firstLoadDone` (flip เมื่อ subscribe callback แรก = ข้อมูล server มาถึง; failSafe 12s กันค้าง) + `showInitialLoad = !firstLoadDone && coreEmpty` (invoices/bankAccounts/projects/payables ว่างหมด) → cached user เห็นทันที ไม่โดนบัง. render `<DataLoadingState/>` (spinner + "กำลังโหลดข้อมูล…") แทน `{page}`. CSS `.wtp-loading*` ใน styles.css (spinner = `var(--brand-500)` เขียวแบรนด์ หมุน). verify: Babel ผ่าน + spinner เขียว rgb(46,139,74) หมุน + ไม่มี error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

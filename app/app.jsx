@@ -80,6 +80,17 @@ window.WTPAuth = {
   },
 };
 
+// ★ Loading state กลางจอ — โชว์ระหว่างดึงข้อมูลจาก server รอบแรก (แทนหน้าว่าง/ศูนย์)
+function DataLoadingState() {
+  return (
+    <div className="wtp-loading">
+      <div className="wtp-loading-spin" aria-hidden="true" />
+      <div className="wtp-loading-text">กำลังโหลดข้อมูล…</div>
+      <div className="wtp-loading-sub">ดึงข้อมูลล่าสุดจากเซิร์ฟเวอร์</div>
+    </div>
+  );
+}
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = aState(() => {
     try {
@@ -124,6 +135,9 @@ function App() {
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const { push: pushToast, node: toastNode } = useToasts();
   const [syncInfo, setSyncInfo] = aState(() => WTPData.getSyncStatus ? WTPData.getSyncStatus() : { status: 'offline', time: null });
+  // ★ Loading state: true เมื่อข้อมูลจริงจาก server มาถึงครั้งแรกแล้ว (subscribe callback แรก)
+  //   ใช้โชว์ "กำลังโหลด…" แทนหน้าว่าง/ศูนย์ ตอน fetch รอบแรก (เฉพาะตอน cache ยังว่าง)
+  const [firstLoadDone, setFirstLoadDone] = aState(false);
 
   // Persist data on change + expose globally for debugging in DevTools console
   // + expose setData for WTPOverride (cloud-shared manual overrides)
@@ -191,13 +205,18 @@ function App() {
     } catch (_) { /* non-fatal */ }
   }, [data.manualOverrides]);
 
-  // Subscribe to server data updates (from data_sync.js)
+  // Subscribe to server data updates (from data_sync.js / data_supabase.js)
   aEffect(() => {
-    if (!WTPData.subscribe) return;
-    const unsub = WTPData.subscribe(serverData => setData(serverData));
+    if (!WTPData.subscribe) { setFirstLoadDone(true); return; }
+    const unsub = WTPData.subscribe(serverData => {
+      setData(serverData);
+      setFirstLoadDone(true);   // ★ ข้อมูลจริงจาก server มาถึงแล้ว → เลิกโชว์ loading
+    });
     const onStatus = e => setSyncInfo(e.detail);
     window.addEventListener('wtpSyncStatus', onStatus);
-    return () => { unsub(); window.removeEventListener('wtpSyncStatus', onStatus); };
+    // กันค้าง: ถ้า server โหลดไม่สำเร็จ/ไม่ยิง callback ใน 12 วิ → เลิกโชว์ loading (โชว์หน้าตามจริง)
+    const failSafe = setTimeout(() => setFirstLoadDone(true), 12000);
+    return () => { unsub(); clearTimeout(failSafe); window.removeEventListener('wtpSyncStatus', onStatus); };
   }, []);
 
   // ── แจ้งเตือนผู้ใช้เมื่อ sync ถูกบล็อก/รีซิงค์ (เดิมขึ้นแค่ใน console ผู้ใช้ไม่เห็น
@@ -559,6 +578,16 @@ function App() {
     default:               page = <HomePage data={data} />;
   }
 
+  // ★ โชว์ "กำลังโหลดข้อมูล…" แทนหน้าว่าง/ศูนย์ เฉพาะตอน fetch รอบแรก + cache ยังว่าง
+  //   (returning user ที่มี cache → coreEmpty=false → เห็นข้อมูลทันที ไม่โดนบัง + sync เบื้องหลัง)
+  const coreEmpty = !(
+    (data.invoices && data.invoices.length) ||
+    (data.bankAccounts && data.bankAccounts.length) ||
+    (data.projects && data.projects.length) ||
+    (data.payables && data.payables.length)
+  );
+  const showInitialLoad = !firstLoadDone && coreEmpty;
+
   return (
     <div className={`app ${sbCollapsed ? 'sb-collapsed' : ''}`}>
       <Sidebar route={route} go={go} routes={routes} data={data} sidebarStyle={tweaks.sidebarStyle} syncInfo={syncInfo} currentUser={currentUser} onLogout={handleLogout} isOpen={sbOpen} onClose={closeSb} collapsed={sbCollapsed} onToggleCollapse={toggleCollapse} />
@@ -567,7 +596,9 @@ function App() {
         <Topbar route={route} routes={routes} data={data} onReset={resetDemo} onMenuClick={openSb} />
         <div data-screen-label={route}>
           {/* key={route} → boundary รีเซ็ตเมื่อเปลี่ยนหน้า (หน้าอื่นไม่พังตาม) */}
-          <ErrorBoundary key={route}>{page}</ErrorBoundary>
+          {showInitialLoad
+            ? <DataLoadingState />
+            : <ErrorBoundary key={route}>{page}</ErrorBoundary>}
         </div>
       </div>
 
