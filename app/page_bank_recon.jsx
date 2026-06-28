@@ -836,6 +836,8 @@ function BankReconPage({ data, setData, toast }) {
   };
   const undoRecord = (line, forecastId) => {
     if (readOnly) return;
+    // ★ ลบรายการ "จ่ายจริง" (ACTUAL) ออกจาก Cashflow แบบถาวร + sync ทั้งทีม → ยืนยันก่อน
+    if (!window.confirm('ยกเลิกการบันทึกจ่ายจริงรายการนี้?\nจะลบออกจาก Actual หน้า Cashflow และมีผลกับทั้งทีม')) return;
     let nextFe = data.forecastEntries || [];
     if (forecastId) {
       brUndoneRef.current[String(forecastId)] = true;                 // ★ กัน self-heal สร้างแถวนี้กลับ (เจตนาลบ)
