@@ -2019,7 +2019,7 @@ function PayablePlanModal({ target, plannedByVchno, bankAccounts, onSave, onCanc
         )}
         <div className="field">
           <label style={{ fontSize: 12 }}>วันที่วางแผนจ่าย<span style={{ color: 'var(--bad)' }}> *</span></label>
-          <YmdPicker value={payDate} onChange={setPayDate} />
+          <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
         </div>
         <div className="field">
           <label style={{ fontSize: 12 }}>บัญชีที่จ่าย (ถ้ามี)</label>
