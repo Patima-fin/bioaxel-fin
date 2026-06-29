@@ -111,6 +111,10 @@ const cfPvCatKey = (pvNo) => 'cf.pvCat.' + String(pvNo || '').trim();
 // ── Section 01 โหมด "แผนจ่ายจริง": ติ๊กเลือกรวมรายการตั้งมือเองต่อ forecast entry (cf.sec1Inc.<id> = 1) ──
 //   default ไม่รวม (ตั้งมือ = ประมาณการรวมที่นับใน Section 02 อยู่แล้ว) — sync ทีมผ่าน WTPOverride
 const cfSec1IncKey = (id) => 'cf.sec1Inc.' + String(id || '').trim();
+// ── PV ตัดล่วงหน้า: ยืนยัน "จ่ายจริงแล้ว" รายใบ (cf.pvPaid.<PL_PV_No> = 1) ──────────
+//   PV ที่ Pmt_Date ยังไม่ถึง = เงินยังไม่ออกจากบัญชี → ยังไม่นับเป็นจ่ายจริง
+//   user กดยืนยัน (เคสเงินออกวันนั้นพอดี ต้องรีบส่งรายงาน) → flag นี้ → นับเข้ายอด actual ทันที
+const cfPvPaidKey = (pvNo) => 'cf.pvPaid.' + String(pvNo || '').trim();
 // ── Vendor → หมวด mapping (เจ้าหนี้กลุ่มการเงิน/ลีสซิ่ง → หมวด 3) · แก้รายชื่อใน localStorage ได้
 const CF_VENDOR_CAT_LS_KEY = 'bio-cf-vendor-cat';
 const CF_VENDOR_CAT_DEFAULTS = [
@@ -716,6 +720,16 @@ function CfReconCard({
 // ─── Main page ─────────────────────────────────────────────────────────────
 function CashFlowDashboard({ data, setData, toast }) {
   const today = new Date();
+  const cfTodayISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // PV ตัดล่วงหน้าที่ Pmt_Date ยังไม่ถึง = เงินยังไม่ออกจริง → ยังไม่นับเป็นจ่ายจริง
+  //   (เว้นแต่ user กดยืนยัน "จ่ายจริงแล้ว" → cf.pvPaid override). ใช้ทั้ง pvActualByWeekCat + openActualDrill
+  //   ★ memo ที่เรียก helper นี้ต้องมี ovTick ใน deps เพื่อ recompute เมื่อ override เปลี่ยน
+  const pvMoneyOut = (pv) => {
+    const dISO = toISODate(pv.Pmt_Date);
+    if (!dISO) return true;                  // ไม่มีวันจ่าย → นับ (กันยอดหาย)
+    if (dISO < cfTodayISO) return true;      // เลยวันจ่ายแล้ว → เงินออกจากบัญชีจริง
+    return !!WTPOverride.resolve(cfPvPaidKey(pv.PL_PV_No), 0);  // ยังไม่ถึง → นับเฉพาะใบที่ยืนยันแล้ว
+  };
   const [year, setYear]   = cfState(today.getFullYear());
   const [month, setMonth] = cfState(today.getMonth() + 1);
   const [editMode, setEditMode] = cfState(false);  // Manual override mode
@@ -731,7 +745,7 @@ function CashFlowDashboard({ data, setData, toast }) {
   //   'apPlan' = แผนจ่ายจริง = รายการ AP ที่เลือกจ่าย (ขึ้น CARD BANK) + รายการตั้งมือที่ติ๊กรวมเอง
   //   เก็บไว้ต่อเครื่อง (localStorage) — เป็น view preference ส่วนตัว ไม่ sync ทีม
   const [s01OutMode, setS01OutMode] = cfState(() => {
-    try { return localStorage.getItem('bio-cf-s01outmode') === 'apPlan' ? 'apPlan' : 'remaining'; }
+    try { const v = localStorage.getItem('bio-cf-s01outmode'); return (v === 'apPlan' || v === 'pv') ? v : 'remaining'; }
     catch (_) { return 'remaining'; }
   });
   const setS01OutModePersist = (m) => {
@@ -883,6 +897,7 @@ function CashFlowDashboard({ data, setData, toast }) {
       if (!inMonth(date, year, month)) return;
       const wIdx = findWeekIdx(date, weeks);
       if (wIdx < 0) return;
+      if (!pvMoneyOut(pv)) return;   // ตัดล่วงหน้า ยังไม่ถึงวันจ่าย → เงินยังไม่ออก → ยังไม่นับเป็นจ่ายจริง
       // จัดหมวด: override ราย PV (cf.pvCat) > AP ที่ผูก > vendor/keyword — ต้องตรงกับ drill-down (openActualDrill)
       const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
       const cat = resolvePvCategory(pv, ap);
@@ -910,6 +925,42 @@ function CashFlowDashboard({ data, setData, toast }) {
     return grid;
   }, [pvVouchers, payables, forecastEntries, ovTick, weeks, year, month, reconValidity]);
 
+  // ── PV ตัดล่วงหน้า "ยังไม่ถึงวันจ่าย" (เงินยังไม่ออก) ราย week × cat ───────────────
+  //   = ใบที่ถูกกันออกจาก pvActualByWeekCat → ใช้โชว์ตัวบ่งชี้ 🕐 + ทำให้คลิกเปิด drill ยืนยันได้
+  //   (ไม่งั้นช่อง Actual = 0 จะคลิกไม่ได้ → เข้าไปกดยืนยันจ่ายจริงไม่ได้)
+  const pendingPvByWeekCat = cfMemo(() => {
+    const grid = weeks.map(() => ({ 1: 0, 2: 0, 3: 0, 4: 0 }));
+    pvVouchers.forEach(pv => {
+      const date = pv.Pmt_Date;
+      if (!inMonth(date, year, month)) return;
+      const wIdx = findWeekIdx(date, weeks);
+      if (wIdx < 0) return;
+      if (pvMoneyOut(pv)) return;   // เงินออกแล้ว/ยืนยันแล้ว → ไม่ใช่ pending
+      const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
+      const cat = resolvePvCategory(pv, ap);
+      const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
+      grid[wIdx][cat] += Math.abs(amt);
+    });
+    return grid;
+  }, [pvVouchers, payables, ovTick, weeks, year, month]);
+
+  // ── PV ทั้งหมด (จ่ายแล้ว+รอจ่าย) ราย week × cat — ใช้เช็คว่าหมวดนั้น "มี PV ไหม" ──────────
+  //   หมวดที่ไม่มี PV เลย (เช่น 04 เงินเดือน/เบ็ดเตล็ด ที่จ่ายไม่ผ่าน PV) → โหมด 'pv' จะ fallback ประมาณการ
+  const pvAnyByWeekCat = cfMemo(() => {
+    const grid = weeks.map(() => ({ 1: 0, 2: 0, 3: 0, 4: 0 }));
+    pvVouchers.forEach(pv => {
+      const date = pv.Pmt_Date;
+      if (!inMonth(date, year, month)) return;
+      const wIdx = findWeekIdx(date, weeks);
+      if (wIdx < 0) return;
+      const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
+      const cat = resolvePvCategory(pv, ap);
+      const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
+      grid[wIdx][cat] += Math.abs(amt);
+    });
+    return grid;
+  }, [pvVouchers, payables, weeks, year, month]);
+
   // ── ประมาณการรายจ่าย "คงเหลือ" = forecast − จ่ายจริงแล้ว (ราย week × cat, floor 0) ──────
   //   ตารางประมาณการรายสัปดาห์ (Section 01) แสดง "ยอดที่ยังต้องจ่าย" — หักส่วนที่จ่าย Actual (PV) ไปแล้ว
   //   เหตุผล: เงินที่จ่ายจริงไปแล้วออกจากยอดเงินสดคงเหลือ (B/F สัปดาห์ = ยอดสดปัจจุบัน) ไปแล้ว
@@ -927,6 +978,17 @@ function CashFlowDashboard({ data, setData, toast }) {
         4: Math.max(0, (g[4] || 0) - (a[4] || 0)),
       };
     }), [forecastByWeekCat, pvActualByWeekCat]);
+
+  // ── โหมด 'pv' (ยอด PV ที่ตัด) ราย week × cat ─────────────────────────────────
+  //   หมวดที่ "มี PV" (จ่ายแล้ว/รอจ่าย) → ใช้ยอด PV ตัดล่วงหน้า (pending; กดจ่ายจริง→หักเป็น 0)
+  //   หมวดที่ "ไม่มี PV เลย" (เช่น 04 เงินเดือน/เบ็ดเตล็ด) → fallback ใช้ประมาณการคงเหลือ (ไม่ปล่อยว่าง)
+  const pvModeGridByWeekCat = cfMemo(() =>
+    pendingPvByWeekCat.map((g, i) => {
+      const any = pvAnyByWeekCat[i] || {};
+      const f   = forecastRemainingByWeekCat[i] || {};
+      const v = (c) => (any[c] || 0) > 0 ? (g[c] || 0) : (f[c] || 0);
+      return { 1: v(1), 2: v(2), 3: v(3), 4: v(4) };
+    }), [pendingPvByWeekCat, pvAnyByWeekCat, forecastRemainingByWeekCat]);
 
   // ════ โหมด "แผนจ่ายจริง (AP)" สำหรับ Section 01 ช่องรายจ่าย ════════════════════
   //   หลักๆ = รายการ AP ที่เลือกจ่ายไว้แล้วจากหน้า Bank Diary (ขึ้น CARD BANK)
@@ -1270,8 +1332,11 @@ function CashFlowDashboard({ data, setData, toast }) {
   //   → ช่องสัปดาห์ปัจจุบันโชว์เฉพาะส่วนที่ "ยังต้องจ่าย" (mirror ฝั่งรับเงิน ivCombinedByWeek)
   //   KPI การ์ด + Section 02 (ติดตามจ่ายจริง) ยังใช้ forecast เต็ม — ตัวเลขจึงต่างกันโดยตั้งใจ
   //   โหมด 'apPlan' = แผนจ่ายจริง (AP ที่เลือกจ่าย + ตั้งมือที่ติ๊กรวม) ไม่มี rollover เดือนถัดไป
-  const _outGrid     = s01OutMode === 'apPlan' ? apPlanScopedByWeekCat : forecastRemainingByWeekCat;
-  const _outRollover = s01OutMode === 'apPlan' ? { 1: 0, 2: 0, 3: 0, 4: 0 } : nextMonthInflow.out;
+  //   'pv' = ใช้ยอด PV ที่ตัดล่วงหน้า (รอจ่าย) ตรงๆ · 'apPlan' = แผน AP · 'remaining' = ประมาณการ − จ่ายแล้ว
+  const _outGrid     = s01OutMode === 'apPlan' ? apPlanScopedByWeekCat
+                     : s01OutMode === 'pv'     ? pvModeGridByWeekCat
+                     : forecastRemainingByWeekCat;
+  const _outRollover = (s01OutMode === 'apPlan' || s01OutMode === 'pv') ? { 1: 0, 2: 0, 3: 0, 4: 0 } : nextMonthInflow.out;
   const planOut  = {
     1: currentRestSplit(_outGrid.map(g => g[1]), _outRollover[1]),
     2: currentRestSplit(_outGrid.map(g => g[2]), _outRollover[2]),
@@ -1579,19 +1644,43 @@ function CashFlowDashboard({ data, setData, toast }) {
       });
     }
 
-    // สรุปยอดช่องรายจ่าย: ประมาณการเต็ม − จ่ายจริงแล้ว = คงเหลือ (ตรงกับตัวเลขในช่องของตาราง)
+    // สรุปยอดช่องรายจ่าย: โชว์ ประมาณการคงเหลือ + PV ตัดล่วงหน้า · "ยอดในช่อง" = ตามโหมดที่เลือก
     let outRecon = null;
+    const outAdvancePv = [];
     if (row && row.startsWith('out')) {
       const cat = Number(row.slice(3));
-      const fF = currentRestSplit(forecastByWeekCat.map(g => g[cat] || 0),         nextMonthInflow.out[cat]);
-      const fA = currentRestSplit(pvActualByWeekCat.map(g => g[cat] || 0),          0);
-      const fR = currentRestSplit(forecastRemainingByWeekCat.map(g => g[cat] || 0), nextMonthInflow.out[cat]);
-      outRecon = { forecast: fF[period], actual: fA[period], remaining: fR[period] };
+      const fF   = currentRestSplit(forecastByWeekCat.map(g => g[cat] || 0),         nextMonthInflow.out[cat]);
+      const fA   = currentRestSplit(pvActualByWeekCat.map(g => g[cat] || 0),          0);
+      const fR   = currentRestSplit(forecastRemainingByWeekCat.map(g => g[cat] || 0), nextMonthInflow.out[cat]);
+      const fP   = currentRestSplit(pendingPvByWeekCat.map(g => g[cat] || 0),         0);
+      const fPvM = currentRestSplit(pvModeGridByWeekCat.map(g => g[cat] || 0),        0);
+      const fAny = currentRestSplit(pvAnyByWeekCat.map(g => g[cat] || 0),             0);
+      const cell = s01OutMode === 'pv' ? fPvM[period] : fR[period];   // ยอดที่แสดงในช่อง ตามโหมด
+      // โหมด pv + หมวดนี้ไม่มี PV เลย → ช่องใช้ประมาณการแทน (เช่น เงินเดือน/เบ็ดเตล็ด)
+      const usedFallback = s01OutMode === 'pv' && (fAny[period] || 0) <= 0;
+      outRecon = { mode: s01OutMode, usedFallback, forecast: fF[period], actual: fA[period], planRemaining: fR[period], pending: fP[period], remaining: cell };
+      // เก็บ PV ตัดล่วงหน้า (ยังไม่ถึงวันจ่าย) ของหมวด+ช่วงนี้ → โชว์ + กดยืนยันจ่ายจริงได้จาก SEC01
+      pvVouchers.forEach(pv => {
+        const d = pv.Pmt_Date;
+        if (!inMonth(d, year, month) || !inPeriod(d)) return;
+        const ap = pv.AP_No ? (payables.find(p => p.vchno === pv.AP_No) || null) : null;
+        if (resolvePvCategory(pv, ap) !== cat) return;
+        const dISO = toISODate(d);
+        if (!(dISO && dISO >= cfTodayISO)) return;   // เฉพาะที่ยังไม่ถึงวันจ่าย (รวมวันนี้)
+        const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
+        outAdvancePv.push({
+          pvNo: pv.PL_PV_No || '', date: d, cat,
+          name: pv.Payee || (ap && (ap.cust_name || ap.vendor)) || '—',
+          amount: Math.abs(amt),
+          confirmed: !!WTPOverride.resolve(cfPvPaidKey(pv.PL_PV_No), 0),
+        });
+      });
+      outAdvancePv.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     }
 
     // Sort by date ascending
     items.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    setDrillDown({ title: label, period, row, items, outRecon });
+    setDrillDown({ title: label, period, row, items, outRecon, advancePv: outAdvancePv });
   };
 
   // ─── Drill-down ฝั่ง "จ่ายจริง" (Actual) ราย week×cat ──────────────────────
@@ -1602,6 +1691,7 @@ function CashFlowDashboard({ data, setData, toast }) {
   const openActualDrill = (weekIdx, cat, label) => {
     const wantCat = (c) => cat == null || c === cat;
     const items = [];
+    const advancePv = [];   // PV ตัดล่วงหน้า (Pmt_Date ยังไม่ถึง) — ไว้แสดง + ปุ่มยืนยันจ่ายจริง
     // 1) PV vouchers — เงินออกจริงตาม Pmt_Date
     pvVouchers.forEach(pv => {
       const date = pv.Pmt_Date;
@@ -1612,7 +1702,10 @@ function CashFlowDashboard({ data, setData, toast }) {
       if (!wantCat(c)) return;
       // ★ ห้ามใช้ ||: Net_Amount=0 (ตัดมัดจำ) เป็น falsy → fallback ไป Amount → drill โชว์ยอดก่อนหัก
       const amt = Number(pv.Net_Amount != null && pv.Net_Amount !== '' ? pv.Net_Amount : (pv.Amount || 0));
-      items.push({
+      const dISO = toISODate(date);
+      const isFuture  = !!dISO && dISO >= cfTodayISO;   // ยังไม่ถึงวันจ่าย (รวมวันนี้พอดี)
+      const confirmed = !!WTPOverride.resolve(cfPvPaidKey(pv.PL_PV_No), 0);
+      const item = {
         source: 'PV', date, pvNo: pv.PL_PV_No || '', cat: c,
         name: pv.Payee || (ap && (ap.cust_name || ap.vendor)) || '—',
         ref: pv.PL_PV_No || pv.AP_No || '',
@@ -1632,7 +1725,10 @@ function CashFlowDashboard({ data, setData, toast }) {
           ['ประเภทการจ่าย', pv.Type_of_Pmt || '—'],
           ['หมายเหตุ', pv.cc_remark || '—'],
         ],
-      });
+      };
+      // ตัดล่วงหน้า ยังไม่ถึงวันจ่าย + ยังไม่ยืนยัน → เข้าถัง advancePv (ไม่นับเข้ายอด)
+      if (isFuture) advancePv.push({ pvNo: pv.PL_PV_No || '', date, name: item.name, amount: Math.abs(amt), cat: c, confirmed, item });
+      if (!isFuture || confirmed) items.push(item);   // เงินออกแล้ว (เลยวัน) หรือยืนยันแล้ว → นับ
     });
     // 2) forecastEntries STATUS=ACTUAL/BOOKED — ประมาณการที่เกิดจริงแล้ว
     forecastEntries.forEach(fe => {
@@ -1671,7 +1767,104 @@ function CashFlowDashboard({ data, setData, toast }) {
       });
     });
     items.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    setDrillDown({ title: label, mode: 'actual', row: 'actual', weekIdx, cat, items });
+    advancePv.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    setDrillDown({ title: label, mode: 'actual', row: 'actual', weekIdx, cat, items, advancePv });
+  };
+
+  // ─── ยืนยัน/ยกเลิก "จ่ายจริงแล้ว" ของ PV ตัดล่วงหน้า (cf.pvPaid override) ───────
+  //   ใช้กับเคสเงินออกแล้ววันนั้นพอดี ต้องรีบส่งรายงาน — กดยืนยัน → นับเข้ายอด actual ทันที
+  //   (ใช้ได้ทั้ง drill โหมด actual [SEC02] และ out-cell [SEC01]; เฉพาะ actual ที่ย้ายใบเข้า items ที่นับ)
+  const markPvPaid = (pvNo, paid) => {
+    if (!pvNo) return;
+    WTPOverride.set(cfPvPaidKey(pvNo), paid ? 1 : null);   // เปลี่ยน override → ovTick → recompute pvActual ทุกที่
+    setDrillDown(prev => {
+      if (!prev || !prev.advancePv) return prev;
+      const advancePv = prev.advancePv.map(p => p.pvNo === pvNo ? { ...p, confirmed: paid } : p);
+      let items = prev.items;
+      if (prev.mode === 'actual') {
+        const target = advancePv.find(p => p.pvNo === pvNo);
+        items = prev.items.filter(x => !(x.source === 'PV' && x.pvNo === pvNo));   // กันซ้ำ
+        if (paid && target && target.item) items.push(target.item);
+        items = items.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      }
+      return { ...prev, advancePv, items };
+    });
+    if (typeof toast === 'function') toast(paid ? 'ยืนยันจ่ายจริงแล้ว — นับเข้ายอด' : 'ยกเลิกการยืนยัน — กลับเป็นยังไม่จ่าย');
+  };
+
+  // ─── ยืนยัน "จ่ายจริงแล้ว" ทั้งหมดทีเดียว — PV ตัดล่วงหน้าที่ยังไม่ยืนยันใน drill นี้ ───────
+  const markAllPvPaid = () => {
+    const dd = drillDown;
+    if (!dd || !dd.advancePv) return;
+    const toConfirm = dd.advancePv.filter(p => !p.confirmed && p.pvNo);
+    if (!toConfirm.length) return;
+    WTPOverride.setMany(toConfirm.reduce((m, p) => { m[cfPvPaidKey(p.pvNo)] = 1; return m; }, {}));  // batch → 1 sync
+    const ids = new Set(toConfirm.map(p => p.pvNo));
+    setDrillDown(prev => {
+      if (!prev || !prev.advancePv) return prev;
+      const advancePv = prev.advancePv.map(p => ids.has(p.pvNo) ? { ...p, confirmed: true } : p);
+      let items = prev.items;
+      if (prev.mode === 'actual') {
+        items = prev.items.filter(x => !(x.source === 'PV' && ids.has(x.pvNo)));
+        toConfirm.forEach(p => { if (p.item) items.push(p.item); });
+        items = items.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      }
+      return { ...prev, advancePv, items };
+    });
+    if (typeof toast === 'function') toast(`ยืนยันจ่ายจริงแล้ว ${toConfirm.length} รายการ — นับเข้ายอด`);
+  };
+
+  // ─── พาเนล "PV ตัดล่วงหน้า · ยังไม่ถึงวันจ่าย" (ใช้ร่วมทั้ง SEC02 actual-drill + SEC01 out-cell) ──
+  const renderAdvancePvPanel = (advancePv) => {
+    if (!advancePv || !advancePv.length) return null;
+    const nUnconfirmed = advancePv.filter(p => !p.confirmed && p.pvNo).length;
+    const totPending = advancePv.reduce((s, p) => s + (p.confirmed ? 0 : (p.amount || 0)), 0);
+    return (
+      <div style={{ marginTop: 14, border: '1px solid color-mix(in oklch, var(--warn) 35%, transparent)', borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', padding: '8px 12px', background: 'var(--warn-bg)' }}>
+          <div style={{ fontWeight: 700, fontSize: 12.5, color: 'var(--ink-700)' }}>
+            🕐 PV ตัดล่วงหน้า · ยังไม่ถึงวันจ่าย ({advancePv.length}) — เงินยังไม่ออกจากบัญชี จึง<strong>ไม่นับ</strong>เป็นจ่ายจริง
+          </div>
+          {!cfIsReadOnly() && nUnconfirmed > 0 && (
+            <button type="button" className="btn btn-primary" style={{ fontSize: 11.5, padding: '4px 12px', whiteSpace: 'nowrap' }}
+              onClick={markAllPvPaid} title={`ยืนยันจ่ายจริงทั้งหมด ${nUnconfirmed} รายการ · รวม ${fmtNum(totPending, 0)}`}>
+              ✓ จ่ายจริงแล้วทั้งหมด ({nUnconfirmed})
+            </button>
+          )}
+        </div>
+        <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 96 }}>วันจ่าย</th>
+              <th style={{ width: 130 }}>เลขที่ PV</th>
+              <th style={{ textAlign: 'left' }}>ผู้รับเงิน/รายการ</th>
+              <th style={{ width: 120, textAlign: 'right' }}>ยอด</th>
+              <th style={{ width: 170, textAlign: 'center' }}>สถานะ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {advancePv.map((p, i) => (
+              <tr key={p.pvNo || (p.date + i)} style={{ background: p.confirmed ? 'var(--good-bg)' : 'transparent' }}>
+                <td>{fmtDate(p.date) || p.date}</td>
+                <td>{p.pvNo || '—'}</td>
+                <td style={{ textAlign: 'left' }}>{p.name}</td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(p.amount, 0)}</td>
+                <td style={{ textAlign: 'center' }}>
+                  {cfIsReadOnly() || !p.pvNo
+                    ? (p.confirmed ? '✓ จ่ายจริงแล้ว' : 'รอถึงวันจ่าย')
+                    : p.confirmed
+                      ? <span style={{ color: 'var(--good)', fontWeight: 700 }}>✓ จ่ายจริงแล้ว <button type="button" className="btn btn-ghost" style={{ fontSize: 11, padding: '1px 7px', marginLeft: 4 }} onClick={() => markPvPaid(p.pvNo, false)}>↩ ยกเลิก</button></span>
+                      : <button type="button" className="btn btn-primary" style={{ fontSize: 11, padding: '3px 11px' }} onClick={() => markPvPaid(p.pvNo, true)}>✓ จ่ายจริงแล้ว</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ padding: '7px 12px', fontSize: 11, color: 'var(--ink-500)', lineHeight: 1.6, borderTop: '1px solid var(--ink-100)' }}>
+          💡 PV ที่ตัดไว้แต่ยังไม่ถึงวันจ่าย — กด <strong>✓ จ่ายจริงแล้ว</strong> เฉพาะกรณีเงินออกจากบัญชีจริงแล้ว (เช่น จ่ายวันนี้พอดี ต้องรีบส่งรายงาน) · พอถึงวันจ่ายระบบจะนับให้อัตโนมัติ
+        </div>
+      </div>
+    );
   };
 
   // ─── Drill-down ฝั่ง "ประมาณการ" (Forecast) ราย week×cat ──────────────────
@@ -2034,6 +2227,8 @@ function CashFlowDashboard({ data, setData, toast }) {
                     <span className="no-present" style={{ fontWeight: 500, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
                       {s01OutMode === 'apPlan'
                         ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
+                        : s01OutMode === 'pv'
+                        ? <span>· <strong>ยอด PV ที่ตัด</strong> = ใบจ่าย (PV) ที่ตัดล่วงหน้า ยังไม่ถึงวันจ่าย · พอกดจ่ายจริงแล้วจะหักออก · <strong>หมวดที่ไม่มี PV (เช่น เงินเดือน) ใช้ประมาณการแทน</strong></span>
                         : <span>· ยอด<strong>คงเหลือต้องจ่าย</strong> (หักที่จ่ายจริงแล้ว)</span>}
                     </span>
                   </div>
@@ -2051,9 +2246,11 @@ function CashFlowDashboard({ data, setData, toast }) {
                       </div>
                     )}
                     <div style={{ display: 'inline-flex', borderRadius: cfScale(8), overflow: 'hidden', border: '1px solid var(--bad)', fontSize: cfScale(11.5), fontWeight: 700 }}>
-                      {[['remaining', 'ประมาณการคงเหลือ'], ['apPlan', 'แผนจ่ายจริง (AP)']].map(opt => (
+                      {[['remaining', 'ประมาณการคงเหลือ'], ['pv', 'ยอด PV ที่ตัด'], ['apPlan', 'แผนจ่ายจริง (AP)']].map(opt => (
                         <button key={opt[0]} type="button" onClick={() => setS01OutModePersist(opt[0])}
-                          title={opt[0] === 'apPlan' ? 'รายการ AP ที่เลือกจ่ายไว้แล้ว (ขึ้น CARD BANK หน้า Bank Diary) + รายการตั้งมือที่ติ๊กรวมเอง' : 'ประมาณการตั้งมือ − จ่ายจริงแล้ว = ยอดคงเหลือต้องจ่าย'}
+                          title={opt[0] === 'apPlan' ? 'รายการ AP ที่เลือกจ่ายไว้แล้ว (ขึ้น CARD BANK หน้า Bank Diary) + รายการตั้งมือที่ติ๊กรวมเอง'
+                                 : opt[0] === 'pv' ? 'ใช้ยอดใบจ่าย (PV) ที่ตัดล่วงหน้า ยังไม่ถึงวันจ่าย — เป็นยอดเต็มของ PV จริง · พอกดจ่ายจริงแล้วจะหักออก'
+                                 : 'ประมาณการตั้งมือ − จ่ายจริงแล้ว = ยอดคงเหลือต้องจ่าย'}
                           style={{ padding: `${cfScale(4)} ${cfScale(10)}`, border: 'none', cursor: 'pointer',
                             background: s01OutMode === opt[0] ? 'var(--bad)' : 'transparent',
                             color: s01OutMode === opt[0] ? '#fff' : 'var(--bad)' }}>{opt[1]}</button>
@@ -2249,17 +2446,22 @@ function CashFlowDashboard({ data, setData, toast }) {
                         </td>
                         <td style={{ padding: `${cfScale(6)} ${cfScale(8)}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: cfScale(13.5), fontWeight: 700,
                           color: a > 0 ? 'var(--ink-900)' : 'var(--ink-300)' }}>
-                          {editMode
-                            ? <EditableNumber ovKey={`${cellOv}.actual`} computed={aRaw} editMode={true} digits={0} />
-                            : (a > 0
-                                ? (<span
-                                     onClick={() => openActualDrill(i, cat, `จ่ายจริง · WEEK ${i + 1} · ${CATEGORY_LABELS_SHORT[cat]}`)}
-                                     title="คลิกดูรายการจ่ายจริงของหมวดนี้"
-                                     style={{ cursor: 'pointer', borderBottom: '1.5px dashed var(--brand-300)' }}>
-                                    {fmtNum(a, 0)}
-                                    {aOver && <span title="แก้มือ" style={{ fontSize: cfScale(8), marginLeft: 2, color: 'var(--brand-500)' }}>✏️</span>}
-                                  </span>)
-                                : <span style={{ color: 'var(--ink-300)' }}>-</span>)}
+                          {(() => {
+                            const pend = pendingPvByWeekCat[i] ? (pendingPvByWeekCat[i][cat] || 0) : 0;
+                            if (editMode) return <EditableNumber ovKey={`${cellOv}.actual`} computed={aRaw} editMode={true} digits={0} />;
+                            if (a <= 0 && pend <= 0) return <span style={{ color: 'var(--ink-300)' }}>-</span>;
+                            // คลิกได้เมื่อมียอดจ่ายจริง หรือมี PV ตัดล่วงหน้ารอยืนยัน (เปิด drill ไปกดยืนยันได้)
+                            return (
+                              <span
+                                onClick={() => openActualDrill(i, cat, `จ่ายจริง · WEEK ${i + 1} · ${CATEGORY_LABELS_SHORT[cat]}`)}
+                                title={pend > 0 ? `มี PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pend, 0)}` : 'คลิกดูรายการจ่ายจริงของหมวดนี้'}
+                                style={{ cursor: 'pointer', borderBottom: '1.5px dashed var(--brand-300)' }}>
+                                {a > 0 ? fmtNum(a, 0) : <span style={{ color: 'var(--ink-300)' }}>–</span>}
+                                {aOver && <span title="แก้มือ" style={{ fontSize: cfScale(8), marginLeft: 2, color: 'var(--brand-500)' }}>✏️</span>}
+                                {pend > 0 && <span title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pend, 0)}`} style={{ fontSize: cfScale(9), marginLeft: cfScale(3) }}>🕐</span>}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding: `${cfScale(6)} ${cfScale(8)}`, textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {vdir === 'na'
@@ -2334,17 +2536,21 @@ function CashFlowDashboard({ data, setData, toast }) {
                     })()}
                   </div>
                   <span style={{ fontSize: cfScale(17), fontWeight: 800, color: 'var(--brand-600)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }}>
-                    {editMode
-                      ? <EditableNumber ovKey={`${cellOvWeek}.total.actual`} computed={actualTotalRaw} editMode={true} digits={0} />
-                      : (actualTotal > 0
-                          ? (<span
-                               onClick={() => openActualDrill(i, null, `จ่ายจริง · WEEK ${i + 1} · ทุกหมวด`)}
-                               title="คลิกดูรายการจ่ายจริงทั้งสัปดาห์"
-                               style={{ cursor: 'pointer', borderBottom: '2px dashed var(--brand-300)' }}>
-                              {fmtNum(actualTotal, 0)}
-                              {actualTotalOver && <span title="แก้มือ" style={{ fontSize: cfScale(9), marginLeft: 3, color: 'var(--brand-500)' }}>✏️</span>}
-                            </span>)
-                          : <span style={{ color: 'var(--ink-300)', fontWeight: 700 }}>–</span>)}
+                    {(() => {
+                      const pendWeek = [1, 2, 3, 4].reduce((s, c) => s + (pendingPvByWeekCat[i] ? (pendingPvByWeekCat[i][c] || 0) : 0), 0);
+                      if (editMode) return <EditableNumber ovKey={`${cellOvWeek}.total.actual`} computed={actualTotalRaw} editMode={true} digits={0} />;
+                      if (actualTotal <= 0 && pendWeek <= 0) return <span style={{ color: 'var(--ink-300)', fontWeight: 700 }}>–</span>;
+                      return (
+                        <span
+                          onClick={() => openActualDrill(i, null, `จ่ายจริง · WEEK ${i + 1} · ทุกหมวด`)}
+                          title={pendWeek > 0 ? `มี PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pendWeek, 0)}` : 'คลิกดูรายการจ่ายจริงทั้งสัปดาห์'}
+                          style={{ cursor: 'pointer', borderBottom: '2px dashed var(--brand-300)' }}>
+                          {actualTotal > 0 ? fmtNum(actualTotal, 0) : <span style={{ color: 'var(--ink-300)' }}>–</span>}
+                          {actualTotalOver && <span title="แก้มือ" style={{ fontSize: cfScale(9), marginLeft: 3, color: 'var(--brand-500)' }}>✏️</span>}
+                          {pendWeek > 0 && <span title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pendWeek, 0)}`} style={{ fontSize: cfScale(11), marginLeft: cfScale(4) }}>🕐</span>}
+                        </span>
+                      );
+                    })()}
                   </span>
                 </div>
               </div>
@@ -2585,7 +2791,9 @@ function CashFlowDashboard({ data, setData, toast }) {
                 </div>
               </>
             );
-          })() : drillDown.items.length === 0 ? (
+          })() : drillDown.items.length === 0
+                  && !(drillDown.advancePv && drillDown.advancePv.length > 0)
+                  && !drillDown.outRecon ? (
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-500)', fontSize: 12.5 }}>
               ไม่มีรายการในช่วงนี้
             </div>
@@ -2644,25 +2852,37 @@ function CashFlowDashboard({ data, setData, toast }) {
                   </>
                 )}
               </div>
+              {/* ── PV ตัดล่วงหน้า · ยังไม่ถึงวันจ่าย — เงินยังไม่ออก จึงไม่นับเป็นจ่ายจริง (กดยืนยันได้) ── */}
+              {drillDown.mode === 'actual' && renderAdvancePvPanel(drillDown.advancePv)}
             </>
           ) : (
             <>
               {drillDown.outRecon ? (
                 /* ── ช่องรายจ่าย: ประมาณการเต็ม − จ่ายจริงแล้ว = คงเหลือต้องจ่าย (= ตัวเลขในช่อง) ── */
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 12 }}>
-                  <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--ink-50)', textAlign: 'center' }}>
-                    <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ประมาณการเต็ม</div>
-                    <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink-700)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.forecast, 0)}</div>
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: drillDown.outRecon.pending > 0 ? 8 : 12 }}>
+                    <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--ink-50)', textAlign: 'center' }}>
+                      <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ประมาณการคงเหลือ</div>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink-700)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.planRemaining, 0)}</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--ink-400)', marginTop: 1 }}>เต็ม {fmtNum(drillDown.outRecon.forecast, 0)} − จ่ายแล้ว {fmtNum(drillDown.outRecon.actual, 0)}</div>
+                    </div>
+                    <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--warn-bg)', textAlign: 'center' }}>
+                      <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>🕐 PV ตัดล่วงหน้า (รอจ่าย)</div>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--warn)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.pending, 0)}</div>
+                    </div>
+                    <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--brand-50)', textAlign: 'center', border: '1.5px solid color-mix(in oklch, var(--brand-500) 40%, transparent)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--ink-600)', fontWeight: 600 }}>= ยอดในช่องนี้ ({drillDown.outRecon.mode === 'pv' ? (drillDown.outRecon.usedFallback ? 'ประมาณการ — ไม่มี PV' : 'ยอด PV') : 'ประมาณการ'})</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--brand-700)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.remaining, 0)}</div>
+                    </div>
                   </div>
-                  <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--good-bg)', textAlign: 'center' }}>
-                    <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>− จ่ายจริงแล้ว</div>
-                    <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--good)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.actual, 0)}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--ink-500)', margin: '0 0 12px', lineHeight: 1.5 }}>
+                    {drillDown.outRecon.mode === 'pv'
+                      ? (drillDown.outRecon.usedFallback
+                          ? <span>💡 หมวดนี้<strong>ไม่มี PV ตัดล่วงหน้า</strong> (เช่น เงินเดือน/เบ็ดเตล็ด ที่จ่ายไม่ผ่าน PV) → ช่องนี้ใช้<strong>ยอดประมาณการคงเหลือ</strong>แทน</span>
+                          : <span>💡 โหมด <strong>ยอด PV ที่ตัด</strong> — ช่องนี้ใช้ยอด PV ตัดล่วงหน้า (รอจ่าย) ตรงๆ · กดยืนยันจ่ายจริงได้ที่ตาราง 🕐 ด้านล่าง พอกดแล้วจะหักออกจากช่องนี้</span>)
+                      : <span>💡 โหมด <strong>ประมาณการคงเหลือ</strong> — ช่องนี้ = ประมาณการ − จ่ายจริงแล้ว · <strong>PV ตัดล่วงหน้ายังไม่ถูกรวม</strong> (กดปุ่ม <strong>ยอด PV ที่ตัด</strong> เพื่อใช้ยอด PV) · กดยืนยันจ่ายจริงได้ที่ตาราง 🕐 ด้านล่าง</span>}
                   </div>
-                  <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--warn-bg)', textAlign: 'center', border: '1.5px solid color-mix(in oklch, var(--warn) 40%, transparent)' }}>
-                    <div style={{ fontSize: 11, color: 'var(--ink-600)', fontWeight: 600 }}>= คงเหลือต้องจ่าย</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--warn)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.remaining, 0)}</div>
-                  </div>
-                </div>
+                </>
               ) : (
               <div style={{
                 display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12,
@@ -2739,6 +2959,8 @@ function CashFlowDashboard({ data, setData, toast }) {
                 <a href="#data_payables" style={{ color: 'var(--brand-600)' }}> AP Outstanding</a> หรือ
                 <a href="#data_forecast" style={{ color: 'var(--brand-600)' }}> ประมาณการรายจ่าย</a>
               </div>
+              {/* PV ตัดล่วงหน้าของช่องนี้ — โชว์ + กดยืนยันจ่ายจริงได้จาก SEC01 ด้วย */}
+              {renderAdvancePvPanel(drillDown.advancePv)}
             </>
           )}
         </Modal>
