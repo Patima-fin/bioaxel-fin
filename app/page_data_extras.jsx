@@ -3223,7 +3223,8 @@ function DataPayablePage({ data, setData, toast }) {
     let st = document.getElementById(styleId);
     if (!st) { st = document.createElement('style'); st.id = styleId; document.head.appendChild(st); }
     st.textContent = `
-      body.ap-aging-snap .ap-aging-card { box-shadow: none !important; }
+      body.ap-aging-snap .ap-aging-card { box-shadow: none !important; animation: none !important; opacity: 1 !important; }
+      body.ap-aging-snap .ap-aging-card .no-print { display: none !important; }
       body.ap-aging-snap .ap-aging-scroll { max-height: none !important; overflow: visible !important; }
       body.ap-aging-snap .ap-aging-card .tbl { min-width: 0 !important; width: auto !important; font-size: 11px !important; }
       body.ap-aging-snap .ap-aging-card .tbl th, body.ap-aging-snap .ap-aging-card .tbl td { min-width: 0 !important; position: static !important; padding: 5px 10px !important; white-space: nowrap !important; }
@@ -3238,10 +3239,14 @@ function DataPayablePage({ data, setData, toast }) {
     node.style.setProperty('width', 'max-content', 'important');
     node.style.setProperty('max-width', 'none', 'important');
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const capW = Math.max(node.scrollWidth, node.offsetWidth, 600);
+    // วัดความกว้างจาก "ตาราง" จริง (ไม่เอาความกว้างแถบควบคุมที่ซ่อนแล้ว)
+    const tbl = node.querySelector('.ap-aging-scroll table');
+    const capW = Math.ceil(Math.max((tbl ? tbl.scrollWidth : node.scrollWidth), 600));
     try {
       const canvas = await window.html2canvas(node, { backgroundColor: '#ffffff', scale: 2, useCORS: true, logging: false,
         width: capW, windowWidth: capW + 60,
+        // กัน "หมอก": neutralize animation/opacity/filter ใน clone (anim-in fade ทำให้รูปซีด)
+        onclone: (cdoc) => { cdoc.querySelectorAll('.ap-aging-card, .ap-aging-card *').forEach(el => { if (!el.style) return; el.style.setProperty('animation', 'none', 'important'); el.style.setProperty('opacity', '1', 'important'); el.style.setProperty('filter', 'none', 'important'); el.style.setProperty('backdrop-filter', 'none', 'important'); }); },
         ignoreElements: (el) => el.classList && el.classList.contains('no-print') });   // ตัดแถบควบคุม/ปุ่มออกจากรูป
       const link = document.createElement('a');
       const _d = new Date(); const p2 = (n) => String(n).padStart(2, '0');

@@ -767,5 +767,12 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **`saveAgingImage` ใหม่:** ตัด width ตายตัว 760 + `table-layout:fixed`/word-break (เคยทำให้ชื่อตก) → snapshot CSS เหลือแค่ nowrap + ฟอนต์ 11px + หัวเขียว + กางเต็ม; node `width:max-content` แล้ววัด `scrollWidth` (capW) ส่งให้ html2canvas → **รูปกว้างพอดีเนื้อหา ชื่อบรรทัดเดียว** (เทสต์ได้ capW≈1097 สำหรับชื่อยาว). pเซลล์ใช้สี hex ทึบจาก inline `a.tint` (ไม่ต้อง override).
 - **verify (preview 8096, isolated harness):** od1 cell bg `rgb(253,236,210)` / od120 `rgb(241,155,155)` (ทึบ ไม่จาง) · creditor `white-space:nowrap` · แถบสรุปบนหายไป (`noSummaryStrip:true`) · saveAgingImage capW=1097 + cleanup ลบ class/style คืน width · ไม่มี console error.
 
+## 2026-06-29 — บันทึกรูปอายุหนี้: แก้ "เหมือนมีหมอก" (anim-in clone) + "รูปยาว" (แถบควบคุมดันความกว้าง) (build `page_data_extras 20260629n`)
+- **คำขอผู้ใช้ (เตย, ดูรูปที่เซฟ):** ภาพ "เหมือนมีหมอก" (ซีดทั้งใบ) + "ทำไมรูปยาว".
+- **"หมอก" = class `anim-in` (fade-in animation).** html2canvas โคลน DOM → animation รันใหม่ใน clone → จับภาพตอน opacity ยังไม่เต็ม = ซีดทั้งใบ. FIX: เพิ่ม **`onclone`** ใน html2canvas → วน `.ap-aging-card, *` set `animation:none / opacity:1 / filter:none / backdrop-filter:none !important` ใน cloned doc + snapshot CSS เพิ่ม `.ap-aging-card { animation:none; opacity:1 }`.
+- **"รูปยาว/กว้างเกิน" = แถบควบคุมรายงาน (`.no-print`) ถูก ignoreElements ตัดออกจากภาพ แต่ยังอยู่ใน layout** → ดัน `node.scrollWidth` (max-content) บานเกินตาราง → ภาพกว้างมีที่ว่าง. FIX: snapshot CSS เพิ่ม **`.ap-aging-card .no-print { display:none }`** (เอาออกจาก layout) + วัด `capW` จาก **`.ap-aging-scroll table` scrollWidth** (ตารางจริง) ไม่ใช่ node. → capW 1097→**766** (พอดีตาราง ชื่อบรรทัดเดียว).
+- **verify (preview 8096, isolated harness + stub html2canvas):** captureWidth **766** (ลดจาก 1097) · `onclone` เป็น function + set opacity `1`/animation none บน clone · `.no-print` `display:none` ตอน snap · ไม่มี console error.
+- **บทเรียน:** html2canvas + element ที่มี CSS `animation`/`opacity`/`filter` → ภาพซีด/หมอก ต้อง neutralize ผ่าน `onclone`. และ element `.no-print` ที่ `ignoreElements` ตัดออก **ยังกินพื้นที่ layout** → ถ้า capture ใช้ขนาด container ต้อง `display:none` หรือวัดจาก element เป้าหมายตรงๆ.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
