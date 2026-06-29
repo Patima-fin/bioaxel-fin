@@ -2114,6 +2114,81 @@ function _normPayableRow(r) {
   return r;
 }
 
+// Parse ไฟล์ "รายงานตรวจสอบเงินทดรองจ่าย/เงินมัดจำคงค้าง" XML จาก EXPRESS (SpreadsheetML)
+// โครงสร้างต่างจากเจ้าหนี้คงค้าง: แถวรายการ = col1 StyleID 'A10' + vchno (AE/AV/PC…),
+//   แถวถัดมา StyleID 'A11' = รายละเอียด. Col index (1-based):
+//   1=เลขที่(vchno) 2=วันที่ 3=รหัสผู้จำหน่าย 4=ชื่อผู้จำหน่าย 5=เลขที่บิล
+//   9=รวมทั้งสิ้น(incl VAT) 10=ครบกำหนด 15=จ่ายด้วยเช็ค → ยอดค้าง = รวมทั้งสิ้น − จ่ายด้วยเช็ค
+// ดึงเฉพาะรายการที่ยัง "ค้างจ่าย" (ยอดค้าง > 0); ข้ามที่จ่ายเคลียร์แล้ว + เอกสารยกเลิก ('*' นำหน้า vchno)
+function parseDepositXML(xmlText) {
+  var SS = 'urn:schemas-microsoft-com:office:spreadsheet';
+  function ssAttr(el, name) {
+    return el.getAttributeNS(SS, name) || el.getAttribute('ss:' + name) || '';
+  }
+  xmlText = xmlText.replace(/&(?![a-zA-Z_][\w.-]*;|#[0-9]+;|#x[0-9a-fA-F]+;)/g, '&amp;');
+  var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
+  var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
+  var results = [], pending = null;
+  rowEls.forEach(function(rowEl) {
+    var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
+    if (!cellEls.length) return;
+    var cm = {}, li = 0;
+    cellEls.forEach(function(cell) {
+      var is = ssAttr(cell, 'Index');
+      li = is ? parseInt(is) : li + 1;
+      var d = cell.getElementsByTagNameNS('*', 'Data')[0];
+      cm[li] = { v: d ? d.textContent.trim() : '', s: ssAttr(cell, 'StyleID') };
+    });
+    var c1 = cm[1];
+    if (!c1) return;
+    // แถวรายละเอียด (A11) — ผูกกับรายการล่าสุด
+    if (c1.s === 'A11') {
+      if (pending && !pending.remark) {
+        var desc = String(c1.v || '').replace(/^\s*\d+\s+/, '').trim();   // ตัดเลขลำดับ "  1  "
+        pending.remark = desc;
+        var po = desc.match(/PO[\s-]?\d+/i);                              // ดึงเลข PO ออกมาเป็น refno
+        if (po) pending.refno = po[0].replace(/\s/g, '');
+      }
+      return;
+    }
+    // แถวรายการจริง = col1 StyleID 'A10' + vchno (ตัวอักษร 2-3 ตัว + เลข)
+    if (c1.s === 'A10' && /^[A-Z]{2,3}\d/.test(c1.v)) {
+      pending = null;
+      var vchno = c1.v;
+      if (vchno.charAt(0) === '*') return;                               // เอกสารยกเลิก → ข้าม
+      var g = function(i) { return (cm[i] && cm[i].v) || ''; };
+      var gn = function(i) { var v = g(i); return v ? (parseFloat(v.replace(/,/g, '')) || 0) : 0; };
+      var total = gn(9), cheque = gn(15);
+      var outstanding = total - cheque;                                  // ยอดค้าง = รวมทั้งสิ้น − จ่ายเช็ค
+      if (outstanding <= 0.01) return;                                   // จ่ายเคลียร์แล้ว → ข้าม
+      var row = {
+        vchdate:    g(2),                  // ISO date
+        vchno:      vchno,                 // AE / AV / PC …
+        docno:      g(5),                  // เลขที่บิล
+        cust_name:  g(4),                  // ชื่อผู้จำหน่าย
+        maincode:   g(3),                  // รหัสผู้จำหน่าย
+        Amount:     String(total),         // ยอดรวมทั้งสิ้น (incl VAT)
+        netpayment: String(outstanding),   // ยอดค้างจ่าย
+        due2:       g(10),                 // วันครบกำหนด
+        remark:     '',
+        refno:      '',
+      };
+      results.push(row);
+      pending = row;
+    }
+  });
+  return results;
+}
+
+// เลือก parser ตามชนิดรายงาน EXPRESS: เงินมัดจำ/ทดรองคงค้าง vs เจ้าหนี้คงค้างแบบละเอียด
+function parsePayableXML(xmlText) {
+  if (/เงินมัดจำคงค้าง|เงินทดรองจ่าย|ตรวจสอบเงินทดรอง/.test(xmlText)) {
+    return { rows: parseDepositXML(xmlText), kind: 'deposit' };
+  }
+  return { rows: parseExpressXML(xmlText), kind: 'payable' };
+}
+
 // ─── AP import: change-detection + summary-row / paid-via-PV filters ──────────
 // Fields ที่เทียบ diff ตอนนำเข้าซ้ำ (vchno เดิม) — แสดงผ่าน <ImportPreview/>
 // ⚠️ ใช้เฉพาะคอลัมน์ที่อยู่ใน schema payables จริง (apps_script Code.gs ENTITY_HEADERS.payables)
@@ -2428,11 +2503,18 @@ function DataPayablePage({ data, setData, toast }) {
       const rdr = new FileReader();
       rdr.onload = function(e) {
         try {
-          const rows = parseExpressXML(e.target.result);
-          if (!rows.length) { toast('ไม่พบรายการเจ้าหนี้ในไฟล์ XML — ตรวจสอบรูปแบบไฟล์'); return; }
+          const parsed = parsePayableXML(e.target.result);
+          const rows = parsed.rows;
+          const kindLabel = parsed.kind === 'deposit' ? 'เงินมัดจำ/ทดรอง (เฉพาะที่ค้างจ่าย)' : 'เจ้าหนี้คงค้าง';
+          if (!rows.length) {
+            toast(parsed.kind === 'deposit'
+              ? 'ไม่พบรายการที่ค้างจ่ายในไฟล์มัดจำ/ทดรอง (อาจจ่ายเคลียร์หมดแล้ว)'
+              : 'ไม่พบรายการเจ้าหนี้ในไฟล์ XML — ตรวจสอบรูปแบบไฟล์');
+            return;
+          }
           setXmlParsedRows(rows);
           setImportFileName(file.name);
-          toast('อ่านไฟล์ XML แล้ว ' + rows.length + ' รายการ — กด "ตรวจสอบข้อมูล" เพื่อดู preview');
+          toast(`อ่านไฟล์ XML (${kindLabel}) แล้ว ${rows.length} รายการ — กด "ตรวจสอบข้อมูล" เพื่อดู preview`);
         } catch (err) {
           toast('อ่านไฟล์ XML ไม่สำเร็จ: ' + err.message);
         }
@@ -3289,6 +3371,7 @@ function DataPayablePage({ data, setData, toast }) {
               borderRadius: 7, color: 'var(--ink-700)', lineHeight: 1.65,
             }}>
               <div>📊 <strong>ไฟล์ .xml จากโปรแกรม EXPRESS</strong> — รายงาน "เจ้าหนี้คงค้างแบบละเอียด" รองรับทุก prefix (CV/RS/RR/CC/RO/RC/AP/AD …) ครบทุกประเภทผู้จำหน่าย</div>
+              <div>🧾 รองรับ <strong>รายงาน "เงินทดรองจ่าย/เงินมัดจำคงค้าง"</strong> ด้วย (AE/AV/PC) — ระบบแยกประเภทอัตโนมัติ แล้วนำเข้า <strong>เฉพาะรายการที่ยังค้างจ่าย</strong> (ยอดรวม − จ่ายเช็คแล้ว)</div>
               <div>📥 หรือ <strong>อัปโหลด .xlsx/.csv</strong> / <strong>วาง TSV</strong>. แถวแรกต้องเป็นชื่อคอลัมน์ (header)</div>
               <div>🧹 <strong>แถวสรุปยอด/หัวหมวด</strong> ถูกตัดออกอัตโนมัติ — นำเข้าเฉพาะรายการจริง</div>
               <div>🔁 รายการที่ <strong>vchno ซ้ำ</strong> แต่ค่าเปลี่ยน (ยอด/วันครบกำหนด) จะ <strong>แจ้งเตือนให้ตรวจทาน</strong> ก่อนอัปเดต</div>
