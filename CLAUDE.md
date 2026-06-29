@@ -743,5 +743,14 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **report 'planned'** (มุมมองอายุหนี้): เข้าช่วงวันที่ถ้ามี "งวดใด" วันจ่ายอยู่ในช่วง (เดิมดูวันแผนเดียว).
 - **verify (preview 8095, isolated harness + patch auth):** Babel ผ่าน (4 ฟังก์ชัน defined) · single: เปิดมา 1 งวด=เต็ม 100k → แก้เป็น 40k + เพิ่มงวด (default 60k) → บันทึก = **2 forecast row REF_DOC เดียว amount −40000/−60000** · badge "📅 2 งวด · ครบ" · reopen เห็น 2 งวด (40000/60000) + ปุ่มยกเลิกทั้งหมด · bulk: ติ๊ก 2 ใบ → "วางแผนจ่ายที่เลือก (2)" → modal "ยอดคงเหลือ" → 2 row (−100000/−50000 เต็ม remaining) · ไม่มี console error. **GOTCHA (เทสต์):** "วางแผนจ่าย" เป็น substring ของปุ่มโหมด "ยังไม่วางแผนจ่าย" → ตอน query ปุ่มต้อง exact-match.
 
+## 2026-06-29 — Bank Diary การ์ดบัญชี: เรียงรายการในวัน "ยุบเป็นบรรทัดเดียวต่อเจ้าหนี้" + หัววันสรุปเข้า/ออก (ให้เหมือน POG) (build `page_bank_diary 20260629d`)
+- **คำขอผู้ใช้ (เตย):** การ์ดสมุดบัญชี (วันที่กางออก) "เรียงให้สวยเรียบร้อยเหมือนของ POG". เดิม BIO ยุบกลุ่มเฉพาะเจ้าหนี้ที่มี >1 รายการ → เจ้าหนี้ใบเดียวแสดงเป็นแถวสูงเต็ม (มีบรรทัดเลขอ้างอิง + ✏️) ปนกับแถวกลุ่มที่ยุบ → ดูไม่เสมอกัน. POG ยุบทุกเจ้าหนี้ (แม้ใบเดียว) เป็นบรรทัดเดียว.
+- **พอร์ต `BDDayGroup` ให้ตรง POG 3 จุด (ฝั่งแสดงผลล้วน ไม่แตะ compute/sync):**
+  1. **ทุกรายการที่จับชื่อเจ้าหนี้ได้ → แถวยุบ (`BDDayItemGroup`) เสมอ** (เงื่อนไข `g.items.length > 1 || g.items[0].creditor`) → ทั้งลิสต์หน้าตาเสมอกัน (ชื่อ + ยอดรวม + "· N รายการ"), กางดูรายละเอียด+แหล่งที่มา. เหลือเฉพาะรายการไม่มีเจ้าหนี้ (โอนระหว่างบัญชี) เป็นแถวเดี่ยว.
+  2. **หัววันเพิ่มสรุป `↑ยอดรับ · ↓ยอดจ่าย`** (`dayIn`/`dayOut`, เขียว/แดง) ใต้ "N รายการ".
+  3. **คีย์จับกลุ่มตัดช่องว่าง** `creditor.toLowerCase().replace(/\s/g, '')` กันชื่อเจ้าหนี้เดียวกันแต่เว้นวรรคต่างกันไม่ถูกรวม.
+- คง enhancement BIO ใน `BDDayItemGroup` detail (โชว่ "✓ จ่าย/รับจริงแล้ว" + เลขอ้างอิง) ไว้ — อยู่ในมุมมองกาง ไม่กระทบความเรียบร้อยหลัก.
+- **verify (preview 8095):** ไฟล์โหลดผ่าน in-browser Babel ครบ (ไฟล์ถัดไป War Room p2 log build ขึ้น = bank_diary transpile ผ่าน) ไม่มี console error. (หน้า login+RLS-gated → ตรวจ DOM จริงไม่ได้; logic mirror POG เป๊ะที่ใช้จริงแล้ว.) bio-only ([[bio-only-scope]]) — อ่าน POG เป็นต้นแบบเท่านั้น ไม่แตะ.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

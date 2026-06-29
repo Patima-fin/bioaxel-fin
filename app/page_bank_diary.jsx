@@ -806,6 +806,8 @@ function BDDayGroup({ day, today, onItemEdit }) {
   const isToday   = day.date === today;
   const isOverdue = day.date < today;
   const dueColor  = isOverdue ? '#c026d3' : isToday ? '#dc2626' : '#1e293b';
+  const dayIn  = day.items.reduce((s, i) => i.signed > 0 ? s + i.signed : s, 0);
+  const dayOut = day.items.reduce((s, i) => i.signed < 0 ? s - i.signed : s, 0);
 
   return (
     <div style={{ borderBottom:'1px solid #f0f4f8' }}>
@@ -824,8 +826,13 @@ function BDDayGroup({ day, today, onItemEdit }) {
           {isToday   && <span style={{ display:'block', fontSize:9, fontWeight:700, color:'#dc2626' }}>วันนี้</span>}
           {isOverdue && <span style={{ display:'block', fontSize:9, fontWeight:700, color:'#c026d3' }}>เลยกำหนด</span>}
         </div>
-        <div style={{ fontSize:11, color:'#64748b' }}>
-          {day.items.length} รายการ
+        <div style={{ fontSize:11, color:'#64748b', lineHeight:1.5 }}>
+          <span>{day.items.length} รายการ</span>
+          <span style={{ display:'block', fontSize:10, whiteSpace:'nowrap' }}>
+            {dayIn  > 0 && <span style={{ color:'#276749', fontVariantNumeric:'tabular-nums' }}>↑{fmtMoney(dayIn)}</span>}
+            {dayIn > 0 && dayOut > 0 && <span style={{ color:'#94a3b8' }}> · </span>}
+            {dayOut > 0 && <span style={{ color:'#c53030', fontVariantNumeric:'tabular-nums' }}>↓{fmtMoney(dayOut)}</span>}
+          </span>
         </div>
         <div style={{ textAlign:'right', fontWeight:700, fontSize:12, color: day.net >= 0 ? '#276749' : '#c53030', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
           {day.net >= 0 ? '+' : '−'}{fmtMoney(Math.abs(day.net))}
@@ -844,14 +851,16 @@ function BDDayGroup({ day, today, onItemEdit }) {
             const map = {};
             day.items.forEach((it, i) => {
               const creditor = it.creditor || '';
-              // key แยกตามทิศ (รับ/จ่าย) + ชื่อเจ้าหนี้ (lowercase) → รวมข้ามชนิด
-              const key = creditor ? ('c:' + (it.signed < 0 ? 'o' : 'i') + ':' + creditor.toLowerCase()) : ('i:' + i);
+              // key แยกตามทิศ (รับ/จ่าย) + ชื่อเจ้าหนี้ (lowercase, ตัดช่องว่าง) → รวมข้ามชนิด
+              const key = creditor ? ('c:' + (it.signed < 0 ? 'o' : 'i') + ':' + creditor.toLowerCase().replace(/\s/g, '')) : ('i:' + i);
               if (!map[key]) { map[key] = { key, name: creditor || it.title, kind: it.kind, items: [], total: 0 }; order.push(map[key]); }
               map[key].items.push(it);
               map[key].total += it.signed;
             });
             return order.map((g, gi) => (
-              g.items.length > 1
+              // รายการที่จับชื่อเจ้าหนี้ได้ → แถวยุบกะทัดรัดเสมอ (แม้ใบเดียว) ให้ทั้งลิสต์หน้าตาเสมอกัน;
+              // กางดูเห็นรายละเอียด+แหล่งที่มา. เฉพาะรายการที่ไม่มีเจ้าหนี้ (โอน ฯลฯ) → แถวเดี่ยวตามเดิม
+              (g.items.length > 1 || g.items[0].creditor)
                 ? <BDDayItemGroup key={g.key} group={g} top={gi > 0} onItemEdit={onItemEdit} />
                 : <BDItemRow key={g.key} it={g.items[0]} top={gi > 0} onItemEdit={onItemEdit} />
             ));
