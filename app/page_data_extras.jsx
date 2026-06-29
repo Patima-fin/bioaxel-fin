@@ -2900,6 +2900,12 @@ function DataPayablePage({ data, setData, toast }) {
     return { plans, plannedSum, net, remaining: net - plannedSum, anyActual: plans.some(p => p.actual) };
   };
   const isPlanned = (r) => (apPlansByVchno[String(r.vchno || '').trim()] || []).length > 0;
+  // ยอดที่ลงตารางอายุหนี้ตามโหมดรายงาน: all=ยอดเต็มใบ · planned=ยอดที่วางแผน · unplanned=ยอดคงเหลือ (เต็ม−วางแผน)
+  const matrixAmt = (r) => {
+    if (reportMode === 'all') return parseNum(r.netpayment);
+    const info = apPlanInfo(r);
+    return reportMode === 'planned' ? Math.min(info.plannedSum, info.net) : Math.max(0, info.remaining);
+  };
 
   const isoOfDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
   const _feIsActual = (f) => (f.ACTUAL_AMOUNT != null && f.ACTUAL_AMOUNT !== '') || f.STATUS === 'ACTUAL';
@@ -2996,9 +3002,11 @@ function DataPayablePage({ data, setData, toast }) {
     const to = rptTo ? (() => { const d = parseDue(rptTo); if (d) d.setHours(23, 59, 59, 999); return d; })() : null;
     return filtered.filter(r => {
       const plans = apPlansByVchno[String(r.vchno || '').trim()] || [];
-      const planned = plans.length > 0;
-      if (reportMode === 'unplanned' && planned) return false;
-      if (reportMode === 'planned' && !planned) return false;
+      const plannedSum = plans.reduce((s, p) => s + p.amount, 0);
+      const remaining = parseNum(r.netpayment) - plannedSum;
+      // วางแผนแล้ว = มียอดวางแผน · ยังไม่วางแผน = ยังมีคงเหลือ (รวมใบที่วางแผนบางส่วน)
+      if (reportMode === 'planned' && plannedSum <= 0.01) return false;
+      if (reportMode === 'unplanned' && remaining <= 0.01) return false;
       if (from || to) {
         if (reportMode === 'planned') {
           // วางแผนแล้ว: เข้าช่วงถ้ามี "งวด" ใดวันจ่ายอยู่ในช่วง
@@ -3056,7 +3064,7 @@ function DataPayablePage({ data, setData, toast }) {
       let o = map.get(name);
       if (!o) { o = { name, total: 0, overdue: 0, none: 0, buckets: {}, rows: [] }; map.set(name, o); }
       o.rows.push(r);
-      const np = parseNum(r.netpayment);
+      const np = matrixAmt(r);   // all=ยอดเต็ม · planned=ยอดที่วางแผน · unplanned=ยอดคงเหลือ
       o.total += np;
       const b = payableAging6(r, today);
       if (b === 'none') o.none += np;
@@ -3072,7 +3080,7 @@ function DataPayablePage({ data, setData, toast }) {
       PAYABLE_AGING6_KEYS.forEach(k => { colTotals[k] += (o.buckets[k] || 0); });
     });
     return { list, colTotals, hasNone: list.some(o => o.none > 0) };
-  }, [matrixRows]);
+  }, [matrixRows, reportMode, apPlansByVchno]);
 
   // รายการที่ "วางแผนจ่าย" (รายงวด) — สำหรับดึงออก Excel เพื่อหาเอกสารจริง/ทำบัญชี
   // เคารพตัวกรองเจ้าหนี้ (filtered) + ช่วงวันที่รายงาน (rptFrom/rptTo จับกับวันจ่ายที่วางแผน)

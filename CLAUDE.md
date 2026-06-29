@@ -780,5 +780,11 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **หัว "เจ้าหนี้/Vendor" จมหายในรูป:** snapshot CSS เดิม `thead th:first-child { background:#eef6f0 }` (พื้นอ่อน) แต่ `color` ยังเป็น `#fff` (จาก rule `thead th` ทั่วไป) → **ตัวขาวบนพื้นเขียวอ่อน = มองไม่เห็น**. FIX: เอา `thead th:first-child` ออกจาก rule พื้นอ่อน (เหลือแค่ `tbody td:first-child`) → หัวคอลัมน์แรกเป็นพื้นเขียว `#2e8b4a` ตัวขาว เหมือนคอลัมน์อื่น (เห็นชัด). บนจอไม่กระทบ (creditor th ใช้ inline brand-100/brand-700 อยู่แล้ว).
 - **verify (preview 8096, isolated + stub html2canvas):** on-screen od1 bg `rgb(253,243,230)` (ซอฟต์) · snapshot หัวคอลัมน์แรก bg `rgb(46,139,74)` เขียว + color ขาว text "เจ้าหนี้ / Vendor" (เห็นชัด) · ไม่มี console error.
 
+## 2026-06-29 — ตารางอายุหนี้: ยอดในตารางตามโหมดรายงาน (planned=ยอดที่วางแผน, unplanned=ยอดคงเหลือ) (build `page_data_extras 20260629p`)
+- **คำขอผู้ใช้ (เตย):** วางแผนจ่ายแค่บางส่วน (1.2M จาก 2.47M) แต่ตารางอายุหนี้ (มุมมองกว้าง) ขึ้น **ยอดเต็ม** เสมอ — อยากให้ตอน "วางแผนแล้ว" เห็นยอดที่วางแผน.
+- **`matrixAmt(r)` (ใหม่) — ยอดที่ลงตารางตาม `reportMode`:** `all`=ยอดเต็ม (`netpayment`) · `planned`=`min(plannedSum, net)` (ยอดที่วางแผน) · `unplanned`=`max(0, remaining)` (เต็ม−วางแผน). `agingMatrix` ใช้ `matrixAmt(r)` แทน `parseNum(r.netpayment)` (+ deps `reportMode, apPlansByVchno`).
+- **`matrixRows` filter ใหม่:** `planned` = `plannedSum>0` (มียอดวางแผน) · `unplanned` = `remaining>0` (ยังมีคงเหลือ — **รวมใบที่วางแผนบางส่วน** ด้วย, เดิมตัดออกเพราะ `plans.length>0`). → ใบที่วางแผนบางส่วนโผล่ทั้งใน planned (ยอดวางแผน) และ unplanned (ยอดคงเหลือ).
+- **verify (preview 8096, isolated harness, BA500 net 2,473,967 + วางแผน 1,200,000):** ตาราง BA500 total = ทั้งหมด **2,473,967** · วางแผนแล้ว **1,200,000** · ยังไม่วางแผน **1,273,967** (คงเหลือ) · กลับ ทั้งหมด 2,473,967 · ไม่มี console error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
