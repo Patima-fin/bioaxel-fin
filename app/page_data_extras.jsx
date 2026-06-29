@@ -2949,19 +2949,31 @@ function DataPayablePage({ data, setData, toast }) {
     const styleId = 'ap-aging-print-style';
     let style = document.getElementById(styleId);
     if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+    // override .tbl print rules ใน styles.css (ใช้ specificity .ap-aging-card .tbl + !important → ชนะ)
     style.textContent = `
       @media print {
-        @page { size: A4 landscape; margin: 8mm; }
+        @page { size: A4 portrait; margin: 9mm 8mm; }
         html, body { background: #fff !important; }
         .sb, .sb-scrim, .topbar, .no-print { display: none !important; }
         .app { grid-template-columns: 1fr !important; display: block !important; }
-        .page, .main { max-width: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+        .main { display: block !important; }
+        .page { max-width: none !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+        /* เอาเฉพาะตารางอายุหนี้ — ซ่อนหัวการ์ด KPI / ชื่อหน้า / แถบกรอง / แบนเนอร์ */
+        .page > *:not(.ap-aging-card) { display: none !important; }
         .ap-aging-card, .ap-aging-card * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        .ap-aging-card { box-shadow: none !important; }
+        .ap-aging-card { box-shadow: none !important; border: none !important; padding: 0 !important; break-inside: auto; }
         .ap-aging-scroll { max-height: none !important; overflow: visible !important; }
-        .ap-aging-card table { break-inside: auto; }
-        .ap-aging-card thead { display: table-header-group; }
-        .ap-aging-card tr { break-inside: avoid; }
+        /* ── ตารางโฉมใหม่: หัวเขียวตัวขาว · ไม่มีเส้นกริดแนวตั้ง · เว้นช่องหายใจ ── */
+        .ap-aging-card .tbl { min-width: 0 !important; width: 100% !important; font-size: 8.5pt !important; border-collapse: separate !important; border-spacing: 0 !important; }
+        .ap-aging-card .tbl th, .ap-aging-card .tbl td { min-width: 0 !important; position: static !important; }
+        .ap-aging-card .tbl thead { display: table-header-group !important; }
+        .ap-aging-card .tbl thead th { background: #2e8b4a !important; color: #fff !important; border: none !important; padding: 7pt 7pt !important; font-weight: 700 !important; font-size: 8.5pt !important; white-space: nowrap !important; }
+        .ap-aging-card .tbl tbody td { border: none !important; border-bottom: 1px solid #e8efea !important; padding: 5.5pt 7pt !important; font-size: 8.5pt !important; }
+        .ap-aging-card .tbl tbody tr { break-inside: avoid; }
+        .ap-aging-card .tbl tbody tr:hover td { background: inherit !important; }
+        .ap-aging-card .tbl tfoot td { border: none !important; border-top: 2px solid #2e8b4a !important; background: #eaf4ee !important; padding: 7pt !important; font-weight: 700 !important; font-size: 8.5pt !important; }
+        /* คอลัมน์ชื่อเจ้าหนี้: ตัดบรรทัดได้ ไม่ดันตารางล้นแนวตั้ง */
+        .ap-aging-card .tbl th:first-child, .ap-aging-card .tbl td:first-child { max-width: 52mm !important; white-space: normal !important; word-break: break-word !important; }
       }`;
     const _d = new Date(); const p2 = (n) => String(n).padStart(2, '0');
     const brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
@@ -2982,7 +2994,8 @@ function DataPayablePage({ data, setData, toast }) {
     if (scroll) { scroll.style.maxHeight = 'none'; scroll.style.overflow = 'visible'; }
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const canvas = await window.html2canvas(node, { backgroundColor: '#ffffff', scale: 2, useCORS: true, logging: false });
+      const canvas = await window.html2canvas(node, { backgroundColor: '#ffffff', scale: 2, useCORS: true, logging: false,
+        ignoreElements: (el) => el.classList && el.classList.contains('no-print') });   // ตัดแถบควบคุม/ปุ่มออกจากรูป
       const link = document.createElement('a');
       const _d = new Date(); const p2 = (n) => String(n).padStart(2, '0');
       const brand = (window.WTP_CONFIG && window.WTP_CONFIG.BRAND_CODE) || 'BIO';
