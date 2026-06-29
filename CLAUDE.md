@@ -774,5 +774,11 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **verify (preview 8096, isolated harness + stub html2canvas):** captureWidth **766** (ลดจาก 1097) · `onclone` เป็น function + set opacity `1`/animation none บน clone · `.no-print` `display:none` ตอน snap · ไม่มี console error.
 - **บทเรียน:** html2canvas + element ที่มี CSS `animation`/`opacity`/`filter` → ภาพซีด/หมอก ต้อง neutralize ผ่าน `onclone`. และ element `.no-print` ที่ `ignoreElements` ตัดออก **ยังกินพื้นที่ layout** → ถ้า capture ใช้ขนาด container ต้อง `display:none` หรือวัดจาก element เป้าหมายตรงๆ.
 
+## 2026-06-29 — ตารางอายุหนี้: สีพื้นซอฟต์ลง + แก้หัว "เจ้าหนี้/Vendor" จมหายในรูป (build `page_data_extras 20260629o`)
+- **คำขอผู้ใช้ (เตย, ดูรูป build n):** สีพื้นเข้มไป อยากซอฟต์กว่านี้ · หัวคอลัมน์ "เจ้าหนี้/Vendor" มองไม่เห็น.
+- **สีซอฟต์:** `PAYABLE_AGING6.tint` ลดความเข้ม `#fdecd2→#f19b9b` เป็น `#fdf3e6→#f6cccc` (พาสเทลอ่อนลง ยังทึบ ไม่จาง) + ขยับ text color oklch สว่างนิด.
+- **หัว "เจ้าหนี้/Vendor" จมหายในรูป:** snapshot CSS เดิม `thead th:first-child { background:#eef6f0 }` (พื้นอ่อน) แต่ `color` ยังเป็น `#fff` (จาก rule `thead th` ทั่วไป) → **ตัวขาวบนพื้นเขียวอ่อน = มองไม่เห็น**. FIX: เอา `thead th:first-child` ออกจาก rule พื้นอ่อน (เหลือแค่ `tbody td:first-child`) → หัวคอลัมน์แรกเป็นพื้นเขียว `#2e8b4a` ตัวขาว เหมือนคอลัมน์อื่น (เห็นชัด). บนจอไม่กระทบ (creditor th ใช้ inline brand-100/brand-700 อยู่แล้ว).
+- **verify (preview 8096, isolated + stub html2canvas):** on-screen od1 bg `rgb(253,243,230)` (ซอฟต์) · snapshot หัวคอลัมน์แรก bg `rgb(46,139,74)` เขียว + color ขาว text "เจ้าหนี้ / Vendor" (เห็นชัด) · ไม่มี console error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
