@@ -1901,6 +1901,29 @@ function payableAging(row, today) {
 }
 const payableCreditorName = (r) => String(r.cust_name || '').trim() || '(ไม่ระบุชื่อ)';
 
+// ── ตารางอายุหนี้ (AP Aging) 6 ระดับ — overdue days = today − due (บวก = เกินกำหนด) ──
+const PAYABLE_AGING6 = [
+  { key: 'notdue', label: 'ยังไม่ถึงกำหนด',     short: 'ยังไม่ถึงกำหนด', color: 'var(--ink-600)',     tint: 'transparent' },
+  { key: 'od1',    label: 'เกินกำหนด < 30 วัน', short: 'เกิน < 30 วัน',  color: 'oklch(68% 0.15 78)', tint: 'color-mix(in oklch, oklch(68% 0.15 78) 10%, transparent)' },
+  { key: 'od30',   label: 'เกินกำหนด 30 วัน',   short: 'เกิน 30 วัน',    color: 'oklch(64% 0.17 56)', tint: 'color-mix(in oklch, oklch(64% 0.17 56) 11%, transparent)' },
+  { key: 'od60',   label: 'เกินกำหนด 60 วัน',   short: 'เกิน 60 วัน',    color: 'oklch(60% 0.19 40)', tint: 'color-mix(in oklch, oklch(60% 0.19 40) 12%, transparent)' },
+  { key: 'od90',   label: 'เกินกำหนด 90 วัน',   short: 'เกิน 90 วัน',    color: 'oklch(57% 0.21 30)', tint: 'color-mix(in oklch, oklch(57% 0.21 30) 13%, transparent)' },
+  { key: 'od120',  label: 'เกินกำหนด 120 วัน+', short: 'เกิน 120 วัน+',  color: 'var(--bad)',         tint: 'color-mix(in oklch, var(--bad) 14%, transparent)' },
+];
+const PAYABLE_AGING6_KEYS = PAYABLE_AGING6.map(a => a.key);
+const PAYABLE_OD_KEYS = ['od1', 'od30', 'od60', 'od90', 'od120'];   // เฉพาะถังที่เกินกำหนด
+function payableAging6(row, today) {
+  const due = parseDue(row.due2);
+  if (!due) return 'none';
+  const od = Math.floor(((today || new Date()) - due) / 86400000);   // จำนวนวันที่เกินกำหนด (≤0 = ยังไม่ถึง)
+  if (od <= 0)  return 'notdue';
+  if (od < 30)  return 'od1';
+  if (od < 60)  return 'od30';
+  if (od < 90)  return 'od60';
+  if (od < 120) return 'od90';
+  return 'od120';
+}
+
 // Amount input: formatted display (2,000.00) when not focused; raw number when editing
 function AmountInput({ value, onChange, label, required }) {
   const [focused, setFocused] = dxState(false);
@@ -2473,6 +2496,33 @@ function DataPayablePage({ data, setData, toast }) {
     return PAYABLE_AGING.map(a => map[a.key]).filter(g => g.rows.length);
   }, [filtered]);
 
+  // ตารางอายุหนี้รายเจ้าหนี้ — 1 แถว/เจ้า แตกยอดเป็น 6 ช่วงอายุ (+ ไม่ระบุ ถ้ามี)
+  const agingMatrix = dxMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const map = new Map();
+    filtered.forEach(r => {
+      const name = payableCreditorName(r);
+      let o = map.get(name);
+      if (!o) { o = { name, total: 0, overdue: 0, none: 0, buckets: {}, rows: [] }; map.set(name, o); }
+      o.rows.push(r);
+      const np = parseNum(r.netpayment);
+      o.total += np;
+      const b = payableAging6(r, today);
+      if (b === 'none') o.none += np;
+      else o.buckets[b] = (o.buckets[b] || 0) + np;
+    });
+    const list = [...map.values()];
+    list.forEach(o => { o.overdue = PAYABLE_OD_KEYS.reduce((s, k) => s + (o.buckets[k] || 0), 0); });
+    list.sort((a, b) => b.overdue - a.overdue || b.total - a.total);
+    const colTotals = { total: 0, none: 0 };
+    PAYABLE_AGING6_KEYS.forEach(k => { colTotals[k] = 0; });
+    list.forEach(o => {
+      colTotals.total += o.total; colTotals.none += o.none;
+      PAYABLE_AGING6_KEYS.forEach(k => { colTotals[k] += (o.buckets[k] || 0); });
+    });
+    return { list, colTotals, hasNone: list.some(o => o.none > 0) };
+  }, [filtered]);
+
   const suggestions = dxMemo(() => {
     if (!query || query.length < 2) return [];
     const q = query.toLowerCase();
@@ -2815,10 +2865,11 @@ function DataPayablePage({ data, setData, toast }) {
           )}
         </div>
 
-        {/* มุมมอง: รายการ / จัดกลุ่ม */}
+        {/* มุมมอง: รายการ / จัดกลุ่ม / อายุหนี้ */}
         <div className="tabnav" style={{ flex: '0 0 auto' }}>
           <button className={viewMode === 'list' ? 'active' : ''} onClick={() => setViewMode('list')}>📄 รายการ</button>
           <button className={viewMode === 'group' ? 'active' : ''} onClick={() => setViewMode('group')}>🗂 จัดกลุ่ม</button>
+          <button className={viewMode === 'matrix' ? 'active' : ''} onClick={() => setViewMode('matrix')}>📊 อายุหนี้</button>
         </div>
         {/* เมื่อจัดกลุ่ม: เลือกจัดกลุ่มตามเจ้าหนี้ / ช่วงอายุ */}
         {viewMode === 'group' && (
@@ -3000,7 +3051,7 @@ function DataPayablePage({ data, setData, toast }) {
           </table>
         </div>
       </div>
-      ) : (
+      ) : viewMode === 'group' ? (
       /* มุมมองจัดกลุ่ม — ตามเจ้าหนี้ / ตามช่วงอายุ */
       <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid var(--ink-100)', background: 'var(--brand-50)' }}>
@@ -3019,6 +3070,80 @@ function DataPayablePage({ data, setData, toast }) {
             : groupBy === 'creditor'
               ? groupByCreditor.map(renderCreditorGroup)
               : groupByAging.map(renderAgingGroup)}
+        </div>
+      </div>
+      ) : (
+      /* มุมมองตารางอายุหนี้ — รายเจ้าหนี้ × 6 ช่วงอายุ */
+      <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid var(--ink-100)', background: 'var(--brand-50)' }}>
+          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--brand-700)' }}>{agingMatrix.list.length} เจ้าหนี้</span>
+          <span style={{ fontSize: 12.5, color: 'var(--ink-600)' }}>{filtered.length} รายการ</span>
+          {(agingMatrix.colTotals.total - agingMatrix.colTotals.notdue - agingMatrix.colTotals.none) > 0 && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--bad)' }}>
+              เกินกำหนดรวม {fmtNum(PAYABLE_OD_KEYS.reduce((s, k) => s + agingMatrix.colTotals[k], 0), 0)}
+            </span>
+          )}
+          <span style={{ marginLeft: 'auto', fontSize: 13.5, fontWeight: 700, color: 'var(--bad)', fontVariantNumeric: 'tabular-nums' }}>รวม {fmtNum(fNet, 2)}</span>
+        </div>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'min(560px, calc(100vh - 360px))' }}>
+          <table className="tbl" style={{ minWidth: 1080 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
+              <tr>
+                <th style={{ textAlign: 'left', minWidth: 220, position: 'sticky', left: 0, zIndex: 4, background: 'var(--surface)' }}>เจ้าหนี้ / Vendor</th>
+                {PAYABLE_AGING6.map(a => (
+                  <th key={a.key} style={{ textAlign: 'right', minWidth: 116, whiteSpace: 'nowrap', color: a.color }} title={a.label}>{a.short}</th>
+                ))}
+                {agingMatrix.hasNone && <th style={{ textAlign: 'right', minWidth: 100, color: 'var(--ink-400)' }} title="ไม่ระบุวันครบกำหนด">ไม่ระบุ</th>}
+                <th style={{ textAlign: 'right', minWidth: 130, color: 'var(--ink-800)' }}>รวม</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agingMatrix.list.length === 0 && (
+                <tr><td colSpan={2 + PAYABLE_AGING6.length + (agingMatrix.hasNone ? 1 : 0)} style={{ padding: 40, textAlign: 'center' }} className="muted">ไม่พบข้อมูล</td></tr>
+              )}
+              {agingMatrix.list.map(o => {
+                const key = 'm:' + o.name;
+                const open = expanded.has(key);
+                return (
+                  <React.Fragment key={key}>
+                    <tr onClick={() => toggleGroup(key)} style={{ cursor: 'pointer', background: open ? 'var(--brand-50)' : undefined }}>
+                      <td style={{ position: 'sticky', left: 0, zIndex: 2, background: open ? 'var(--brand-50)' : 'var(--surface)', fontWeight: 600, color: 'var(--ink-900)' }}>
+                        <span style={{ display: 'inline-block', width: 12, fontSize: 10, color: 'var(--ink-400)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>{' '}
+                        <span title={o.name}>{o.name}</span>
+                      </td>
+                      {PAYABLE_AGING6.map(a => {
+                        const v = o.buckets[a.key] || 0;
+                        return (
+                          <td key={a.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', background: v ? a.tint : undefined, color: v ? (a.key === 'notdue' ? 'var(--ink-700)' : a.color) : 'var(--ink-300)', fontWeight: v && a.key !== 'notdue' ? 700 : 400 }}>
+                            {v ? fmtNum(v, 0) : '–'}
+                          </td>
+                        );
+                      })}
+                      {agingMatrix.hasNone && <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: o.none ? 'var(--ink-500)' : 'var(--ink-300)' }}>{o.none ? fmtNum(o.none, 0) : '–'}</td>}
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--bad)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(o.total, 0)}</td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={2 + PAYABLE_AGING6.length + (agingMatrix.hasNone ? 1 : 0)} style={{ padding: '0 16px 12px 30px', background: 'color-mix(in oklch, var(--brand-50) 38%, transparent)' }}>
+                          {renderDetailTable(o.rows.slice().sort((x, y) => (parseDue(x.due2) || new Date(0)) - (parseDue(y.due2) || new Date(0))))}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: 'var(--brand-50)', fontWeight: 700 }}>
+                <td style={{ position: 'sticky', left: 0, zIndex: 2, background: 'var(--brand-50)', color: 'var(--brand-700)' }}>รวม {agingMatrix.list.length} เจ้าหนี้</td>
+                {PAYABLE_AGING6.map(a => (
+                  <td key={a.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: a.key === 'notdue' ? 'var(--ink-700)' : a.color }}>{agingMatrix.colTotals[a.key] ? fmtNum(agingMatrix.colTotals[a.key], 0) : '–'}</td>
+                ))}
+                {agingMatrix.hasNone && <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--ink-500)' }}>{agingMatrix.colTotals.none ? fmtNum(agingMatrix.colTotals.none, 0) : '–'}</td>}
+                <td style={{ textAlign: 'right', color: 'var(--bad)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(agingMatrix.colTotals.total, 0)}</td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       </div>
       )}
