@@ -3074,6 +3074,43 @@ function DataPayablePage({ data, setData, toast }) {
     return { list, colTotals, hasNone: list.some(o => o.none > 0) };
   }, [matrixRows]);
 
+  // รายการที่ "วางแผนจ่าย" (รายงวด) — สำหรับดึงออก Excel เพื่อหาเอกสารจริง/ทำบัญชี
+  // เคารพตัวกรองเจ้าหนี้ (filtered) + ช่วงวันที่รายงาน (rptFrom/rptTo จับกับวันจ่ายที่วางแผน)
+  const plannedRows = dxMemo(() => {
+    const from = rptFrom ? parseDue(rptFrom) : null;
+    const to = rptTo ? (() => { const d = parseDue(rptTo); if (d) d.setHours(23, 59, 59, 999); return d; })() : null;
+    const out = [];
+    filtered.forEach(r => {
+      const plans = apPlansByVchno[String(r.vchno || '').trim()] || [];
+      plans.forEach(p => {
+        const d = parseDue(p.date);
+        if (from && (!d || d < from)) return;
+        if (to && (!d || d > to)) return;
+        out.push({
+          planDate: p.date || '', vchno: r.vchno || '', cust_name: r.cust_name || '',
+          due2: r.due2 || '', installAmount: p.amount, fullAmount: parseNum(r.netpayment),
+          status: p.actual ? 'จ่ายจริงแล้ว' : 'วางแผน', bankAc: p.bankAc || '',
+          category: p.category || r.cf_category || '', dpt_code: r.dpt_code || '', remark: r.remark || '',
+        });
+      });
+    });
+    out.sort((a, b) => (parseDue(a.planDate) || new Date(0)) - (parseDue(b.planDate) || new Date(0)));
+    return out;
+  }, [filtered, apPlansByVchno, rptFrom, rptTo]);
+  const PLANNED_COLS = [
+    { key: 'planDate', label: 'วันที่วางแผนจ่าย', type: 'date' },
+    { key: 'vchno', label: 'เลขที่ใบสำคัญ' },
+    { key: 'cust_name', label: 'เจ้าหนี้ / Vendor' },
+    { key: 'due2', label: 'วันครบกำหนด', type: 'date' },
+    { key: 'installAmount', label: 'ยอดงวดที่วางแผน', type: 'number' },
+    { key: 'fullAmount', label: 'ยอดเต็มใบ', type: 'number' },
+    { key: 'status', label: 'สถานะ' },
+    { key: 'bankAc', label: 'บัญชีจ่าย' },
+    { key: 'category', label: 'หมวด CF' },
+    { key: 'dpt_code', label: 'แผนก' },
+    { key: 'remark', label: 'หมายเหตุ' },
+  ];
+
   const suggestions = dxMemo(() => {
     if (!query || query.length < 2) return [];
     const q = query.toLowerCase();
@@ -3181,12 +3218,36 @@ function DataPayablePage({ data, setData, toast }) {
   const saveAgingImage = async () => {
     if (typeof window.html2canvas !== 'function') { toast && toast('ตัวช่วยบันทึกรูปยังโหลดไม่เสร็จ — ลองใหม่อีกครั้ง'); return; }
     const node = matrixRef.current; if (!node) return;
+    // โหมดสแนปช็อต: ตารางแคบลง (แนวตั้ง) + พื้นสีทึบรายช่วงอายุ (กัน html2canvas เรนเดอร์ color-mix จาง/ชัดไม่เท่ากัน)
+    const SNAP_W = 760;
+    const styleId = 'ap-aging-snap-style';
+    let st = document.getElementById(styleId);
+    if (!st) { st = document.createElement('style'); st.id = styleId; document.head.appendChild(st); }
+    st.textContent = `
+      body.ap-aging-snap .ap-aging-card { box-shadow: none !important; }
+      body.ap-aging-snap .ap-aging-scroll { max-height: none !important; overflow: visible !important; }
+      body.ap-aging-snap .ap-aging-card .tbl { min-width: 0 !important; width: 100% !important; font-size: 10.5px !important; table-layout: fixed !important; }
+      body.ap-aging-snap .ap-aging-card .tbl th, body.ap-aging-snap .ap-aging-card .tbl td { min-width: 0 !important; position: static !important; padding: 5px 6px !important; }
+      body.ap-aging-snap .ap-aging-card .tbl thead th { background: #2e8b4a !important; color: #fff !important; border: none !important; }
+      body.ap-aging-snap .ap-aging-card .tbl tfoot td { background: #eaf4ee !important; border-top: 2px solid #2e8b4a !important; }
+      body.ap-aging-snap .ap-aging-card .tbl th:first-child, body.ap-aging-snap .ap-aging-card .tbl td:first-child { width: 150px !important; max-width: 150px !important; white-space: normal !important; word-break: break-word !important; background: #f4faf6 !important; }
+      body.ap-aging-snap .apg-notdue  { background: #ffffff !important; }
+      body.ap-aging-snap .apg-od1     { background: #fdf1e3 !important; }
+      body.ap-aging-snap .apg-od30    { background: #fbe6d6 !important; }
+      body.ap-aging-snap .apg-od60    { background: #f9dccf !important; }
+      body.ap-aging-snap .apg-od90    { background: #f7d2cb !important; }
+      body.ap-aging-snap .apg-od120   { background: #f5cccc !important; }`;
+    document.body.classList.add('ap-aging-snap');
     const scroll = node.querySelector('.ap-aging-scroll');
     const prevMax = scroll ? scroll.style.maxHeight : null, prevOv = scroll ? scroll.style.overflow : null;
     if (scroll) { scroll.style.maxHeight = 'none'; scroll.style.overflow = 'visible'; }
+    const prevW = node.style.width, prevMaxW = node.style.maxWidth;
+    node.style.setProperty('width', SNAP_W + 'px', 'important');
+    node.style.setProperty('max-width', SNAP_W + 'px', 'important');
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const canvas = await window.html2canvas(node, { backgroundColor: '#ffffff', scale: 2, useCORS: true, logging: false,
+        width: SNAP_W, windowWidth: SNAP_W,
         ignoreElements: (el) => el.classList && el.classList.contains('no-print') });   // ตัดแถบควบคุม/ปุ่มออกจากรูป
       const link = document.createElement('a');
       const _d = new Date(); const p2 = (n) => String(n).padStart(2, '0');
@@ -3195,7 +3256,12 @@ function DataPayablePage({ data, setData, toast }) {
       link.href = canvas.toDataURL('image/png');
       link.click();
     } catch (err) { console.error('save image failed', err); toast && toast('บันทึกรูปไม่สำเร็จ: ' + (err && err.message ? err.message : err)); }
-    finally { if (scroll) { scroll.style.maxHeight = prevMax; scroll.style.overflow = prevOv; } }
+    finally {
+      document.body.classList.remove('ap-aging-snap');
+      if (st.parentNode) st.parentNode.removeChild(st);
+      node.style.width = prevW; node.style.maxWidth = prevMaxW;
+      if (scroll) { scroll.style.maxHeight = prevMax; scroll.style.overflow = prevOv; }
+    }
   };
 
   // ── เรนเดอร์ตารางรายการย่อยในกลุ่ม (คลิกแถวเพื่อแก้ไข + วางแผนจ่ายรายใบ) ──────
@@ -3770,6 +3836,14 @@ function DataPayablePage({ data, setData, toast }) {
           <YmdPicker value={rptTo} onChange={setRptTo} size="sm" />
           {(rptFrom || rptTo) && <button className="btn btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => { setRptFrom(''); setRptTo(''); }}>ล้างช่วง</button>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            {plannedRows.length > 0 && (
+              <ExportButton
+                rows={plannedRows} columns={PLANNED_COLS}
+                filename="AP_planned_payments" sheetName="แผนจ่าย"
+                title={`รายการเจ้าหนี้ที่วางแผนจ่าย${(rptFrom || rptTo) ? ` · วันจ่าย ${rptFrom ? fmtDate(rptFrom) : '…'}–${rptTo ? fmtDate(rptTo) : '…'}` : ''}`}
+                label={`📋 รายการวางแผน (${plannedRows.length})`}
+              />
+            )}
             <button className="btn btn-ghost" style={{ height: 32 }} onClick={printAging} title="พิมพ์ / บันทึกเป็น PDF">🖨️ พิมพ์ PDF</button>
             <button className="btn btn-ghost" style={{ height: 32 }} onClick={saveAgingImage} title="บันทึกเป็นรูป PNG">🖼️ บันทึกรูป</button>
           </div>
@@ -3820,7 +3894,7 @@ function DataPayablePage({ data, setData, toast }) {
                       {PAYABLE_AGING6.map(a => {
                         const v = o.buckets[a.key] || 0;
                         return (
-                          <td key={a.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', background: v ? a.tint : undefined, color: v ? (a.key === 'notdue' ? 'var(--ink-700)' : a.color) : 'var(--ink-300)', fontWeight: v && a.key !== 'notdue' ? 700 : 400 }}>
+                          <td key={a.key} className={v ? ('apg-' + a.key) : undefined} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', background: v ? a.tint : undefined, color: v ? (a.key === 'notdue' ? 'var(--ink-700)' : a.color) : 'var(--ink-300)', fontWeight: v && a.key !== 'notdue' ? 700 : 400 }}>
                             {v ? fmtNum(v, 0) : '–'}
                           </td>
                         );

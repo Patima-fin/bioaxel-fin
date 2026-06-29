@@ -752,5 +752,12 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - คง enhancement BIO ใน `BDDayItemGroup` detail (โชว่ "✓ จ่าย/รับจริงแล้ว" + เลขอ้างอิง) ไว้ — อยู่ในมุมมองกาง ไม่กระทบความเรียบร้อยหลัก.
 - **verify (preview 8095):** ไฟล์โหลดผ่าน in-browser Babel ครบ (ไฟล์ถัดไป War Room p2 log build ขึ้น = bank_diary transpile ผ่าน) ไม่มี console error. (หน้า login+RLS-gated → ตรวจ DOM จริงไม่ได้; logic mirror POG เป๊ะที่ใช้จริงแล้ว.) bio-only ([[bio-only-scope]]) — อ่าน POG เป็นต้นแบบเท่านั้น ไม่แตะ.
 
+## 2026-06-29 — ตารางอายุหนี้: บันทึกรูปแนวตั้ง+สีทึบสม่ำเสมอ + ดึง Excel "รายการที่วางแผนจ่าย" (build `page_data_extras 20260629l`)
+- **คำขอผู้ใช้ (เตย):** (1) บันทึกรูป (PNG) อยากได้แคบลง/แนวตั้ง (ตอนนี้กว้างไป) + สีในรูปจางบ้างชัดบ้าง (2) ตอน "วางแผนแล้ว" อยากดึงรายการที่วางแผนออกไป (เลขที่ใบ/เจ้าหนี้/วันจ่าย/ยอด) ไปหาเอกสารจริงทำบัญชี.
+- **(1) `saveAgingImage` rework — โหมดสแนปช็อต:** inject `<style id=ap-aging-snap-style>` + `document.body.classList.add('ap-aging-snap')` ระหว่างแคป → ตาราง `table-layout:fixed` + `min-width:0` + ฟอนต์ 10.5px + คอลัมน์เจ้าหนี้ 150px ตัดบรรทัด → **แคบลง (capture width `760`)**. **สีพื้นช่วงอายุเป็น hex ทึบ** (`.apg-od1..od120` `#fdf1e3→#f5cccc`, notdue ขาว, หัวเขียว `#2e8b4a` ตัวขาว) ทับ inline `color-mix(...transparent)` → กัน html2canvas เรนเดอร์ alpha จาง/ชัดไม่เท่ากัน. เพิ่ม `className={v ? ('apg-'+a.key) : undefined}` ที่เซลล์ bucket (เฉพาะที่มียอด — เซลล์ว่างไม่ติดสี). cleanup ลบ class+style คืน width. (print PDF เดิมไม่แตะ.)
+- **(2) ดึง Excel รายการวางแผน:** memo `plannedRows` = แตก `apPlansByVchno` เป็นราย "งวด" (เคารพ `filtered` + ช่วงวันจ่าย `rptFrom/rptTo`) เรียงตามวันจ่าย; คอลัมน์ `PLANNED_COLS` = วันจ่ายที่วางแผน/เลขที่ใบ/เจ้าหนี้/วันครบกำหนด/ยอดงวด/ยอดเต็มใบ/สถานะ/บัญชี/หมวด/แผนก/หมายเหตุ. ปุ่ม **`<ExportButton>` "📋 รายการวางแผน (N)"** ในแถบควบคุมรายงาน (โผล่เมื่อ `plannedRows.length>0`) → Excel ผ่าน `exportRowsToExcel`. เด่นตอน 'วางแผนแล้ว'+ใส่ช่วงวัน → ได้รายการตรงงวด ไปหาเอกสารจริงได้.
+- **verify (preview 8096, isolated harness + stub html2canvas):** ปุ่ม "📋 รายการวางแผน (2)" โผล่ · เซลล์ติด `apg-*` เฉพาะมียอด · saveAgingImage width=760 + body `ap-aging-snap` + style สีทึบ `#fdf1e3`/หัวเขียว + cleanup ลบครบ · ไม่มี console error.
+- **ยังไม่พอร์ต POG รอบนี้** (ผู้ใช้ไม่ได้สั่ง — [[bio-only-scope]]); พร้อมพอร์ตถ้าสั่ง.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
