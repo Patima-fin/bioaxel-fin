@@ -543,6 +543,8 @@
     // กระทบยอดธนาคาร — sync แท็บแยก (statement lines + สถานะการกระทบ)
     bankReconLines: [],
     bankReconState: [],
+    bankReconBook: [],    // สมุดบัญชี Express (งบกระทบยอด) — movements/outstanding/meta
+    bankReconMatch: [],   // การจับคู่ Express ↔ STM (confirmed/manual)
     presence: [],   // ใครออนไลน์อยู่ (heartbeat) — อ่านจากแท็บ presence
     bankEntries: [
       // ── กรุงเทพ 123-4-56789-0 (Main) ────────────────────────────────────
@@ -609,7 +611,7 @@
     'payables','debtLedger','receipts','bankEntries','checks','debtMaster','bankTransfers',
     'stsServiceFee','stsPendingCalc','stsCalcResult','debtEvents','users',
     'cashflowSnapshots','followUpsLog','manualOverrides',
-    'bankReconLines','bankReconState','presence'];
+    'bankReconLines','bankReconState','bankReconBook','bankReconMatch','presence'];
   const isOnline = () => !!(window.WTP_CONFIG && (window.WTP_CONFIG.SHEET_ID || window.WTP_CONFIG.BACKEND === 'supabase'));
   // ค่าตั้งต้นเมื่อ localStorage ว่าง:
   //   offline → seed mock เต็ม (โหมดสาธิต)
@@ -657,6 +659,7 @@
     'projects',       // ★ ใหม่  — ~4–5MB (648 rows × 120 cols) ← ตัวการหลักที่ยังทำให้ blob เกิน
     'pvVouchers',     // ระยะกลาง — ~184KB (614 rows)
     'bankReconLines', // ระยะกลาง — varies, import-only; BankReconStore localStorage เป็น backup
+    'bankReconBook',  // ระยะกลาง — งบกระทบยอด Express, import-only; BankReconStore localStorage เป็น backup
     'receipts',       // ระยะกลาง — ~137KB (686 rows)
     'payables',       // ระยะกลาง — ~163KB (545 rows)
   ]);
