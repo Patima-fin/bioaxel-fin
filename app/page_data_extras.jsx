@@ -2612,6 +2612,7 @@ function DataPayablePage({ data, setData, toast }) {
   const [expanded, setExpanded]       = dxState(() => new Set());  // กลุ่มที่กางอยู่
   // ── วางแผนจ่าย + รายงาน (มุมมองอายุหนี้) ────────────────────────────────────
   const [planTarget, setPlanTarget]   = dxState(null);   // {aps:[...]} → เปิด modal วางแผนจ่าย
+  const [selectedAp, setSelectedAp]   = dxState(() => new Set());  // id รายการที่ติ๊กเลือก (วางแผนหลายอัน)
   const [reportMode, setReportMode]   = dxState('all');  // 'all' | 'unplanned' | 'planned'
   const [rptFrom, setRptFrom]         = dxState('');      // ISO ช่วงวันที่
   const [rptTo, setRptTo]             = dxState('');
@@ -2819,6 +2820,7 @@ function DataPayablePage({ data, setData, toast }) {
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     toast && toast('วางแผนจ่าย ' + aps.length + ' รายการ → ' + fmtDate(payDate));
     setPlanTarget(null);
+    setSelectedAp(new Set());
   };
 
   // ยกเลิกแผนจ่าย — ลบ forecast ที่ผูก AP (เฉพาะที่ยังไม่จ่ายจริง)
@@ -2977,6 +2979,14 @@ function DataPayablePage({ data, setData, toast }) {
   const credOptShown = creditorOptions.filter(o =>
     !credQuery.trim() || o.name.toLowerCase().includes(credQuery.toLowerCase()));
 
+  // ติ๊กเลือกรายการเพื่อวางแผนจ่ายหลายอัน
+  const toggleSelAp = (id) => setSelectedAp(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const setManyAp = (ids, on) => setSelectedAp(prev => {
+    const n = new Set(prev); ids.forEach(id => on ? n.add(id) : n.delete(id)); return n;
+  });
+
   // ── พิมพ์ PDF (ใช้ window.print + print CSS ซ่อน chrome) ────────────────────
   const printAging = () => {
     const styleId = 'ap-aging-print-style';
@@ -3041,15 +3051,28 @@ function DataPayablePage({ data, setData, toast }) {
 
   // ── เรนเดอร์ตารางรายการย่อยในกลุ่ม (คลิกแถวเพื่อแก้ไข + วางแผนจ่ายรายใบ) ──────
   const renderDetailTable = (rowsArr) => {
-    const unplanned = canEdit ? rowsArr.filter(r => r.vchno && !isPlanned(r)) : [];
+    const selectable = canEdit ? rowsArr.filter(r => r.vchno) : [];
+    const unplanned  = canEdit ? rowsArr.filter(r => r.vchno && !isPlanned(r)) : [];
+    const selInTable = selectable.filter(r => selectedAp.has(r.id));
+    const allSel     = selectable.length > 0 && selInTable.length === selectable.length;
     return (
       <div>
-        {canEdit && unplanned.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 0 4px', borderBottom: '1px solid var(--ink-50)', marginBottom: 4 }}>
-            <button className="btn btn-primary" style={{ height: 28, fontSize: 12, padding: '0 10px' }}
-              onClick={(e) => { e.stopPropagation(); setPlanTarget({ aps: unplanned }); }}>
-              📅 วางแผนจ่ายทั้งหมด ({unplanned.length})
-            </button>
+        {canEdit && selectable.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', padding: '6px 0 4px', borderBottom: '1px solid var(--ink-50)', marginBottom: 4 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-600)', cursor: 'pointer', marginRight: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = selInTable.length > 0 && !allSel; }}
+                onChange={() => setManyAp(selectable.map(r => r.id), !allSel)} style={{ cursor: 'pointer' }} />
+              เลือกทั้งหมด ({selectable.length})
+            </label>
+            {selInTable.length > 0
+              ? <button className="btn btn-primary" style={{ height: 28, fontSize: 12, padding: '0 10px' }}
+                  onClick={(e) => { e.stopPropagation(); setPlanTarget({ aps: selInTable }); }}>
+                  📅 วางแผนจ่ายที่เลือก ({selInTable.length})
+                </button>
+              : unplanned.length > 0 && <button className="btn btn-ghost" style={{ height: 28, fontSize: 12, padding: '0 10px' }}
+                  onClick={(e) => { e.stopPropagation(); setPlanTarget({ aps: unplanned }); }}>
+                  📅 วางแผนจ่ายทั้งหมดที่ยังไม่วางแผน ({unplanned.length})
+                </button>}
           </div>
         )}
         <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
@@ -3059,8 +3082,14 @@ function DataPayablePage({ data, setData, toast }) {
               const am  = PAYABLE_AGING_BY_KEY[ag.key];
               const due = parseDue(r.due2);
               const plan = plannedByVchno[String(r.vchno || '').trim()];
+              const sel  = selectedAp.has(r.id);
               return (
-                <tr key={r.id} onClick={() => setEdit(r)} style={{ cursor: 'pointer' }}>
+                <tr key={r.id} onClick={() => setEdit(r)} style={{ cursor: 'pointer', background: sel ? 'var(--brand-50)' : undefined }}>
+                  {canEdit && (
+                    <td style={{ width: 30, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      {r.vchno ? <input type="checkbox" checked={sel} onChange={() => toggleSelAp(r.id)} style={{ cursor: 'pointer' }} /> : null}
+                    </td>
+                  )}
                   <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-500)', width: 84 }}>{fmtDate(r.vchdate) || '—'}</td>
                   <td style={{ fontFamily: 'ui-monospace', color: 'var(--brand-700)', fontWeight: 600, width: 130 }}>{r.vchno || '—'}</td>
                   <td style={{ color: 'var(--ink-700)' }}>{r.cust_name || '—'}</td>
