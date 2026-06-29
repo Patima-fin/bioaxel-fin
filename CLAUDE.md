@@ -759,5 +759,13 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **verify (preview 8096, isolated harness + stub html2canvas):** ปุ่ม "📋 รายการวางแผน (2)" โผล่ · เซลล์ติด `apg-*` เฉพาะมียอด · saveAgingImage width=760 + body `ap-aging-snap` + style สีทึบ `#fdf1e3`/หัวเขียว + cleanup ลบครบ · ไม่มี console error.
 - **ยังไม่พอร์ต POG รอบนี้** (ผู้ใช้ไม่ได้สั่ง — [[bio-only-scope]]); พร้อมพอร์ตถ้าสั่ง.
 
+## 2026-06-29 — ตารางอายุหนี้: สีพื้นทึบเข้มขึ้น (เลิก color-mix จาง) + ชื่อเจ้าหนี้บรรทัดเดียว + ตัดแถบสรุปบนออก (build `page_data_extras 20260629m`)
+- **คำขอผู้ใช้ (เตย, ดูตารางบนจอ):** สียังจาง · แถบสรุปด้านบนสุดเอาออก · ชื่อเจ้าหนี้อย่าตกคนละบรรทัด.
+- **สีจาง = `color-mix(...transparent) 10-14%` มันอ่อนมาก** → เปลี่ยน `PAYABLE_AGING6.tint` เป็น **solid hex ทึบ** (od1 `#fdecd2` → od120 `#f19b9b` ไล่ส้ม→แดง) + ดาร์กสีตัวอักษร bucket (`color` oklch ~50% สำหรับ contrast บนพื้นเข้ม). ผลพลอยได้: html2canvas เรนเดอร์ solid hex สม่ำเสมอ → **รูปไม่จาง/ไม่ชัดบ้างจางบ้างอีก** (ไม่ต้องพึ่ง snapshot color override แล้ว — ตัด `.apg-*` ออกจาก snapshot CSS).
+- **ตัดแถบสรุปบน** (`ตารางอายุหนี้เจ้าหนี้ · N เจ้าหนี้ ... รวม`) ออกทั้ง div — ซ้ำกับแถวรวมล่าง (tfoot) + scope label ดูได้จากปุ่ม report controls. (กระทบพิมพ์ PDF ด้วย → รายงานเหลือแค่ตาราง สะอาดขึ้น).
+- **ชื่อเจ้าหนี้บรรทัดเดียว:** เซลล์เจ้าหนี้ (sticky ซ้าย) เพิ่ม `whiteSpace:'nowrap'` → ไม่ตกบรรทัด (คอลัมน์ยืดตามชื่อยาว มี scroll แนวนอน).
+- **`saveAgingImage` ใหม่:** ตัด width ตายตัว 760 + `table-layout:fixed`/word-break (เคยทำให้ชื่อตก) → snapshot CSS เหลือแค่ nowrap + ฟอนต์ 11px + หัวเขียว + กางเต็ม; node `width:max-content` แล้ววัด `scrollWidth` (capW) ส่งให้ html2canvas → **รูปกว้างพอดีเนื้อหา ชื่อบรรทัดเดียว** (เทสต์ได้ capW≈1097 สำหรับชื่อยาว). pเซลล์ใช้สี hex ทึบจาก inline `a.tint` (ไม่ต้อง override).
+- **verify (preview 8096, isolated harness):** od1 cell bg `rgb(253,236,210)` / od120 `rgb(241,155,155)` (ทึบ ไม่จาง) · creditor `white-space:nowrap` · แถบสรุปบนหายไป (`noSummaryStrip:true`) · saveAgingImage capW=1097 + cleanup ลบ class/style คืน width · ไม่มี console error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.
