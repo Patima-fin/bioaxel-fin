@@ -714,5 +714,13 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 - **บันทึกรูป (`saveAgingImage`)** เพิ่ม `html2canvas ignoreElements: el.classList.contains('no-print')` → รูปไม่ติดแถบควบคุม/ปุ่ม.
 - **verify (preview 8090, isolated harness + patch auth):** Babel ผ่าน · `.page` children = [page-head, grid-4, card(filter), ap-aging-card] → `agingIsDirectChildOfPage:true`, siblings ที่ถูกซ่อน=3 · control bar เป็น no-print + มีปุ่มพิมพ์ · ไม่มี console error. (การพิมพ์จริง = window.print ดิอะล็อก เทสต์อัตโนมัติไม่ได้ แต่ specificity override + โครงสร้าง DOM ยืนยันแล้ว.)
 
+## 2026-06-29 — DATA เจ้าหนี้คงค้าง: แก้วันที่ใบสำคัญ/วันครบกำหนดได้เองในแอป (EXPRESS ตั้งผิด ไม่ต้องรออัปไฟล์) (build `page_data_extras 20260629i`)
+- **คำขอผู้ใช้ (เตย):** EXPRESS ตั้งวันครบกำหนด/วันที่เอกสารมาผิดบ้าง แต่เข้า EXPRESS ไปดึงเองไม่ได้ → รออัปไฟล์ใหม่ช้า. อยากแก้ 2 วันที่นี้เองในแอป.
+- **`APEditModal` เดิม read-only ล้วน** (ทุกช่อง `<div>`, footer มีแค่ "ปิด", `onSave`/`onDelete` ส่งมาแต่ไม่ถูกใช้). แก้ให้ **`vchdate` (วันที่ใบสำคัญ) + `due2` (วันครบกำหนด)** แก้ได้ผ่าน `<input type="date">` (ปฏิทิน) + ปุ่ม **"บันทึกวันที่"** (gate ด้วย `canEdit` prop ใหม่; viewer/owner ยังเห็นแบบ read-only div). ฟิลด์การเงินอื่นยัง read-only (แก้ผ่านนำเข้าไฟล์เท่านั้น — กันแก้ผิด).
+- **helper ใน modal:** `toISOInput(v)` = `parseDue(v)` → ISO `YYYY-MM-DD` (รองรับ ISO / DD/MM/YYYY / พ.ศ. ที่ EXPRESS ส่งมา); `DateF` = ช่องวันที่แก้ได้; `datesDirty` (เทียบ ISO ก่อน/หลัง — ปุ่มบันทึกเปิดเฉพาะเมื่อเปลี่ยนจริง); `saveDates` = `onSave({...row, vchdate:draft.vchdate, due2:draft.due2})` **เปลี่ยนเฉพาะ 2 วันที่ ฟิลด์อื่นคงเดิม** (ไม่เขียนทับ docno-backfill/ฟิลด์อื่นใน draft). บันทึกเก็บเป็น **ISO** (readers ทั้งแอป — table `parseDue`, Bank Diary `bdToISO`, aging — รับ ISO อยู่แล้ว).
+- `save` ของ DataPayablePage เพิ่ม `WTPData.forceSyncNow()` → เซฟทันที (เดิม `save` เป็น dead code เพราะ modal ไม่เคยเรียก onSave). `<APEditModal ... canEdit={canEdit} />`.
+- **⚠️ re-upload ไฟล์ EXPRESS ที่ยังตั้งผิด จะ revert การแก้มือ** (import merge by vchno เขียนทับ due2/vchdate จากไฟล์) — เป็นการแก้ชั่วคราวจนกว่าจะแก้ที่ EXPRESS; import diff จะโชว์เป็น "เปลี่ยน".
+- **verify (preview 8090, isolated harness):** modal มี 2 ช่อง `input[type=date]` (vchdate `2026-03-24` ISO, due2 `03/07/2026`→`2026-07-03`) · แก้ due2→`2026-08-15` กดบันทึก → payable.due2=`2026-08-15`, vchdate คงเดิม · ปุ่มบันทึก disabled จนกว่าจะเปลี่ยน (`datesDirty`) · canEdit=false (ไม่ล็อกอิน) → 0 date input + ไม่มีปุ่มบันทึก (read-only div) · ไม่มี console error.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

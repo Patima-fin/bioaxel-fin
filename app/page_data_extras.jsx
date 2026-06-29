@@ -2072,7 +2072,7 @@ function AmountInput({ value, onChange, label, required }) {
 }
 
 // ─── AP Edit Modal — 3-col grid, highlight due date + netpayment ─────────────
-function APEditModal({ row, onClose, onSave, onDelete }) {
+function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
   const [draft, setDraft]             = dxState(null);
   const [confirmDelete, setConfirm]   = dxState(false);
   dxEffect(() => {
@@ -2129,24 +2129,57 @@ function APEditModal({ row, onClose, onSave, onDelete }) {
     );
   };
 
+  // แปลงค่าวันที่ (ISO / DD/MM/YYYY / พ.ศ.) → ISO YYYY-MM-DD สำหรับ <input type=date>
+  const toISOInput = (v) => {
+    const d = parseDue(v);
+    if (!d || isNaN(d)) return '';
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  // ช่องวันที่ที่ "แก้ได้" — ปฏิทินกดเลือก (กรณี EXPRESS ตั้งมาผิด แก้เองได้เลย ไม่ต้องรออัปไฟล์ใหม่)
+  const DateF = ({ fkey, label, highlight }) => {
+    const iso = toISOInput(draft[fkey]);
+    const hi = highlight === 'due' ? dueStyle : {};
+    return (
+      <div className="field">
+        <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {label}{canEdit && <span style={{ color: 'var(--brand-600)', fontSize: 10, fontWeight: 700 }}>✎ แก้ได้</span>}
+        </label>
+        {canEdit
+          ? <input type="date" value={iso} onChange={e => setDraft(d => ({ ...d, [fkey]: e.target.value }))}
+              style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-150)', padding: '0 10px', fontSize: 13, width: '100%', cursor: 'pointer', fontFamily: 'inherit', ...hi }} />
+          : <div style={{ minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...hi }}>{draft[fkey] ? (fmtDate(draft[fkey]) || draft[fkey]) : '—'}</div>}
+      </div>
+    );
+  };
+  const datesDirty = canEdit && (toISOInput(draft.vchdate) !== toISOInput(row.vchdate) || toISOInput(draft.due2) !== toISOInput(row.due2));
+  const saveDates = () => {
+    onSave && onSave({ ...row, vchdate: draft.vchdate, due2: draft.due2 });   // เปลี่ยนเฉพาะ 2 วันที่ ฟิลด์อื่นคงเดิม
+  };
+
   return (
     <>
       <Modal open={!!row} title={`ข้อมูล AP · ${draft.vchno || '—'}`}
         maxWidth={900} onClose={onClose}
         footer={<>
           <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
+          {canEdit && <button className="btn btn-primary" onClick={saveDates} disabled={!datesDirty}><Icon name="check" size={13} /> บันทึกวันที่</button>}
         </>}>
+        {canEdit && (
+          <div style={{ fontSize: 12, color: 'var(--ink-600)', background: 'color-mix(in oklch, var(--brand-500) 7%, transparent)', border: '1px solid color-mix(in oklch, var(--brand-500) 22%, transparent)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, lineHeight: 1.55 }}>
+            ✎ แก้ <strong>วันที่ใบสำคัญ</strong> / <strong>วันครบกำหนด</strong> ได้เลย (กรณี EXPRESS ตั้งมาผิด) แล้วกด "บันทึกวันที่" — ไม่ต้องรออัปไฟล์ใหม่. ฟิลด์อื่นแก้ได้จากการนำเข้าไฟล์เท่านั้น.
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px 16px' }}>
 
           <Hdr label="ข้อมูลเอกสาร" icon="invoice" />
           {/* บรรทัด 1: วันที่ | vchno | docno */}
-          <F fkey="vchdate" label="วันที่ใบสำคัญ" />
+          <DateF fkey="vchdate" label="วันที่ใบสำคัญ" />
           <F fkey="vchno"   label="vchno · ใบสำคัญ" />
           <F fkey="docno"   label="docno (col B)" />
-          {/* บรรทัด 2: refno | refcode | due (highlight) */}
+          {/* บรรทัด 2: refno | refcode | due (highlight, แก้ได้) */}
           <F fkey="refno"   label="refno · เลขที่อ้างอิง" />
           <F fkey="refcode" label="refcode" />
-          <F fkey="due2"    label="วันครบกำหนด" highlight="due" />
+          <DateF fkey="due2" label="วันครบกำหนด" highlight="due" />
 
           <Hdr label="เจ้าหนี้ (VENDOR)" icon="money" />
           <F fkey="cust_name" label="ชื่อเจ้าหนี้" span={2} />
@@ -3114,6 +3147,7 @@ function DataPayablePage({ data, setData, toast }) {
         ? d.payables.map(x => x.id === row.id ? row : x)
         : [{ ...row, id: WTPData.newId() }, ...d.payables],
     }));
+    if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     setEdit(null);
     toast('บันทึกข้อมูลแล้ว');
   };
@@ -3817,7 +3851,7 @@ function DataPayablePage({ data, setData, toast }) {
       )}
 
       {/* Edit / view modal */}
-      <APEditModal row={edit} onClose={() => setEdit(null)} onSave={save} onDelete={remove} />
+      <APEditModal row={edit} onClose={() => setEdit(null)} onSave={save} onDelete={remove} canEdit={canEdit} />
     </div>
   );
 }
