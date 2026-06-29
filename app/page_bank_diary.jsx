@@ -1856,7 +1856,7 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
   //   global ทุกบัญชี (จับคู่ด้วยเลข AP ล้วน) ให้เหมือนหน้า Cash Flow แม้ AP วางแผนคนละบัญชีกับที่จ่าย
   const paidApSet = React.useMemo(() => {
     const s = new Set();
-    pvList.forEach(p => { if (p.apNo) s.add(String(p.apNo).trim()); });
+    pvList.forEach(p => pvSettledDocs(p).forEach(d => s.add(d)));   // AP_No + บิลย่อย settles[] (1 เช็คจ่ายหลายบิล)
     return s;
   }, [pvList]);
   const pvByAccount = React.useMemo(() => {

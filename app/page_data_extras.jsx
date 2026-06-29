@@ -295,6 +295,113 @@ function DataCrudPage({ data, setData, toast, config }) {
     return s;
   };
 
+  // Diff ชุด parsedRows กับ DB (ตาม dedupKey) → setImportPreview — ใช้ร่วมทั้ง path วาง/อัปโหลด (delimited)
+  // และ path XML (config.xmlParser). parsedRows = object ที่ coerce type แล้ว (ทั้ง 2 path).
+  const buildDiffPreview = (parsedRows, fieldByKey, blankSkipped, skippedCols) => {
+    // dedupKey รับได้ทั้ง string เดี่ยว หรือ array (compound key เช่น ['PL_PV_No','AP_No'])
+    const dedupKeys  = Array.isArray(config.dedupKey) ? config.dedupKey : [config.dedupKey];
+    const primaryKey = dedupKeys[0];   // ใช้สำหรับ group ใน UI (เช่น PL_PV_No)
+    const SEP = '|';
+    const makeTuple = (r) => dedupKeys.map(k => String(r[k] ?? '').trim()).join(SEP);
+
+    // Date scope — ถ้ามี config.scopeDateField จะคำนวณช่วงวันที่ของไฟล์ import
+    // แล้ว filter DB ที่อยู่นอกช่วงทิ้ง (ไม่นับเป็น missing)
+    const scopeField = config.scopeDateField;
+    let dateLo = null, dateHi = null;
+    if (scopeField) {
+      const ds = parsedRows.map(r => String(r[scopeField] ?? '').slice(0, 10)).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).sort();
+      if (ds.length > 0) { dateLo = ds[0]; dateHi = ds[ds.length - 1]; }
+    }
+    const inDateScope = (r) => {
+      if (!scopeField || !dateLo || !dateHi) return true;
+      const d = String(r[scopeField] ?? '').slice(0, 10);
+      return d && d >= dateLo && d <= dateHi;
+    };
+
+    const existing = data[config.dataKey] || [];
+    // Map<tuple, DB row[]> — รองรับ duplicates ใน DB (PV+AP เดียวกัน เกิดมาแล้วใน DB)
+    const existingByTuple = new Map();
+    existing.forEach(r => {
+      const k = makeTuple(r);
+      if (!k.replace(new RegExp(SEP, 'g'), '').trim()) return;   // empty tuple
+      if (!existingByTuple.has(k)) existingByTuple.set(k, []);
+      existingByTuple.get(k).push(r);
+    });
+
+    const importedTuples = new Set();
+    const cat = { added: [], changed: [], unchanged: [], missing: [] };
+    let noKeyCount = 0;
+
+    parsedRows.forEach(obj => {
+      const tuple = makeTuple(obj);
+      const tupleClean = tuple.replace(new RegExp(SEP, 'g'), '').trim();
+      if (!tupleClean) {
+        noKeyCount++;
+        cat.added.push({ row: obj, key: tuple, primary: '(ไม่มีเลข)' });
+        return;
+      }
+      importedTuples.add(tuple);
+      const exList = existingByTuple.get(tuple);
+      if (!exList || exList.length === 0) {
+        cat.added.push({ row: obj, key: tuple, primary: obj[primaryKey] || '' });
+        return;
+      }
+      // Use first matching row (if DB has multiple, others will still appear; we match 1:1 by position)
+      const ex = exList.shift();
+      const diff = {};
+      Object.entries(obj).forEach(([fk, v]) => {
+        if (dedupKeys.includes(fk)) return;
+        if (fk === 'settles') return;   // ฟิลด์ array (บิลย่อยที่จ่าย) — ไม่เทียบ diff (commit merge ...row อัปเดตให้อยู่แล้ว)
+        const t = fieldByKey[fk]?.type;
+        if (normCmp(ex[fk], t) !== normCmp(v, t)) {
+          diff[fk] = { old: ex[fk], new: v };
+        }
+      });
+      const item = { row: obj, existing: ex, key: tuple, primary: ex[primaryKey] || obj[primaryKey] || '' };
+      if (Object.keys(diff).length === 0) {
+        cat.unchanged.push(item);
+      } else {
+        cat.changed.push({ ...item, diff });
+      }
+    });
+
+    // หา missing: tuple ใน DB (ที่อยู่ใน date scope) ที่ไม่อยู่ใน importedTuples
+    // existingByTuple ยังเหลือเฉพาะ row ที่ไม่ได้ถูก match (.shift() เอาออกตอน matching)
+    existingByTuple.forEach((rows, tuple) => {
+      rows.forEach(r => {
+        if (!inDateScope(r)) return;
+        if (importedTuples.has(tuple)) {
+          // tuple นี้มีใน import แต่ DB มีหลาย row → row ที่เกินถือเป็น duplicate (ไม่ใช่ missing) — ข้าม
+          return;
+        }
+        cat.missing.push({ row: r, key: tuple, primary: r[primaryKey] || '' });
+      });
+    });
+
+    cat.blankSkipped = blankSkipped;
+    cat.noKeyCount   = noKeyCount;
+    cat.skippedCols  = skippedCols;
+    cat.fieldByKey   = fieldByKey;
+    cat.dateRange    = (dateLo && dateHi) ? { lo: dateLo, hi: dateHi } : null;
+    cat.dedupKeys    = dedupKeys;
+    cat.primaryKey   = primaryKey;
+    setImportPreview(cat);
+    setDeleteMissingChoice(false);
+    setImportStats(null);
+  };
+
+  // XML path (config.xmlParser) — rows ผ่าน parser มาแล้ว (coerce type + settles[] ครบ) → diff เลย
+  //   ใช้กับ DATA PV (parsePaymentXML: รายงานจ่ายชำระหนี้). ต้องมี dedupKey (PV มี ['PL_PV_No','AP_No'])
+  const handleXmlImport = (xmlRows) => {
+    if (!Array.isArray(xmlRows) || xmlRows.length === 0) {
+      toast('ไม่พบใบจ่าย (PS) ในไฟล์ — ตรวจสอบว่าเป็นรายงาน "การจ่ายชำระหนี้" ของ EXPRESS');
+      return;
+    }
+    if (!config.dedupKey) { toast('หน้านี้ไม่รองรับนำเข้า XML'); return; }
+    const fieldByKey = Object.fromEntries(importFields.map(f => [f.key, f]));
+    buildDiffPreview(xmlRows, fieldByKey, 0, []);
+  };
+
   const handleImport = () => {
     if (!importText.trim()) { toast('ไม่มีข้อมูล — กรุณาวางข้อมูลจาก Excel ก่อน'); return; }
     const { headers, rows } = parseDelimited(importText);
@@ -355,95 +462,7 @@ function DataCrudPage({ data, setData, toast, config }) {
     }
 
     // ── Mode 2: มี dedupKey → diff แล้วโชว์ preview ก่อน commit ──────────
-    // dedupKey รับได้ทั้ง string เดี่ยว หรือ array (compound key เช่น ['PL_PV_No','AP_No'])
-    const dedupKeys  = Array.isArray(dedupKey) ? dedupKey : [dedupKey];
-    const primaryKey = dedupKeys[0];   // ใช้สำหรับ group ใน UI (เช่น PL_PV_No)
-    const SEP = '|';
-    const makeTuple = (r) => dedupKeys.map(k => String(r[k] ?? '').trim()).join(SEP);
-
-    // Date scope — ถ้ามี config.scopeDateField จะคำนวณช่วงวันที่ของไฟล์ import
-    // แล้ว filter DB ที่อยู่นอกช่วงทิ้ง (ไม่นับเป็น missing)
-    const scopeField = config.scopeDateField;
-    let dateLo = null, dateHi = null;
-    if (scopeField) {
-      const ds = parsedRows.map(r => String(r[scopeField] ?? '').slice(0, 10)).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).sort();
-      if (ds.length > 0) { dateLo = ds[0]; dateHi = ds[ds.length - 1]; }
-    }
-    const inDateScope = (r) => {
-      if (!scopeField || !dateLo || !dateHi) return true;
-      const d = String(r[scopeField] ?? '').slice(0, 10);
-      return d && d >= dateLo && d <= dateHi;
-    };
-
-    const existing = data[config.dataKey] || [];
-    // Map<tuple, DB row[]> — รองรับ duplicates ใน DB (PV+AP เดียวกัน เกิดมาแล้วใน DB)
-    const existingByTuple = new Map();
-    existing.forEach(r => {
-      const k = makeTuple(r);
-      if (!k.replace(new RegExp(SEP, 'g'), '').trim()) return;   // empty tuple
-      if (!existingByTuple.has(k)) existingByTuple.set(k, []);
-      existingByTuple.get(k).push(r);
-    });
-
-    const importedTuples = new Set();
-    const cat = { added: [], changed: [], unchanged: [], missing: [] };
-    let noKeyCount = 0;
-
-    parsedRows.forEach(obj => {
-      const tuple = makeTuple(obj);
-      const tupleClean = tuple.replace(new RegExp(SEP, 'g'), '').trim();
-      if (!tupleClean) {
-        noKeyCount++;
-        cat.added.push({ row: obj, key: tuple, primary: '(ไม่มีเลข)' });
-        return;
-      }
-      importedTuples.add(tuple);
-      const exList = existingByTuple.get(tuple);
-      if (!exList || exList.length === 0) {
-        cat.added.push({ row: obj, key: tuple, primary: obj[primaryKey] || '' });
-        return;
-      }
-      // Use first matching row (if DB has multiple, others will still appear; we match 1:1 by position)
-      const ex = exList.shift();
-      const diff = {};
-      Object.entries(obj).forEach(([fk, v]) => {
-        if (dedupKeys.includes(fk)) return;
-        const t = fieldByKey[fk]?.type;
-        if (normCmp(ex[fk], t) !== normCmp(v, t)) {
-          diff[fk] = { old: ex[fk], new: v };
-        }
-      });
-      const item = { row: obj, existing: ex, key: tuple, primary: ex[primaryKey] || obj[primaryKey] || '' };
-      if (Object.keys(diff).length === 0) {
-        cat.unchanged.push(item);
-      } else {
-        cat.changed.push({ ...item, diff });
-      }
-    });
-
-    // หา missing: tuple ใน DB (ที่อยู่ใน date scope) ที่ไม่อยู่ใน importedTuples
-    // existingByTuple ยังเหลือเฉพาะ row ที่ไม่ได้ถูก match (.shift() เอาออกตอน matching)
-    existingByTuple.forEach((rows, tuple) => {
-      rows.forEach(r => {
-        if (!inDateScope(r)) return;
-        if (importedTuples.has(tuple)) {
-          // tuple นี้มีใน import แต่ DB มีหลาย row → row ที่เกินถือเป็น duplicate (ไม่ใช่ missing) — ข้าม
-          return;
-        }
-        cat.missing.push({ row: r, key: tuple, primary: r[primaryKey] || '' });
-      });
-    });
-
-    cat.blankSkipped = blankSkipped;
-    cat.noKeyCount   = noKeyCount;
-    cat.skippedCols  = skippedCols;
-    cat.fieldByKey   = fieldByKey;
-    cat.dateRange    = (dateLo && dateHi) ? { lo: dateLo, hi: dateHi } : null;
-    cat.dedupKeys    = dedupKeys;
-    cat.primaryKey   = primaryKey;
-    setImportPreview(cat);
-    setDeleteMissingChoice(false);
-    setImportStats(null);
+    buildDiffPreview(parsedRows, fieldByKey, blankSkipped, skippedCols);
   };
 
   // Apply the preview → upsert + optional delete
@@ -536,6 +555,22 @@ function DataCrudPage({ data, setData, toast, config }) {
   // Upload an .xlsx file directly (no need to copy-paste)
   const handleFileUpload = (file) => {
     if (!file) return;
+    // XML path (EXPRESS) — config.xmlParser แปลงไฟล์ 2 ชั้น (PS/บิลย่อย) → flat rows แล้ว diff ทันที
+    if (config.xmlParser && /\.xml$/i.test(file.name)) {
+      const xr = new FileReader();
+      xr.onload = (e) => {
+        try {
+          const rows = config.xmlParser(e.target.result);
+          setImportFileName(file.name);
+          setImportText('');
+          handleXmlImport(rows);
+        } catch (err) {
+          toast('อ่านไฟล์ XML ไม่สำเร็จ: ' + err.message);
+        }
+      };
+      xr.readAsText(file, 'utf-8');
+      return;
+    }
     if (!window.XLSX) { toast('ไม่พบไลบรารี SheetJS — กรุณาใช้วิธี Copy-Paste แทน'); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -946,16 +981,16 @@ function DataCrudPage({ data, setData, toast, config }) {
                 border: 'none',
               }}>
                 <Icon name="upload" size={13} />
-                เลือกไฟล์ Excel
+                {config.xmlParser ? 'เลือกไฟล์ (XML / Excel)' : 'เลือกไฟล์ Excel'}
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt"
+                  accept={config.xmlParser ? '.xml,.xlsx,.xls,.xlsm,.csv,.tsv,.txt' : '.xlsx,.xls,.xlsm,.csv,.tsv,.txt'}
                   onChange={(e) => handleFileUpload(e.target.files?.[0])}
                   style={{ display: 'none' }}
                 />
               </label>
               <span style={{ fontSize: 11.5, color: importDragOver ? 'var(--brand-700)' : 'var(--ink-500)', fontWeight: importDragOver ? 600 : 400 }}>
-                {importDragOver ? '⬇️ วางไฟล์ที่นี่' : 'หรือลากไฟล์มาวาง — รองรับ .xlsx, .xls, .csv'}
+                {importDragOver ? '⬇️ วางไฟล์ที่นี่' : (config.xmlParser ? 'หรือลากไฟล์มาวาง — .xml (EXPRESS), .xlsx, .csv' : 'หรือลากไฟล์มาวาง — รองรับ .xlsx, .xls, .csv')}
               </span>
               {importFileName && (
                 <button type="button" onClick={() => { setImportFileName(''); setImportText(''); }}
@@ -1503,7 +1538,7 @@ function ForecastEntriesPage({ data, setData, toast }) {
     const norm = (s) => String(s == null ? '' : s).trim();
     const fe = data.forecastEntries || [], pv = data.pvVouchers || [], ap = data.payables || [];
     if (!fe.length || !pv.length) return [];
-    const paid = new Set(pv.map(p => norm(p.AP_No)).filter(Boolean));
+    const paid = new Set(); pv.forEach(p => pvSettledDocs(p).forEach(d => paid.add(d)));   // AP_No + บิลย่อย settles[]
     const pay  = new Set(ap.map(p => norm(p.vchno)).filter(Boolean));
     const ids = [];
     fe.forEach(e => {
@@ -1785,9 +1820,11 @@ function DataPVPage({ data, setData, toast }) {
   return (
     <DataCrudPage data={data} setData={setData} toast={toast} config={{
       title: 'DATA PV · Payment Voucher',
-      sub: 'RAW_PV_PAYMENT · รายการจ่ายเงินจริงทั้งหมด · วาง RAW ได้เลย',
+      sub: 'รายการจ่ายเงินจริง · โยนไฟล์ XML "รายงานการจ่ายชำระหนี้" (EXPRESS) ได้เลย · WHT เกิดตอนจ่าย',
       dataKey: 'pvVouchers',
-      importSourceNote: 'เอาข้อมูลจาก AP รายงาน 4.3 มาวาง/อัปโหลด',
+      importSourceNote: 'โยนไฟล์ .xml "รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (EXPRESS) — ยอดสุทธิ = เช็คจ่าย (หัก WHT แล้ว) · 1 เช็ค = 1 แถว · บิลที่จ่ายทั้งหมดเก็บไว้ดูได้ · ใบยกเลิก (*) ตัดออกให้ · หรือวาง RAW จาก AP รายงาน 4.3',
+      // ★ ตัวอ่าน XML รายงานจ่ายชำระหนี้ (2 ชั้น PS/บิลย่อย) → 1 pvVoucher/ใบจ่าย + settles[]
+      xmlParser: parsePaymentXML,
       // ทะเบียน PV ต้นทางตั้งหัวคอลัมน์บัญชีที่ตัดจ่ายว่า "Account_Code" (ไม่ใช่ Bank_AC) → map เข้าให้ตรง
       headerAliases: { 'Account_Code': 'Bank_AC' },
       dedupKey: ['PL_PV_No', 'AP_No'],   // compound key — PV เดียวมีหลาย AP ได้
@@ -1810,6 +1847,7 @@ function DataPVPage({ data, setData, toast }) {
         Remark: '', cc_remark: '',
         Amount: 0, Down_payment: 0, Deduct: 0, Vat: 0, Ret: 0,
         Before_WHT: 0, WHT: 0, Less_Other: 0, Total: 0, Minus_Other: 0, Net_Amount: 0,
+        settles: [],         // บิล/หนี้ที่เช็คนี้ไปจ่าย (จาก XML จ่ายชำระหนี้): [{vchno,billno,paid,note}]
       },
       readOnlyRows: true,    // PV records come from accounting system — don't edit them
       allowDelete: true,     // …but allow deleting stale entries that never actually paid out
@@ -1819,8 +1857,12 @@ function DataPVPage({ data, setData, toast }) {
         { key: 'PL_PV_No',   label: 'เลขที่ PV',    width: 120, mono: true, align: 'center' },
         { key: 'AP_No',      label: 'เลขที่ AP',    width: 120, mono: true, align: 'center' },
         { key: 'Payee',      label: 'ผู้รับเงิน' },
+        { key: 'WHT', label: 'WHT', align: 'right', headerAlign: 'right', width: 90, sortValue: r => parseNum(r.WHT),
+          render: r => { const w = parseNum(r.WHT); return <span style={{ color: w ? 'oklch(58% 0.17 70)' : 'var(--ink-300)', fontVariantNumeric: 'tabular-nums' }}>{w ? fmtNum(w, 2) : '—'}</span>; } },
         { key: 'Net_Amount', label: 'ยอดสุทธิ', align: 'right', headerAlign: 'right', width: 130, sortValue: r => parseNum(r.Net_Amount),
           render: r => <span style={{ fontWeight: 700, color: parseNum(r.Net_Amount) < 0 ? 'var(--bad)' : 'var(--ink-800)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(parseNum(r.Net_Amount), 2)}</span> },
+        { key: 'settles', label: 'บิลที่จ่าย', align: 'center', width: 92, sortValue: r => (Array.isArray(r.settles) ? r.settles.length : 0),
+          render: r => { const n = Array.isArray(r.settles) ? r.settles.length : 0; return n ? <span title={r.settles.map(s => `${s.vchno || s.docno || '?'}${s.paid ? ' · ' + fmtNum(s.paid, 2) : ''}`).join('\n')} style={{ display: 'inline-block', minWidth: 20, padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)', color: 'var(--brand-700)', fontWeight: 600, fontSize: 11.5 }}>{n} บิล</span> : <span style={{ color: 'var(--ink-300)' }}>—</span>; } },
         { key: 'cc_remark',  label: 'หมายเหตุ' },
       ],
       modalFields: [
@@ -2157,6 +2199,66 @@ function parseExpressXML(xmlText) {
   return results;
 }
 
+// ── Parser: รายงาน "การจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (EXPRESS, SpreadsheetML) ──
+//   โครงสร้าง 2 ชั้น (ต่างจากเจ้าหนี้คงค้างที่ classify ด้วย StyleID):
+//     • แถวหัว PS = col3 ขึ้นต้น "PS" → 1 ใบจ่าย (1 เช็ค) → 1 pvVoucher
+//     • แถวย่อย   = col4 มีเลขเอกสาร (RO/AP/RC/RR/RS) + col3 ว่าง → บิล/หนี้ที่เช็คนั้นไปจ่าย → settles[]
+//   คอลัมน์หัว PS: 1=วันจ่าย 2='*'(ยกเลิก) 3=PS 4=ผู้จำหน่าย 8=ยอดตามใบรับ(gross) 9=เงินสด
+//     10=เช็คจ่าย(สุทธิ=gross−WHT) 13=ภาษีWHT 15=หมายเหตุ 16=เลขเช็ค 17=ลงวันที่ 18=ธนาคาร 19=สถานะ
+//   ★ WHT เกิดที่นี่ (ตอนจ่าย) ไม่เหมือนตั้งหนี้ → Net_Amount = เช็คจ่าย (เงินสดออกจริง), เก็บ WHT + gross ด้วย
+//   ★ Net_Amount เก็บเป็น "บวก" (ตรงกับ pvActualByWeekCat ที่ += amt ตรงๆ ไม่ abs)
+//   คืน array ของ pvVoucher (1/ใบจ่าย) — ตัดใบที่ยกเลิก ('*') ทิ้ง
+function parsePaymentXML(xmlText) {
+  var SS = 'urn:schemas-microsoft-com:office:spreadsheet';
+  function ssAttr(el, name) { return el.getAttributeNS(SS, name) || el.getAttribute('ss:' + name) || ''; }
+  xmlText = xmlText.replace(/&(?![a-zA-Z_][\w.-]*;|#[0-9]+;|#x[0-9a-fA-F]+;)/g, '&amp;');
+  var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
+  var num = function (s) { if (s == null || s === '') return 0; var n = parseFloat(String(s).replace(/[, ]/g, '')); return isNaN(n) ? 0 : n; };
+  var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
+  var out = [], cur = null;
+  rowEls.forEach(function (rowEl) {
+    var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
+    if (!cellEls.length) return;
+    var cm = {}, li = 0;
+    cellEls.forEach(function (cell) {
+      var is = ssAttr(cell, 'Index');
+      li = is ? parseInt(is) : li + 1;
+      var d = cell.getElementsByTagNameNS('*', 'Data')[0];
+      cm[li] = d ? d.textContent.trim() : '';
+    });
+    var c3 = cm[3] || '', c4 = cm[4] || '';
+    // แถวหัว PS (ใบจ่าย)
+    if (/^PS\d/.test(c3)) {
+      var gross = num(cm[8]), cash = num(cm[9]), cheque = num(cm[10]), wht = num(cm[13]);
+      var net = cheque || cash || (gross - wht);
+      cur = {
+        PL_PV_No: c3,
+        Pmt_Date: cm[1] || '',
+        Payee: c4,
+        AP_No: '',                 // เลขเอกสารบิลแรกที่จ่าย — เติมจากแถวย่อยแรก (ให้ paidApSet เดิมใช้ได้)
+        Amount: gross, Before_WHT: gross, Total: gross, WHT: wht, Net_Amount: net,
+        Type_of_Pmt: cm[19] || 'เช็คจ่าย',
+        Chq_No: cm[16] || '', Chq_Date: cm[17] || '', Bank_AC: cm[18] || '',
+        Remark: cm[15] || '', cc_remark: cm[15] || '',
+        settles: [],
+        _canceled: /\*/.test(cm[2] || ''),
+      };
+      out.push(cur);
+      return;
+    }
+    // แถวย่อย (บิลที่เช็คนี้จ่าย) — col4 เป็นเลขเอกสาร, col3 ว่าง
+    if (cur && !c3 && c4 && /^[A-Za-z]/.test(c4)) {
+      cur.settles.push({ vchno: c4, billdate: cm[5] || '', billno: cm[6] || '', paid: num(cm[7]), note: cm[8] || '' });
+      if (!cur.AP_No) cur.AP_No = c4;
+      return;
+    }
+  });
+  return out
+    .filter(function (r) { return r.PL_PV_No && !r._canceled; })
+    .map(function (r) { delete r._canceled; return r; });
+}
+
 // เทียบค่าให้ทน format ต่าง — date → epoch (กัน DD/MM vs ISO), number → parseNum (กัน "2,000.00")
 function _payableNormCmp(v, type) {
   if (type === 'number') return parseNum(v);
@@ -2382,7 +2484,7 @@ function DataPayablePage({ data, setData, toast }) {
   //    จึงไม่ใช่เจ้าหนี้คงค้าง ไม่ควรอยู่ในชีตนี้ (ผู้ใช้กดล้างได้จาก banner ด้านบน)
   const paidVchnoSet = dxMemo(() => {
     const s = new Set();
-    (data.pvVouchers || []).forEach(pv => { const a = String(pv.AP_No || '').trim(); if (a) s.add(a); });
+    (data.pvVouchers || []).forEach(pv => pvSettledDocs(pv).forEach(d => s.add(d)));   // AP_No + บิลย่อย settles[]
     return s;
   }, [data.pvVouchers]);
   const paidRows = dxMemo(() =>
@@ -2696,8 +2798,8 @@ function DataPayablePage({ data, setData, toast }) {
       detail = parsed.filter(o => { const keep = _isPayableDetailRow(o); if (!keep) summarySkipped++; return keep; });
     }
 
-    // (2) เซ็ตของที่จ่ายแล้ว (ดึงไป PV) — vchno ที่ตรงกับ AP_No ใน pvVouchers
-    const paidSet = new Set((data.pvVouchers || []).map(pv => String(pv.AP_No || '').trim()).filter(Boolean));
+    // (2) เซ็ตของที่จ่ายแล้ว (ดึงไป PV) — vchno ที่ตรงกับ AP_No หรือบิลย่อย settles[] ใน pvVouchers
+    const paidSet = new Set(); (data.pvVouchers || []).forEach(pv => pvSettledDocs(pv).forEach(d => paidSet.add(d)));
 
     // index payable เดิมด้วย vchno
     const existing = data.payables || [];

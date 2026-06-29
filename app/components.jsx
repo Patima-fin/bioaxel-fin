@@ -88,6 +88,25 @@ function ivReceivedDate(iv) {
   return raw;
 }
 
+// All document numbers a PV (ใบสำคัญจ่าย) settles → its AP_No + any settles[] sub-lines.
+//   การนำเข้า "รายงานจ่ายชำระหนี้" (EXPRESS) เก็บ 1 แถว/ใบจ่าย (เช็ค) แต่ 1 เช็คจ่ายได้หลายบิล
+//   → บิลที่จ่ายทั้งหมดเก็บใน settles[] (แต่ละ item: {vchno, billno, paid, ...}).
+//   ใช้สร้าง paidApSet (Bank Diary / Cash Flow / DATA เจ้าหนี้คงค้าง) ให้ตัด/มาร์ก "จ่ายแล้ว" ครบทุกบิล
+//   ไม่ใช่แค่ AP_No หลัก. รับได้ทั้ง raw pvVoucher (AP_No/settles), normalized (apNo/raw.settles),
+//   และ settles ที่เป็น JSON string (กันเคส serialize).
+function pvSettledDocs(pv) {
+  const out = [];
+  if (!pv) return out;
+  const ap = pv.AP_No != null && pv.AP_No !== '' ? pv.AP_No : pv.apNo;
+  if (ap) out.push(String(ap).trim());
+  let s = pv.settles != null ? pv.settles : (pv.raw && pv.raw.settles);
+  if (typeof s === 'string') { try { s = JSON.parse(s); } catch (_) { s = null; } }
+  if (Array.isArray(s)) {
+    s.forEach(function (x) { const v = x && (x.vchno || x.docno); if (v) out.push(String(v).trim()); });
+  }
+  return Array.from(new Set(out.filter(Boolean)));   // unique (AP_No มักซ้ำกับ settles[0])
+}
+
 function fmtDate(iso) {
   const d = parseDateFlexible(iso);
   if (!d) return '—';

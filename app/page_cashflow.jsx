@@ -314,7 +314,7 @@ function cfIsManager() {
 // ─── AP-PV match (filter out paid AP) ─────────────────────────────────────
 function buildPaidVchnoSet(pvVouchers) {
   const set = new Set();
-  (pvVouchers || []).forEach(pv => { if (pv.AP_No) set.add(pv.AP_No); });
+  (pvVouchers || []).forEach(pv => pvSettledDocs(pv).forEach(d => set.add(d)));   // AP_No + บิลย่อย settles[]
   return set;
 }
 
@@ -934,7 +934,7 @@ function CashFlowDashboard({ data, setData, toast }) {
   // ── paidApSet: เลขที่ AP ที่จ่ายจริงผ่าน PV แล้ว (PV.AP_No) → ตัด AP-plan ที่จ่ายแล้วออก ──
   const paidApSet = cfMemo(() => {
     const s = new Set();
-    pvVouchers.forEach(pv => { if (pv.AP_No) s.add(String(pv.AP_No).trim()); });
+    pvVouchers.forEach(pv => pvSettledDocs(pv).forEach(d => s.add(d)));   // AP_No + บิลย่อย settles[] (1 เช็คจ่ายหลายบิล)
     return s;
   }, [pvVouchers]);
 
