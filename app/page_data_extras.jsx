@@ -2182,10 +2182,13 @@ function parseDepositXML(xmlText) {
 }
 
 // เลือก parser ตามชนิดรายงาน EXPRESS: เงินมัดจำ/ทดรองคงค้าง vs เจ้าหนี้คงค้างแบบละเอียด
+// ⚠️ ห้าม detect ด้วยคำว่า "เงินทดรองจ่าย" ลอยๆ — ไฟล์ "เจ้าหนี้คงค้างแบบละเอียด" มี
+//    "เงินทดรองจ่ายพนักงาน" เป็น "ประเภทผู้จำหน่าย" อยู่ด้วย → จะจับผิดเป็นไฟล์มัดจำ.
+//    ใช้คำเฉพาะของรายงานมัดจำ (ที่ไฟล์ AP ไม่มี) + กันด้วยชื่อรายงาน AP เป็น belt-and-suspenders.
 function parsePayableXML(xmlText) {
-  if (/เงินมัดจำคงค้าง|เงินทดรองจ่าย|ตรวจสอบเงินทดรอง/.test(xmlText)) {
-    return { rows: parseDepositXML(xmlText), kind: 'deposit' };
-  }
+  var isDeposit = /เงินมัดจำคงค้าง|ตรวจสอบเงินทดรองจ่าย/.test(xmlText)
+               && !/เจ้าหนี้คงค้างแบบละเอียด/.test(xmlText);
+  if (isDeposit) return { rows: parseDepositXML(xmlText), kind: 'deposit' };
   return { rows: parseExpressXML(xmlText), kind: 'payable' };
 }
 
@@ -3271,14 +3274,14 @@ function DataPayablePage({ data, setData, toast }) {
         </div>
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'min(560px, calc(100vh - 360px))' }}>
           <table className="tbl" style={{ minWidth: 1080 }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--panel)' }}>
               <tr>
-                <th style={{ textAlign: 'left', minWidth: 220, position: 'sticky', left: 0, zIndex: 4, background: 'var(--surface)' }}>เจ้าหนี้ / Vendor</th>
+                <th style={{ textAlign: 'left', minWidth: 220, position: 'sticky', left: 0, zIndex: 4, background: 'var(--brand-100)', color: 'var(--brand-700)' }}>เจ้าหนี้ / Vendor</th>
                 {PAYABLE_AGING6.map(a => (
-                  <th key={a.key} style={{ textAlign: 'right', minWidth: 116, whiteSpace: 'nowrap', color: a.color }} title={a.label}>{a.short}</th>
+                  <th key={a.key} style={{ textAlign: 'right', minWidth: 116, whiteSpace: 'nowrap', color: a.color, background: 'var(--panel)' }} title={a.label}>{a.short}</th>
                 ))}
-                {agingMatrix.hasNone && <th style={{ textAlign: 'right', minWidth: 100, color: 'var(--ink-400)' }} title="ไม่ระบุวันครบกำหนด">ไม่ระบุ</th>}
-                <th style={{ textAlign: 'right', minWidth: 130, color: 'var(--ink-800)' }}>รวม</th>
+                {agingMatrix.hasNone && <th style={{ textAlign: 'right', minWidth: 100, color: 'var(--ink-400)', background: 'var(--panel)' }} title="ไม่ระบุวันครบกำหนด">ไม่ระบุ</th>}
+                <th style={{ textAlign: 'right', minWidth: 130, color: 'var(--ink-800)', background: 'var(--panel)' }}>รวม</th>
               </tr>
             </thead>
             <tbody>
@@ -3291,7 +3294,7 @@ function DataPayablePage({ data, setData, toast }) {
                 return (
                   <React.Fragment key={key}>
                     <tr onClick={() => toggleGroup(key)} style={{ cursor: 'pointer', background: open ? 'var(--brand-50)' : undefined }}>
-                      <td style={{ position: 'sticky', left: 0, zIndex: 2, background: open ? 'var(--brand-50)' : 'var(--surface)', fontWeight: 600, color: 'var(--ink-900)' }}>
+                      <td style={{ position: 'sticky', left: 0, zIndex: 2, background: open ? 'var(--brand-100)' : 'var(--brand-50)', fontWeight: 600, color: 'var(--ink-900)' }}>
                         <span style={{ display: 'inline-block', width: 12, fontSize: 10, color: 'var(--ink-400)', transform: open ? 'rotate(90deg)' : 'none' }}>▶</span>{' '}
                         <span title={o.name}>{o.name}</span>
                       </td>
