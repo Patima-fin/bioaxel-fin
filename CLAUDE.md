@@ -648,5 +648,10 @@ Must be served over **HTTP** (not `file://`) — it fetches ~25 separate `.jsx`.
 ## 2026-06-28 — Loading state ตอนดึงข้อมูล server รอบแรก (port จาก WTP) — build `app.jsx 20260628b` / `styles.css 20260628a`
 - หลัง splash หาย ข้อมูลจริงยังโหลดไม่เสร็จ → หน้าโชว์ศูนย์/ว่าง ดูเหมือนพัง. FIX (`app.jsx`): state `firstLoadDone` (flip เมื่อ subscribe callback แรก = ข้อมูล server มาถึง; failSafe 12s กันค้าง) + `showInitialLoad = !firstLoadDone && coreEmpty` (invoices/bankAccounts/projects/payables ว่างหมด) → cached user เห็นทันที ไม่โดนบัง. render `<DataLoadingState/>` (spinner + "กำลังโหลดข้อมูล…") แทน `{page}`. CSS `.wtp-loading*` ใน styles.css (spinner = `var(--brand-500)` เขียวแบรนด์ หมุน). verify: Babel ผ่าน + spinner เขียว rgb(46,139,74) หมุน + ไม่มี error.
 
+## 2026-06-29 — What-if Simulator (จำลองกระแสเงินสด) — พาเนลแยกในหน้า Weekly Forecast (port จาก WTP) — build `page_cashflow 20260629a`
+- พาเนล "🔮 จำลองกระแสเงินสด (What-if)" ใต้ Section 03 หน้า `#cashflow` — เลื่อนวันจ่าย/รับรายรายการ → ยอดคงเหลือรายสัปดาห์ + จุดเงินต่ำสุด คำนวณใหม่ทันที (baseline → จำลอง). **จำลองล้วน — `React.useState` (shift/excl) ไม่เขียน Supabase/ไม่ sync** + badge "จำลองเท่านั้น" + ปุ่มล้าง.
+- `CfWhatIfPanel({ bf, weeks, items })` (module-level ก่อน `CfReconCard`) — pure, `calc(useSim)` running balance รายสัปดาห์ → minClose; UI hero ก่อน→หลัง + ตารางคงเหลือ (ติดลบไฮไลต์แดง) + 2 กลุ่มจ่าย/รับ ปุ่ม ◀▶✕. collapsed default + `no-present`. `whatIfItems` memo (parent, ใช้ `cfMemo`) สร้างรายการ PLANNED รายตัว (จ่าย=forecastEntries / รับ=invoices `ivIsProject`+`!ivIsPaid` + LOAN), bf=`liveAvailable`.
+- verify (preview 8010, isolated render mock เงิน 2M + จ่าย 3M W3): Babel ผ่าน · baseline ขาดมือ "เงินไม่พอ" · เลื่อน W3→W4 → "ดีขึ้น"+"เพียงพอ"+1.0M · ไม่มี console error (มีแต่ Supabase auth). โค้ดเหมือน WTP ทุกจุด.
+
 ## Repo rule: keep CLAUDE.md current
 **Every time you `git push`, update this `CLAUDE.md`** to reflect anything that changed (architecture, conventions, new pages, gotchas). Treat it as part of the push, like the `?v=` bump.

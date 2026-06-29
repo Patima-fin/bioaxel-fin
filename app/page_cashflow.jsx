@@ -341,6 +341,161 @@ function openingBalanceAt(snapshots, cutoffISO, liveBalance) {
   return hasInMonth ? getBalanceAtDate(snapshots, cutoffISO) : liveBalance;
 }
 
+// ─── What-if Simulator (จำลองกระแสเงินสด) ────────────────────────────────────
+//   พาเนลจำลองแยก: เลื่อนวัน "จ่าย/รับ" แล้วดูยอดคงเหลือ+จุดต่ำสุดเปลี่ยนทันที
+//   ★ จำลองล้วน — state อยู่ในเครื่อง (useState) ไม่เขียน Supabase/ไม่ sync/ไม่กระทบใคร
+//   items = [{id, dir:'in'|'out', label, amount, week}] (parent สร้างจาก source เดียวกับตาราง)
+function CfWhatIfPanel({ bf, weeks, items }) {
+  const [collapsed, setCollapsed] = React.useState(true);
+  const [shift, setShift] = React.useState({});   // itemId → จำนวนสัปดาห์ที่เลื่อน (+/-)
+  const [excl, setExcl]   = React.useState({});    // itemId → พักไว้ (ไม่นับ)
+  const nW = weeks.length;
+  const clampW = (w) => Math.max(0, Math.min(nW - 1, w));
+  const wkOf = (it) => clampW(it.week + (shift[it.id] || 0));
+
+  const calc = (useSim) => {
+    const net = weeks.map(() => ({ in: 0, out: 0 }));
+    items.forEach(it => {
+      if (useSim && excl[it.id]) return;
+      const w = useSim ? wkOf(it) : clampW(it.week);
+      if (it.dir === 'in') net[w].in += it.amount; else net[w].out += it.amount;
+    });
+    let run = bf; const rows = [];
+    for (let i = 0; i < nW; i++) { run += net[i].in - net[i].out; rows.push({ in: net[i].in, out: net[i].out, close: run }); }
+    const minClose = rows.length ? Math.min.apply(null, rows.map(r => r.close)) : bf;
+    return { rows, minClose };
+  };
+  const base = calc(false);
+  const sim  = calc(true);
+  const changed = items.some(it => (shift[it.id] || 0) !== 0 || excl[it.id]);
+
+  const move = (id, d) => setShift(s => ({ ...s, [id]: (s[id] || 0) + d }));
+  const toggle = (id) => setExcl(e => ({ ...e, [id]: !e[id] }));
+  const reset = () => { setShift({}); setExcl({}); };
+
+  const outItems = items.filter(i => i.dir === 'out').sort((a, b) => b.amount - a.amount);
+  const inItems  = items.filter(i => i.dir === 'in').sort((a, b) => b.amount - a.amount);
+
+  const money = (n) => fmtNum(Math.round(n), 0);
+  const closeColor = (v) => v < 0 ? 'var(--bad)' : 'var(--good, #0a7d3c)';
+
+  const ItemRow = (it) => {
+    const off = shift[it.id] || 0;
+    const w = wkOf(it);
+    const isExcl = !!excl[it.id];
+    return (
+      <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderBottom: '1px solid var(--ink-100,#eef2f8)', opacity: isExcl ? 0.45 : 1, fontSize: 12.5 }}>
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={it.label}>{it.label}</div>
+        <div style={{ width: 92, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: it.dir === 'in' ? 'var(--good,#0a7d3c)' : 'var(--bad)' }}>
+          {it.dir === 'in' ? '+' : '−'}{money(it.amount)}
+        </div>
+        <div style={{ width: 64, textAlign: 'center', fontWeight: 600 }}>
+          {isExcl ? <span style={{ color: 'var(--ink-400)' }}>พักไว้</span>
+            : <span>{weeks[w] ? weeks[w].label : ('W' + (w + 1))}{off !== 0 && <span style={{ color: 'var(--brand-600,#1a4490)', fontSize: 10 }}> ({off > 0 ? '+' : ''}{off})</span>}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 3 }} data-no-capture="1">
+          <button className="btn btn-sm" disabled={isExcl || w <= 0} onClick={() => move(it.id, -1)} title="เลื่อนเร็วขึ้น 1 สัปดาห์" style={{ padding: '2px 7px' }}>◀</button>
+          <button className="btn btn-sm" disabled={isExcl || w >= nW - 1} onClick={() => move(it.id, +1)} title="เลื่อนช้าลง 1 สัปดาห์" style={{ padding: '2px 7px' }}>▶</button>
+          <button className="btn btn-sm" onClick={() => toggle(it.id)} title={isExcl ? 'นำกลับมา' : 'พักรายการนี้ไว้'} style={{ padding: '2px 7px' }}>{isExcl ? '↺' : '✕'}</button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="card no-present" style={{ marginTop: 16, overflow: 'hidden' }}>
+      <div onClick={() => setCollapsed(c => !c)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 160ms', color: 'var(--ink-400)' }}>▶</span>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink-900)' }}>🔮 จำลองกระแสเงินสด (What-if)</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>ลองเลื่อนวันจ่าย/รับ → ดูจุดเงินต่ำสุดเปลี่ยนทันที · {collapsed ? 'กดเพื่อดู ▾' : 'ย่อ ▴'}</div>
+          </div>
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#7a5b00', background: '#fff7e6', border: '1px solid #ffe1a8', borderRadius: 8, padding: '3px 9px', whiteSpace: 'nowrap' }}>🔒 จำลองเท่านั้น · ไม่กระทบข้อมูลจริง</span>
+      </div>
+
+      {!collapsed && (
+        <div style={{ marginTop: 14 }}>
+          {items.length === 0 ? (
+            <div style={{ color: 'var(--ink-500)', fontSize: 13, padding: '12px 0' }}>ไม่มีรายการจ่าย/รับที่วางแผนไว้ในเดือนนี้ให้จำลอง</div>
+          ) : (
+            <React.Fragment>
+              {/* สรุปจุดต่ำสุด ก่อน → หลัง */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+                <div style={{ flex: 1, minWidth: 200, background: 'var(--ink-50,#f4f7fb)', borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ fontSize: 12, color: 'var(--ink-500)' }}>จุดเงินสดต่ำสุดของเดือน</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: closeColor(base.minClose) }}>{money(base.minClose)}</span>
+                    {changed && <React.Fragment>
+                      <span style={{ color: 'var(--ink-400)' }}>→</span>
+                      <span style={{ fontSize: 22, fontWeight: 800, color: closeColor(sim.minClose) }}>{money(sim.minClose)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: (sim.minClose - base.minClose) >= 0 ? 'var(--good,#0a7d3c)' : 'var(--bad)' }}>
+                        ({(sim.minClose - base.minClose) >= 0 ? '▲ ดีขึ้น ' : '▼ แย่ลง '}{money(Math.abs(sim.minClose - base.minClose))})
+                      </span>
+                    </React.Fragment>}
+                  </div>
+                  <div style={{ fontSize: 11.5, marginTop: 4, color: (changed ? sim.minClose : base.minClose) < 0 ? 'var(--bad)' : 'var(--good,#0a7d3c)' }}>
+                    {(changed ? sim.minClose : base.minClose) < 0 ? '⚠ เงินไม่พอ — ต้องเติมเงิน/เลื่อนจ่าย' : '✓ เงินสดเพียงพอตลอดเดือน'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <button className="btn" onClick={reset} disabled={!changed} data-no-capture="1">↺ ล้างการจำลอง</button>
+                </div>
+              </div>
+
+              {/* ตารางยอดคงเหลือรายสัปดาห์ (จำลอง) */}
+              <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--ink-500)', textAlign: 'right' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>สัปดาห์</th>
+                      <th style={{ padding: '4px 8px' }}>รับ</th>
+                      <th style={{ padding: '4px 8px' }}>จ่าย</th>
+                      <th style={{ padding: '4px 8px' }}>คงเหลือ{changed ? ' (จำลอง)' : ''}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weeks.map((w, i) => {
+                      const r = sim.rows[i] || { in: 0, out: 0, close: bf };
+                      const neg = r.close < 0;
+                      return (
+                        <tr key={i} style={{ borderTop: '1px solid var(--ink-100,#eef2f8)', background: neg ? 'rgba(220,38,38,0.06)' : 'transparent' }}>
+                          <td style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>{w.label} <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}>({w.from}–{w.to})</span></td>
+                          <td style={{ textAlign: 'right', padding: '4px 8px', color: 'var(--good,#0a7d3c)', fontVariantNumeric: 'tabular-nums' }}>{r.in ? money(r.in) : '—'}</td>
+                          <td style={{ textAlign: 'right', padding: '4px 8px', color: 'var(--bad)', fontVariantNumeric: 'tabular-nums' }}>{r.out ? money(r.out) : '—'}</td>
+                          <td style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 700, color: closeColor(r.close), fontVariantNumeric: 'tabular-nums' }}>{money(r.close)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 11, color: 'var(--ink-400)', marginTop: 4 }}>เริ่มจากเงินสดใช้ได้ปัจจุบัน {money(bf)} · นับเฉพาะรายการที่ยังไม่เกิดจริง (แผน)</div>
+              </div>
+
+              {/* รายการที่เลื่อนได้ */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--bad)', marginBottom: 4 }}>💸 รายการจ่าย ({outItems.length})</div>
+                  <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--ink-100,#eef2f8)', borderRadius: 10 }}>
+                    {outItems.length ? outItems.map(ItemRow) : <div style={{ padding: 10, color: 'var(--ink-400)', fontSize: 12 }}>ไม่มี</div>}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--good,#0a7d3c)', marginBottom: 4 }}>💰 รายการรับ ({inItems.length})</div>
+                  <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--ink-100,#eef2f8)', borderRadius: 10 }}>
+                    {inItems.length ? inItems.map(ItemRow) : <div style={{ padding: 10, color: 'var(--ink-400)', fontSize: 12 }}>ไม่มี</div>}
+                  </div>
+                </div>
+              </div>
+            </React.Fragment>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Section 03 — ตรวจสอบยอดดิบ (Cash Reconciliation, manager-only) ──────────
 //   หลักการ (วิธีที่เตยทำใน Excel): ยกมา + รับโครงการ + เงินกู้ − ค่าใช้จ่าย
 //   = ยอดสุทธิใช้ได้ → ต้องตรงกับ "เงินในธนาคารจริง" ถ้าไม่ตรง = มีรายการตกหล่น
@@ -888,6 +1043,54 @@ function CashFlowDashboard({ data, setData, toast }) {
     }
     return { forecast, actual, liveForecast, forecastRemaining };
   }, [invoices, weeks, year, month, ivPlanLock, financeByCode]);
+
+  // ── What-if items: รายการ "แผนที่ยังไม่เกิดจริง" รายตัว (จ่าย/รับ) สำหรับพาเนลจำลอง ──
+  //   ใช้ filter เดียวกับ forecastByWeekCat (จ่าย) + ivInflowByWeek.liveForecast (รับ) แต่ emit รายตัว
+  //   เพื่อให้เลื่อนวันรายรายการได้. นับเฉพาะ PLANNED (ตัด ACTUAL/BOOKED ที่เกิดไปแล้ว = อยู่ในยอดสดแล้ว)
+  const whatIfItems = cfMemo(() => {
+    const out = [];
+    forecastEntries.forEach(fe => {
+      const status = String(fe.STATUS || fe.status || '').toUpperCase();
+      if (status === 'CANCELED' || status === 'ACTUAL' || status === 'BOOKED') return;
+      const etype = String(fe.EXPENSE_TYPE || fe.CATEGORY || '').toUpperCase();
+      if (etype === 'LOAN' || etype === 'BANK_RECON') return;
+      const amt = Number(fe.AMOUNT || fe.amount || 0);
+      if (amt >= 0) return;   // outflow only
+      const date = fe.PAYMENT_DATE || fe.DATE || fe.paymentDate;
+      if (!inMonth(date, year, month)) return;
+      const w = findWeekIdx(date, weeks);
+      if (w < 0) return;
+      out.push({ id: 'o_' + (fe.id || out.length), dir: 'out',
+        label: fe.VENDOR || fe.vendor || fe.DESCRIPTION || fe.description || fe.REF_DOC || 'รายจ่าย',
+        amount: Math.abs(amt), week: w });
+    });
+    invoices.forEach(iv => {
+      if (!ivIsProject(iv)) return;
+      if (ivIsPaid(iv)) return;
+      if (!iv.expectedReceive || !inMonth(iv.expectedReceive, year, month)) return;
+      const w = findWeekIdx(iv.expectedReceive, weeks);
+      if (w < 0) return;
+      const net = ivNetExpected(iv, financeByCode);
+      if (!(net > 0)) return;
+      out.push({ id: 'i_' + (iv.id || iv.ivNo || out.length), dir: 'in',
+        label: iv.customerName || iv.customer || iv.ivNo || iv.IV_NO || 'รับเงินโครงการ',
+        amount: net, week: w });
+    });
+    forecastEntries.forEach(fe => {
+      if (String(fe.EXPENSE_TYPE || fe.CATEGORY || '').toUpperCase() !== 'LOAN') return;
+      const status = String(fe.STATUS || '').toUpperCase();
+      if (status === 'CANCELED' || status === 'ACTUAL' || status === 'BOOKED') return;
+      const amt = Number(fe.AMOUNT || fe.amount || 0);
+      if (amt <= 0) return;
+      const date = fe.PAYMENT_DATE || fe.DATE;
+      if (!inMonth(date, year, month)) return;
+      const w = findWeekIdx(date, weeks);
+      if (w < 0) return;
+      out.push({ id: 'l_' + (fe.id || out.length), dir: 'in',
+        label: fe.DESCRIPTION || fe.description || 'เงินกู้รับเข้า', amount: amt, week: w });
+    });
+    return out;
+  }, [forecastEntries, invoices, weeks, year, month, financeByCode]);
 
   // ── Loan inflow (forecast + actual) — from forecastEntries CATEGORY=LOAN
   //   Plan   = baseline ที่คาดไว้ — นับทุกแถวที่ไม่ใช่ CANCELED (รวม ACTUAL/BOOKED ด้วย)
@@ -2272,6 +2475,9 @@ function CashFlowDashboard({ data, setData, toast }) {
           month={month}
         />
       )}
+
+      {/* ═════ What-if Simulator — จำลองเลื่อนจ่าย/รับ (พาเนลแยก, จำลองล้วน) ═══ */}
+      <CfWhatIfPanel bf={liveAvailable} weeks={weeks} items={whatIfItems} />
 
       {/* ═════ Drill-down modal — verify which rows make up each cell ═══════ */}
       {drillDown && (
