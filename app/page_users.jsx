@@ -13,6 +13,10 @@ const ROLE_LABELS = {
   owner:   { label: 'Owner',   color: 'b-violet', desc: 'ดูได้ทุกหน้า แต่แก้/ลบไม่ได้' },
 };
 
+// ─── หน่วยงาน (department) — ตัวเลือกมาตรฐาน · "การเงิน" ใช้กรอง dropdown "ผู้รับผิดชอบ"
+//   หน้ากระทบยอดธนาคาร (wtpUsersByDept('finance')) · เก็บเป็น label ไทยตรงๆ ──
+const DEPARTMENTS = ['การเงิน', 'บัญชี', 'ธุรการ', 'จัดซื้อ', 'ผู้บริหาร', 'อื่นๆ'];
+
 function UsersPage({ data, setData, toast }) {
   // Manager-only guard (extra safety on top of sidebar filtering)
   const canSee = window.WTPAuth ? window.WTPAuth.can('canManageUsers') : true;
@@ -464,10 +468,15 @@ function UserEditModal({ row, onSave, onClose }) {
           </select>
         </div>
         <div className="field">
-          <label>หน่วยงาน</label>
-          <input className="input" value={draft.department || ''}
-            onChange={e => set('department', e.target.value)}
-            placeholder="เช่น การเงิน / บัญชี / จัดซื้อ" />
+          <label>หน่วยงาน (ฝ่ายงาน)</label>
+          <select className="select input" value={draft.department || ''}
+            onChange={e => set('department', e.target.value)}>
+            <option value="">— ไม่ระบุ —</option>
+            {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+            {draft.department && DEPARTMENTS.indexOf(draft.department) < 0 &&
+              <option value={draft.department}>{draft.department}</option>}
+          </select>
+          <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>ฝ่าย "การเงิน" จะเลือกเป็นผู้รับผิดชอบในหน้ากระทบยอดธนาคารได้</div>
         </div>
         <div className="field" style={{ gridColumn: '1/-1' }}>
           <label>หมายเหตุ</label>

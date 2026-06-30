@@ -1287,6 +1287,26 @@ function wtpMoveBankAccount(acNo, dir, groupAcs, allAcs, manualOverrides) {
   return true;
 }
 
+// ─── User directory (สำหรับ dropdown "ผู้รับผิดชอบ" หน้ากระทบยอด) ──────────────
+//   BIO: ผู้ใช้อยู่ใน data.users (ชีต users) มี field department (หน่วยงาน, free-text/ตัวเลือก)
+//   อ่านจาก window.__wtpData.users → ทุกหน้าที่มี data เห็นเหมือนกัน. คืน {u,n,d}.
+function wtpUserDirectory() {
+  const arr = (window.__wtpData && window.__wtpData.users) || [];
+  return arr.filter(u => u && u.username).map(u => ({
+    u: String(u.username).toLowerCase(), n: u.displayName || u.username, d: u.department || '',
+  }));
+}
+// กรองตามฝ่าย — 'finance' จับคู่ทั้ง label ไทย "การเงิน" และ "finance"/"fin" (ทนต่อ free-text เดิม)
+function wtpUsersByDept(deptKey) {
+  const k = String(deptKey || '').toLowerCase();
+  return wtpUserDirectory().filter(u => {
+    const d = String(u.d || '').toLowerCase();
+    if (!d) return false;
+    if (k === 'finance') return d.indexOf('การเงิน') >= 0 || d.indexOf('finance') >= 0 || d === 'fin';
+    return d.indexOf(k) >= 0;
+  });
+}
+
 // ─── Export to globals ───────────────────────────────────────────────────────
 Object.assign(window, {
   fmtNum, fmtInt, fmtMoney, fmtDate, fmtDateLong, parseDateFlexible,
@@ -1297,4 +1317,5 @@ Object.assign(window, {
   WTPOverride, EditableNumber, EditModeToggle, useOverrideSub, useOverrideSubAny,
   CloudSyncStatusButton,
   wtpBankSortOrderFrom, wtpSortBankAccounts, wtpMoveBankAccount,
+  wtpUserDirectory, wtpUsersByDept,
 });
