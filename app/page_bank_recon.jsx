@@ -1738,10 +1738,10 @@ function BRAssignSelect({ itemId, financeUsers, readOnly }) {
 //   ใช้ srgb + white (ไม่ใช่ oklch/var(--surface)) เพราะ var(--surface)=โปร่งใส & บางเบราว์เซอร์ไม่รองรับ oklch color-mix
 const BR_TH_BG = 'color-mix(in srgb, var(--brand-500) 12%, white)';
 // ตารางแถวกระทบ side-by-side (EXPRESS | BANK STATEMENT | สถานะ | [ผู้รับผิดชอบ] | จัดการ) — item: {key,mango[],bank[],statusKind,statusSub,action,assignee,checkId,checkSide,rowBg}
-function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssignee }) {
+function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssignee, maxH }) {
   if (!items.length) return <BREmpty text={emptyText || 'ไม่มีรายการ'} />;
   return (
-    <div style={{ maxHeight: '54vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 10 }}>
+    <div style={{ maxHeight: maxH || '54vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 10 }}>
       <table style={{ width: '100%', fontSize: 12, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
         <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
           <tr style={{ fontSize: 10.5, color: 'var(--ink-600)', letterSpacing: .3 }}>
@@ -1784,7 +1784,15 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
   const [dTo, setDTo] = brState('');
   const [aMin, setAMin] = brState('');
   const [aMax, setAMax] = brState('');
+  const [fullscreen, setFullscreen] = brState(false);  // ขยายตารางทำงานเต็มหน้าเว็บ — ซ่อนหัว/KPI ด้านบน
   const fileRef = brRef(null);
+
+  brEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
 
   const moves = (book && book.moves) || [];
   const outs  = (book && book.outs) || [];
@@ -1937,9 +1945,32 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
   const inpSt = { padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 7, fontSize: 12, fontFamily: 'inherit' };
   const lblSt = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--ink-500)' };
 
+  const tableMaxH = fullscreen ? 'calc(100vh - 210px)' : '54vh';
+
   return (
-    <div>
+    <div style={fullscreen ? { position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--bg, #f4f7fb)', padding: '10px 14px', overflow: 'auto' } : undefined}>
+      {/* แถบหัวแบบบางตอนเต็มจอ */}
+      {fullscreen && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+          padding: '6px 12px', marginBottom: 8, background: 'linear-gradient(90deg, #ebf8ff, transparent)',
+          border: '1px solid #bee3f8', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <strong style={{ color: '#1e4fbd', fontSize: 13, whiteSpace: 'nowrap' }}>โหมดเต็มจอ · เทียบ Express</strong>
+            <span style={{ fontSize: 11.5, color: 'var(--ink-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {acct ? bdBrand(brBrandKey(acct)).label + ' ···' + bdLast4(accNo) : ''} · {brFmtMonth(month)} · Express {moves.length} · STM {(stmLines || []).length}
+            </span>
+          </div>
+          <button onClick={() => setFullscreen(false)}
+            style={{ background: '#1e4fbd', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 4 }}>
+              <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+            ออกจากเต็มจอ
+          </button>
+        </div>
+      )}
       {/* header: back + นำเข้า */}
+      {!fullscreen && (
       <div className="card anim-in" style={{ padding: 14, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button className="btn btn-ghost" onClick={onBack} title="กลับไปภาพรวมบัญชี">← ภาพรวม</button>
@@ -1948,17 +1979,27 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
             <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>Express {moves.length} รายการ · STM {(stmLines || []).length} รายการ</div>
           </div>
         </div>
-        {!readOnly && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {onImportStatement && <button className="btn btn-ghost" onClick={onImportStatement} title="นำเข้า statement ธนาคารของบัญชีนี้">📥 statement</button>}
-          {pendingItems.length > 0 && <button className="btn btn-ghost" onClick={() => setTab('pending')} title="ดูคู่ที่ระบบจับให้อัตโนมัติ"
-            style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}>⚡ จับคู่อัตโนมัติ ({pendingItems.length})</button>}
-          <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>
-            {busy ? 'กำลังอ่าน…' : (noBook ? '📂 นำเข้างบกระทบยอด Express' : '📂 นำเข้า/อัปเดต Express')}
-          </button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
-            onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }} />
-        </div>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {!noBook && <button className="btn btn-ghost" onClick={() => setFullscreen(true)} title="ขยายตารางทำงานเต็มหน้าเว็บ — ซ่อนหัวสรุป/KPI ด้านบน"
+            style={{ background: '#ebf8ff', color: '#1e4fbd', border: '1px solid #63b3ed' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+            ขยายเต็มจอ
+          </button>}
+          {!readOnly && <React.Fragment>
+            {onImportStatement && <button className="btn btn-ghost" onClick={onImportStatement} title="นำเข้า statement ธนาคารของบัญชีนี้">📥 statement</button>}
+            {pendingItems.length > 0 && <button className="btn btn-ghost" onClick={() => setTab('pending')} title="ดูคู่ที่ระบบจับให้อัตโนมัติ"
+              style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}>⚡ จับคู่อัตโนมัติ ({pendingItems.length})</button>}
+            <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>
+              {busy ? 'กำลังอ่าน…' : (noBook ? '📂 นำเข้างบกระทบยอด Express' : '📂 นำเข้า/อัปเดต Express')}
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }} />
+          </React.Fragment>}
+        </div>
       </div>
+      )}
 
       {orphans.length > 0 && (
         <div className="card" style={{ padding: '10px 14px', marginBottom: 12, background: '#fffbeb', borderLeft: '4px solid #f6ad55', fontSize: 12.5, color: 'var(--ink-700)' }}>
@@ -1977,6 +2018,7 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
 
       {!noBook && (<div>
         {/* KPI — ยอด EXPRESS / ยอด BANK / ผลต่าง / กระทบแล้ว / ค้างกระทบ */}
+        {!fullscreen && (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(5, minmax(0,1fr))', gap: 10, marginBottom: 14 }}>
           <KpiTile label={'ยอด EXPRESS · ' + moves.length + ' รายการ'} value={mangoNet} digits={2} accent={mangoNet < 0 ? 'var(--bad)' : 'var(--brand-600)'} icon="bank" />
           <KpiTile label={'ยอด BANK · ' + stm.length + ' รายการ'} value={bankNet} digits={2} accent={bankNet < 0 ? 'var(--bad)' : 'var(--brand-600)'} icon="bank" />
@@ -1984,6 +2026,7 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
           <KpiTile label="กระทบแล้ว" value={matchItems.length} digits={0} unit="" accent="var(--good)" icon="check" />
           <KpiTile label="ค้างกระทบ" value={unmatchedItems.length} digits={0} unit="" accent="var(--bad)" icon="arrow_down" />
         </div>
+        )}
 
         <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
           {/* tabs — pill-count style */}
@@ -2031,7 +2074,7 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
                     <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>🤖 ระบบจับคู่ EXPRESS ↔ BANK ด้วยยอด+วัน+เลขเช็ค — ตรวจแล้วกดยืนยัน</span>
                   </div>
                 )}
-                <BRReconTable items={shownItems} emptyText={st.freeMoves.length === 0 && st.freeStm.length === 0 ? '✓ จับคู่ครบแล้ว — ไม่มีรายการรอยืนยัน' : 'ไม่มีคู่อัตโนมัติ — ใช้แท็บ "รอกระทบยอด" จับคู่เอง'} />
+                <BRReconTable items={shownItems} maxH={tableMaxH} emptyText={st.freeMoves.length === 0 && st.freeStm.length === 0 ? '✓ จับคู่ครบแล้ว — ไม่มีรายการรอยืนยัน' : 'ไม่มีคู่อัตโนมัติ — ใช้แท็บ "รอกระทบยอด" จับคู่เอง'} />
               </div>
             )}
 
@@ -2084,20 +2127,20 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
                     <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>ยังไม่มีผู้ใช้ฝ่าย "การเงิน" — ตั้งหน่วยงานที่หน้าจัดการผู้ใช้ก่อน</span>
                   )}
                 </div>
-                <BRReconTable items={shownItems} selectable={!readOnly} sel={selMerged} onToggle={toggleSel} showAssignee emptyText={assignFilter !== 'all' ? 'ไม่มีรายการค้างกระทบตามตัวกรองผู้รับผิดชอบ' : '✓ ไม่มีรายการค้างกระทบ'} />
+                <BRReconTable items={shownItems} maxH={tableMaxH} selectable={!readOnly} sel={selMerged} onToggle={toggleSel} showAssignee emptyText={assignFilter !== 'all' ? 'ไม่มีรายการค้างกระทบตามตัวกรองผู้รับผิดชอบ' : '✓ ไม่มีรายการค้างกระทบ'} />
               </div>
             )}
 
             {/* ── กระทบแล้ว ── */}
-            {tab === 'matched' && <BRReconTable items={shownItems} emptyText="ยังไม่มีการจับคู่ที่ยืนยัน — ดูแท็บ 'รอยืนยัน'" />}
+            {tab === 'matched' && <BRReconTable items={shownItems} maxH={tableMaxH} emptyText="ยังไม่มีการจับคู่ที่ยืนยัน — ดูแท็บ 'รอยืนยัน'" />}
 
             {/* ── ทั้งหมด ── */}
-            {tab === 'all' && <BRReconTable items={shownItems} emptyText="ไม่มีรายการ" />}
+            {tab === 'all' && <BRReconTable items={shownItems} maxH={tableMaxH} emptyText="ไม่มีรายการ" />}
 
             {/* ── Outstanding (เช็คค้างจากไฟล์ Express) ── */}
             {tab === 'outstanding' && (outs.length === 0
               ? <BREmpty text="ไม่มีรายการ Outstanding Cheque ในไฟล์" />
-              : <div style={{ maxHeight: '54vh', overflow: 'auto' }}>
+              : <div style={{ maxHeight: tableMaxH, overflow: 'auto' }}>
                   <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>เช็ค/รายการที่ Express บันทึกแล้ว แต่<b>ยังไม่ขึ้นธนาคาร</b> (ค้างจากเดือนก่อนๆ) — ตามไฟล์งบกระทบยอด</div>
                   <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
                     <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
