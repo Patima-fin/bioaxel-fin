@@ -1862,7 +1862,7 @@ function CashFlowDashboard({ data, setData, toast }) {
     const nUnconfirmed = advancePv.filter(p => !p.confirmed && p.pvNo).length;
     const totPending = advancePv.reduce((s, p) => s + (p.confirmed ? 0 : (p.amount || 0)), 0);
     return (
-      <div style={{ marginTop: 14, border: '1px solid color-mix(in oklch, var(--warn) 35%, transparent)', borderRadius: 8, overflow: 'hidden' }}>
+      <div className="no-present no-print" style={{ marginTop: 14, border: '1px solid color-mix(in oklch, var(--warn) 35%, transparent)', borderRadius: 8, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', padding: '8px 12px', background: 'var(--warn-bg)' }}>
           <div style={{ fontWeight: 700, fontSize: 12.5, color: 'var(--ink-700)' }}>
             🕐 PV ตัดล่วงหน้า · ยังไม่ถึงวันจ่าย ({advancePv.length}) — เงินยังไม่ออกจากบัญชี จึง<strong>ไม่นับ</strong>เป็นจ่ายจริง
@@ -2502,7 +2502,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                                 style={{ cursor: 'pointer', borderBottom: '1.5px dashed var(--brand-300)' }}>
                                 {a > 0 ? fmtNum(a, 0) : <span style={{ color: 'var(--ink-300)' }}>–</span>}
                                 {aOver && <span title="แก้มือ" style={{ fontSize: cfScale(8), marginLeft: 2, color: 'var(--brand-500)' }}>✏️</span>}
-                                {pend > 0 && <span title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pend, 0)}`} style={{ fontSize: cfScale(9), marginLeft: cfScale(3) }}>🕐</span>}
+                                {pend > 0 && <span className="no-present no-print" title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pend, 0)}`} style={{ fontSize: cfScale(9), marginLeft: cfScale(3) }}>🕐</span>}
                               </span>
                             );
                           })()}
@@ -2591,7 +2591,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                           style={{ cursor: 'pointer', borderBottom: '2px dashed var(--brand-300)' }}>
                           {actualTotal > 0 ? fmtNum(actualTotal, 0) : <span style={{ color: 'var(--ink-300)' }}>–</span>}
                           {actualTotalOver && <span title="แก้มือ" style={{ fontSize: cfScale(9), marginLeft: 3, color: 'var(--brand-500)' }}>✏️</span>}
-                          {pendWeek > 0 && <span title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pendWeek, 0)}`} style={{ fontSize: cfScale(11), marginLeft: cfScale(4) }}>🕐</span>}
+                          {pendWeek > 0 && <span className="no-present no-print" title={`PV ตัดล่วงหน้า รอยืนยันจ่ายจริง ${fmtNum(pendWeek, 0)}`} style={{ fontSize: cfScale(11), marginLeft: cfScale(4) }}>🕐</span>}
                         </span>
                       );
                     })()}
@@ -2910,7 +2910,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                       <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink-700)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.planRemaining, 0)}</div>
                       <div style={{ fontSize: 9.5, color: 'var(--ink-400)', marginTop: 1 }}>เต็ม {fmtNum(drillDown.outRecon.forecast, 0)} − จ่ายแล้ว {fmtNum(drillDown.outRecon.actual, 0)}</div>
                     </div>
-                    <div style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--warn-bg)', textAlign: 'center' }}>
+                    <div className="no-present no-print" style={{ padding: '11px 12px', borderRadius: 8, background: 'var(--warn-bg)', textAlign: 'center' }}>
                       <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>🕐 PV ตัดล่วงหน้า (รอจ่าย)</div>
                       <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--warn)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtNum(drillDown.outRecon.pending, 0)}</div>
                     </div>
