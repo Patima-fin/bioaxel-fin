@@ -2217,9 +2217,11 @@ function CashFlowDashboard({ data, setData, toast }) {
                 </div>
               </th>
               <th style={{ width: 180, textAlign: 'right' }}>
-                สัปดาห์ที่เหลือ
+                {isLastWeekOfMonth ? 'เดือนถัดไป' : 'สัปดาห์ที่เหลือ'}
                 <div style={{ fontSize: cfScale(10), color: 'var(--ink-500)', fontWeight: 400 }}>
-                  รวม {weeks.length - nowWeek - 1} สัปดาห์
+                  {isLastWeekOfMonth
+                    ? monthNames[(month === 12 ? 1 : month + 1) - 1] + ' ' + (month === 12 ? year + 1 : year)
+                    : `รวม ${weeks.length - nowWeek - 1} สัปดาห์`}
                 </div>
               </th>
               <th style={{ width: 180, textAlign: 'right', background: 'var(--ink-50)' }}>
