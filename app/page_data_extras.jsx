@@ -3838,9 +3838,9 @@ function DataPayablePage({ data, setData, toast }) {
             <button className={reportMode === 'planned' ? 'active' : ''} onClick={() => setReportMode('planned')}>วางแผนแล้ว</button>
           </div>
           <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{reportMode === 'planned' ? 'วันจ่ายที่วางแผน' : 'วันครบกำหนด'}:</span>
-          <YmdPicker value={rptFrom} onChange={setRptFrom} size="sm" />
+          <DateInput value={rptFrom} onChange={setRptFrom} max={rptTo || undefined} size="sm" title="ตั้งแต่วันที่" />
           <span style={{ color: 'var(--ink-400)' }}>–</span>
-          <YmdPicker value={rptTo} onChange={setRptTo} size="sm" />
+          <DateInput value={rptTo} onChange={setRptTo} min={rptFrom || undefined} size="sm" title="ถึงวันที่" />
           {(rptFrom || rptTo) && <button className="btn btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => { setRptFrom(''); setRptTo(''); }}>ล้างช่วง</button>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             {plannedRows.length > 0 && (

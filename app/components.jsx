@@ -730,6 +730,29 @@ function YmdPicker({ value, onChange, minYear, maxYear, style, size }) {
   );
 }
 
+// ─── DateInput — ปฏิทินกดง่าย (native <input type="date">) ────────────────────
+// ทางเลือกที่กดง่ายกว่า YmdPicker (cascade 3 dropdown) — คลิกครั้งเดียวเด้งปฏิทิน
+// value = ISO 'YYYY-MM-DD' (ค.ศ.) | '' · onChange(iso)  (native ใช้ YYYY-MM-DD อยู่แล้ว)
+function DateInput({ value, onChange, min, max, style, size, title }) {
+  return (
+    <input
+      type="date"
+      value={value || ''}
+      min={min || undefined}
+      max={max || undefined}
+      title={title || 'เลือกวันที่ (ค.ศ.)'}
+      onChange={e => onChange(e.target.value || '')}
+      style={{
+        padding: size === 'sm' ? '4px 8px' : '6px 10px',
+        border: '1px solid var(--line)', borderRadius: 7,
+        fontSize: size === 'sm' ? 12 : 12.5, fontFamily: 'inherit',
+        background: 'var(--panel)', color: 'var(--ink-800)', cursor: 'pointer',
+        colorScheme: 'light', ...style,
+      }}
+    />
+  );
+}
+
 // ─── ErrorBoundary — กันหน้า "หายทั้งหน้า" เมื่อข้อมูลมีปัญหา (โชว์ fallback แทนจอขาว) ──
 class ErrorBoundary extends React.Component {
   constructor(p) { super(p); this.state = { err: null }; }
