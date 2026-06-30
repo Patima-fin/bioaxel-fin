@@ -230,6 +230,22 @@ function ivNetExpected(iv, financeByCode) {
   }
   return bal * 106 / 107 - debt;
 }
+// ยอด "ใบแจ้งหนี้คงค้าง" แบบเดียวกับ War Room P1 SEC03 — netExpected = balance − debt (ไม่หัก WHT)
+//   ใช้เป็นยอด "รับเงินโครงการ" ของคอลัมน์เดือนถัดไป (สัปดาห์สุดท้ายของเดือน) เพื่อให้ตรงกับ War Room
+function ivWarroomNet(iv, financeByCode) {
+  const bal = Number(iv.balance) || 0;
+  let debt = 0;
+  if (financeByCode && typeof window.resolveDebt === 'function') {
+    const s  = String(iv.jobNo || '').trim();
+    const mx = s.match(/^(.+)-([A-Z]{2,6})$/);   // ตัด suffix รุ่น (เหมือน War Room)
+    const cj = mx ? mx[1] : s;
+    const f  = financeByCode[cj] || financeByCode[iv.contractRef] || {};
+    debt = window.resolveDebt(iv, f);
+  } else {
+    debt = Number(iv.debt) || 0;
+  }
+  return bal - debt;
+}
 function ivIsPaid(iv) {
   const s = String(iv.status || '').toLowerCase();
   return s === 'paid' || s === 'รับชำระแล้ว';
@@ -1303,14 +1319,22 @@ function CashFlowDashboard({ data, setData, toast }) {
     if (!isLastWeekOfMonth) return { iv: 0, loan: 0, out: { 1: 0, 2: 0, 3: 0, 4: 0 } };
     const nextYear  = month === 12 ? year + 1 : year;
     const nextMonth = month === 12 ? 1 : month + 1;
+    // ฝั่งรับ "สัปดาห์ที่เหลือ" (= เดือนถัดไป) ใช้ยอดเดียวกับ War Room รายรับ SEC03:
+    //   "ใบแจ้งหนี้คงค้างที่ยังไม่ได้รับเงิน และวันคาดรับอยู่นอกเดือนปัจจุบัน" (ค้างรับ + ยังไม่ระบุวัน + เดือนถัดไปขึ้นไป)
+    //   netExpected = balance − debt (ไม่หัก WHT) — ตรงกับ War Room เพื่อให้ผู้ใช้กระทบยอดได้
+    //   เมื่อขึ้นเดือนใหม่ จะไม่ใช่สัปดาห์สุดท้ายอีก → กลับไปใช้เงื่อนไขปกติเอง
+    const _p2 = (n) => String(n).padStart(2, '0');
+    const curMonthStr = `${year}-${_p2(month)}`;   // เดือนที่กำลังดู (= เดือนปัจจุบันจริง เพราะ rollover เกิดเฉพาะสัปดาห์สุดท้ายของเดือนนี้)
     let iv = 0, loan = 0;
     const out = { 1: 0, 2: 0, 3: 0, 4: 0 };
     invoices.forEach(ivRow => {
-      // ลูกหนี้คงค้างทุกใบที่ยังไม่ได้รับเงิน — เดียวกับ logic main
+      // ลูกหนี้คงค้าง (เฉพาะงานโครงการ) ที่ยังไม่ได้รับเงิน
       if (ivIsPaid(ivRow)) return;
-      if (ivRow.expectedReceive && inMonth(ivRow.expectedReceive, nextYear, nextMonth)) {
-        iv += ivNetExpected(ivRow, financeByCode);
-      }
+      if (!ivIsProject(ivRow)) return;
+      const recvISO = toISODate(ivRow.expectedReceive);
+      // คาดรับ "ในเดือนนี้" → เป็นยอดของเดือนปัจจุบัน (War Room SEC02) ไม่ใช่ SEC03
+      if (recvISO && recvISO.startsWith(curMonthStr)) return;
+      iv += ivWarroomNet(ivRow, financeByCode);
     });
     forecastEntries.forEach(fe => {
       const isLoan = String(fe.EXPENSE_TYPE || fe.CATEGORY || '').toUpperCase() === 'LOAN';
@@ -1324,7 +1348,7 @@ function CashFlowDashboard({ data, setData, toast }) {
       if (!isLoan && amt < 0) out[categorizeForecastEntry(fe)] += Math.abs(amt);
     });
     return { iv, loan, out };
-  }, [isLastWeekOfMonth, invoices, forecastEntries, year, month]);
+  }, [isLastWeekOfMonth, invoices, forecastEntries, year, month, weeks, nowWeek, financeByCode]);
 
   // Plan table — use forecast bucket only (it already includes all entries,
   //   ACTUAL items at their planned date). Drill-down popup shows breakdown.
@@ -1521,25 +1545,36 @@ function CashFlowDashboard({ data, setData, toast }) {
             ],
           });
         });
-        // สัปดาห์สุดท้าย: คอลัมน์ "ที่เหลือ/TOTAL" โชว์ตัวอย่างเดือนถัดไป (ยังไม่ถูกล็อก)
+        // สัปดาห์สุดท้าย: คอลัมน์ "ที่เหลือ/TOTAL" = ใบแจ้งหนี้คงค้างนอกเดือนปัจจุบัน
+        //   (มิเรอร์ War Room รายรับ SEC03 — netExpected = balance − debt) ตรงกับ nextMonthInflow.iv
         if (isLastWk && (period === 'rest' || period === 'total')) {
           const nyY = month === 12 ? year + 1 : year;
           const nyM = month === 12 ? 1 : month + 1;
+          const _p2 = (n) => String(n).padStart(2, '0');
+          const curMonthStr = `${year}-${_p2(month)}`;
           invoices.forEach(iv => {
             if (ivIsPaid(iv)) return;
-            if (!iv.expectedReceive || !inMonth(iv.expectedReceive, nyY, nyM)) return;
+            if (!ivIsProject(iv)) return;
+            const recvISO = toISODate(iv.expectedReceive);
+            if (recvISO && recvISO.startsWith(curMonthStr)) return;
+            const net = ivWarroomNet(iv, financeByCode);
+            if (!(net > 0)) return;
+            const tag = !recvISO ? 'ค้างรับ · ยังไม่ระบุวันคาดรับ'
+              : inMonth(recvISO, nyY, nyM) ? 'คาดรับเดือนถัดไป'
+              : 'ค้างรับ · นอกเดือนปัจจุบัน';
             items.push({
               source: 'IV',
-              date: toISODate(iv.expectedReceive),
+              date: recvISO || '',
               name: iv.projectName || iv.PROJECT_NAME || iv.customer || '—',
               ref: iv.ivNo || iv.IV_NO || iv.invoiceNo || '',
-              amount: ivNetExpected(iv, financeByCode),
-              note: 'เดือนถัดไป (ยังไม่ล็อก)',
+              amount: net,
+              note: tag,
               detail: [
                 ['เลขที่ IV', iv.ivNo || iv.IV_NO || iv.invoiceNo || '—'],
-                ['วันคาดรับ', fmtDate(iv.expectedReceive) || '—'],
-                ['คาดรับสุทธิ', fmtNum(ivNetExpected(iv, financeByCode), 0) + ' '],
-                ['หมายเหตุ', 'แผนเดือนถัดไป — ยังไม่ถูกล็อก'],
+                ['วันคาดรับ', recvISO ? (fmtDate(recvISO) || recvISO) : '— (ยังไม่ระบุ)'],
+                ['ยอดคงค้าง', fmtNum(Number(iv.balance) || 0, 0) + ' '],
+                ['คาดรับสุทธิ (balance − debt)', fmtNum(net, 0) + ' '],
+                ['สถานะ', tag],
               ],
             });
           });
@@ -2664,7 +2699,7 @@ function CashFlowDashboard({ data, setData, toast }) {
         <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
           <li><strong>ยอดยกมา</strong> — ยอดธนาคารสิ้นเดือนก่อน (<a href="#daily_balance" style={{ color: 'var(--brand-600)' }}>บันทึกรายวัน</a>) · ไม่มีก็ใช้ยอดสดปัจจุบัน · <strong>รายรับ</strong> — ลูกหนี้ค้างที่ยังไม่รับเงิน (<a href="#iv_report" style={{ color: 'var(--brand-600)' }}>IV</a>)</li>
           <li><strong>ประมาณการ (Forecast)</strong> — ตั้งมือล่วงหน้าจาก <a href="#data_forecast" style={{ color: 'var(--brand-600)' }}>ประมาณการรายจ่าย</a> · <strong>จ่ายจริง (Actual)</strong> — <a href="#data_pv" style={{ color: 'var(--brand-600)' }}>PV</a> + ประมาณการที่จ่ายจริง · <strong>เงินกู้</strong> — ตั้ง EXPENSE_TYPE=LOAN · เรื่อง AP ครบดิว/เลือกจ่าย ดูที่ <a href="#bank_diary" style={{ color: 'var(--brand-600)' }}>Bank Diary</a></li>
-          <li>สัปดาห์สุดท้ายของเดือน → คอลัมน์ "สัปดาห์ที่เหลือ" = ประมาณการ<strong>เดือนถัดไป</strong></li>
+          <li>สัปดาห์สุดท้ายของเดือน → คอลัมน์ "สัปดาห์ที่เหลือ": <strong>รายจ่าย</strong> = ประมาณการ<strong>เดือนถัดไป</strong> · <strong>รับเงินโครงการ</strong> = ยอดเดียวกับ <a href="#warroom1" style={{ color: 'var(--brand-600)' }}>War Room รายรับ SEC03</a> (ใบแจ้งหนี้คงค้างนอกเดือนปัจจุบัน) · พอขึ้นเดือนใหม่กลับไปใช้เงื่อนไขปกติ</li>
         </ul>
         )}
       </div>
