@@ -1188,34 +1188,6 @@ function BankReconPage({ data, setData, toast }) {
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
   };
 
-  // ── สำรอง/กู้คืนข้อมูลกระทบยอด (statement + สถานะ + column map) เป็นไฟล์ JSON ──
-  //    หน้านี้เก็บใน localStorage เครื่องเดียว → ไฟล์สำรองกันข้อมูลหาย/ย้ายเครื่องได้
-  const backupRef = React.useRef(null);
-  const exportBackup = () => {
-    const payload = { _type: 'wtp-bankrecon-backup', _at: new Date().toISOString(),
-      lines: BankReconStore.getLines(), state: BankReconStore.getState(), mapping: BankReconStore.getMapping() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'bankrecon-backup-' + new Date().toISOString().slice(0, 10) + '.json';
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    if (toast) toast('ดาวน์โหลดไฟล์สำรองข้อมูลกระทบยอดแล้ว');
-  };
-  const importBackup = (file) => {
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const o = JSON.parse(r.result);
-        if (!o || o._type !== 'wtp-bankrecon-backup') { if (toast) toast('ไฟล์สำรองไม่ถูกต้อง'); return; }
-        if (!confirm('กู้คืนข้อมูลกระทบยอดจากไฟล์สำรอง?\n(ทับข้อมูลปัจจุบันในเครื่องนี้)')) return;
-        if (o.lines)   { setLinesAll(o.lines);     BankReconStore.setLines(o.lines);   pushReconLines(o.lines); }
-        if (o.state)   { setReconState(o.state);   BankReconStore.setState(o.state);   pushReconState(o.state); }
-        if (o.mapping) { setMapAll(o.mapping);     BankReconStore.setMapping(o.mapping); }
-        if (toast) toast('กู้คืนข้อมูลสำรองแล้ว — sync ขึ้นชีตให้ทีมด้วย');
-      } catch (e) { if (toast) toast('อ่านไฟล์สำรองไม่ได้: ' + (e.message || e)); }
-    };
-    r.readAsText(file);
-  };
-
   if (!accounts.length) {
     return <div className="page bg-pattern"><div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-500)' }}>ยังไม่มีบัญชีธนาคารในระบบ</div></div>;
   }
@@ -1233,13 +1205,9 @@ function BankReconPage({ data, setData, toast }) {
           <button className="btn btn-ghost" onClick={() => goMonth(-1)} title="เดือนก่อน">‹</button>
           <div style={{ padding: '6px 12px', background: 'var(--ink-50)', borderRadius: 8, fontSize: 13, fontWeight: 600, minWidth: 96, textAlign: 'center' }}>{brFmtMonth(month)}</div>
           <button className="btn btn-ghost" onClick={() => goMonth(1)} title="เดือนถัดไป">›</button>
-          <button className="btn btn-ghost" onClick={exportBackup} title="ดาวน์โหลดไฟล์สำรองข้อมูลกระทบยอด (กันข้อมูลหาย / ย้ายเครื่อง)">💾 สำรอง</button>
-          {!readOnly && <button className="btn btn-ghost" onClick={() => backupRef.current && backupRef.current.click()} title="กู้คืนจากไฟล์สำรอง">↩️ กู้คืน</button>}
           {!readOnly && <button className="btn btn-primary" onClick={() => setImportOpen(true)} title="นำเข้าไฟล์รายการเดินบัญชี (CSV/Excel) — โยนได้หลายไฟล์/หลายบัญชีพร้อมกัน">📥 นำเข้า statement</button>}
         </div>
       </div>
-      <input ref={backupRef} type="file" accept="application/json,.json" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ''; }} />
 
       {/* Account selector — ปุ่มแบงค์ กดคลิกเดียวเข้าเลย (เลิกใช้ dropdown) */}
       <div className="card anim-in" style={{ padding: 12, marginBottom: 16 }}>
@@ -1279,19 +1247,19 @@ function BankReconPage({ data, setData, toast }) {
         )}
       </div>
 
-      {/* sub-nav: 2 หน้าย่อย — ใช้บัญชี/เดือน/STM ร่วมกัน */}
-      <div className="card anim-in" style={{ padding: 6, marginBottom: 16, display: 'flex', gap: 6 }}>
+      {/* sub-nav: 2 หน้าย่อย — ใช้บัญชี/เดือน/STM ร่วมกัน (compact) */}
+      <div className="card anim-in" style={{ padding: 4, marginBottom: 14, display: 'flex', gap: 5 }}>
         {[
           { key: 'forecast', label: '📥 เทียบ PV / ใบรับเงิน', sub: 'Weekly Forecast — เทียบกับระบบ WTP' },
           { key: 'mango',    label: '📒 เทียบ Express',         sub: 'งบกระทบยอด Express ↔ STM — จับคู่ + ยืนยัน + M-to-N' },
         ].map(t => (
           <button key={t.key} onClick={() => setMainTab(t.key)}
-            style={{ flex: '1 1 0', border: 'none', cursor: 'pointer', borderRadius: 9, padding: '10px 12px', textAlign: 'left', fontFamily: 'inherit',
+            style={{ flex: '1 1 0', border: 'none', cursor: 'pointer', borderRadius: 8, padding: '6px 10px', textAlign: 'left', fontFamily: 'inherit',
               background: mainTab === t.key ? 'linear-gradient(135deg, var(--brand-500), var(--brand-700))' : 'var(--ink-50)',
               color: mainTab === t.key ? '#fff' : 'var(--ink-700)',
-              boxShadow: mainTab === t.key ? '0 4px 14px color-mix(in oklch, var(--brand-500) 30%, transparent)' : 'none', transition: 'all .14s' }}>
-            <div style={{ fontSize: 14, fontWeight: 800 }}>{t.label}</div>
-            <div style={{ fontSize: 11, opacity: mainTab === t.key ? .9 : .6, marginTop: 2 }}>{t.sub}</div>
+              boxShadow: mainTab === t.key ? '0 3px 10px color-mix(in oklch, var(--brand-500) 28%, transparent)' : 'none', transition: 'all .14s' }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{t.label}</div>
+            <div style={{ fontSize: 10, opacity: mainTab === t.key ? .9 : .6, marginTop: 1 }}>{t.sub}</div>
           </button>
         ))}
       </div>
@@ -1315,9 +1283,6 @@ function BankReconPage({ data, setData, toast }) {
       )}
 
       {mainTab === 'forecast' && (<React.Fragment>
-      {/* โน้ตไฟล์ที่ใช้นำเข้า + นำเข้าหลายไฟล์พร้อมกัน (พับเก็บได้) */}
-      {!readOnly && <BRImportHelp />}
-
       {/* KPI — ยกมา / เข้า / ออก / คงเหลือ + cross-check */}
       <div className="grid anim-in" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12, marginBottom: 8 }}>
         <KpiTile label="ยอดยกมา (ต้นเดือน)" value={monthly.opening != null ? monthly.opening : 0} digits={0} accent="var(--brand-500)" icon="coin" />
@@ -1613,56 +1578,62 @@ function BRMangoTab(props) {
   // ── OVERVIEW ──
   return (
     <div>
-      <div className="card anim-in" style={{ padding: 14, marginBottom: 16 }}>
-        <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--ink-800)' }}>📒 กระทบยอด Express ERP ↔ Bank Statement</div>
-        <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>
-          เทียบสมุดบัญชีจากงบกระทบยอด Express กับรายการเดินบัญชีจริง — เลือกบัญชีเพื่อ <b>นำเข้า → จับคู่อัตโนมัติ → ยืนยัน → จับคู่เอง</b> · เดือน <b>{brFmtMonth(month)}</b>
-        </div>
+      {/* KPI strip (compact) */}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 10, marginBottom: 14 }}>
+        {[
+          { label: 'บัญชีทั้งหมด',  value: accounts.length, unit: '',  col: 'var(--brand-600)' },
+          { label: '% กระทบเฉลี่ย', value: kAvgPct,         unit: '%', col: brPctColor(kAvgPct, withData.length > 0) },
+          { label: 'รอยืนยัน',      value: kPending,        unit: '',  col: 'var(--warn)' },
+          { label: 'ค้างกระทบ',     value: kUnmatched,      unit: '',  col: 'var(--bad)' },
+        ].map((k, i) => (
+          <div key={i} className="card" style={{ padding: '8px 12px', borderLeft: '3px solid ' + k.col }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-500)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--ink-800)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.15, marginTop: 1 }}>
+              {fmtNum(k.value, 0)}{k.unit && <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-500)', marginLeft: 2 }}>{k.unit}</span>}
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* KPI strip */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12, marginBottom: 14 }}>
-        <KpiTile label="บัญชีทั้งหมด" value={accounts.length} digits={0} unit="" accent="var(--brand-600)" icon="bank" />
-        <KpiTile label="% กระทบเฉลี่ย" value={kAvgPct} digits={0} unit="%" accent={brPctColor(kAvgPct, withData.length > 0)} icon="check" />
-        <KpiTile label="รอยืนยัน" value={kPending} digits={0} unit="" accent="var(--warn)" icon="refresh" />
-        <KpiTile label="ค้างกระทบ" value={kUnmatched} digits={0} unit="" accent="var(--bad)" icon="arrow_down" />
-      </div>
-
-      {/* account cards */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 12 }}>
+      {/* account cards (compact) */}
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
         {ov.map(o => {
           const b = bdBrand(brBrandKey(o.a));
           const col = brPctColor(o.pct, o.hasData);
+          // โชว์ชื่อบัญชีเฉพาะเมื่อไม่ซ้ำกับชื่อย่อแบงค์ (กันบรรทัดซ้ำ)
+          const acctName = (o.a.accountName || '').trim();
+          const showName = acctName && acctName.toLowerCase() !== String(b.label).trim().toLowerCase();
           return (
             <button key={o.accNo} type="button" onClick={() => { setAccountNo(o.accNo); setView('detail'); }}
-              className="card" style={{ textAlign: 'left', cursor: 'pointer', padding: 14, border: '1px solid var(--line)',
-                borderTop: '3px solid ' + col, display: 'flex', flexDirection: 'column', gap: 10, fontFamily: 'inherit' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                <HpBankLogo name={o.a.bankName} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--ink-800)' }}>{b.label} <span style={{ opacity: .6, fontWeight: 500 }}>···{bdLast4(o.accNo)}</span></div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.a.accountName || o.a.bankName || ''}</div>
+              className="card" style={{ textAlign: 'left', cursor: 'pointer', padding: '9px 11px', border: '1px solid var(--line)',
+                borderTop: '3px solid ' + col, display: 'flex', flexDirection: 'column', gap: 5, fontFamily: 'inherit' }}>
+              {/* หัวการ์ด: โลโก้ + ชื่อบัญชี (ซ้าย) · % (ขวาบน) */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <div style={{ transform: 'scale(.82)', transformOrigin: 'left center', flex: 'none' }}><HpBankLogo name={o.a.bankName} /></div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12.5, color: 'var(--ink-800)' }}>{b.label} <span style={{ opacity: .6, fontWeight: 500 }}>···{bdLast4(o.accNo)}</span></div>
+                    {showName && <div style={{ fontSize: 10, color: 'var(--ink-500)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{acctName}</div>}
+                  </div>
                 </div>
+                {o.hasData && <span style={{ fontSize: 21, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums', flex: 'none', lineHeight: 1 }}>{o.pct}%</span>}
               </div>
               {o.hasData ? (
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span style={{ fontSize: 26, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' }}>{o.pct}%</span>
-                    <span style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>กระทบ {o.usedStm.size}/{o.totalStm} รายการ</span>
-                  </div>
-                  <div style={{ height: 6, background: 'var(--ink-100)', borderRadius: 4, overflow: 'hidden', margin: '6px 0 8px' }}>
+                  <div style={{ fontSize: 10.5, color: 'var(--ink-500)', marginBottom: 3 }}>กระทบ {o.usedStm.size}/{o.totalStm} รายการ</div>
+                  <div style={{ height: 5, background: 'var(--ink-100)', borderRadius: 4, overflow: 'hidden', margin: '0 0 6px' }}>
                     <div style={{ height: '100%', width: Math.min(100, o.pct) + '%', background: col }} />
                   </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11.5 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 10.5 }}>
                     <span style={{ color: 'var(--good)', fontWeight: 600 }}>✓ {o.confirmed.length}</span>
-                    <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⏳ รอยืนยัน {o.suggested}</span>
+                    <span style={{ color: 'var(--warn)', fontWeight: 600 }}>⏳ {o.suggested}</span>
                     <span style={{ color: 'var(--bad)', fontWeight: 600 }}>⚠ ค้าง {o.unmatched}</span>
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: 12, color: 'var(--ink-400)', padding: '8px 0' }}>ยังไม่มีข้อมูล — กดเพื่อนำเข้างบกระทบยอด/statement</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-400)', padding: '4px 0' }}>ยังไม่มีข้อมูล — กดเพื่อนำเข้า</div>
               )}
-              <div style={{ fontSize: 11.5, color: 'var(--brand-600)', fontWeight: 600, marginTop: 'auto' }}>เปิดดูรายละเอียด →</div>
+              <div style={{ fontSize: 10.5, color: 'var(--brand-600)', fontWeight: 600, marginTop: 'auto' }}>เปิดดูรายละเอียด →</div>
             </button>
           );
         })}
@@ -2439,6 +2410,8 @@ function BRImportModal({ accounts, defaultAcct, buildMapping, onCommit, onClose,
         <input ref={inputRef} type="file" multiple accept=".csv,.xls,.xlsx,.txt" style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
       </div>
+      {/* คู่มือไฟล์ที่ใช้นำเข้า (ย้ายมาจากหน้าหลัก — พับเก็บได้) */}
+      <BRImportHelp />
       {/* ตารางสรุปต่อไฟล์ */}
       {items.length > 0 && (
         <div style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }}>
@@ -2725,7 +2698,7 @@ const BR_FILE_GUIDE = [
 function BRImportHelp() {
   const [open, setOpen] = brState(false);
   return (
-    <div className="card no-print anim-in" style={{ marginBottom: 16, padding: '10px 14px' }}>
+    <div className="no-print" style={{ marginTop: 14, marginBottom: 2, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
       <button onClick={() => setOpen(o => !o)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
         display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--ink-700)', padding: 0 }}>
         📄 ไฟล์ที่ใช้นำเข้า (แต่ละธนาคารใช้นามสกุลอะไร) <span style={{ color: 'var(--ink-400)' }}>{open ? '▲' : '▼'}</span>

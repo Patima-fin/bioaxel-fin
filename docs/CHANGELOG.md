@@ -750,3 +750,11 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - พอร์ตจาก WTP (`waterpog-fin`): `BRMangoDetail` เพิ่ม state **`fullscreen`** + ปุ่ม **"⛶ ขยายเต็มจอ"** (ฟ้า) ในหัวการ์ดหน้าเทียบ Express รายบัญชี → wrap detail เป็น **fixed overlay `inset:0 zIndex:1000`** เต็มหน้าเว็บ.
 - ตอนเต็มจอ: ซ่อนหัวการ์ด back/นำเข้า + การ์ด KPI 5 ใบ → เหลือ tabs + filter + ตาราง; มีแถบหัวบาง (ชื่อบัญชี/เดือน/Express·STM + ปุ่ม "ออกจากเต็มจอ"); กด **Esc** ออกได้.
 - `BRReconTable` รับ prop **`maxH`** (default `'54vh'`) → ส่ง `tableMaxH = 'calc(100vh - 210px)'` ตอนเต็มจอ (4 จุดเรียก + scroll container แท็บ Outstanding). หมายเหตุ: BIO ใช้แบรนด์ "Express" และไม่มี brExportExcel (ต่างจาก WTP ที่มีปุ่ม Excel ในแถบเต็มจอ).
+
+## 2026-06-30 — กระทบยอด หน้า "เทียบ Express": จัดหน้าให้กระชับ (พอร์ตจาก WTP · build `page_bank_recon 20260630c`)
+- **ปุ่ม สำรอง/กู้คืน:** เอาออกหมด (หัวหน้า+popup) + ลบโค้ด exportBackup/importBackup/backupRef ที่ตายแล้ว — หัวหน้าเหลือ เลื่อนเดือน + 📥 นำเข้า statement.
+- **คู่มือ "ไฟล์ที่ใช้นำเข้า"** ย้ายจากหน้าหลัก → เข้า popup นำเข้า statement (ใต้ช่องลากไฟล์ พับเก็บได้) · `BRImportHelp` เป็น in-modal (เลิก card wrapper).
+- **แท็บย่อย 2 อัน** ย่อ padding/ฟอนต์ · ลบการ์ดหัวข้อ "📒 กระทบยอด Express ERP ↔ Bank Statement".
+- **การ์ดบัญชี (overview):** กริด `290→220px`, ย้าย **% มุมขวาบน**, คงโลโก้ย่อ `×0.82`, ซ่อนชื่อบัญชีถ้าซ้ำชื่อย่อแบงค์, ฟอนต์/progress เล็กลง.
+- **KPI strip 4 ช่อง** → มินิการ์ด (label 11px · ตัวเลข 20px · แถบสีซ้าย).
+- verify: Babel transform page_bank_recon ผ่าน 0 error (ผ่าน @babel/standalone) · ไม่มี ref ค้างของ backup.
