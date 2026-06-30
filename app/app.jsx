@@ -518,6 +518,8 @@ function App() {
     warroom1: { label: 'War Room — รายรับ (หน้า 1)', title: 'Revenue Collection', icon: 'receivables' },
     warroom2: { label: 'War Room — รายปี (หน้า 2)', title: 'Annual Cash Flow', icon: 'forecast' },
     cashflow: { label: 'Weekly Forecast', title: 'Weekly Forecast', icon: 'chart' },
+    cashflow_forecast: { label: 'ประมาณการรายรับ-รายจ่าย', title: 'Cash Flow Forecast', icon: 'chart' },
+    recurring: { label: 'ค่าใช้จ่ายประจำ', title: 'Recurring Expenses', icon: 'forecast' },
     cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
     debt:        { label: 'ภาระหนี้ทั้งหมด',       title: 'Debt Register',   icon: 'money' },
     debt_ledger: { label: 'Debt Ledger · ดอกเบี้ย', title: 'Debt Ledger',     icon: 'money' },
@@ -550,6 +552,8 @@ function App() {
     case 'warroom1':       page = <WarRoomPage1 data={data} setData={setData} toast={pushToast} />; break;
     case 'warroom2':       page = <WarRoomPage2 data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow':       page = <CashFlowDashboard data={data} setData={setData} toast={pushToast} />; break;
+    case 'cashflow_forecast': page = <CashFlowForecastPage data={data} />; break;
+    case 'recurring':      page = <RecurringExpensesPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
     case 'projects':       page = <ProjectControlPage data={data} setData={setData} toast={pushToast} />; break;
     case 'investor':       page = <InvestorDashboard data={data} setData={setData} toast={pushToast} />; break;
@@ -819,6 +823,8 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
             <span>รายงาน / วิเคราะห์</span>{chevron(sec.reports)}
           </div>
           {(sec.reports || collapsed) && navItems([
+            ['cashflow_forecast', 'ประมาณการรายรับ-รายจ่าย', 'chart'],
+            ['recurring',     'ค่าใช้จ่ายประจำ',       'forecast'],
             ['debt',          'ภาระหนี้ทั้งหมด',       'money'],
             ['debt_ledger',   'Debt Ledger · ดอกเบี้ย','money'],
             ['iv_report',     'รายงานติดตาม IV',       'invoice'],
