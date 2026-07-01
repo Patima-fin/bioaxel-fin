@@ -552,7 +552,7 @@ function App() {
     case 'warroom1':       page = <WarRoomPage1 data={data} setData={setData} toast={pushToast} />; break;
     case 'warroom2':       page = <WarRoomPage2 data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow':       page = <CashFlowDashboard data={data} setData={setData} toast={pushToast} />; break;
-    case 'cashflow_forecast': page = <CashFlowForecastPage data={data} />; break;
+    case 'cashflow_forecast': page = <CashFlowForecastPage data={data} setData={setData} toast={pushToast} />; break;
     case 'recurring':      page = <RecurringExpensesPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
     case 'projects':       page = <ProjectControlPage data={data} setData={setData} toast={pushToast} />; break;

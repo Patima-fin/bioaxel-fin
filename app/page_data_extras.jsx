@@ -2268,6 +2268,14 @@ function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
       <Modal open={!!row} title={`ข้อมูล AP · ${draft.vchno || '—'}`}
         maxWidth={900} onClose={onClose}
         footer={<>
+          {canEdit && onDelete && (confirmDelete
+            ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 'auto' }}>
+                <span style={{ fontSize: 12.5, color: 'var(--bad)', fontWeight: 700 }}>ลบรายการนี้ถาวร?</span>
+                <button className="btn btn-ghost" onClick={() => setConfirm(false)}>ยกเลิก</button>
+                <button className="btn" style={{ background: 'var(--bad)', color: '#fff' }} onClick={() => onDelete(row.id)}><Icon name="trash" size={13} /> ยืนยันลบ</button>
+              </div>
+            : <button className="btn btn-ghost" style={{ color: 'var(--bad)', marginRight: 'auto' }} onClick={() => setConfirm(true)} title="ลบรายการนี้ออกจากเจ้าหนี้คงค้าง"><Icon name="trash" size={13} /> ลบรายการ</button>
+          )}
           <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
           {canEdit && <button className="btn btn-primary" onClick={saveDates} disabled={!datesDirty}><Icon name="check" size={13} /> บันทึกวันที่</button>}
         </>}>
@@ -3286,6 +3294,12 @@ function DataPayablePage({ data, setData, toast }) {
                 onChange={() => setManyAp(selectable.map(r => r.id), !allSel)} style={{ cursor: 'pointer' }} />
               เลือกทั้งหมด ({selectable.length})
             </label>
+            {selInTable.length > 0 && (
+              <button className="btn btn-ghost" style={{ height: 28, fontSize: 12, padding: '0 10px', color: 'var(--bad)' }}
+                onClick={(e) => { e.stopPropagation(); removeMany(selInTable.map(r => r.id)); }} title="ลบรายการที่เลือกออกจากเจ้าหนี้คงค้าง">
+                <Icon name="trash" size={12} /> ลบที่เลือก ({selInTable.length})
+              </button>
+            )}
             {selInTable.length > 0
               ? <button className="btn btn-primary" style={{ height: 28, fontSize: 12, padding: '0 10px' }}
                   onClick={(e) => { e.stopPropagation(); setPlanTarget({ aps: selInTable }); }}>
@@ -3415,8 +3429,21 @@ function DataPayablePage({ data, setData, toast }) {
   };
 
   const remove = (id) => {
-    setData(d => ({ ...d, payables: d.payables.filter(x => x.id !== id) }));
+    setData(d => ({ ...d, payables: (d.payables || []).filter(x => x.id !== id) }));
+    if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
+    setEdit(null);
     toast('ลบรายการแล้ว');
+  };
+
+  // ลบหลายรายการที่ติ๊กเลือก (มุมมองจัดกลุ่ม) — ลบจริงผ่าน sync
+  const removeMany = (ids) => {
+    const set = new Set((ids || []).filter(Boolean));
+    if (!set.size) { toast('รายการที่เลือกไม่มี id — ลบไม่ได้'); return; }
+    if (!window.confirm(`ลบ ${set.size} รายการที่เลือกถาวรจากเจ้าหนี้คงค้าง?`)) return;
+    setData(d => ({ ...d, payables: (d.payables || []).filter(x => !set.has(x.id)) }));
+    if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
+    setSelectedAp(new Set());
+    toast(`ลบ ${set.size} รายการแล้ว`);
   };
 
   const resetImport = () => {

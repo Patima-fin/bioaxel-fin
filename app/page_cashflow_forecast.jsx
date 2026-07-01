@@ -65,9 +65,11 @@ function cfwPeriodRange(key) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-function CashFlowForecastPage({ data }) {
+function CashFlowForecastPage({ data, setData, toast }) {
+  const canEdit = !!(window.WTPAuth && window.WTPAuth.can('canEdit')) && typeof setData === 'function';
   const [period, setPeriod] = cfwState('eom');
   const [collapsed, setCollapsed] = cfwState({});      // cat → ย่อ
+  const [editItem, setEditItem] = cfwState(null);      // รายการที่กดแก้ (วันจ่าย / ไม่จ่าย)
   const [holdMode, setHoldMode] = cfwState(() => {     // 'gross' (ยอดเต็ม, default) | 'net' (หัก HOLD)
     try { return localStorage.getItem('bio-cfw-holdmode') === 'net' ? 'net' : 'gross'; } catch (_) { return 'gross'; }
   });
@@ -77,6 +79,20 @@ function CashFlowForecastPage({ data }) {
   const previewRef = cfwRef(null);    // รายงานใน modal (ตัวที่ capture ตอน export)
 
   const setHold = (m) => { setHoldMode(m); try { localStorage.setItem('bio-cfw-holdmode', m); } catch (_) {} };
+
+  // ── แก้แผนจ่ายในหน้านี้ (อัปเดต forecastEntries แถวเดียวกับที่ Bank Diary ใช้ → sync ตรงกัน) ──
+  const applyPayDate = (item, newISO) => {
+    if (!canEdit || !item || !item.id || !newISO) return;
+    setData((d) => ({ ...d, forecastEntries: (d.forecastEntries || []).map((fe) => String(fe.id) === String(item.id) ? { ...fe, PAYMENT_DATE: newISO } : fe) }));
+    if (typeof WTPData !== 'undefined' && WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(), 200);
+    setEditItem(null); toast && toast('เลื่อนวันจ่ายเป็น ' + fmtDate(newISO) + ' แล้ว');
+  };
+  const unplanItem = (item) => {
+    if (!canEdit || !item || !item.id) return;
+    setData((d) => ({ ...d, forecastEntries: (d.forecastEntries || []).filter((fe) => String(fe.id) !== String(item.id)) }));
+    if (typeof WTPData !== 'undefined' && WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(), 200);
+    setEditItem(null); toast && toast(item.expType === 'AP' ? 'ยกเลิกแผนจ่าย AP แล้ว' : 'เอาออกจากรอบแล้ว');
+  };
 
   const model = cfwMemo(() => cfwBuildModel(data, period, holdMode), [data.bankAccounts, data.forecastEntries, data.cashflowSnapshots, period, holdMode]);
   const detailCats = model.cats.filter((c) => c.items.length);
@@ -124,7 +140,7 @@ function CashFlowForecastPage({ data }) {
         </div>
       </div>
 
-      <CfwReport innerRef={reportRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} />
+      <CfwReport innerRef={reportRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} onEditItem={canEdit ? setEditItem : null} />
 
       {/* ส่งออก — โชว์รายงานเต็มในหน้าต่าง preview + ปุ่ม PNG / PDF / ปิด ด้านบน (เห็นก่อนเลือกโหลด) */}
       {exportOpen && (
@@ -144,12 +160,46 @@ function CashFlowForecastPage({ data }) {
           </div>
         </div>
       )}
+
+      {editItem && <CfwEditModal item={editItem} onClose={() => setEditItem(null)} onApplyDate={applyPayDate} onUnplan={unplanItem} />}
     </div>
   );
 }
 
+// ── modal แก้แผนจ่ายรายการเดียว: เลื่อนวันจ่าย / ไม่จ่ายรอบนี้ (ยกเลิกแผน) ──
+function CfwEditModal({ item, onClose, onApplyDate, onUnplan }) {
+  const [date, setDate] = cfwState(item.dueISO || '');
+  const isAP = item.expType === 'AP';
+  return (
+    <Modal open title="แก้แผนจ่าย" onClose={onClose} maxWidth={440}
+      footer={(
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', width: '100%' }}>
+          <button className="btn btn-ghost btn-sm cfw-unplan" onClick={() => { if (confirm(isAP ? 'ยกเลิกแผนจ่าย AP นี้? (จะกลับไปเป็น "ยังไม่วางแผน")' : 'เอารายการนี้ออกจากรอบ?')) onUnplan(item); }}>✕ ไม่จ่ายรอบนี้</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>ยกเลิก</button>
+            <button className="btn btn-primary btn-sm" disabled={!date || date === item.dueISO} onClick={() => onApplyDate(item, date)}>บันทึกวันจ่าย</button>
+          </div>
+        </div>
+      )}>
+      <div className="cfw-edit">
+        <div className="cfw-edit-name">{item.desc || '—'}</div>
+        <div className="cfw-edit-meta">
+          <span className={'rc-cat c' + item.cat}>{item.cat}</span> {cfwCatLabel(item.cat)}
+          {item.ref ? <span className="cfw-edit-ref"> · {item.ref}</span> : null}
+          <span className={'cfw-edit-tag ' + (isAP ? 'ap' : 'rec')}>{isAP ? 'AP วางแผนจ่าย' : 'ค่าใช้จ่ายประจำ'}</span>
+        </div>
+        <div className="cfw-edit-amt">ยอด {fmtMoney(item.amount, { digits: 2 })} บาท</div>
+        <label className="cfw-edit-fld"><span>วันจ่าย</span>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <div className="cfw-edit-note">แก้ที่นี่จะอัปเดตแผนเดียวกับหน้า Bank Diary · "ไม่จ่ายรอบนี้" = เอาออกจากประมาณการ (AP กลับเป็นยังไม่วางแผน)</div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── รายงาน (ใช้ทั้งบนหน้า + ใน modal export) ───────────────────────────────
-function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCats, collapsed, setCollapsed }) {
+function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCats, collapsed, setCollapsed, onEditItem }) {
   return (
     <div className="cfw-report" ref={innerRef}>
       {/* header */}
@@ -248,8 +298,8 @@ function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCa
                           <td className="r b">{fmtMoney(v.total, { digits: 2 })}</td>
                         </tr>
                         {v.items.map((it, ii) => (
-                          <tr key={ii} className="cfw-d-item">
-                            <td className="l"><span className="cfw-it-desc">{it.desc || '—'}</span>{it.ref ? <span className="cfw-it-ref"> · {it.ref}</span> : null}</td>
+                          <tr key={ii} className={'cfw-d-item' + (onEditItem ? ' cfw-d-item--edit' : '')} onClick={onEditItem ? () => onEditItem(it) : undefined}>
+                            <td className="l"><span className="cfw-it-desc">{it.desc || '—'}</span>{it.ref ? <span className="cfw-it-ref"> · {it.ref}</span> : null}{onEditItem ? <span className="cfw-it-edit">✏ แก้</span> : null}</td>
                             <td className="c">{fmtDate(it.dueISO)}</td>
                             <td className="r">{fmtMoney(it.amount, { digits: 2 })}</td>
                           </tr>
@@ -297,15 +347,19 @@ function cfwBuildModel(data, periodKey, holdMode) {
   const defaultAc = banks.slice().sort((a, b) => b.avail - a.avail)[0];
   const bankSet = new Set(banks.map((b) => b.ac));
 
-  // due rows = forecastEntries planned outflow ในรอบ
-  const SKIP_TYPES = new Set(['LOAN', 'CREDIT_LINE', 'BANK_RECON', 'AP']);
+  // ค่าใช้จ่ายถึงกำหนด = "แผนจ่าย" ที่ตั้งไว้แล้ว = forecastEntries เฉพาะ:
+  //   • AP ที่วางแผนจ่าย (EXPENSE_TYPE='AP', REF_DOC=เลข AP — สร้างที่ Bank Diary/หน้านี้)
+  //   • งวดค่าใช้จ่ายประจำ (EXPENSE_TYPE='RECURRING')
+  //   → AP ที่ยังไม่วางแผน = ไม่มีแถว forecast = ไม่ขึ้น (ตามสเปก) · กรองตามรอบด้วย PAYMENT_DATE
+  const INCLUDE_TYPES = new Set(['AP', 'RECURRING']);
   const SKIP_STATUS = new Set(['ACTUAL', 'BOOKED', 'CANCELED', 'CANCELLED']);
   const dues = [];
   (data.forecastEntries || []).forEach((fe) => {
+    const et = String(fe.EXPENSE_TYPE || fe.expense_type || '').toUpperCase();
+    if (!INCLUDE_TYPES.has(et)) return;                              // เอาเฉพาะ AP + recurring
     const amt = Number(fe.AMOUNT != null ? fe.AMOUNT : fe.amount) || 0;
     if (amt >= 0) return;                                            // เฉพาะรายจ่าย
     if (SKIP_STATUS.has(String(fe.STATUS || fe.status || '').toUpperCase())) return;
-    if (SKIP_TYPES.has(String(fe.EXPENSE_TYPE || fe.expense_type || '').toUpperCase())) return;
     const dueRaw = fe.PAYMENT_DATE || fe.payment_date || fe.DATE || fe.date;
     const dueISO = (typeof toISODate === 'function' ? toISODate(dueRaw) : String(dueRaw || '')).slice(0, 10);
     if (!dueISO || dueISO < fromISO || dueISO > toISO) return;
@@ -316,6 +370,7 @@ function cfwBuildModel(data, periodKey, holdMode) {
       cat, ac, dueISO, amount: Math.abs(amt),
       desc: fe.DESCRIPTION || fe.description || fe.NOTE || fe.note || '',
       ref: fe.REF_DOC || fe.ref_doc || '',
+      id: fe.id, expType: et,                                        // สำหรับกดแก้ในหน้านี้
     });
   });
 
@@ -418,6 +473,23 @@ const CFW_CSS = `
 .cfw-d-grand td.r{color:var(--cfw-out)}
 .rc-cat{display:inline-flex;width:18px;height:18px;border-radius:5px;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;color:#fff;vertical-align:middle}
 .rc-cat.c1{background:#2563eb}.rc-cat.c2{background:#7c3aed}.rc-cat.c3{background:#d97706}.rc-cat.c4{background:#0d9488}
+.cfw-d-item--edit{cursor:pointer}
+.cfw-d-item--edit:hover td{background:var(--brand-50)}
+.cfw-it-edit{display:none;margin-left:8px;font-size:10.5px;color:var(--brand-600);font-weight:700}
+.cfw-d-item--edit:hover .cfw-it-edit{display:inline}
+.cfw-edit{display:flex;flex-direction:column;gap:9px}
+.cfw-edit-name{font-size:15px;font-weight:800;color:var(--ink-900)}
+.cfw-edit-meta{font-size:12px;color:var(--ink-600);display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.cfw-edit-ref{color:var(--ink-400)}
+.cfw-edit-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:2px}
+.cfw-edit-tag.ap{background:#fff7ed;color:#c2410c}.cfw-edit-tag.rec{background:var(--brand-50);color:var(--brand-700)}
+.cfw-edit-amt{font-size:13px;font-weight:700;color:var(--cfw-out,#b14070)}
+.cfw-edit-fld{display:flex;flex-direction:column;gap:5px;margin-top:2px}
+.cfw-edit-fld>span{font-size:12px;font-weight:700;color:var(--ink-600)}
+.cfw-edit-fld input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;background:#fff;color:var(--ink-800)}
+.cfw-edit-fld input:focus{outline:none;border-color:var(--brand-500);box-shadow:0 0 0 3px var(--brand-100)}
+.cfw-edit-note{font-size:11px;color:var(--ink-400);line-height:1.5;background:var(--ink-50);padding:8px 10px;border-radius:8px}
+.cfw-unplan{color:var(--bad)!important;border-color:var(--bad)!important}
 .cfw-hold-tog{display:inline-flex;align-items:center;gap:4px;background:var(--ink-50);border:1px solid var(--line);border-radius:9px;padding:3px}
 .cfw-hold-lbl{font-size:11px;color:var(--ink-500);font-weight:600;padding:0 4px}
 .cfw-hold-tog button{border:none;background:transparent;color:var(--ink-600);font-family:inherit;font-size:12px;font-weight:600;padding:4px 11px;border-radius:7px;cursor:pointer}
