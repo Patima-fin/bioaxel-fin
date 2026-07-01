@@ -737,25 +737,29 @@ function bdVendorCanon(name) {
   return s.trim();
 }
 
-/* แถวรายการเดี่ยวในการ์ดบัญชี (ใช้ทั้งแบบเดี่ยวและรายย่อยในกลุ่มผู้ขาย) */
-function BDItemRow({ it, top, onItemEdit, label, sub, hideTag }) {
+/* แถวรายการเดี่ยวในการ์ดบัญชี (ใช้ทั้งแบบเดี่ยวและรายย่อยในกลุ่มผู้ขาย)
+ * indent=true → เว้นช่องกว้างเท่า ▶ ของแถวกลุ่ม ให้ป้าย/ชื่อเรียงตรงกัน (เช่น แถวโอนที่ไม่มีลูกศรกาง) */
+function BDItemRow({ it, top, onItemEdit, label, sub, hideTag, indent }) {
   const inflow   = it.signed >= 0;
   const tag      = bdItemTag(it.kind);
   const editable = onItemEdit && (it.kind === 'forecast' || it.kind === 'transfer');
   return (
     <div onClick={editable ? () => onItemEdit(it) : undefined}
          title={editable ? 'กดเพื่อแก้ไขรายการ' : undefined}
-         style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0 8px', padding:'5px 0', borderTop: top ? '1px dashed #e9e9f3' : 'none', cursor: editable ? 'pointer' : 'default', borderRadius: editable ? 6 : 0 }}>
-      <div style={{ minWidth:0 }}>
-        <div style={{ fontSize:12, color:'#1e293b' }}>
-          {!hideTag && <span style={{ display:'inline-block', fontSize:9, fontWeight:700, borderRadius:4, padding:'0 5px', marginRight:5, background:tag.bg, color:tag.c }}>{tag.t}</span>}
-          {label != null ? label : it.title}
-          {editable && <span style={{ marginLeft:6, fontSize:10, color:'#a5b4fc' }}>✏️</span>}
+         style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:'0 8px', padding:'5px 0', borderTop: top ? '1px dashed #e9e9f3' : 'none', cursor: editable ? 'pointer' : 'default', borderRadius: editable ? 6 : 0, alignItems:'center' }}>
+      <div style={{ minWidth:0, display:'flex', alignItems:'baseline', gap:6 }}>
+        {indent && <span style={{ flex:'0 0 auto', width:9, fontSize:9, visibility:'hidden' }}>▶</span>}
+        <div style={{ minWidth:0, flex:1 }}>
+          <div style={{ fontSize:12, color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+            {!hideTag && <span style={{ display:'inline-block', fontSize:9, fontWeight:700, borderRadius:4, padding:'0 5px', marginRight:5, background:tag.bg, color:tag.c }}>{tag.t}</span>}
+            {label != null ? label : it.title}
+            {editable && <span style={{ marginLeft:6, fontSize:10, color:'#a5b4fc' }}>✏️</span>}
+          </div>
+          <div style={{ fontSize:10, color:'#94a3b8' }}>{sub != null ? sub : it.sub}</div>
+          {it.remark ? <div style={{ fontSize:10, color:'#64748b', marginTop:1 }}>📝 {it.remark}</div> : null}
         </div>
-        <div style={{ fontSize:10, color:'#94a3b8' }}>{sub != null ? sub : it.sub}</div>
-        {it.remark ? <div style={{ fontSize:10, color:'#64748b', marginTop:1 }}>📝 {it.remark}</div> : null}
       </div>
-      <div style={{ textAlign:'right', fontWeight:600, fontSize:12, color: inflow ? '#276749' : '#c53030', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+      <div style={{ textAlign:'right', fontWeight:600, fontSize:12, color: inflow ? '#276749' : '#c53030', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap', alignSelf:'center' }}>
         {inflow ? '+' : '−'}{fmtMoney(Math.abs(it.signed))}
       </div>
     </div>
@@ -862,7 +866,7 @@ function BDDayGroup({ day, today, onItemEdit }) {
               // กางดูเห็นรายละเอียด+แหล่งที่มา. เฉพาะรายการที่ไม่มีเจ้าหนี้ (โอน ฯลฯ) → แถวเดี่ยวตามเดิม
               (g.items.length > 1 || g.items[0].creditor)
                 ? <BDDayItemGroup key={g.key} group={g} top={gi > 0} onItemEdit={onItemEdit} />
-                : <BDItemRow key={g.key} it={g.items[0]} top={gi > 0} onItemEdit={onItemEdit} />
+                : <BDItemRow key={g.key} it={g.items[0]} top={gi > 0} onItemEdit={onItemEdit} indent />
             ));
           })()}
         </div>

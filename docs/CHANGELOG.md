@@ -765,3 +765,7 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - **ลบทีละรายการ:** เดินสายปุ่ม **🗑 ลบรายการ** (สีแดง มุมซ้าย footer ของ `APEditModal`) → กดแล้วต้อง **ยืนยันลบ** ซ้ำ (ใช้ `confirmDelete` เดิม). เปิด popup ได้ทั้งมุมมอง 📄 รายการ และ 🗂 จัดกลุ่ม.
 - **ลบหลายรายการ:** เพิ่ม `removeMany(ids)` + ปุ่ม **🗑 ลบที่เลือก (N)** ในแถบเลือกของ `renderDetailTable` (มุมมองจัดกลุ่ม — reuse checkbox `selectedAp` เดิมที่ใช้กับวางแผนจ่าย) · มี `window.confirm` ยืนยัน.
 - **`remove(id)` แก้ให้ลบจริง:** เพิ่ม `forceSyncNow()` + `setEdit(null)` — เดิมลบแล้ว **ไม่ sync ขึ้น cloud** อาจเด้งกลับ (เทียบ `save` ที่เรียก forceSyncNow อยู่แล้ว) · ลบผ่าน `setData` filter id (replaceAll + baseIds → ลบจริงทั้งทีม เหมือน `cleanPaidNow`).
+
+## 2026-07-01 — Bank Diary: แถวในการ์ดเรียงตรงกัน (build `page_bank_diary 20260701a`)
+- เตยแจ้งแถวในการ์ดบัญชี "ยึกยักแหว่งๆ ไม่เท่ากัน". สาเหตุ: ในวันที่กางออก มีแถว 2 แบบปน — **แถวกลุ่มเจ้าหนี้** (`BDDayItemGroup`) มีลูกศร `▶` นำหน้าก่อนป้าย/ชื่อ ส่วน **แถวเดี่ยว** (`BDItemRow` เช่นรายการโอน) ไม่มีลูกศร → ป้าย/ชื่อขยับซ้าย ~15px ไม่ตรงกับแถวข้างบน + จำนวนเงินลอยชิดบนเพราะแถวโอนเป็น 2 บรรทัด.
+- **แก้ที่ `BDItemRow`:** เพิ่ม prop `indent` → เว้น spacer กว้างเท่า `▶` (width 9 + gap) ให้ป้าย/ชื่อของแถวเดี่ยวเรียงตรงกับแถวกลุ่ม · `alignItems:'center'`+`alignSelf:'center'` ให้จำนวนเงินอยู่กึ่งกลางแนวตั้ง (สวยตอนแถวมี 2 บรรทัด) · ใส่ ellipsis กันชื่อยาวดันแถวเบี้ยว. จุดเรียกใน `BDDayGroup` (เคสแถวเดี่ยว/โอน) ส่ง `indent`. เป็นการแก้ layout ล้วน ไม่แตะ logic/ข้อมูล.
