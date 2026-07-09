@@ -29,6 +29,8 @@ const CFW_CAT_LABELS = {
   4: 'ค่าใช้จ่ายเบ็ดเตล็ด / เงินเดือน',
 };
 const cfwCatLabel = (c) => CFW_CAT_LABELS[c] || (typeof CATEGORY_LABELS !== 'undefined' && CATEGORY_LABELS[c]) || ('หมวด ' + c);
+// ชื่อเจ้าหนี้สะอาด — ตัด "จ่าย " นำหน้า + "(เลขเอกสาร)" ท้าย ออกจาก DESCRIPTION ของแถวแผนจ่าย AP
+const cfwCleanVendor = (s) => String(s || '').replace(/^\s*จ่าย\s+/, '').replace(/\s*\([^()]*\)\s*$/, '').trim() || '—';
 
 function cfwISO(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -69,6 +71,7 @@ function CashFlowForecastPage({ data, setData, toast }) {
   const canEdit = !!(window.WTPAuth && window.WTPAuth.can('canEdit')) && typeof setData === 'function';
   const [period, setPeriod] = cfwState('eom');
   const [collapsed, setCollapsed] = cfwState({});      // cat → ย่อ
+  const [groupMode, setGroupMode] = cfwState('cat');   // ดูแบบ: cat | vendor | doc
   const [editItem, setEditItem] = cfwState(null);      // รายการที่กดแก้ (วันจ่าย / ไม่จ่าย)
   const [holdMode, setHoldMode] = cfwState(() => {     // 'gross' (ยอดเต็ม, default) | 'net' (หัก HOLD)
     try { return localStorage.getItem('bio-cfw-holdmode') === 'net' ? 'net' : 'gross'; } catch (_) { return 'gross'; }
@@ -140,7 +143,7 @@ function CashFlowForecastPage({ data, setData, toast }) {
         </div>
       </div>
 
-      <CfwReport innerRef={reportRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} onEditItem={canEdit ? setEditItem : null} />
+      <CfwReport innerRef={reportRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} groupMode={groupMode} onSetGroupMode={setGroupMode} onEditItem={canEdit ? setEditItem : null} />
 
       {/* ส่งออก — โชว์รายงานเต็มในหน้าต่าง preview + ปุ่ม PNG / PDF / ปิด ด้านบน (เห็นก่อนเลือกโหลด) */}
       {exportOpen && (
@@ -155,7 +158,7 @@ function CashFlowForecastPage({ data, setData, toast }) {
               </div>
             </div>
             <div className="cfw-exp-scroll">
-              <CfwReport innerRef={previewRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} />
+              <CfwReport innerRef={previewRef} model={model} holdMode={holdMode} periodLabel={periodLabel} todayLong={todayLong} detailCats={detailCats} collapsed={collapsed} setCollapsed={setCollapsed} groupMode={groupMode} />
             </div>
           </div>
         </div>
@@ -199,7 +202,9 @@ function CfwEditModal({ item, onClose, onApplyDate, onUnplan }) {
 }
 
 // ── รายงาน (ใช้ทั้งบนหน้า + ใน modal export) ───────────────────────────────
-function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCats, collapsed, setCollapsed, onEditItem }) {
+function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCats, collapsed, setCollapsed, groupMode, onSetGroupMode, onEditItem }) {
+  const gm = groupMode || 'cat';
+  const allDues = model.cats.flatMap((c) => c.items);   // flat — ใช้ตอน group แบบ ผู้จำหน่าย/เอกสาร
   return (
     <div className="cfw-report" ref={innerRef}>
       {/* header */}
@@ -270,45 +275,65 @@ function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCa
         </table>
 
         {/* detail */}
-        <div className="cfw-detail-h">รายละเอียดประเภทรายจ่าย</div>
+        <div className="cfw-detail-h">
+          <span>รายละเอียดประเภทรายจ่าย</span>
+          {onSetGroupMode && detailCats.length > 0 && (
+            <div className="cfw-grp" data-no-capture="1">
+              <span className="cfw-grp-lbl">ดูแบบ:</span>
+              {[['cat', 'ตามประเภท'], ['vendor', 'ตามผู้จำหน่าย'], ['doc', 'ตามเอกสาร']].map(([k, l]) => (
+                <button key={k} className={'cfw-grp-btn' + (gm === k ? ' active' : '')} onClick={() => onSetGroupMode(k)}>{l}</button>
+              ))}
+            </div>
+          )}
+          {onEditItem ? <span className="cfw-detail-hint">💡 คลิกรายการเพื่อเลื่อนวันจ่าย / ไม่จ่าย</span> : null}
+        </div>
         {detailCats.length === 0 ? (
           <div className="cfw-empty">ไม่มีรายการค่าใช้จ่ายถึงกำหนดในรอบนี้</div>
         ) : (
           <table className="cfw-detail">
-            <thead><tr><th className="l">ชื่อเจ้าหนี้ / คำอธิบายรายการ</th><th className="c">ครบกำหนด</th><th className="r">จำนวน (บาท)</th></tr></thead>
+            <thead><tr><th className="l">ชื่อเจ้าหนี้ / เอกสาร / หมายเหตุ</th><th className="c">ครบกำหนด</th><th className="r">จำนวน (บาท)</th></tr></thead>
             <tbody>
-              {detailCats.map((c) => {
-                const open = collapsed[c.cat] !== true;
-                return (
-                  <React.Fragment key={c.cat}>
-                    <tr className="cfw-d-cat" onClick={() => setCollapsed((p) => ({ ...p, [c.cat]: open }))}>
-                      <td colSpan={2}>
-                        <span className="cfw-tw">{open ? '▾' : '▸'}</span>
-                        <span className={'rc-cat c' + c.cat} style={{ marginRight: 7 }}>{c.cat}</span>
-                        {cfwCatLabel(c.cat)}
-                        <span className="cfw-cnt">{c.items.length}</span>
-                      </td>
-                      <td className="r b">{fmtMoney(c.total, { digits: 2 })}</td>
+              {gm === 'vendor' ? (
+                cfwGroupByVendor(allDues).map((v, vi) => (
+                  <React.Fragment key={vi}>
+                    <tr className="cfw-d-ven cfw-d-ven--top">
+                      <td className="l"><b>{v.name}</b></td>
+                      <td className="c muted">{v.items.length > 1 ? v.items.length + ' รายการ' : ''}</td>
+                      <td className="r b">{fmtMoney(v.total, { digits: 2 })}</td>
                     </tr>
-                    {open && c.vendors.map((v, vi) => (
-                      <React.Fragment key={vi}>
-                        <tr className="cfw-d-ven">
-                          <td className="l"><b>{v.name}</b></td>
-                          <td className="c muted">{v.items.length > 1 ? v.items.length + ' รายการ' : ''}</td>
-                          <td className="r b">{fmtMoney(v.total, { digits: 2 })}</td>
-                        </tr>
-                        {v.items.map((it, ii) => (
-                          <tr key={ii} className={'cfw-d-item' + (onEditItem ? ' cfw-d-item--edit' : '')} onClick={onEditItem ? () => onEditItem(it) : undefined}>
-                            <td className="l"><span className="cfw-it-desc">{it.desc || '—'}</span>{it.ref ? <span className="cfw-it-ref"> · {it.ref}</span> : null}{onEditItem ? <span className="cfw-it-edit">✏ แก้</span> : null}</td>
-                            <td className="c">{fmtDate(it.dueISO)}</td>
-                            <td className="r">{fmtMoney(it.amount, { digits: 2 })}</td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    ))}
+                    {v.items.map((it, ii) => <CfwItemRow key={ii} it={it} showCat onEditItem={onEditItem} />)}
                   </React.Fragment>
-                );
-              })}
+                ))
+              ) : gm === 'doc' ? (
+                allDues.slice().sort(cfwDocSort).map((it, ii) => <CfwItemRow key={ii} it={it} showVendor showCat flat onEditItem={onEditItem} />)
+              ) : (
+                detailCats.map((c) => {
+                  const open = collapsed[c.cat] !== true;
+                  return (
+                    <React.Fragment key={c.cat}>
+                      <tr className="cfw-d-cat" onClick={() => setCollapsed((p) => ({ ...p, [c.cat]: open }))}>
+                        <td colSpan={2}>
+                          <span className="cfw-tw">{open ? '▾' : '▸'}</span>
+                          <span className={'rc-cat c' + c.cat} style={{ marginRight: 7 }}>{c.cat}</span>
+                          {cfwCatLabel(c.cat)}
+                          <span className="cfw-cnt">{c.items.length}</span>
+                        </td>
+                        <td className="r b">{fmtMoney(c.total, { digits: 2 })}</td>
+                      </tr>
+                      {open && c.vendors.map((v, vi) => (
+                        <React.Fragment key={vi}>
+                          <tr className="cfw-d-ven">
+                            <td className="l"><b>{v.name}</b></td>
+                            <td className="c muted">{v.items.length > 1 ? v.items.length + ' รายการ' : ''}</td>
+                            <td className="r b">{fmtMoney(v.total, { digits: 2 })}</td>
+                          </tr>
+                          {v.items.map((it, ii) => <CfwItemRow key={ii} it={it} onEditItem={onEditItem} />)}
+                        </React.Fragment>
+                      ))}
+                    </React.Fragment>
+                  );
+                })
+              )}
               <tr className="cfw-d-grand">
                 <td className="l" colSpan={2}>รวมทั้งสิ้น</td>
                 <td className="r">{fmtMoney(model.totalDue, { digits: 2 })}</td>
@@ -320,6 +345,32 @@ function CfwReport({ innerRef, model, holdMode, periodLabel, todayLong, detailCa
     </div>
   );
 }
+
+// แถวรายการย่อย (ใช้ทั้ง 3 โหมด) — showVendor=โชว์ชื่อเจ้าหนี้ (โหมดเอกสาร) · showCat=โชว์ชิปหมวด (โหมดผู้จำหน่าย/เอกสาร)
+function CfwItemRow({ it, showVendor, showCat, flat, onEditItem }) {
+  const sep = (cond) => (cond ? <span className="cfw-it-sep"> · </span> : null);
+  return (
+    <tr className={'cfw-d-item' + (onEditItem ? ' cfw-d-item--edit' : '') + (flat ? ' cfw-d-item--flat' : '')}
+      onClick={onEditItem ? () => onEditItem(it) : undefined} title={onEditItem ? 'คลิกเพื่อแก้วันจ่าย / ไม่จ่าย' : undefined}>
+      <td className="l">
+        {showCat ? <span className={'rc-cat c' + it.cat} style={{ marginRight: 6 }}>{it.cat}</span> : null}
+        {showVendor ? <b className="cfw-it-ven">{it.vendor}</b> : null}
+        {it.docNo ? <span className="cfw-it-doc">{sep(showVendor)}{it.docNo}</span> : null}
+        {it.remark ? <span className="cfw-it-rm">{sep(it.docNo || showVendor)}{it.remark}</span> : ((!it.docNo && !showVendor) ? <span className="cfw-it-rm">—</span> : null)}
+      </td>
+      <td className="c">{fmtDate(it.dueISO)}</td>
+      <td className="r">{fmtMoney(it.amount, { digits: 2 })}</td>
+    </tr>
+  );
+}
+// group ตามผู้จำหน่าย (ข้ามหมวด) — เรียงยอดมาก→น้อย, ในกลุ่มเรียงตามวันครบกำหนด
+function cfwGroupByVendor(dues) {
+  const map = {};
+  dues.forEach((it) => { const k = (it.vendor || '—'); (map[k] = map[k] || { name: k, total: 0, items: [] }); map[k].total += it.amount; map[k].items.push(it); });
+  return Object.values(map).map((v) => { v.items.sort((a, b) => (a.dueISO < b.dueISO ? -1 : 1)); return v; }).sort((a, b) => b.total - a.total);
+}
+// เรียงโหมดเอกสาร — วันครบกำหนดก่อน แล้วชื่อเจ้าหนี้
+const cfwDocSort = (a, b) => (a.dueISO < b.dueISO ? -1 : a.dueISO > b.dueISO ? 1 : String(a.vendor || '').localeCompare(String(b.vendor || ''), 'th'));
 
 // ── build model from live entities ────────────────────────────────────────
 //   holdMode: 'gross' (default) = ยอดเต็มตามบัญชี · 'net' = หัก HOLD (ค้ำ LG / เช็คค้าง)
@@ -353,6 +404,11 @@ function cfwBuildModel(data, periodKey, holdMode) {
   //   → AP ที่ยังไม่วางแผน = ไม่มีแถว forecast = ไม่ขึ้น (ตามสเปก) · กรองตามรอบด้วย PAYMENT_DATE
   const INCLUDE_TYPES = new Set(['AP', 'RECURRING']);
   const SKIP_STATUS = new Set(['ACTUAL', 'BOOKED', 'CANCELED', 'CANCELLED']);
+  // lookup เพื่อดึง "ชื่อเจ้าหนี้สะอาด + หมายเหตุ" — AP จาก payables (ตามเลข AP), recurring จากทะเบียน
+  const apByVchno = {};
+  (data.payables || []).forEach((p) => { const k = String(p.vchno || p.docno || '').trim(); if (k && !apByVchno[k]) apByVchno[k] = p; });
+  const recById = {};
+  if (typeof rcLoadDefs === 'function') { try { rcLoadDefs().forEach((d) => { recById[d.id] = d; }); } catch (_) {} }
   const dues = [];
   (data.forecastEntries || []).forEach((fe) => {
     const et = String(fe.EXPENSE_TYPE || fe.expense_type || '').toUpperCase();
@@ -366,10 +422,24 @@ function cfwBuildModel(data, periodKey, holdMode) {
     const cat = (typeof categorizeForecastEntry === 'function') ? categorizeForecastEntry(fe) : (Number(fe.CATEGORY) || 1);
     let ac = String(fe.Bank_AC || fe.bankAc || '').trim();
     if (!ac || !bankSet.has(ac)) ac = defaultAc ? defaultAc.ac : '';
+    const refDoc = String(fe.REF_DOC || fe.ref_doc || '').trim();
+    // ★ vendor (ชื่อเจ้าหนี้สะอาด) เป็นตัว group · docNo + remark เป็นรายการย่อย
+    let vendor, docNo, remark;
+    if (et === 'AP') {
+      const ap = apByVchno[refDoc];
+      vendor = (ap && (ap.cust_name || ap.vendor)) || cfwCleanVendor(fe.DESCRIPTION);
+      docNo = refDoc;
+      remark = (ap && ap.remark) || '';
+    } else {                                                          // RECURRING
+      const m = refDoc.match(/^REC-(.+)-\d{4}-\d{2}$/);
+      const def = m ? recById[m[1]] : null;
+      vendor = fe.DESCRIPTION || (def && def.name) || 'ค่าใช้จ่ายประจำ';
+      docNo = '';
+      remark = (def && def.remark) || '';
+    }
     dues.push({
       cat, ac, dueISO, amount: Math.abs(amt),
-      desc: fe.DESCRIPTION || fe.description || fe.NOTE || fe.note || '',
-      ref: fe.REF_DOC || fe.ref_doc || '',
+      vendor: vendor || '—', docNo, remark,
       id: fe.id, expType: et,                                        // สำหรับกดแก้ในหน้านี้
     });
   });
@@ -391,7 +461,7 @@ function cfwBuildModel(data, periodKey, holdMode) {
     const info = byCat[c] || { total: 0, items: [] };
     const venMap = {};
     info.items.forEach((it) => {
-      const key = (it.desc || '—').trim() || '—';
+      const key = (it.vendor || '—').trim() || '—';
       (venMap[key] = venMap[key] || { name: key, total: 0, items: [] });
       venMap[key].total += it.amount;
       venMap[key].items.push(it);
@@ -408,7 +478,7 @@ function cfwBuildModel(data, periodKey, holdMode) {
 }
 
 const CFW_CSS = `
-.cfw-page{max-width:1180px;--cfw-in:#0d9488;--cfw-in-soft:rgba(20,184,166,.10);--cfw-out:#b14070;--cfw-due-soft:rgba(245,158,11,.12)}
+.cfw-page{width:100%;--cfw-in:#0d9488;--cfw-in-soft:rgba(20,184,166,.10);--cfw-out:#b14070;--cfw-due-soft:rgba(245,158,11,.12)}
 .cfw-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .cfw-periods{display:flex;gap:6px;flex-wrap:wrap}
 .cfw-chip{border:1px solid var(--line);background:#fff;color:var(--ink-600);padding:6px 14px;border-radius:999px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:.14s}
@@ -451,7 +521,17 @@ const CFW_CSS = `
 .cfw-catrow td.sub.neg{color:var(--cfw-out);font-weight:700}
 .cfw-net td{border-top:2px solid var(--brand-500);background:var(--brand-50);font-weight:800;color:var(--brand-900);padding-top:11px;padding-bottom:11px}
 .cfw-net td.tot{background:var(--brand-100)}
-.cfw-detail-h{margin:20px 0 8px;font-size:13.5px;font-weight:800;color:var(--brand-800)}
+.cfw-detail-h{margin:20px 0 8px;font-size:13.5px;font-weight:800;color:var(--brand-800);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cfw-detail-hint{font-size:11px;font-weight:500;color:var(--ink-400)}
+.cfw-grp{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}
+.cfw-grp-lbl{font-size:11px;font-weight:600;color:var(--ink-400)}
+.cfw-grp-btn{border:1px solid var(--line);background:#fff;color:var(--ink-600);font-family:inherit;font-size:11.5px;font-weight:600;padding:4px 12px;border-radius:999px;cursor:pointer;transition:.14s}
+.cfw-grp-btn:hover{border-color:var(--brand-400);color:var(--brand-700)}
+.cfw-grp-btn.active{background:var(--brand-600);color:#fff;border-color:var(--brand-600)}
+.cfw-it-ven{color:var(--ink-800)} .cfw-it-sep{color:var(--ink-300)}
+.cfw-d-ven--top td{border-top:1px solid var(--line)}
+.cfw-d-item--flat td{border-top:1px solid var(--line-soft)}
+.cfw-d-item--flat td.l{padding-left:14px}
 .cfw-empty{padding:26px;text-align:center;color:var(--ink-400);font-size:12.5px}
 .cfw-detail{width:100%;border-collapse:collapse;font-size:12px}
 .cfw-detail th{background:var(--ink-50);color:var(--ink-500);padding:8px 12px;font-weight:700;font-size:11px;border-bottom:1px solid var(--line)}
@@ -468,15 +548,13 @@ const CFW_CSS = `
 .cfw-d-ven td.l{padding-left:18px}
 .cfw-d-item td{color:var(--ink-600);border-top:1px dashed var(--line-soft)}
 .cfw-d-item td.l{padding-left:34px}
-.cfw-it-desc{color:var(--ink-700)} .cfw-it-ref{color:var(--ink-400);font-size:11px}
+.cfw-it-doc{color:var(--ink-700);font-weight:600;font-variant-numeric:tabular-nums} .cfw-it-rm{color:var(--ink-400);font-size:11.5px}
 .cfw-d-grand td{border-top:2px solid var(--brand-500);background:var(--brand-50);font-weight:800;color:var(--brand-900);font-size:13px;padding:11px 12px}
 .cfw-d-grand td.r{color:var(--cfw-out)}
 .rc-cat{display:inline-flex;width:18px;height:18px;border-radius:5px;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;color:#fff;vertical-align:middle}
 .rc-cat.c1{background:#2563eb}.rc-cat.c2{background:#7c3aed}.rc-cat.c3{background:#d97706}.rc-cat.c4{background:#0d9488}
-.cfw-d-item--edit{cursor:pointer}
-.cfw-d-item--edit:hover td{background:var(--brand-50)}
-.cfw-it-edit{display:none;margin-left:8px;font-size:10.5px;color:var(--brand-600);font-weight:700}
-.cfw-d-item--edit:hover .cfw-it-edit{display:inline}
+.cfw-d-item--edit{cursor:pointer;transition:background .1s}
+.cfw-d-item--edit:hover>td{background:var(--brand-50)}
 .cfw-edit{display:flex;flex-direction:column;gap:9px}
 .cfw-edit-name{font-size:15px;font-weight:800;color:var(--ink-900)}
 .cfw-edit-meta{font-size:12px;color:var(--ink-600);display:flex;align-items:center;gap:5px;flex-wrap:wrap}

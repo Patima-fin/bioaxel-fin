@@ -464,7 +464,7 @@ function RcForm({ data, init, onSave, onClose }) {
 }
 
 const RC_CSS = `
-.rc-page{max-width:1180px}
+.rc-page{width:100%}
 .rc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
 @media(max-width:760px){.rc-stats{grid-template-columns:repeat(2,1fr)}}
 .rc-stat{background:var(--panel,#fff);border:1px solid var(--line);border-radius:var(--radius,12px);padding:13px 16px;box-shadow:var(--shadow-sm)}
