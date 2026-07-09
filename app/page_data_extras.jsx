@@ -3,6 +3,53 @@
 
 const { useState: dxState, useMemo: dxMemo, useEffect: dxEffect } = React;
 
+// username ของผู้ล็อกอินอยู่ ณ ขณะนี้ — ใช้ stamp "updatedBy" ตอนนำเข้า/แก้ไขข้อมูล
+function dxCurrentUsername() {
+  try { return (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; }
+  catch (_) { return ''; }
+}
+function dxFmtDateTimeTH(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const datePart = d.toLocaleDateString('th-TH-u-ca-gregory', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timePart = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart} น.`;
+}
+// stamp ผู้แก้ไข + เวลา ลงในแถว — BIO เก็บทั้งแถวเป็น JSONB (data) ใน Supabase
+// ฟิลด์ updatedBy/updatedAt จึงติดไปกับแถวได้เลย ไม่ต้องแก้ schema/backend
+function dxStampMeta(row) {
+  return { ...row, updatedBy: dxCurrentUsername(), updatedAt: new Date().toISOString() };
+}
+
+// ── แบนเนอร์ "อัปเดตล่าสุดเมื่อไหร่ / โดยใคร" — คำนวณจากแถวในหน่วยความจำ
+//   (BIO = Supabase โหลดทั้งชุดมาแล้ว) หาแถวที่ updatedAt ใหม่สุด ────────────────
+function DataFreshnessBadge({ rows }) {
+  const info = dxMemo(() => {
+    if (!Array.isArray(rows)) return null;
+    let best = null;
+    for (const r of rows) {
+      const t = r && r.updatedAt;
+      if (!t) continue;
+      if (!best || String(t) > String(best.updatedAt)) best = r;
+    }
+    return best ? { updatedAt: best.updatedAt, updatedBy: best.updatedBy || null } : null;
+  }, [rows]);
+
+  if (!info || !info.updatedAt) return null;
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5,
+      color: 'var(--ink-500)', background: 'var(--ink-100)',
+      border: '1px solid var(--ink-200)', borderRadius: 999, padding: '4px 10px', marginTop: 6,
+    }}>
+      <Icon name="daily" size={13} />
+      อัปเดตล่าสุด {dxFmtDateTimeTH(info.updatedAt)}
+      {info.updatedBy ? <> · โดย <strong style={{ color: 'var(--ink-700)' }}>{info.updatedBy}</strong></> : null}
+    </div>
+  );
+}
+
 // ─── Generic CRUD page ────────────────────────────────────────────────────────
 function DataCrudPage({ data, setData, toast, config }) {
   // Role gating — viewer/owner can only see; staff can edit but not delete;
@@ -90,11 +137,12 @@ function DataCrudPage({ data, setData, toast, config }) {
   const sort = { key: sortKey, dir: sortDir };
 
   const save = (row) => {
+    const stamped = dxStampMeta(row);
     setData(d => ({
       ...d,
-      [config.dataKey]: row.id
-        ? d[config.dataKey].map(x => x.id === row.id ? row : x)
-        : [{ ...row, id: WTPData.newId() }, ...d[config.dataKey]],
+      [config.dataKey]: stamped.id
+        ? d[config.dataKey].map(x => x.id === stamped.id ? stamped : x)
+        : [{ ...stamped, id: WTPData.newId() }, ...d[config.dataKey]],
     }));
     setEdit(null);
     toast('บันทึกข้อมูลแล้ว');
@@ -444,8 +492,10 @@ function DataCrudPage({ data, setData, toast, config }) {
 
     // ── Mode 1: no dedupKey → behaviour เดิม (append ทั้งหมด) ─────────────
     if (!dedupKey) {
+      const importedBy = dxCurrentUsername();
+      const importedAt = new Date().toISOString();
       const newRows = parsedRows.map(obj => {
-        const filled = { id: WTPData.newId(), ...obj };
+        const filled = { id: WTPData.newId(), updatedBy: importedBy, updatedAt: importedAt, ...obj };
         if (config.emptyRow) {
           Object.entries(config.emptyRow).forEach(([k, v]) => {
             if (filled[k] === undefined || filled[k] === '' || filled[k] === null) filled[k] = v;
@@ -469,6 +519,8 @@ function DataCrudPage({ data, setData, toast, config }) {
   const commitImport = () => {
     if (!importPreview) return;
     const preview = importPreview;
+    const importedBy = dxCurrentUsername();
+    const importedAt = new Date().toISOString();
     setData(d => {
       let next = [...(d[config.dataKey] || [])];
 
@@ -478,12 +530,12 @@ function DataCrudPage({ data, setData, toast, config }) {
         if (existing?.id) changedById.set(existing.id, row);
       });
       if (changedById.size > 0) {
-        next = next.map(r => changedById.has(r.id) ? { ...r, ...changedById.get(r.id) } : r);
+        next = next.map(r => changedById.has(r.id) ? { ...r, ...changedById.get(r.id), updatedBy: importedBy, updatedAt: importedAt } : r);
       }
 
       // 2) add new — fill emptyRow defaults + new id
       const newRows = preview.added.map(({ row }) => {
-        const filled = { ...row };
+        const filled = { ...row, updatedBy: importedBy, updatedAt: importedAt };
         if (config.emptyRow) {
           Object.entries(config.emptyRow).forEach(([k, v]) => {
             if (filled[k] === undefined || filled[k] === '' || filled[k] === null) filled[k] = v;
@@ -619,6 +671,7 @@ function DataCrudPage({ data, setData, toast, config }) {
         <div>
           <h1 className="page-title">{config.title}</h1>
           <div className="page-sub">{config.sub}</div>
+          {config.trackFreshness && <DataFreshnessBadge rows={data[config.dataKey]} />}
         </div>
         <div className="page-head-r">
           <ExportButton
@@ -1822,6 +1875,8 @@ function DataPVPage({ data, setData, toast }) {
       title: 'DATA PV · Payment Voucher',
       sub: 'รายการจ่ายเงินจริง · โยนไฟล์ XML "รายงานการจ่ายชำระหนี้" (EXPRESS) ได้เลย · WHT เกิดตอนจ่าย',
       dataKey: 'pvVouchers',
+      trackFreshness: true,   // โชว์ "อัปเดตล่าสุดเมื่อไหร่/โดยใคร" ที่หัวหน้า
+
       importSourceNote: 'โยนไฟล์ .xml "รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (EXPRESS) — ยอดสุทธิ = เช็คจ่าย (หัก WHT แล้ว) · 1 เช็ค = 1 แถว · บิลที่จ่ายทั้งหมดเก็บไว้ดูได้ · ใบยกเลิก (*) ตัดออกให้ · หรือวาง RAW จาก AP รายงาน 4.3',
       // ★ ตัวอ่าน XML รายงานจ่ายชำระหนี้ (2 ชั้น PS/บิลย่อย) → 1 pvVoucher/ใบจ่าย + settles[]
       xmlParser: parsePaymentXML,
@@ -3417,11 +3472,12 @@ function DataPayablePage({ data, setData, toast }) {
   };
 
   const save = (row) => {
+    const stamped = dxStampMeta(row);
     setData(d => ({
       ...d,
-      payables: row.id
-        ? d.payables.map(x => x.id === row.id ? row : x)
-        : [{ ...row, id: WTPData.newId() }, ...d.payables],
+      payables: stamped.id
+        ? d.payables.map(x => x.id === stamped.id ? stamped : x)
+        : [{ ...stamped, id: WTPData.newId() }, ...d.payables],
     }));
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     setEdit(null);
@@ -3532,14 +3588,16 @@ function DataPayablePage({ data, setData, toast }) {
   const commitImport = () => {
     const p = importPreview;
     if (!p) return;
+    const importedBy = dxCurrentUsername();
+    const importedAt = new Date().toISOString();
     setData(d => {
       let next = [...(d.payables || [])];
       // update changed (merge ฟิลด์จากไฟล์เข้า row เดิม คง id)
       const changedById = new Map();
       p.changed.forEach(({ existing, row }) => { if (existing?.id) changedById.set(existing.id, row); });
-      if (changedById.size) next = next.map(r => changedById.has(r.id) ? { ...r, ...changedById.get(r.id) } : r);
+      if (changedById.size) next = next.map(r => changedById.has(r.id) ? { ...r, ...changedById.get(r.id), updatedBy: importedBy, updatedAt: importedAt } : r);
       // add new
-      const newRows = p.added.map(({ row }) => _normPayableRow({ ...row, id: WTPData.newId() }));
+      const newRows = p.added.map(({ row }) => _normPayableRow({ ...row, id: WTPData.newId(), updatedBy: importedBy, updatedAt: importedAt }));
       if (newRows.length) next = [...newRows, ...next];
       // delete: paidCut เสมอ + missing เฉพาะที่ผู้ใช้เลือก
       const removeIds = new Set();
@@ -3574,6 +3632,7 @@ function DataPayablePage({ data, setData, toast }) {
         <div>
           <h1 className="page-title">DATA AP Outstanding · ใบแจ้งหนี้เจ้าหนี้คงค้าง</h1>
           <div className="page-sub">RAW_AP_OUTSTANDING · 54 คอลัมน์ · วางข้อมูล RAW ได้เลย</div>
+          <DataFreshnessBadge rows={data.payables} />
         </div>
         <div className="page-head-r">
           <ExportButton

@@ -171,7 +171,7 @@
     const ref = String(p['Ref.code'] || '');
     m = ref.match(/^(\d{2})\d{2}/); if (m) return +m[1];
     const bud = String(p['งบประมาณ'] || '');
-    m = bud.match(/(67|68|69)/); if (m) return +m[1];
+    m = bud.match(/(67|68|69|70)/); if (m) return +m[1];
     const s = isoOf(p['Start']); if (s) { const y = +s.slice(0, 4) + 543 - 2500; if (y >= 60 && y <= 75) return y; }
     return 0;
   }

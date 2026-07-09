@@ -1121,7 +1121,7 @@ function ProjectControlPage({ data, setData, toast }) {
   const summary = pcMemo(() => PCU.summarize(topRows), [topRows]);
   const visibleColObjs = pcMemo(() => gridState.order.map(id => allCols.find(c => c.id === id)).filter(c => c && !gridState.hidden.includes(c.id)), [gridState.order, gridState.hidden, allCols]);
 
-  const fyCounts = pcMemo(() => { const m = { 67: 0, 68: 0, 69: 0 }; allProjects.forEach(p => { if (m[p.fy] != null) m[p.fy]++; }); return m; }, [allProjects]);
+  const fyCounts = pcMemo(() => { const m = { 67: 0, 68: 0, 69: 0, 70: 0 }; allProjects.forEach(p => { if (m[p.fy] != null) m[p.fy]++; }); return m; }, [allProjects]);
 
   const saveFinance = (contractNo, f) => {
     PCU.setFinanceField(contractNo, f);
@@ -1247,7 +1247,7 @@ function ProjectControlPage({ data, setData, toast }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 11, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 10, opacity: .65, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 600 }}>ปีงบประมาณ</span>
-          <div style={{ display: 'flex', gap: 5 }}>{fyBtn('all', 'ทั้งหมด')}{fyBtn(67, 'FY67')}{fyBtn(68, 'FY68')}{fyBtn(69, 'FY69')}</div>
+          <div style={{ display: 'flex', gap: 5 }}>{fyBtn('all', 'ทั้งหมด')}{fyBtn(67, 'FY67')}{fyBtn(68, 'FY68')}{fyBtn(69, 'FY69')}{fyBtn(70, 'FY70')}</div>
           {advConds.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.22)', borderRadius: 7, padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}><PcI.filter size={11} />ฟิลเตอร์ขั้นสูง {advConds.length} เงื่อนไข</span>}
           {(statusFilter || search || advConds.length > 0) && <button onClick={() => { setStatusFilter(null); setSearchInput(''); setSearch(''); setAdvConds([]); }} style={{ fontSize: 11, fontWeight: 600, color: '#fff', background: 'rgba(255,255,255,.16)', border: 'none', borderRadius: 7, padding: '3px 10px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><PcI.close size={11} />ล้างตัวกรอง{statusFilter ? ' · ' + (PCU.STATUS_META[statusFilter]?.th || statusFilter) : ''}</button>}
         </div>
