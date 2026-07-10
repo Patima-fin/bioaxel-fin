@@ -366,9 +366,14 @@ function PnLPage({ data, setData, toast }) {
       try {
         const X = window.XLSX;
         const wb = X.read(e.target.result, { type: 'array', cellDates: false });
-        const codeRe = /^\d{4}-\d{1,2}$/;       // รูปแบบ BIO (4110-01)
-        const codeReLoose = /^\d{4,7}$/;        // เผื่อไฟล์รุ่นไม่มีขีด
-        const isCode = (s) => codeRe.test(s) || codeReLoose.test(s);
+        // รหัสบัญชี BIO — รับ "ทุกรูปแบบที่เป็นตัวเลข" (ผังบัญชีเพิ่มรหัสใหม่ได้เรื่อยๆ รูปแบบไม่แน่นอน):
+        //   4110-01 · 4110-100 · 5410-01-02  (มีขีด/สแลชคั่น กี่ท่อน/กี่หลักก็ได้ = รหัสย่อย)
+        //   4110 · 41100000                    (ตัวเลขล้วน 4–8 หลัก)
+        // ⚠️ เดิม /^\d{4}-\d{1,2}$/ รับ suffix แค่ 1–2 หลัก → รหัสย่อย 3 หลัก (4110-100)
+        //    หรือหลายท่อน (5410-01-02) จะ "หายเงียบ" ตอนอ่านไฟล์ ทำให้งบไม่ตรง
+        const codeSep  = /^\d{3,}(?:[-\/]\d+)+$/;   // มีตัวคั่น = รหัสย่อยชัดเจน (กี่ท่อน กี่หลักก็ได้)
+        const codePure = /^\d{4,8}$/;               // ตัวเลขล้วน 4–8 หลัก
+        const isCode = (s) => codeSep.test(s) || codePure.test(s);
         // เลือกชีต: ชื่อ "PL" ก่อน, ไม่งั้นชีตที่มีรหัสบัญชีเยอะสุด
         const aoaOf = (n) => X.utils.sheet_to_json(wb.Sheets[n], { header: 1, blankrows: false });
         let sn = wb.SheetNames.find(n => /^pl$/i.test(String(n).trim()));
@@ -541,14 +546,26 @@ function PnLPage({ data, setData, toast }) {
     setBusy(true);
     try {
       const now = new Date().toISOString().slice(0, 10);
-      const rows = parsed.accounts.map(a => {
+      const allRows = parsed.accounts.map(a => {
         const code = String(a.code).trim();
         const grp = (groupOverride && groupOverride[code]) || a.group || PL_inferGroup(code, a.name) || '';
         const row = { code, name: a.name || '', group: grp, year: parsed.year || PL_YEAR_DEFAULT, seq: (typeof a.seq === 'number' ? a.seq : 0), updatedAt: now };
         for (let m = 1; m <= 12; m++) row['m' + m] = Number(a.m[m - 1]) || 0;
         return row;
-      }).filter(r => r.group);   // กันบัญชีที่จัดกลุ่มไม่ได้หลุดเข้าฐาน (ปกติไม่มี)
+      });
+      const rows    = allRows.filter(r => r.group);   // เข้าฐานได้ (จัดกลุ่มสำเร็จ)
+      const dropped = allRows.filter(r => !r.group);  // จัดกลุ่มไม่ได้ → ต้องเตือน ห้ามทิ้งเงียบ
       if (!rows.length) { toast('จัดกลุ่มบัญชีไม่สำเร็จ — โปรดตรวจผังบัญชี'); setBusy(false); return; }
+      // "ไม่ทิ้งเงียบ": ถ้ามีรหัสจัดกลุ่มไม่ได้ ให้ค้าง popup จัดประเภทแทนการบันทึกทิ้งรหัสนั้น
+      if (dropped.length) {
+        setNewAccts(dropped.map(r => {
+          let amt = 0; for (let m = 1; m <= 12; m++) amt += Number(r['m' + m]) || 0;
+          return { code: r.code, name: r.name, amount: amt, group: '' };
+        }));
+        toast('มี ' + dropped.length + ' รหัสที่จัดกลุ่มอัตโนมัติไม่ได้ — โปรดเลือกกลุ่มก่อนบันทึก (อีก ' + rows.length + ' บัญชีจัดให้แล้ว)');
+        setUploadOpen(false); setBusy(false); return;
+      }
+      const newCount = rows.filter(r => !knownCodes.has(String(r.code).trim())).length;   // รหัสที่ยังไม่เคยมีในฐาน
       await window.WTPData.writeTable('pnlBase', rows, r => String(r.code));
       // ข้อมูลเสริม: ต้นทุน/กำไรต่อเครื่อง BA (ชีต "ต้นทุน") — เก็บใน manualOverrides (sync ทั้งทีม, ไม่ต้องมีตารางใหม่)
       try {
@@ -557,7 +574,9 @@ function PnLPage({ data, setData, toast }) {
           WTPOverride.setRaw('pnl.costBA', JSON.stringify({ rows: cb, monthsLabel: parsed.monthsLabel || '', updatedAt: now }));
         }
       } catch (_) {}
-      toast('นำเข้างบ ' + (parsed.monthsLabel || '') + ' สำเร็จ (' + rows.length + ' บัญชี' + (parsed.costBA && parsed.costBA.length ? ' + ต้นทุนเครื่อง ' + parsed.costBA.length + ' รายการ' : '') + ') — กำลังรีเฟรช');
+      toast('นำเข้างบ ' + (parsed.monthsLabel || '') + ' สำเร็จ (' + rows.length + ' บัญชี'
+        + (newCount ? ' · รหัสใหม่ ' + newCount + ' ตัว' : '')
+        + (parsed.costBA && parsed.costBA.length ? ' + ต้นทุนเครื่อง ' + parsed.costBA.length + ' รายการ' : '') + ') — กำลังรีเฟรช');
       setNewAccts(null); setFile(null); setUploadOpen(false); setLastParsed(null);
       setTimeout(loadData, 600);
     } catch (err) { toast('นำเข้าไม่สำเร็จ: ' + (err && err.message || err)); }
