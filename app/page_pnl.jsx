@@ -334,6 +334,37 @@ function PLHealthRow({ s }) {
   const [open, setOpen] = plState(false);
   const dt = s.detail || {};
   const hdRow = { display: 'flex', gap: 10, padding: '2px 0' }, hdK = { color: '#94a3b8', minWidth: 96, flexShrink: 0 };
+  // เกณฑ์ให้คะแนน = ชิปจุดเกณฑ์ (ค่า → คะแนน) + ไฮไลต์ช่วงที่ค่าปัจจุบันตกอยู่
+  const fmtBT = (t, unit) => unit === '%' ? Math.round(t * 100) + '%' : (t.toFixed(t % 1 === 0 ? 1 : 2) + ' เท่า');
+  const renderBands = (band) => {
+    const { pts, value, unit } = band;
+    let loIdx = -1, hiIdx = -1;
+    if (value != null && !isNaN(value)) {
+      if (value <= pts[0][0]) { loIdx = hiIdx = 0; }
+      else if (value >= pts[pts.length - 1][0]) { loIdx = hiIdx = pts.length - 1; }
+      else { for (let i = 0; i < pts.length - 1; i++) { if (value >= pts[i][0] && value <= pts[i + 1][0]) { loIdx = i; hiIdx = i + 1; break; } } }
+    }
+    return (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {pts.map((p, i) => {
+            const on = i === loIdx || i === hiIdx;
+            return (
+              <span key={i} style={{ fontSize: 10.5, padding: '2px 9px', borderRadius: 8, border: '1px solid ' + (on ? '#6366f1' : '#e2e8f0'), background: on ? '#eef2ff' : '#fff', color: on ? '#4338ca' : '#94a3b8', fontWeight: on ? 700 : 500, whiteSpace: 'nowrap', boxShadow: on ? '0 1px 4px rgba(99,102,241,0.18)' : 'none' }}>
+                {fmtBT(p[0], unit)} <span style={{ opacity: 0.5 }}>→</span> {p[1]}
+              </span>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 5 }}>
+          คะแนนเป็นสเกลไล่ระยะ 0–100 (ยิ่งสูงยิ่งได้คะแนนมาก) — ไม่ใช่ผ่าน/ไม่ผ่าน
+          {value != null && !isNaN(value)
+            ? <> · <b style={{ color: '#4338ca' }}>ค่าปัจจุบัน {fmtBT(value, unit)} → คะแนน {s.score}</b></>
+            : ' · ยังไม่มีข้อมูลงบแสดงฐานะการเงิน (ใช้คะแนนกลาง 50)'}
+        </div>
+      </div>
+    );
+  };
   return (
     <div style={{ borderBottom: '1px solid #f1f5f9' }}>
       <div onClick={() => setOpen(o => !o)} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 34px 74px', alignItems: 'center', gap: 10, padding: '8px 2px', cursor: 'pointer', fontSize: 12.5 }}>
@@ -353,7 +384,7 @@ function PLHealthRow({ s }) {
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0 2px 96px', color: '#475569' }}><span>{x.label}</span><b style={{ fontVariantNumeric: 'tabular-nums', color: '#0f172a' }}>{PL_fmt(x.value)}</b></div>
           ))}
           <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a' }}>{dt.result}</b></div>
-          <div style={hdRow}><span style={hdK}>เกณฑ์ให้คะแนน</span><span style={{ color: '#64748b' }}>{dt.bands}</span></div>
+          <div style={{ ...hdRow, alignItems: 'flex-start' }}><span style={hdK}>เกณฑ์ให้คะแนน</span>{dt.band ? renderBands(dt.band) : <span style={{ color: '#64748b' }}>{dt.bands}</span>}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}><span>📄</span><span>ที่มา: {dt.src} · ถ่วงน้ำหนัก {Math.round((s.weight || 0) * 100)}% ของคะแนนรวม</span></div>
         </div>
       )}
@@ -403,19 +434,24 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
   const { ca, cl, tl, ta, eq } = bal;
   const curRatio = (ca != null && cl) ? ca / cl : null, debtRatio = (tl != null && ta) ? tl / ta : null;
-  const sLiq = curRatio != null ? PL_scoreLinear(curRatio, [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 95]]) : 50;
-  const sProf = PL_scoreLinear(netMargin, [[-0.5, 5], [-0.2, 20], [0, 45], [0.05, 68], [0.15, 92]]);
-  const sGrow = PL_scoreLinear(growth, [[-0.5, 10], [0, 50], [0.3, 75], [0.8, 90], [1.5, 97]]);
-  const sEff = PL_scoreLinear(opexRatio, [[0.2, 95], [0.4, 75], [0.6, 55], [0.9, 32], [1.5, 12]]);
-  let sRisk = debtRatio != null ? PL_scoreLinear(debtRatio, [[0.3, 90], [0.6, 65], [1, 42], [2, 20], [4, 8]]) : 50;
+  const ptsLiq = [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 95]];
+  const ptsProf = [[-0.5, 5], [-0.2, 20], [0, 45], [0.05, 68], [0.15, 92]];
+  const ptsGrow = [[-0.5, 10], [0, 50], [0.3, 75], [0.8, 90], [1.5, 97]];
+  const ptsEff = [[0.2, 95], [0.4, 75], [0.6, 55], [0.9, 32], [1.5, 12]];
+  const ptsRisk = [[0.3, 90], [0.6, 65], [1, 42], [2, 20], [4, 8]];
+  const sLiq = curRatio != null ? PL_scoreLinear(curRatio, ptsLiq) : 50;
+  const sProf = PL_scoreLinear(netMargin, ptsProf);
+  const sGrow = PL_scoreLinear(growth, ptsGrow);
+  const sEff = PL_scoreLinear(opexRatio, ptsEff);
+  let sRisk = debtRatio != null ? PL_scoreLinear(debtRatio, ptsRisk) : 50;
   if (eq != null && eq < 0) sRisk = Math.min(sRisk, 12);
   const m0 = revA[0], m1 = revA[revA.length - 1];
   const subs = [
-    { name: 'สภาพคล่อง', score: Math.round(sLiq), weight: 0.20, detail: { metric: 'อัตราส่วนสภาพคล่อง (Current Ratio)', formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน', inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }], result: curRatio != null ? curRatio.toFixed(2) + ' เท่า' : '— (ยังไม่มีข้อมูลงบแสดงฐานะการเงิน)', src: 'งบแสดงฐานะการเงิน', bands: '≥ 2 เท่า = ดี · ~1 เท่า = เฝ้าระวัง · < 1 เท่า = เสี่ยง' } },
-    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.30, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', bands: '≥ 15% = ดี · 0–5% = พอใช้ · ติดลบ = ต้องแก้ไข' } },
-    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.15, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', bands: '> 80% = ดีมาก · 0–30% = ปกติ · ติดลบ = หดตัว' } },
-    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.15, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', bands: '< 30% = ดี · ~60% = เฝ้าระวัง · > 90% = ต้องแก้ไข (ยิ่งต่ำยิ่งดี)' } },
-    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.20, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', bands: '< 0.5 เท่า = ดี · ~1 เท่า = เฝ้าระวัง · > 2 เท่า = เสี่ยง (ยิ่งต่ำยิ่งดี)' } },
+    { name: 'สภาพคล่อง', score: Math.round(sLiq), weight: 0.20, detail: { metric: 'อัตราส่วนสภาพคล่อง (Current Ratio)', formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน', inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }], result: curRatio != null ? curRatio.toFixed(2) + ' เท่า' : '— (ยังไม่มีข้อมูลงบแสดงฐานะการเงิน)', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsLiq, value: curRatio, unit: 'เท่า' } } },
+    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.30, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsProf, value: netMargin, unit: '%' } } },
+    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.15, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', band: { pts: ptsGrow, value: growth, unit: '%' } } },
+    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.15, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsEff, value: opexRatio, unit: '%', lowerBetter: true } } },
+    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.20, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsRisk, value: debtRatio, unit: 'เท่า', lowerBetter: true } } },
   ];
   subs.forEach(s => { s.label = s.score >= 70 ? 'ดี' : s.score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ'; s.color = s.score >= 70 ? '#22c55e' : s.score >= 45 ? '#f59e0b' : '#ef4444'; });
   const overall = Math.round(sLiq * 0.2 + sProf * 0.3 + sGrow * 0.15 + sEff * 0.15 + sRisk * 0.2);
