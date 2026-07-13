@@ -294,36 +294,37 @@ function PL_scoreLinear(v, pts) {
 
 // combo chart: แท่งรายได้ + แท่งค่าใช้จ่าย + เส้นกำไรสุทธิ (SVG ล้วน)
 function PLComboChart({ months, rev, exp, net }) {
-  const W = 720, padL = 44, padR = 14, padT = 34, padB = 26, height = 240;
+  // viewBox aspect (~1.9:1) ให้ตรงกับพื้นที่จริงในการ์ด + สูงอัตโนมัติตามความกว้าง → เนื้อหาเต็มกรอบ ไม่ letterbox
+  const W = 460, padL = 40, padR = 12, padT = 34, padB = 30, height = 242;
   const n = Math.max(1, months.length);
   const innerW = W - padL - padR, innerH = height - padT - padB;
   const lo = Math.min(0, ...net), hi = Math.max(1, ...rev, ...exp, ...net), span = (hi - lo) || 1;
   const yv = (v) => padT + (1 - (v - lo) / span) * innerH;
-  const band = innerW / n, bw = Math.min(20, band * 0.3);
+  const band = innerW / n, bw = Math.min(26, band * 0.4);
   const cx = (i) => padL + band * i + band / 2;
   const y0 = yv(0);
   const kf = (v) => { const a = Math.abs(v); if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M'; if (a >= 1e3) return Math.round(v / 1e3) + 'K'; return String(Math.round(v)); };
   const netPts = net.map((v, i) => cx(i) + ',' + yv(v)).join(' ');
   return (
-    <svg viewBox={'0 0 ' + W + ' ' + height} width="100%" height={height} style={{ display: 'block' }}>
+    <svg viewBox={'0 0 ' + W + ' ' + height} width="100%" style={{ display: 'block', height: 'auto' }}>
       <line x1={padL} y1={y0} x2={W - padR} y2={y0} stroke="#cbd5e1" strokeDasharray="3 3" />
       {months.map((_, i) => (
         <g key={i}>
-          <rect x={cx(i) - bw - 1} y={Math.min(yv(rev[i]), y0)} width={bw} height={Math.abs(yv(rev[i]) - y0)} rx={3} fill="#3b82f6" />
-          <rect x={cx(i) + 1} y={Math.min(yv(exp[i]), y0)} width={bw} height={Math.abs(yv(exp[i]) - y0)} rx={3} fill="#cbd5e1" />
+          <rect x={cx(i) - bw - 1.5} y={Math.min(yv(rev[i]), y0)} width={bw} height={Math.abs(yv(rev[i]) - y0)} rx={3} fill="#3b82f6" />
+          <rect x={cx(i) + 1.5} y={Math.min(yv(exp[i]), y0)} width={bw} height={Math.abs(yv(exp[i]) - y0)} rx={3} fill="#cbd5e1" />
         </g>
       ))}
       {/* ตัวเลขบนหัวแท่ง รายได้ (น้ำเงิน) + ค่าใช้จ่าย (เทา) */}
       {months.map((_, i) => (
         <g key={'v' + i}>
-          {Math.abs(rev[i]) > 0.5 && <text x={cx(i) - bw / 2 - 1} y={yv(rev[i]) - 3} fontSize="8" textAnchor="middle" fill="#2563eb" fontWeight="700" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(rev[i])}</text>}
-          {Math.abs(exp[i]) > 0.5 && <text x={cx(i) + bw / 2 + 1} y={yv(exp[i]) - 3} fontSize="8" textAnchor="middle" fill="#64748b" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(exp[i])}</text>}
+          {Math.abs(rev[i]) > 0.5 && <text x={cx(i) - bw / 2 - 1.5} y={yv(rev[i]) - 4} fontSize="10" textAnchor="middle" fill="#2563eb" fontWeight="700" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(rev[i])}</text>}
+          {Math.abs(exp[i]) > 0.5 && <text x={cx(i) + bw / 2 + 1.5} y={yv(exp[i]) - 4} fontSize="10" textAnchor="middle" fill="#64748b" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(exp[i])}</text>}
         </g>
       ))}
       <polyline points={netPts} fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinejoin="round" />
-      {net.map((v, i) => <circle key={i} cx={cx(i)} cy={yv(v)} r={3} fill="#fff" stroke="#ef4444" strokeWidth="2" />)}
-      {months.map((mo, i) => <text key={i} x={cx(i)} y={height - 9} fontSize="11" textAnchor="middle" fill="#94a3b8">{mo}</text>)}
-      {net.map((v, i) => <text key={i} x={cx(i)} y={yv(v) - 8} fontSize="9" textAnchor="middle" fill="#dc2626" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(v)}</text>)}
+      {net.map((v, i) => <circle key={i} cx={cx(i)} cy={yv(v)} r={3.5} fill="#fff" stroke="#ef4444" strokeWidth="2" />)}
+      {months.map((mo, i) => <text key={i} x={cx(i)} y={height - 9} fontSize="12" textAnchor="middle" fill="#94a3b8">{mo}</text>)}
+      {net.map((v, i) => <text key={i} x={cx(i)} y={yv(v) - 9} fontSize="11" textAnchor="middle" fill="#dc2626" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(v)}</text>)}
     </svg>
   );
 }
