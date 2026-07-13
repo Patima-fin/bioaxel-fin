@@ -367,12 +367,13 @@ function PLHealthRow({ s }) {
   };
   return (
     <div style={{ borderBottom: '1px solid #f1f5f9' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 34px 74px', alignItems: 'center', gap: 10, padding: '8px 2px', cursor: 'pointer', fontSize: 12.5 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#334155', fontWeight: 600 }}>
-          <span style={{ width: 12, color: '#94a3b8', fontSize: 10 }}>{open ? '▾' : '▸'}</span>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.color, flexShrink: 0 }} />{s.name}
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 96px) 1fr 30px 92px', alignItems: 'center', gap: 10, padding: '8px 2px', cursor: 'pointer', fontSize: 12.5 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#334155', fontWeight: 600, minWidth: 0 }}>
+          <span style={{ width: 12, color: '#94a3b8', fontSize: 10, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.color, flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
         </span>
-        <span style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: s.score + '%', background: s.color, borderRadius: 5 }} /></span>
+        <span style={{ textAlign: 'right', color: '#475569', fontWeight: 700, fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={s.detail && s.detail.result}>{s.detail && s.detail.result}</span>
+        <span style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: Math.max(0, Math.min(100, s.score)) + '%', background: s.color, borderRadius: 5 }} /></span>
         <span style={{ fontWeight: 800, color: '#0f172a', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{s.score}</span>
         <span style={{ color: s.color, fontWeight: 700, fontSize: 11, textAlign: 'right' }}>{s.label}</span>
       </div>
