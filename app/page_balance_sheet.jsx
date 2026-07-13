@@ -247,7 +247,7 @@ function BSRatioRow({ r, last }) {
             </div>
           ))}
           <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a', fontVariantNumeric: 'tabular-nums' }}>{dt.result}</b></div>
-          {dt.std && <div style={hdRow}><span style={hdK}>เกณฑ์มาตรฐาน</span><span style={{ color: '#334155' }}>🎯 {dt.std}{r.score != null && <b style={{ color: r.score >= 70 ? '#16a34a' : (r.score >= 45 ? '#d97706' : '#dc2626') }}> · {r.score >= 70 ? 'ถึงมาตรฐาน' : (r.score >= 45 ? 'ใกล้มาตรฐาน' : 'ต่ำกว่ามาตรฐาน')}</b>}</span></div>}
+          {dt.std && <div style={hdRow}><span style={hdK}>เกณฑ์มาตรฐาน</span><span style={{ color: '#334155' }}>🎯 {dt.std}</span></div>}
           <div style={{ ...hdRow, alignItems: 'flex-start' }}><span style={hdK}>เกณฑ์คะแนน</span>{sb ? renderBands(sb) : <span style={{ color: '#64748b' }}>{dt.bands}</span>}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}>
             <span>📄</span><span>ที่มา: {dt.src}</span>
