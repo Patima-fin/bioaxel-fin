@@ -283,6 +283,239 @@ function PL_compute(d, lastMonth) {
   return { totalRevenue, totalCost, grossProfit, gpMargin, totalSGA, netProfit, netMargin };
 }
 
+// ═══════════ ส่วนวิเคราะห์ P&L (ชาร์ต + คะแนนสุขภาพ + CFO Insight) — พอร์ตจาก finance-tools ═══════════
+const PL_ANAL_PALETTE = ['#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#22c55e', '#ec4899', '#14b8a6'];
+// interpolate คะแนนจากจุดเกณฑ์ (piecewise-linear) — พอร์ต finScoreLinear
+function PL_scoreLinear(v, pts) {
+  if (v <= pts[0][0]) return pts[0][1];
+  for (let i = 0; i < pts.length - 1; i++) { const [v0, s0] = pts[i], [v1, s1] = pts[i + 1]; if (v <= v1) return s0 + (s1 - s0) * (v - v0) / (v1 - v0); }
+  return pts[pts.length - 1][1];
+}
+
+// combo chart: แท่งรายได้ + แท่งค่าใช้จ่าย + เส้นกำไรสุทธิ (SVG ล้วน)
+function PLComboChart({ months, rev, exp, net }) {
+  const W = 720, padL = 44, padR = 14, padT = 26, padB = 26, height = 240;
+  const n = Math.max(1, months.length);
+  const innerW = W - padL - padR, innerH = height - padT - padB;
+  const lo = Math.min(0, ...net), hi = Math.max(1, ...rev, ...exp, ...net), span = (hi - lo) || 1;
+  const yv = (v) => padT + (1 - (v - lo) / span) * innerH;
+  const band = innerW / n, bw = Math.min(20, band * 0.3);
+  const cx = (i) => padL + band * i + band / 2;
+  const y0 = yv(0);
+  const kf = (v) => { const a = Math.abs(v); if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M'; if (a >= 1e3) return Math.round(v / 1e3) + 'K'; return String(Math.round(v)); };
+  const netPts = net.map((v, i) => cx(i) + ',' + yv(v)).join(' ');
+  return (
+    <svg viewBox={'0 0 ' + W + ' ' + height} width="100%" height={height} style={{ display: 'block' }}>
+      <line x1={padL} y1={y0} x2={W - padR} y2={y0} stroke="#cbd5e1" strokeDasharray="3 3" />
+      {months.map((_, i) => (
+        <g key={i}>
+          <rect x={cx(i) - bw - 1} y={Math.min(yv(rev[i]), y0)} width={bw} height={Math.abs(yv(rev[i]) - y0)} rx={3} fill="#3b82f6" />
+          <rect x={cx(i) + 1} y={Math.min(yv(exp[i]), y0)} width={bw} height={Math.abs(yv(exp[i]) - y0)} rx={3} fill="#cbd5e1" />
+        </g>
+      ))}
+      <polyline points={netPts} fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinejoin="round" />
+      {net.map((v, i) => <circle key={i} cx={cx(i)} cy={yv(v)} r={3} fill="#fff" stroke="#ef4444" strokeWidth="2" />)}
+      {months.map((mo, i) => <text key={i} x={cx(i)} y={height - 9} fontSize="11" textAnchor="middle" fill="#94a3b8">{mo}</text>)}
+      {net.map((v, i) => <text key={i} x={cx(i)} y={yv(v) - 8} fontSize="9" textAnchor="middle" fill="#dc2626" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(v)}</text>)}
+    </svg>
+  );
+}
+
+// แถวคะแนนย่อย (คลิกกางดูสูตร) ในการ์ดคะแนนสุขภาพ
+function PLHealthRow({ s }) {
+  const [open, setOpen] = plState(false);
+  const dt = s.detail || {};
+  const hdRow = { display: 'flex', gap: 10, padding: '2px 0' }, hdK = { color: '#94a3b8', minWidth: 96, flexShrink: 0 };
+  return (
+    <div style={{ borderBottom: '1px solid #f1f5f9' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'grid', gridTemplateColumns: '150px 1fr 34px 74px', alignItems: 'center', gap: 10, padding: '8px 2px', cursor: 'pointer', fontSize: 12.5 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#334155', fontWeight: 600 }}>
+          <span style={{ width: 12, color: '#94a3b8', fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.color, flexShrink: 0 }} />{s.name}
+        </span>
+        <span style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: s.score + '%', background: s.color, borderRadius: 5 }} /></span>
+        <span style={{ fontWeight: 800, color: '#0f172a', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{s.score}</span>
+        <span style={{ color: s.color, fontWeight: 700, fontSize: 11, textAlign: 'right' }}>{s.label}</span>
+      </div>
+      {open && (
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, padding: '10px 12px', margin: '2px 0 8px', fontSize: 12 }}>
+          <div style={hdRow}><span style={hdK}>ตัวชี้วัด</span><span style={{ color: '#334155' }}>{dt.metric}</span></div>
+          <div style={hdRow}><span style={hdK}>สูตร</span><span style={{ fontFamily: 'ui-monospace, monospace', color: '#334155' }}>{dt.formula}</span></div>
+          {(dt.inputs || []).filter(x => x.value != null).map((x, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0 2px 96px', color: '#475569' }}><span>{x.label}</span><b style={{ fontVariantNumeric: 'tabular-nums', color: '#0f172a' }}>{PL_fmt(x.value)}</b></div>
+          ))}
+          <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a' }}>{dt.result}</b></div>
+          <div style={hdRow}><span style={hdK}>เกณฑ์ให้คะแนน</span><span style={{ color: '#64748b' }}>{dt.bands}</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}><span>📄</span><span>ที่มา: {dt.src} · ถ่วงน้ำหนัก {Math.round((s.weight || 0) * 100)}% ของคะแนนรวม</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// กล่องวิเคราะห์ P&L ทั้งหมด: 4 ชาร์ต + คะแนนสุขภาพ + CFO Insight
+function PLAnalytics({ c, groups, model, lastMonth, bal }) {
+  const cardBox = { background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 };
+  const cardH = { fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 };
+  const nMon = lastMonth || 1;
+  const months = PL_MONTHS_TH.slice(0, nMon);
+  const revA = c.totalRevenue.slice(0, nMon), netA = c.netProfit.slice(0, nMon);
+  const expA = revA.map((v, i) => v - netA[i]);
+  const rev = PL_sum(c.totalRevenue, nMon), net = PL_sum(c.netProfit, nMon), gross = PL_sum(c.grossProfit, nMon);
+  const cogs = PL_sum(groups.cogs, nMon), sell = PL_sum(groups.selling, nMon), adm = PL_sum(groups.admin, nMon), fin = PL_sum(groups.finance, nMon);
+  const opex = sell + adm;
+  // หมวดค่าใช้จ่าย (donut)
+  const catDefs = [
+    { name: 'ต้นทุนขาย', total: cogs }, { name: 'ค่าใช้จ่ายในการขาย', total: sell },
+    { name: 'ค่าใช้จ่ายในการบริหาร', total: adm }, { name: 'ต้นทุนทางการเงิน', total: fin },
+  ];
+  const grand = catDefs.reduce((s, x) => s + x.total, 0) || 1;
+  const cats = catDefs.map((x, i) => ({ name: x.name, total: x.total, color: PL_ANAL_PALETTE[i], pct: x.total / grand }))
+    .filter(x => Math.abs(x.total) > 0.01).sort((a, b) => b.total - a.total);
+  const donutData = cats.map(x => ({ label: x.name, value: x.total, valueLabel: (x.pct * 100).toFixed(0) + '%', color: x.color }));
+  // ค่าใช้จ่ายสูงสุด (top expense accounts)
+  const accts = (model && model.accounts) || {};
+  const expAccts = [];
+  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { const t = PL_sum(a.arr, nMon); if (Math.abs(t) > 0.01) expAccts.push({ name: a.name || a.code, total: t }); }));
+  expAccts.sort((a, b) => b.total - a.total);
+  const topExp = expAccts.slice(0, 6);
+  const topMax = topExp.length ? topExp[0].total : 1;
+  // คะแนนสุขภาพ
+  const netMargin = net / (rev || 1), grossMargin = gross / (rev || 1), opexRatio = opex / (rev || 1);
+  const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
+  const { ca, cl, tl, ta, eq } = bal;
+  const curRatio = (ca != null && cl) ? ca / cl : null, debtRatio = (tl != null && ta) ? tl / ta : null;
+  const sLiq = curRatio != null ? PL_scoreLinear(curRatio, [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 95]]) : 50;
+  const sProf = PL_scoreLinear(netMargin, [[-0.5, 5], [-0.2, 20], [0, 45], [0.05, 68], [0.15, 92]]);
+  const sGrow = PL_scoreLinear(growth, [[-0.5, 10], [0, 50], [0.3, 75], [0.8, 90], [1.5, 97]]);
+  const sEff = PL_scoreLinear(opexRatio, [[0.2, 95], [0.4, 75], [0.6, 55], [0.9, 32], [1.5, 12]]);
+  let sRisk = debtRatio != null ? PL_scoreLinear(debtRatio, [[0.3, 90], [0.6, 65], [1, 42], [2, 20], [4, 8]]) : 50;
+  if (eq != null && eq < 0) sRisk = Math.min(sRisk, 12);
+  const m0 = revA[0], m1 = revA[revA.length - 1];
+  const subs = [
+    { name: 'สภาพคล่อง', score: Math.round(sLiq), weight: 0.20, detail: { metric: 'อัตราส่วนสภาพคล่อง (Current Ratio)', formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน', inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }], result: curRatio != null ? curRatio.toFixed(2) + ' เท่า' : '— (ยังไม่มีข้อมูลงบแสดงฐานะการเงิน)', src: 'งบแสดงฐานะการเงิน', bands: '≥ 2 เท่า = ดี · ~1 เท่า = เฝ้าระวัง · < 1 เท่า = เสี่ยง' } },
+    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.30, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', bands: '≥ 15% = ดี · 0–5% = พอใช้ · ติดลบ = ต้องแก้ไข' } },
+    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.15, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', bands: '> 80% = ดีมาก · 0–30% = ปกติ · ติดลบ = หดตัว' } },
+    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.15, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', bands: '< 30% = ดี · ~60% = เฝ้าระวัง · > 90% = ต้องแก้ไข (ยิ่งต่ำยิ่งดี)' } },
+    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.20, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', bands: '< 0.5 เท่า = ดี · ~1 เท่า = เฝ้าระวัง · > 2 เท่า = เสี่ยง (ยิ่งต่ำยิ่งดี)' } },
+  ];
+  subs.forEach(s => { s.label = s.score >= 70 ? 'ดี' : s.score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ'; s.color = s.score >= 70 ? '#22c55e' : s.score >= 45 ? '#f59e0b' : '#ef4444'; });
+  const overall = Math.round(sLiq * 0.2 + sProf * 0.3 + sGrow * 0.15 + sEff * 0.15 + sRisk * 0.2);
+  const gcol = overall >= 70 ? '#22c55e' : overall >= 45 ? '#f59e0b' : '#ef4444';
+  const gstat = overall >= 70 ? 'ดี' : overall >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ';
+  // CFO Insight
+  const f = (v) => PL_fmt(v), pc = (v) => (v * 100).toFixed(1) + '%';
+  const top = cats[0];
+  const eqNeg = eq != null && eq < 0;
+  const B = [];
+  B.push({ t: 'good', x: 'รายได้รวม ' + f(rev) + ' บาท' + (m0 != null ? ' (' + months[0] + ' ' + f(m0) + ' → ล่าสุด ' + f(m1) + ')' : '') });
+  B.push({ t: 'good', x: 'กำไรขั้นต้น ' + f(gross) + ' บาท คิดเป็นอัตรา ' + pc(grossMargin) });
+  if (top) B.push({ t: 'bad', x: top.name + ' ' + f(top.total) + ' บาท คิดเป็น ' + pc(top.pct) + ' ของค่าใช้จ่าย' });
+  B.push({ t: net < 0 ? 'bad' : 'good', x: (net < 0 ? 'ขาดทุน' : 'กำไร') + 'สุทธิ ' + f(net) + ' บาท อัตรา ' + pc(netMargin) });
+  if (eqNeg) B.push({ t: 'bad', x: 'ส่วนของผู้ถือหุ้นติดลบ ' + f(eq) + ' บาท' + (debtRatio ? ' · Debt Ratio ' + debtRatio.toFixed(2) + ' เท่า' : '') });
+  if (fin > 0.01) B.push({ t: 'warn', x: 'ต้นทุนทางการเงิน (ดอกเบี้ยจ่าย) ' + f(fin) + ' บาท กดดันกระแสเงินสด' });
+  const Rc = [];
+  if (opexRatio > 0.5) Rc.push('คุมค่าใช้จ่ายขายและบริหาร — ปัจจุบัน ' + (opexRatio * 100).toFixed(0) + '% ของรายได้ · ตั้งเพดานค่าโฆษณาไม่เกิน ~25% ของยอดขาย');
+  if (net < 0) Rc.push('เร่งหาจุดคุ้มทุน — เพิ่มรายได้หรือลดค่าใช้จ่ายให้กำไรก่อนต้นทุนการเงินเป็นบวก');
+  if (eqNeg) Rc.push('ปรับโครงสร้างทุน — พิจารณาแปลงเงินกู้กรรมการ/ในเครือเป็นทุน (debt-to-equity) เพื่อแก้ส่วนผู้ถือหุ้นติดลบ');
+  if (curRatio != null && curRatio < 1.2) Rc.push('ดูแลสภาพคล่อง — สินทรัพย์หมุนเวียนต่อหนี้สินหมุนเวียน ' + curRatio.toFixed(2) + ' เท่า · เร่งเก็บลูกหนี้');
+  if (!Rc.length) Rc.push('รักษาโมเมนตัม — คุมต้นทุนและขยายรายได้ต่อเนื่อง');
+  let summary = 'บริษัทมีรายได้รวม ' + f(rev) + ' บาท '
+    + (growth > 0.05 ? 'เติบโต ' + (growth * 100).toFixed(0) + '% จากต้นงวด ' : growth < -0.05 ? 'ลดลง ' + (Math.abs(growth) * 100).toFixed(0) + '% จากต้นงวด ' : '')
+    + 'และกำไรขั้นต้นที่ ' + (grossMargin * 100).toFixed(0) + '% ';
+  const bico = (t) => {
+    const cc = t === 'good' ? '#059669' : (t === 'bad' ? '#dc2626' : '#d97706');
+    const cm = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: cc, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flexShrink: 0, marginTop: 2 } };
+    if (t === 'good') return <svg {...cm}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>;
+    if (t === 'warn') return <svg {...cm}><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" x2="12" y1="9" y2="13" /><line x1="12" x2="12.01" y1="17" y2="17" /></svg>;
+    return <svg {...cm}><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>;
+  };
+  const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, marginBottom: 14 };
+  return (
+    <>
+      <div className="pnl-section-head" style={{ marginTop: 22 }}>
+        <h2>📈 วิเคราะห์ผลประกอบการ (Charts & Analytics)</h2>
+        <span className="pnl-tag">รายเดือน · โครงสร้างค่าใช้จ่าย · สุขภาพการเงิน · สรุปผู้บริหาร</span>
+      </div>
+      <div style={gridStyle}>
+        <div style={cardBox}>
+          <div style={cardH}>รายได้ · ค่าใช้จ่าย · กำไรสุทธิ รายเดือน</div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 6, fontSize: 11, color: '#64748b' }}>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 5 }} />รายได้</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#cbd5e1', marginRight: 5 }} />ค่าใช้จ่าย</span>
+            <span><span style={{ display: 'inline-block', width: 14, height: 3, background: '#ef4444', marginRight: 5, verticalAlign: 'middle' }} />กำไร/ขาดทุนสุทธิ</span>
+          </div>
+          <PLComboChart months={months} rev={revA} exp={expA} net={netA} />
+        </div>
+        <div style={cardBox}>
+          <div style={cardH}>โครงสร้างค่าใช้จ่ายทั้งหมด</div>
+          {donutData.length ? <Donut size={170} thickness={22} data={donutData} animate={false} /> : <div style={{ color: '#94a3b8', fontSize: 12 }}>ไม่มีข้อมูลค่าใช้จ่าย</div>}
+        </div>
+      </div>
+      <div style={gridStyle}>
+        <div style={cardBox}>
+          <div style={cardH}>ค่าใช้จ่ายสูงสุด ({nMon} เดือน)</div>
+          <div style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 10 }}>บัญชีค่าใช้จ่ายอันดับต้น ๆ ที่เป็นตัวแปรหลักของผลกำไร</div>
+          {topExp.map((x, i) => (
+            <div key={i} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                <span style={{ color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{x.name}</span>
+                <span style={{ fontWeight: 700, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>{PL_fmt(x.total)} · {(x.total / (grand) * 100).toFixed(0)}%</span>
+              </div>
+              <div style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: Math.max(2, x.total / topMax * 100) + '%', background: PL_ANAL_PALETTE[i % PL_ANAL_PALETTE.length], borderRadius: 5 }} /></div>
+            </div>
+          ))}
+        </div>
+        <div style={cardBox}>
+          <div style={cardH}>แนวโน้มกำไร(ขาดทุน)สุทธิรายเดือน</div>
+          <AreaChart data={months.map((mo, i) => ({ label: mo, value: netA[i] }))} height={220} color="#dc2626" />
+        </div>
+      </div>
+      {/* คะแนนสุขภาพการเงิน */}
+      <div style={{ ...cardBox, display: 'grid', gridTemplateColumns: 'minmax(200px, 240px) 1fr', gap: 18, alignItems: 'start', marginBottom: 14 }}>
+        <div style={{ textAlign: 'center', padding: '6px 4px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>คะแนนสุขภาพทางการเงิน</div>
+          <div style={{ width: 150, height: 150, borderRadius: '50%', margin: '0 auto', background: 'conic-gradient(' + gcol + ' ' + (overall * 3.6) + 'deg, #e2e8f0 0)', display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: 112, height: 112, borderRadius: '50%', background: 'white', display: 'grid', placeItems: 'center' }}>
+              <div><span style={{ fontSize: 34, fontWeight: 800, color: '#0f172a' }}>{overall}</span><span style={{ fontSize: 13, color: '#94a3b8' }}>/100</span></div>
+            </div>
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: gcol, color: '#fff', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />{gstat}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>คะแนนย่อยรายมิติ <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกแต่ละมิติเพื่อดูสูตร + ตัวเลขที่ใช้</span></div>
+          <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 6px' }}>คำนวณจากงบกำไรขาดทุน + งบแสดงฐานะการเงิน · คะแนนรวม = ถ่วงน้ำหนัก (ทำกำไร 30% · สภาพคล่อง 20% · ความเสี่ยง 20% · เติบโต 15% · ประสิทธิภาพ 15%)</div>
+          {subs.map((s, i) => <PLHealthRow key={i} s={s} />)}
+        </div>
+      </div>
+      {/* CFO Insight */}
+      <div style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <span style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>✨</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>สรุปเชิงผู้บริหาร (CFO Insight)</div>
+            <div style={{ fontSize: 11.5, color: '#94a3b8' }}>วิเคราะห์จากงบการเงินจริง · ชี้ความเสี่ยงและข้อเสนอแนะ</div>
+          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, color: '#6366f1', background: '#eef2ff', padding: '3px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>Auto Generated</span>
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.7, color: '#1e293b', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+          บริษัทมีรายได้รวม <b>{f(rev)}</b> บาท {growth > 0.05 ? 'เติบโต ' + (growth * 100).toFixed(0) + '% จากต้นงวด ' : growth < -0.05 ? 'ลดลง ' + (Math.abs(growth) * 100).toFixed(0) + '% จากต้นงวด ' : ''}และกำไรขั้นต้นที่ <b>{(grossMargin * 100).toFixed(0)}%</b> {net < 0
+            ? <>แต่ยัง<b style={{ color: '#dc2626' }}>ขาดทุนสุทธิ {f(net)}</b> บาท{top ? ' จาก' + top.name + 'และค่าใช้จ่ายที่สูงเกินรายได้' : ''}</>
+            : <>และทำ<b style={{ color: '#059669' }}>กำไรสุทธิ {f(net)}</b> บาท</>}
+          {eqNeg && <> · จุดที่ต้องเร่งแก้คือ<b>ส่วนของผู้ถือหุ้นติดลบ {f(eq)}</b> บาท</>}.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px 18px', marginBottom: 14 }}>
+          {B.map((x, i) => <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#334155', lineHeight: 1.5 }}>{bico(x.t)}<span>{x.x}</span></div>)}
+        </div>
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 800, color: '#92400e', marginBottom: 8 }}>💡 ข้อเสนอแนะเชิงบริหาร</div>
+          {Rc.map((r, i) => <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, color: '#334155', lineHeight: 1.6, marginBottom: 6 }}><span style={{ flexShrink: 0, width: 19, height: 19, borderRadius: '50%', background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span><span>{r}</span></div>)}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── การ์ด KPI แบบย่อ (คลิก "ดูรายละเอียด" เพื่อกางกล่องแหล่งที่มา/สูตร/อ้างอิง) ──
 function PLKpiCard({ kpi, s }) {
   const [open, setOpen] = plState(false);
@@ -647,6 +880,22 @@ function PnLPage({ data, setData, toast }) {
     const net     = PL_sum(comp.netProfit, lastMonth);
     return { revenue, cost, gp, net, gpM: revenue ? gp / revenue * 100 : 0, netM: revenue ? net / revenue * 100 : 0, costM: revenue ? cost / revenue * 100 : 0 };
   }, [comp, lastMonth]);
+
+  // ── ยอดจากงบแสดงฐานะการเงิน (bs.data override → BS_SEED) สำหรับคะแนนสุขภาพ/CFO insight ──
+  // BS_SEED / BS_find เป็น global จาก page_balance_sheet.jsx (โหลดพร้อมกัน — ใช้ตอน render ได้)
+  const bal = plMemo(() => {
+    let bsData = (typeof BS_SEED !== 'undefined') ? BS_SEED : { rows: [] };
+    try {
+      const row = ((data && data.manualOverrides) || []).find(r => r && r.key === 'bs.data');
+      if (row && row.value != null && row.value !== '') {
+        const v = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+        if (v && Array.isArray(v.rows) && v.rows.length) bsData = v;
+      }
+    } catch (_) {}
+    const rows = (bsData && bsData.rows) || [];
+    const cv = (re) => { if (typeof BS_find !== 'function') return null; const r = BS_find(rows, re); return (r && r.cur != null) ? r.cur : null; };
+    return { ca: cv(/^รวมสินทรัพย์หมุนเวียน$/), cl: cv(/^รวมหนี้สินหมุนเวียน$/), tl: cv(/^รวมหนี้สิน$/), ta: cv(/^รวมสินทรัพย์$/), eq: cv(/^รวมส่วนของผู้ถือหุ้น/) };
+  }, [data && data.manualOverrides]);
 
   // ── ข้อมูลเสริม: ต้นทุน/กำไรต่อเครื่อง BA (ชีต "ต้นทุน") — อ่านจาก manualOverrides (sync ทั้งทีม) ──
   const costBA = plMemo(() => {
@@ -1226,6 +1475,9 @@ function PnLPage({ data, setData, toast }) {
           </>
         );
       })()}
+
+      {/* ── วิเคราะห์ผลประกอบการ: ชาร์ต + คะแนนสุขภาพ + CFO Insight (แบบ finance-tools) ── */}
+      <PLAnalytics c={c} groups={groups} model={model} lastMonth={lastMonth} bal={bal} />
 
       {/* UPLOAD MODAL — เปิดจากปุ่ม "อัปโหลดข้อมูล" บน hero banner */}
       <Modal open={uploadOpen} onClose={() => { setUploadOpen(false); setFile(null); }} wide

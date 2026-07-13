@@ -32,6 +32,7 @@ function BS_fmtPct(v, opt) {
   return v < 0 ? '(' + s + ')' : s;
 }
 const BS_neg = (v) => (typeof v === 'number' && v < 0) ? ' bs-neg' : '';
+const BS_PALETTE = ['#3b82f6', '#06b6d4', '#8b5cf6', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6', '#94a3b8'];
 
 // ── SEED (จากไฟล์เตย · ชีต “งบฐานะการเงิน(รวม)”) ──────────────────────────────
 // kind: section=หัวใหญ่ · group=หัวกลุ่มย่อย · line=รายการ · subtotal=รวมย่อย
@@ -183,49 +184,95 @@ function BS_parseWorkbook(f) {
   });
 }
 
-// ── การ์ดอัตราส่วนแบบย่อ (คลิก "ดูรายละเอียด" เพื่อกางกล่องแหล่งที่มา/สูตร/อ้างอิง) ──
-function BSRatioCard({ r }) {
+// ── แถวอัตราส่วน (คลิกกางดู สูตร/ค่า/ผลลัพธ์/เกณฑ์/ที่มา) — เลย์เอาต์เลียนแบบ finance-tools ──
+function BSRatioRow({ r, last }) {
   const [open, setOpen] = bsState(false);
+  const scol = r.status === 'good' ? '#16a34a' : (r.status === 'warn' ? '#d97706' : '#dc2626');
+  const dt = r.detail || {};
+  const hdRow = { display: 'flex', gap: 10, padding: '2px 0' };
+  const hdK = { color: '#94a3b8', minWidth: 88, flexShrink: 0 };
   return (
-    <div style={{ background: 'white', borderRadius: 12, padding: 13, border: '1px solid #e2e8f0', borderTop: '3px solid ' + r.st.a, boxShadow: '0 1px 3px rgba(15,23,42,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: r.st.bg, display: 'grid', placeItems: 'center', fontSize: 15, flexShrink: 0 }}>{r.icon}</div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>{r.label}</div>
-            <div style={{ fontSize: 9.5, color: '#94a3b8' }}>{r.en}</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 21, fontWeight: 800, color: r.st.a, letterSpacing: '-0.5px', lineHeight: 1 }}>{r.display}</div>
-          <span style={{ display: 'inline-flex', alignItems: 'center', background: r.st.bg, color: r.st.a, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12 }}>{r.st.t}</span>
-        </div>
+    <div style={{ borderBottom: last ? 'none' : '1px solid #f1f5f9' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 2px', fontSize: 12.5, cursor: 'pointer' }}>
+        <span style={{ width: 14, color: '#94a3b8', fontSize: 11, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+        <span style={{ flex: 1, color: '#334155', fontWeight: 600, minWidth: 0 }}>{r.name}</span>
+        <span style={{ fontWeight: 800, color: '#0f172a', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.valueText}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, whiteSpace: 'nowrap', background: scol + '1f', color: scol }}>{r.statusText}</span>
       </div>
-      <button onClick={() => setOpen(o => !o)} style={{ alignSelf: 'flex-start', background: 'none', border: 0, cursor: 'pointer', color: '#64748b', fontSize: 10.5, fontWeight: 600, padding: 0 }}>
-        {open ? 'ซ่อนรายละเอียด ▴' : 'ดูรายละเอียด · แหล่งที่มา ▾'}
-      </button>
       {open && (
-        <div style={{ background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 8, padding: '9px 11px' }}>
-          <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 4 }}>แหล่งที่มา · การคำนวณ</div>
-          <div style={{ fontSize: 11.5, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-line', fontVariantNumeric: 'tabular-nums' }}>{r.formula}</div>
-          <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 5 }}>
-            <span style={{ flexShrink: 0 }}>📄</span><span>{r.src}</span>
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, padding: '10px 12px', margin: '2px 0 8px', fontSize: 12 }}>
+          <div style={hdRow}><span style={hdK}>สูตร</span><span style={{ fontFamily: 'ui-monospace, monospace', color: '#334155' }}>{dt.formula}</span></div>
+          {(dt.inputs || []).filter(x => x.value != null).map((x, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0 2px 88px', color: '#475569' }}>
+              <span>{x.label}</span><b style={{ fontVariantNumeric: 'tabular-nums', color: '#0f172a' }}>{BS_fmt(x.value)}</b>
+            </div>
+          ))}
+          <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a', fontVariantNumeric: 'tabular-nums' }}>{dt.result}</b></div>
+          <div style={hdRow}><span style={hdK}>เกณฑ์</span><span style={{ color: '#64748b' }}>{dt.bands}</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}>
+            <span>📄</span><span>ที่มา: {dt.src}</span>
           </div>
-          {r.bench && (
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 5, display: 'flex', gap: 5 }}>
-              <span style={{ flexShrink: 0 }}>📏</span><span>เกณฑ์ปกติ: {r.bench}</span>
-            </div>
-          )}
-          {r.ref && (
-            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 5 }}>
-              <span style={{ flexShrink: 0 }}>📚</span>
-              {r.refUrl
-                ? <a href={r.refUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>อ้างอิง: {r.ref} ↗</a>
-                : <span>อ้างอิง: {r.ref}</span>}
-            </div>
-          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── กล่องวิเคราะห์ฐานะการเงิน (Auto Generated) — พอร์ตจาก finBalInsight (finance-tools) ──
+function BSInsight({ m, bs }) {
+  const ta = m.totalAssets.cur, tl = m.totalLiab.cur, eq = m.equity.cur, ca = m.curAssets.cur, cl = m.curLiab.cur;
+  const f = (v) => BS_fmt(v);
+  const asof = (bs.asOf || '').replace(/^ณ\s*/, '');
+  const eqNeg = eq != null && eq < 0;
+  // จุดสังเกต (bullets)
+  const B = [];
+  if (ca != null && cl) { const cr = ca / cl; B.push({ t: cr >= 1 ? 'good' : 'bad', x: 'สภาพคล่อง ' + cr.toFixed(2) + ' เท่า — สินทรัพย์หมุนเวียน ' + f(ca) + ' เทียบหนี้สินหมุนเวียน ' + f(cl) }); }
+  if (ca != null && cl != null) { const wc = ca - cl; B.push({ t: wc > 0 ? 'good' : 'bad', x: 'เงินทุนหมุนเวียนสุทธิ ' + f(wc) + ' บาท ' + (wc > 0 ? '(เป็นบวก)' : '(ติดลบ)') }); }
+  if (tl != null && ta) { const dr = tl / ta; B.push({ t: dr < 1 ? 'warn' : 'bad', x: 'หนี้สินคิดเป็น ' + (dr * 100).toFixed(0) + '% ของสินทรัพย์' + (dr > 1 ? ' (หนี้มากกว่าสินทรัพย์)' : '') }); }
+  if (eqNeg) B.push({ t: 'bad', x: 'ส่วนของผู้ถือหุ้นติดลบ ' + f(eq) + ' บาท — ต้องเพิ่มทุนหรือแปลงหนี้เป็นทุน' });
+  // ข้อเสนอแนะ (recs)
+  const Rc = [];
+  if (eqNeg) Rc.push('เพิ่มทุน / แปลงเงินกู้กรรมการเป็นทุน (debt-to-equity) เพื่อแก้ส่วนของผู้ถือหุ้นติดลบ');
+  if (ca != null && cl && ca / cl < 1.2) Rc.push('ดูแลสภาพคล่อง — เร่งเก็บลูกหนี้ / ลดสินค้าคงคลัง ให้สินทรัพย์หมุนเวียนคุ้มหนี้ระยะสั้น');
+  if (tl != null && ta && tl / ta > 0.7) Rc.push('ลดภาระหนี้ — สัดส่วนหนี้ต่อสินทรัพย์สูง ควรทยอยชำระ / รีไฟแนนซ์ดอกเบี้ยต่ำ');
+  if (!Rc.length) Rc.push('รักษาโครงสร้างทุนให้แข็งแรงต่อเนื่อง');
+  const bico = (t) => {
+    const c = t === 'good' ? '#059669' : (t === 'bad' ? '#dc2626' : '#d97706');
+    const common = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: c, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flexShrink: 0, marginTop: 2 } };
+    if (t === 'good') return <svg {...common}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>;
+    if (t === 'warn') return <svg {...common}><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" x2="12" y1="9" y2="13" /><line x1="12" x2="12.01" y1="17" y2="17" /></svg>;
+    return <svg {...common}><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>;
+  };
+  return (
+    <div style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18, marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <span style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>✨</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>วิเคราะห์ฐานะการเงิน</div>
+          <div style={{ fontSize: 11.5, color: '#94a3b8' }}>สภาพคล่อง · โครงสร้างหนี้ · ส่วนของผู้ถือหุ้น</div>
+        </div>
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, color: '#6366f1', background: '#eef2ff', padding: '3px 9px', borderRadius: 20, whiteSpace: 'nowrap' }}>Auto Generated</span>
+      </div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.7, color: '#1e293b', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+        ณ {asof} บริษัทมีสินทรัพย์รวม <b>{f(ta)}</b> บาท · เงินทุนมาจากหนี้สิน <b>{f(tl)}</b> บาท และส่วนของผู้ถือหุ้น <b style={{ color: eqNeg ? '#dc2626' : '#059669' }}>{f(eq)}</b> บาท
+        {eqNeg && <> — <b style={{ color: '#dc2626' }}>ส่วนของผู้ถือหุ้นติดลบ (ขาดทุนสะสมเกินทุน)</b> คือจุดที่ต้องเร่งแก้</>}.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px 18px', marginBottom: 14 }}>
+        {B.map((x, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#334155', lineHeight: 1.5 }}>
+            {bico(x.t)}<span>{x.x}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 800, color: '#92400e', marginBottom: 8 }}>💡 ข้อเสนอแนะ</div>
+        {Rc.map((r, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, color: '#334155', lineHeight: 1.6, marginBottom: 6 }}>
+            <span style={{ flexShrink: 0, width: 19, height: 19, borderRadius: '50%', background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+            <span>{r}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -270,6 +317,31 @@ function BalanceSheetPage({ data, setData, toast }) {
       balanced: (totalAssets.cur != null && grand.cur != null) ? Math.abs(totalAssets.cur - grand.cur) <= 1 : true,
     };
   }, [rows]);
+
+  // ── โครงสร้างสินทรัพย์ (donut) + แหล่งเงินทุน (bars) — พอร์ตจาก finBalAssetComp/finBalFunding ──
+  const bsCharts = bsMemo(() => {
+    // รายการสินทรัพย์ (เฉพาะ kind 'line' ใต้ section "สินทรัพย์")
+    let inAssets = false; const alines = [];
+    for (const r of rows) {
+      if (r.kind === 'section') { inAssets = (r.label === 'สินทรัพย์'); continue; }
+      if (inAssets && r.kind === 'line' && r.cur != null && Math.abs(r.cur) > 0.01) alines.push({ name: r.label, value: r.cur });
+    }
+    alines.sort((a, b) => b.value - a.value);
+    let lines = alines;
+    if (lines.length > 7) { const top = lines.slice(0, 6); const rest = lines.slice(6).reduce((s, x) => s + x.value, 0); top.push({ name: 'อื่น ๆ', value: rest }); lines = top; }
+    const tot = lines.reduce((s, x) => s + x.value, 0) || 1;
+    const assetComp = lines.map((x, i) => ({ label: x.name, value: x.value, valueLabel: (x.value / tot * 100).toFixed(0) + '%', color: BS_PALETTE[i % BS_PALETTE.length] }));
+    // แหล่งเงินทุน
+    const nclRow = BS_find(rows, /^รวมหนี้สินไม่หมุนเวียน$/);
+    const items = [
+      { name: 'หนี้สินหมุนเวียน', value: m.curLiab.cur, color: '#f59e0b' },
+      { name: 'หนี้สินไม่หมุนเวียน', value: nclRow ? nclRow.cur : null, color: '#ef4444' },
+      { name: 'ส่วนของผู้ถือหุ้น', value: m.equity.cur, color: '#22c55e' },
+    ].filter(x => x.value != null);
+    const base = Math.abs(m.totalAssets.cur) || 1;
+    const funding = items.map(x => ({ name: x.name, value: x.value, color: x.value < 0 ? '#dc2626' : x.color, pct: x.value / base }));
+    return { assetComp, funding };
+  }, [rows, m]);
 
   // ── บันทึกรูป / พิมพ์ ──
   const saveImage = () => {
@@ -336,40 +408,49 @@ function BalanceSheetPage({ data, setData, toast }) {
       iconBg: '#f0fdf4', iconColor: '#16a34a', icon: <><circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0112 0v1" /></> },
   ];
 
-  // ── อัตราส่วน (พร้อมแหล่งที่มา) — สไตล์เดียวกับ KPI หน้า P&L ──
-  const ratios = [
-    (() => { const v = m.curRatio, ok = v >= 1; return {
-      icon: '💧', label: 'อัตราส่วนสภาพคล่อง', en: 'Current Ratio',
-      display: isNaN(v) ? '—' : v.toFixed(2) + ' เท่า',
-      st: isNaN(v) ? { t: 'ไม่มีข้อมูล', a: '#64748b', bg: '#f1f5f9' } : (ok ? { t: 'แข็งแรง', a: '#16a34a', bg: '#dcfce7' } : (v >= 0.5 ? { t: 'ตึงตัว', a: '#d97706', bg: '#fef3c7' } : { t: 'เสี่ยงสภาพคล่อง', a: '#dc2626', bg: '#fee2e2' })),
-      formula: 'สินทรัพย์หมุนเวียน ' + BS_fmt(m.curAssets.cur) + '\n÷ หนี้สินหมุนเวียน ' + BS_fmt(m.curLiab.cur),
-      src: 'บรรทัด “รวมสินทรัพย์หมุนเวียน” ÷ “รวมหนี้สินหมุนเวียน”',
-      bench: 'ทั่วไป 1.5–2.0 เท่า · < 1.0 = เสี่ยงสภาพคล่อง', ref: 'เกณฑ์สภาพคล่อง (Farseer 2026)',
-      refUrl: 'https://www.farseer.com/blog/balance-sheet-ratios/' }; })(),
-    (() => { const v = m.debtToAssets, ok = v <= 100; return {
-      icon: '⚖️', label: 'หนี้สินต่อสินทรัพย์', en: 'Debt to Assets',
-      display: BS_fmtPct(v),
-      st: isNaN(v) ? { t: 'ไม่มีข้อมูล', a: '#64748b', bg: '#f1f5f9' } : (v > 100 ? { t: 'หนี้เกินสินทรัพย์', a: '#dc2626', bg: '#fee2e2' } : (v > 70 ? { t: 'สูง', a: '#d97706', bg: '#fef3c7' } : { t: 'คุมได้', a: '#16a34a', bg: '#dcfce7' })),
-      formula: 'รวมหนี้สิน ' + BS_fmt(m.totalLiab.cur) + '\n÷ รวมสินทรัพย์ ' + BS_fmt(m.totalAssets.cur),
-      src: 'บรรทัด “รวมหนี้สิน” ÷ “รวมสินทรัพย์”',
-      bench: 'ยิ่งต่ำยิ่งดี · > 100% = หนี้เกินสินทรัพย์', ref: 'อัตราส่วนหนี้สิน/leverage (Farseer 2026)',
-      refUrl: 'https://www.farseer.com/blog/balance-sheet-ratios/' }; })(),
-    (() => { const eq = m.equity.cur || 0, neg = eq < 0; return {
-      icon: '🏛️', label: 'ส่วนของผู้ถือหุ้น', en: 'Shareholders’ Equity',
-      display: BS_fmt(eq),
-      st: neg ? { t: 'ขาดทุนเกินทุน', a: '#dc2626', bg: '#fee2e2' } : { t: 'เป็นบวก', a: '#16a34a', bg: '#dcfce7' },
-      formula: 'ทุนที่เรียกชำระ ' + BS_fmt(BS_find(rows, /^ทุนที่ออกและเรียกชำระ/).cur) + '\n+ ขาดทุนสะสม ' + BS_fmt(BS_find(rows, /ขาดทุนสะสม/).cur),
-      src: 'บรรทัด “รวมส่วนของผู้ถือหุ้น” · ทุนชำระแล้ว + ขาดทุนสะสม',
-      bench: 'บวก = ทุนไม่ติดลบ · ติดลบ = ขาดทุนเกินทุน (equity ต่ำกว่าศูนย์)', ref: 'งบแสดงฐานะการเงิน (นิยามมาตรฐาน)' }; })(),
-    (() => { const eq = m.equity.cur || 0, na = eq <= 0; const v = m.de; return {
-      icon: '🔗', label: 'หนี้สินต่อทุน (D/E)', en: 'Debt to Equity',
-      display: na ? 'N/M' : (isNaN(v) ? '—' : v.toFixed(2) + ' เท่า'),
-      st: na ? { t: 'ทุนติดลบ — ตีความไม่ได้', a: '#dc2626', bg: '#fee2e2' } : (v <= 2 ? { t: 'คุมได้', a: '#16a34a', bg: '#dcfce7' } : { t: 'สูง', a: '#d97706', bg: '#fef3c7' }),
-      formula: 'รวมหนี้สิน ' + BS_fmt(m.totalLiab.cur) + '\n÷ ส่วนของผู้ถือหุ้น ' + BS_fmt(eq),
-      src: 'บรรทัด “รวมหนี้สิน” ÷ “รวมส่วนของผู้ถือหุ้น” · ทุนติดลบ ⇒ ตีความไม่ได้ (N/M)',
-      bench: 'ทั่วไป 1.0–2.0 เท่า · < 1.0 = ทุน > หนี้ · ทุนเข้มข้น 2.0–3.0', ref: 'เกณฑ์ D/E (Business Supervisor 2026)',
-      refUrl: 'https://www.businesssupervisor.com/what-is-a-good-debt-to-equity-ratio/' }; })(),
-  ];
+  // ── อัตราส่วน 5 ตัว — พอร์ตจาก finBalRatios (finance-tools) แบบ 1:1 ──
+  const ratios = bsMemo(() => {
+    const ca = m.curAssets.cur, cl = m.curLiab.cur, ta = m.totalAssets.cur, tl = m.totalLiab.cur, eq = m.equity.cur;
+    const R = [];
+    const P = (name, valueText, status, statusText, detail) => R.push({ name, valueText, status, statusText, detail });
+    // 1) สภาพคล่อง
+    if (ca != null && cl) { const cr = ca / cl;
+      P('อัตราส่วนสภาพคล่อง (Current Ratio)', cr.toFixed(2) + ' เท่า',
+        cr >= 1.5 ? 'good' : (cr >= 1 ? 'warn' : 'bad'), cr >= 1.5 ? 'แข็งแรง' : (cr >= 1 ? 'พอใช้' : 'ตึงตัว'),
+        { formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน',
+          inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
+          result: cr.toFixed(2) + ' เท่า', bands: '≥ 1.5 = แข็งแรง · 1–1.5 = พอใช้ · < 1 = ตึงตัว', src: 'งบแสดงฐานะการเงิน' }); }
+    // 2) เงินทุนหมุนเวียนสุทธิ
+    if (ca != null && cl != null) { const wc = ca - cl;
+      P('เงินทุนหมุนเวียนสุทธิ (Working Capital)', BS_fmt(wc) + ' บาท',
+        wc > 0 ? 'good' : 'bad', wc > 0 ? 'เป็นบวก' : 'ติดลบ',
+        { formula: 'สินทรัพย์หมุนเวียน − หนี้สินหมุนเวียน',
+          inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
+          result: BS_fmt(wc) + ' บาท', bands: 'เป็นบวก = มีสภาพคล่องหมุนเวียน · ติดลบ = ต้องเสริมเงินทุน', src: 'งบแสดงฐานะการเงิน' }); }
+    // 3) หนี้สินต่อสินทรัพย์
+    if (tl != null && ta) { const dr = tl / ta;
+      P('อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', dr.toFixed(2) + ' เท่า (' + (dr * 100).toFixed(0) + '%)',
+        dr < 0.6 ? 'good' : (dr < 1 ? 'warn' : 'bad'), dr < 0.6 ? 'ปลอดภัย' : (dr < 1 ? 'เฝ้าระวัง' : 'หนี้เกินสินทรัพย์'),
+        { formula: 'หนี้สินรวม ÷ สินทรัพย์รวม',
+          inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }],
+          result: dr.toFixed(2) + ' เท่า', bands: '< 0.6 = ปลอดภัย · 0.6–1 = เฝ้าระวัง · > 1 = หนี้เกินสินทรัพย์', src: 'งบแสดงฐานะการเงิน' }); }
+    // 4) หนี้สินต่อทุน (D/E)
+    if (tl != null && eq != null) { const neg = eq < 0, de = eq !== 0 ? tl / eq : null;
+      P('อัตราส่วนหนี้สินต่อทุน (D/E)', neg ? 'ทุนติดลบ' : (de != null ? de.toFixed(2) + ' เท่า' : '—'),
+        neg ? 'bad' : (de < 1.5 ? 'good' : (de < 3 ? 'warn' : 'bad')), neg ? 'ต้องเพิ่มทุน' : (de < 1.5 ? 'เหมาะสม' : 'หนี้สูง'),
+        { formula: 'หนี้สินรวม ÷ ส่วนของผู้ถือหุ้น',
+          inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมส่วนของผู้ถือหุ้น', value: eq }],
+          result: neg ? 'คำนวณไม่ได้ (ส่วนของผู้ถือหุ้นติดลบ)' : de.toFixed(2) + ' เท่า',
+          bands: '< 1.5 = เหมาะสม · 1.5–3 = สูง · ทุนติดลบ = ต้องเพิ่มทุน', src: 'งบแสดงฐานะการเงิน' }); }
+    // 5) ส่วนของผู้ถือหุ้น (Equity Ratio)
+    if (eq != null && ta) { const er = eq / ta;
+      P('อัตราส่วนส่วนของผู้ถือหุ้น (Equity Ratio)', (er * 100).toFixed(0) + '%',
+        er >= 0.4 ? 'good' : (er > 0 ? 'warn' : 'bad'), er >= 0.4 ? 'ทุนหนา' : (er > 0 ? 'ทุนบาง' : 'ขาดทุนเกินทุน'),
+        { formula: 'ส่วนของผู้ถือหุ้น ÷ สินทรัพย์รวม',
+          inputs: [{ label: 'รวมส่วนของผู้ถือหุ้น', value: eq }, { label: 'รวมสินทรัพย์', value: ta }],
+          result: (er * 100).toFixed(0) + '%', bands: '≥ 40% = ทุนหนา · 0–40% = ทุนบาง · ติดลบ = ขาดทุนเกินทุน', src: 'งบแสดงฐานะการเงิน' }); }
+    return R;
+  }, [m]);
 
   const heroBtn = { background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.25)',
     borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 };
@@ -449,14 +530,45 @@ function BalanceSheetPage({ data, setData, toast }) {
         <div className="bs-modal-note">ที่มา: {bs.source}{bs.updatedAt ? ' · อัปเดต ' + new Date(bs.updatedAt).toLocaleString('th-TH') : ''}</div>
       </div>
 
-      {/* RATIOS WITH SOURCES */}
+      {/* โครงสร้างงบ — โดนัทสินทรัพย์ + แหล่งเงินทุน (แบบ finance-tools) */}
       <div className="bs-section-head" style={{ marginTop: 22 }}>
-        <h2>📊 อัตราส่วนทางการเงิน (จากงบฐานะการเงิน)</h2>
-        <span className="bs-tag">ทุกตัวมีแหล่งที่มา · {bs.curLabel}</span>
+        <h2>📊 โครงสร้างงบแสดงฐานะการเงิน</h2>
+        <span className="bs-tag">{bs.curLabel}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-        {ratios.map((r, i) => <BSRatioCard key={i} r={r} />)}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
+        <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>โครงสร้างสินทรัพย์</div>
+          <Donut size={170} thickness={22} data={bsCharts.assetComp} animate={false} />
+        </div>
+        <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>แหล่งเงินทุน (หนี้สิน &amp; ส่วนของผู้ถือหุ้น)</div>
+          <div style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 12 }}>สัดส่วนต่อสินทรัพย์รวม {BS_fmt(m.totalAssets.cur)} บาท</div>
+          {bsCharts.funding.map((x, i) => (
+            <div key={i} style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12.5, marginBottom: 4 }}>
+                <span style={{ color: '#334155' }}>{x.name}{x.value < 0 && <span style={{ color: '#dc2626', fontWeight: 700 }}> (ติดลบ)</span>}</span>
+                <span style={{ fontWeight: 700, color: x.value < 0 ? '#dc2626' : '#0f172a', fontVariantNumeric: 'tabular-nums' }}>{BS_fmt(x.value)} บาท</span>
+              </div>
+              <div style={{ height: 9, borderRadius: 6, background: '#f1f5f9', overflow: 'hidden' }}>
+                <span style={{ display: 'block', height: '100%', width: Math.max(2, Math.abs(x.pct) * 100) + '%', background: x.color, borderRadius: 6 }} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* RATIOS — เลย์เอาต์รายการแบบ finance-tools (คลิกกางดูสูตร + ที่มา) */}
+      <div className="bs-section-head" style={{ marginTop: 22 }}>
+        <h2>📊 อัตราส่วนทางการเงิน</h2>
+        <span className="bs-tag">🖱️ คลิกดูสูตร + ที่มา · {bs.curLabel}</span>
+      </div>
+      <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: '8px 16px 12px' }}>
+        <div style={{ fontSize: 11.5, color: '#94a3b8', margin: '8px 0 4px' }}>คำนวณจากงบแสดงฐานะการเงิน {bs.asOf}</div>
+        {ratios.map((r, i) => <BSRatioRow key={i} r={r} last={i === ratios.length - 1} />)}
+      </div>
+
+      {/* วิเคราะห์ฐานะการเงิน (Auto Generated) — พอร์ตจาก finBalInsight */}
+      <BSInsight m={m} bs={bs} />
 
       {/* UPLOAD MODAL */}
       <Modal open={uploadOpen} onClose={() => { setUploadOpen(false); setFile(null); }} wide title="อัปโหลดงบแสดงฐานะการเงิน">
