@@ -283,6 +283,53 @@ function PL_compute(d, lastMonth) {
   return { totalRevenue, totalCost, grossProfit, gpMargin, totalSGA, netProfit, netMargin };
 }
 
+// ── การ์ด KPI แบบย่อ (คลิก "ดูรายละเอียด" เพื่อกางกล่องแหล่งที่มา/สูตร/อ้างอิง) ──
+function PLKpiCard({ kpi, s }) {
+  const [open, setOpen] = plState(false);
+  return (
+    <div style={{ background: 'white', borderRadius: 12, padding: 13, border: '1px solid #e2e8f0', borderTop: '3px solid ' + s.accent, boxShadow: '0 1px 3px rgba(15,23,42,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div onClick={() => setOpen(o => !o)} style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: s.bg, display: 'grid', placeItems: 'center', fontSize: 15, flexShrink: 0 }}>{kpi.icon}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>{kpi.label}</div>
+            <div style={{ fontSize: 9.5, color: '#94a3b8' }}>{kpi.en}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: s.accent, letterSpacing: '-0.5px', lineHeight: 1 }}>{PL_fmtPct(kpi.value)}</div>
+          <span style={{ display: 'inline-flex', alignItems: 'center', background: s.bg, color: s.accent, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12 }}>{s.txt}</span>
+        </div>
+      </div>
+      <button onClick={() => setOpen(o => !o)} style={{ alignSelf: 'flex-start', background: 'none', border: 0, cursor: 'pointer', color: '#64748b', fontSize: 10.5, fontWeight: 600, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+        {open ? 'ซ่อนรายละเอียด ▴' : 'ดูรายละเอียด · แหล่งที่มา ▾'}
+      </button>
+      {open && (
+        <div style={{ background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 8, padding: '9px 11px' }}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 4 }}>แหล่งที่มา · การคำนวณ</div>
+          <div style={{ fontSize: 11.5, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-line', fontVariantNumeric: 'tabular-nums' }}>{kpi.formula}</div>
+          <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 5 }}>
+            <span style={{ flexShrink: 0 }}>📄</span><span>{kpi.src}</span>
+          </div>
+          {kpi.bench && (
+            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 5, display: 'flex', gap: 5 }}>
+              <span style={{ flexShrink: 0 }}>📏</span><span>เกณฑ์ปกติ: {kpi.bench}</span>
+            </div>
+          )}
+          {kpi.ref && (
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 5 }}>
+              <span style={{ flexShrink: 0 }}>📚</span>
+              {kpi.refUrl
+                ? <a href={kpi.refUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>อ้างอิง: {kpi.ref} ↗</a>
+                : <span>อ้างอิง: {kpi.ref}</span>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 function PnLPage({ data, setData, toast }) {
   const [loading, setLoading]   = plState(true);
@@ -1173,53 +1220,8 @@ function PnLPage({ data, setData, toast }) {
               <h2>📊 ตัวชี้วัดทางการเงิน (Financial KPIs)</h2>
               <span className="pnl-tag">อัตราส่วนสำคัญจากงบ YTD {elapsed} เดือน · ทุกตัวมีแหล่งที่มา</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
-              {kpis.map((kpi, i) => {
-                const s = statusOf(kpi);
-                return (
-                  <div key={i} style={{
-                    background: 'white', borderRadius: 12, padding: 16,
-                    border: '1px solid #e2e8f0', borderTop: '3px solid ' + s.accent,
-                    boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
-                    display: 'flex', flexDirection: 'column', gap: 11,
-                  }}>
-                    {/* header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 9, background: s.bg, display: 'grid', placeItems: 'center', fontSize: 17, flexShrink: 0 }}>{kpi.icon}</div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.25 }}>{kpi.label}</div>
-                        <div style={{ fontSize: 10.5, color: '#94a3b8', letterSpacing: '0.2px' }}>{kpi.en}</div>
-                      </div>
-                    </div>
-                    {/* value + status chip */}
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 28, fontWeight: 800, color: s.accent, letterSpacing: '-0.5px', lineHeight: 1 }}>{PL_fmtPct(kpi.value)}</div>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', background: s.bg, color: s.accent, fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 12 }}>{s.txt}</span>
-                    </div>
-                    {/* แหล่งที่มา · การคำนวณ */}
-                    <div style={{ background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 8, padding: '9px 11px', marginTop: 'auto' }}>
-                      <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 4 }}>แหล่งที่มา · การคำนวณ</div>
-                      <div style={{ fontSize: 11.5, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-line', fontVariantNumeric: 'tabular-nums' }}>{kpi.formula}</div>
-                      <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 5 }}>
-                        <span style={{ flexShrink: 0 }}>📄</span><span>{kpi.src}</span>
-                      </div>
-                      {kpi.bench && (
-                        <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 5, display: 'flex', gap: 5 }}>
-                          <span style={{ flexShrink: 0 }}>📏</span><span>เกณฑ์ปกติ: {kpi.bench}</span>
-                        </div>
-                      )}
-                      {kpi.ref && (
-                        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 5 }}>
-                          <span style={{ flexShrink: 0 }}>📚</span>
-                          {kpi.refUrl
-                            ? <a href={kpi.refUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>อ้างอิง: {kpi.ref} ↗</a>
-                            : <span>อ้างอิง: {kpi.ref}</span>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              {kpis.map((kpi, i) => <PLKpiCard key={i} kpi={kpi} s={statusOf(kpi)} />)}
             </div>
           </>
         );
