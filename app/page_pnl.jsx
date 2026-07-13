@@ -384,6 +384,7 @@ function PLHealthRow({ s }) {
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0 2px 96px', color: '#475569' }}><span>{x.label}</span><b style={{ fontVariantNumeric: 'tabular-nums', color: '#0f172a' }}>{PL_fmt(x.value)}</b></div>
           ))}
           <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a' }}>{dt.result}</b></div>
+          {dt.std && <div style={hdRow}><span style={hdK}>เกณฑ์มาตรฐาน</span><span style={{ color: '#334155' }}>🎯 {dt.std} <b style={{ color: s.score >= 70 ? '#16a34a' : (s.score >= 45 ? '#d97706' : '#dc2626') }}>· {s.score >= 70 ? 'ถึงมาตรฐาน' : (s.score >= 45 ? 'ใกล้มาตรฐาน' : 'ต่ำกว่ามาตรฐาน')}</b></span></div>}
           <div style={{ ...hdRow, alignItems: 'flex-start' }}><span style={hdK}>เกณฑ์ให้คะแนน</span>{dt.band ? renderBands(dt.band) : <span style={{ color: '#64748b' }}>{dt.bands}</span>}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}><span>📄</span><span>ที่มา: {dt.src} · ถ่วงน้ำหนัก {Math.round((s.weight || 0) * 100)}% ของคะแนนรวม</span></div>
         </div>
@@ -411,10 +412,10 @@ function PL_buildHealth(inp) {
   if (eq != null && eq < 0) sRisk = Math.min(sRisk, 12);
   const m0 = revA[0], m1 = revA[revA.length - 1];
   const subs = [
-    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.35, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsProf, value: netMargin, unit: '%' } } },
-    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.20, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', band: { pts: ptsGrow, value: growth, unit: '%' } } },
-    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.20, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsEff, value: opexRatio, unit: '%', lowerBetter: true } } },
-    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.25, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsRisk, value: debtRatio, unit: 'เท่า', lowerBetter: true } } },
+    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.35, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', std: '≥ 5% (ดีมาก ≥ 15%)', band: { pts: ptsProf, value: netMargin, unit: '%' } } },
+    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.20, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', std: 'โต ≥ 30% ต่องวด (ดีมาก ≥ 80%)', band: { pts: ptsGrow, value: growth, unit: '%' } } },
+    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.20, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', std: '≤ 40% ของรายได้ (ดีมาก ≤ 20%)', band: { pts: ptsEff, value: opexRatio, unit: '%', lowerBetter: true } } },
+    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.25, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', std: 'หนี้ ≤ 60% ของสินทรัพย์ (ดีมาก ≤ 30%)', band: { pts: ptsRisk, value: debtRatio, unit: 'เท่า', lowerBetter: true } } },
   ];
   subs.forEach(s => { s.label = s.score >= 70 ? 'ดี' : s.score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ'; s.color = s.score >= 70 ? '#22c55e' : s.score >= 45 ? '#f59e0b' : '#ef4444'; });
   const overall = Math.round(sProf * 0.35 + sRisk * 0.25 + sGrow * 0.20 + sEff * 0.20);
@@ -438,7 +439,7 @@ function PLHealthCard({ overall, subs, gcol, gstat }) {
       </div>
       <div>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>คะแนนย่อยรายมิติ <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกแต่ละมิติเพื่อดูสูตร + ตัวเลขที่ใช้</span></div>
-        <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 6px' }}>คำนวณจากงบกำไรขาดทุน + งบแสดงฐานะการเงิน · คะแนนรวม = ถ่วงน้ำหนัก (ทำกำไร 35% · ความเสี่ยง 25% · เติบโต 20% · ประสิทธิภาพ 20%)</div>
+        <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 6px' }}>คำนวณจากงบกำไรขาดทุน + งบแสดงฐานะการเงิน · คะแนนรวม = ถ่วงน้ำหนัก (ทำกำไร 35% · ความเสี่ยง 25% · เติบโต 20% · ประสิทธิภาพ 20%) · เกณฑ์: ≥70 ดี · 45–69 เฝ้าระวัง · &lt;45 ต้องปรับปรุง</div>
         {subs.map((s, i) => <PLHealthRow key={i} s={s} />)}
       </div>
     </div>

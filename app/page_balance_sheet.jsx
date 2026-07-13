@@ -247,6 +247,7 @@ function BSRatioRow({ r, last }) {
             </div>
           ))}
           <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a', fontVariantNumeric: 'tabular-nums' }}>{dt.result}</b></div>
+          {dt.std && <div style={hdRow}><span style={hdK}>เกณฑ์มาตรฐาน</span><span style={{ color: '#334155' }}>🎯 {dt.std}{r.score != null && <b style={{ color: r.score >= 70 ? '#16a34a' : (r.score >= 45 ? '#d97706' : '#dc2626') }}> · {r.score >= 70 ? 'ถึงมาตรฐาน' : (r.score >= 45 ? 'ใกล้มาตรฐาน' : 'ต่ำกว่ามาตรฐาน')}</b>}</span></div>}
           <div style={{ ...hdRow, alignItems: 'flex-start' }}><span style={hdK}>เกณฑ์คะแนน</span>{sb ? renderBands(sb) : <span style={{ color: '#64748b' }}>{dt.bands}</span>}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}>
             <span>📄</span><span>ที่มา: {dt.src}</span>
@@ -482,7 +483,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         cr >= 1.5 ? 'good' : (cr >= 1 ? 'warn' : 'bad'), cr >= 1.5 ? 'แข็งแรง' : (cr >= 1 ? 'พอใช้' : 'ตึงตัว'),
         { formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน',
           inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
-          result: cr.toFixed(2) + ' เท่า', bands: '≥ 1.5 = แข็งแรง · 1–1.5 = พอใช้ · < 1 = ตึงตัว', src: 'งบแสดงฐานะการเงิน',
+          result: cr.toFixed(2) + ' เท่า', bands: '≥ 1.5 = แข็งแรง · 1–1.5 = พอใช้ · < 1 = ตึงตัว', src: 'งบแสดงฐานะการเงิน', std: '≥ 1.5 เท่า (ดีมาก ≥ 2)',
           scoreBand: { pts: [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 96]], value: cr, unit: 'เท่า' } },
         BS_scoreLinear(cr, [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 96]])); }
     // 2) เงินทุนหมุนเวียนสุทธิ
@@ -491,7 +492,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         wc > 0 ? 'good' : 'bad', wc > 0 ? 'เป็นบวก' : 'ติดลบ',
         { formula: 'สินทรัพย์หมุนเวียน − หนี้สินหมุนเวียน',
           inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
-          result: BS_fmt(wc) + ' บาท', bands: 'เป็นบวก = มีสภาพคล่องหมุนเวียน · ติดลบ = ต้องเสริมเงินทุน', src: 'งบแสดงฐานะการเงิน',
+          result: BS_fmt(wc) + ' บาท', bands: 'เป็นบวก = มีสภาพคล่องหมุนเวียน · ติดลบ = ต้องเสริมเงินทุน', src: 'งบแสดงฐานะการเงิน', std: 'เป็นบวก · ≥ 50% ของหนี้สั้น',
           scoreBand: { pts: [[-0.5, 10], [0, 45], [0.5, 68], [1, 84], [2, 96]], value: wcx, unit: 'x' } },
         BS_scoreLinear(wcx, [[-0.5, 10], [0, 45], [0.5, 68], [1, 84], [2, 96]])); }
     // 3) หนี้สินต่อสินทรัพย์
@@ -500,7 +501,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         dr < 0.6 ? 'good' : (dr < 1 ? 'warn' : 'bad'), dr < 0.6 ? 'ปลอดภัย' : (dr < 1 ? 'เฝ้าระวัง' : 'หนี้เกินสินทรัพย์'),
         { formula: 'หนี้สินรวม ÷ สินทรัพย์รวม',
           inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }],
-          result: dr.toFixed(2) + ' เท่า', bands: '< 0.6 = ปลอดภัย · 0.6–1 = เฝ้าระวัง · > 1 = หนี้เกินสินทรัพย์', src: 'งบแสดงฐานะการเงิน',
+          result: dr.toFixed(2) + ' เท่า', bands: '< 0.6 = ปลอดภัย · 0.6–1 = เฝ้าระวัง · > 1 = หนี้เกินสินทรัพย์', src: 'งบแสดงฐานะการเงิน', std: '≤ 0.6 เท่า (≤ 60%)',
           scoreBand: { pts: [[0.3, 92], [0.6, 68], [1, 42], [2, 20], [4, 8]], value: dr, unit: 'เท่า', lowerBetter: true } },
         BS_scoreLinear(dr, [[0.3, 92], [0.6, 68], [1, 42], [2, 20], [4, 8]])); }
     // 4) หนี้สินต่อทุน (D/E)
@@ -510,7 +511,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         { formula: 'หนี้สินรวม ÷ ส่วนของผู้ถือหุ้น',
           inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมส่วนของผู้ถือหุ้น', value: eq }],
           result: neg ? 'คำนวณไม่ได้ (ส่วนของผู้ถือหุ้นติดลบ)' : de.toFixed(2) + ' เท่า',
-          bands: '< 1.5 = เหมาะสม · 1.5–3 = สูง · ทุนติดลบ = ต้องเพิ่มทุน', src: 'งบแสดงฐานะการเงิน',
+          bands: '< 1.5 = เหมาะสม · 1.5–3 = สูง · ทุนติดลบ = ต้องเพิ่มทุน', src: 'งบแสดงฐานะการเงิน', std: '≤ 1 เท่า (ดีมาก ≤ 0.5)',
           scoreBand: neg ? null : { pts: [[0.5, 90], [1, 72], [2, 45], [3, 28], [5, 10]], value: de, unit: 'เท่า', lowerBetter: true } },
         neg ? 5 : (de != null ? BS_scoreLinear(de, [[0.5, 90], [1, 72], [2, 45], [3, 28], [5, 10]]) : 8)); }
     // 5) ส่วนของผู้ถือหุ้น (Equity Ratio)
@@ -519,7 +520,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         er >= 0.4 ? 'good' : (er > 0 ? 'warn' : 'bad'), er >= 0.4 ? 'ทุนหนา' : (er > 0 ? 'ทุนบาง' : 'ขาดทุนเกินทุน'),
         { formula: 'ส่วนของผู้ถือหุ้น ÷ สินทรัพย์รวม',
           inputs: [{ label: 'รวมส่วนของผู้ถือหุ้น', value: eq }, { label: 'รวมสินทรัพย์', value: ta }],
-          result: (er * 100).toFixed(0) + '%', bands: '≥ 40% = ทุนหนา · 0–40% = ทุนบาง · ติดลบ = ขาดทุนเกินทุน', src: 'งบแสดงฐานะการเงิน',
+          result: (er * 100).toFixed(0) + '%', bands: '≥ 40% = ทุนหนา · 0–40% = ทุนบาง · ติดลบ = ขาดทุนเกินทุน', src: 'งบแสดงฐานะการเงิน', std: '≥ 40%',
           scoreBand: { pts: [[-0.2, 5], [0, 20], [0.2, 50], [0.4, 72], [0.6, 92]], value: er, unit: '%' } },
         BS_scoreLinear(er, [[-0.2, 5], [0, 20], [0.2, 50], [0.4, 72], [0.6, 92]])); }
     return R;
