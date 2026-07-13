@@ -1078,100 +1078,118 @@ function PnLPage({ data, setData, toast }) {
       </div>
       </>)}
 
-      {/* ── AI INSIGHTS ─────────────────────────────────────────────────── */}
+      {/* ── FINANCIAL KPIs (อัตราส่วนสำคัญ + แหล่งที่มาการคำนวณ) ───────────── */}
       {(() => {
-        // วิเคราะห์จากข้อมูล BIO เอง (ไม่มีงบประมาณ) — เน้นโครงสร้างต้นทุน/ตัวฉุดผลประกอบการ
-        const insights = [];
+        // ตัวชี้วัดทางการเงินล้วน — คำนวณจากงบ YTD ทุกตัวมี "แหล่งที่มา" กำกับ (มาจากบรรทัดใด ÷ อะไร)
         const elapsed  = lastMonth || 1;
-        const rev      = PL_sum(c.totalRevenue, lastMonth);
-        const cogsYtd  = PL_sum(groups.cogs, lastMonth);
-        const sgaYtd   = PL_sum(c.totalSGA, lastMonth);
-        const adminYtd = PL_sum(groups.admin, lastMonth);
-        const finYtd   = PL_sum(groups.finance, lastMonth);
-        const gpYtd    = PL_sum(c.grossProfit, lastMonth);
-        const sellAdminYtd = PL_sum(groups.selling, lastMonth) + adminYtd;  // ขาย+บริหาร (ไม่รวมการเงิน)
-        const pbfYtd   = gpYtd - sellAdminYtd;                              // ขาดทุนจากดำเนินงานก่อนต้นทุนการเงิน
-        const pctRev   = (v) => rev ? v / rev * 100 : 0;
-        // 1) ผลสุทธิ
-        if (k.net < 0) {
-          insights.push({
-            kind: 'critical', icon: '🚨', title: 'ขาดทุนสุทธิ ' + PL_fmt(-k.net) + ' บาท (' + PL_fmtPct(Math.abs(pctRev(k.net))) + ' ของรายได้)',
-            body: 'YTD ' + elapsed + ' เดือน · รายได้ ' + PL_fmt(rev) + ' · ค่าใช้จ่ายรวม ' + PL_fmt(cogsYtd + sgaYtd) +
-                  ' = ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' + ขาย/บริหาร ' + PL_fmt(sellAdminYtd) + ' + การเงิน ' + PL_fmt(finYtd),
-          });
-        } else if (k.net > 0) {
-          insights.push({ kind: 'good', icon: '✅', title: 'กำไรสุทธิ ' + PL_fmt(k.net) + ' บาท (' + PL_fmtPct(pctRev(k.net)) + ' ของรายได้)', body: 'YTD สะสม ' + elapsed + ' เดือน' });
-        }
-        // 2) อัตรากำไรขั้นต้น / ต้นทุนขาย
-        if (gpYtd < 0) {
-          insights.push({ kind: 'critical', icon: '⚠️', title: 'ขายต่ำกว่าทุน — กำไรขั้นต้นติดลบ',
-            body: 'ต้นทุนขาย ' + PL_fmt(cogsYtd) + ' > รายได้ ' + PL_fmt(rev) + ' (ต้นทุน = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้) · ทบทวนการตั้งราคา/ต้นทุนต่อหน่วย' });
-        } else if (k.gpM < 20) {
-          insights.push({ kind: 'risk', icon: '📊', title: 'อัตรากำไรขั้นต้นบาง (' + PL_fmtPct(k.gpM) + ')',
-            body: 'ต้นทุนขาย = ' + PL_fmtPct(pctRev(cogsYtd)) + ' ของรายได้ · เหลือกำไรขั้นต้น ' + PL_fmt(gpYtd) + ' รองรับค่าใช้จ่ายขาย/บริหาร/การเงิน ' + PL_fmt(sgaYtd) });
-        }
-        // 3) ค่าใช้จ่ายบริหารเทียบกำไรขั้นต้น (ตัวฉุดหลัก)
-        if (adminYtd > 0 && gpYtd > 0 && adminYtd > gpYtd) {
-          insights.push({ kind: 'risk', icon: '🔴', title: 'ค่าใช้จ่ายบริหารสูงกว่ากำไรขั้นต้น',
-            body: 'บริหาร ' + PL_fmt(adminYtd) + ' (' + PL_fmtPct(pctRev(adminYtd)) + ' ของรายได้) · กำไรขั้นต้นมีแค่ ' + PL_fmt(gpYtd) + ' → ค่าใช้จ่ายคงที่ (เงินเดือน/ค่าเสื่อม) กดดันผลประกอบการ' });
-        }
-        // 4) ขาดทุนจากการดำเนินงาน (ก่อนต้นทุนการเงิน)
-        if (pbfYtd < 0) {
-          insights.push({ kind: 'info', icon: '📉', title: 'ขาดทุนจากการดำเนินงานก่อนต้นทุนการเงิน ' + PL_fmt(-pbfYtd),
-            body: 'กำไรขั้นต้น ' + PL_fmt(gpYtd) + ' − ค่าใช้จ่ายขาย/บริหาร ' + PL_fmt(sellAdminYtd) + ' = ' + PL_fmt(pbfYtd) + ' · บวกต้นทุนการเงินอีก ' + PL_fmt(finYtd) });
-        }
-        // 5) ต้นทุนการเงิน
-        if (finYtd > 0 && rev > 0 && pctRev(finYtd) >= 5) {
-          insights.push({ kind: 'info', icon: '🏦', title: 'ต้นทุนการเงิน ' + PL_fmt(finYtd) + ' (' + PL_fmtPct(pctRev(finYtd)) + ' ของรายได้)',
-            body: 'ดอกเบี้ยจ่าย/เช่าซื้อสะสม ' + elapsed + ' เดือน · ภาระดอกเบี้ยสูงเมื่อเทียบกับรายได้ปัจจุบัน' });
-        }
-        // 6) แนวโน้มเดือนล่าสุด vs ก่อนหน้า
-        if (lastMonth >= 2) {
-          const cur = c.netProfit[lastMonth - 1] || 0, prev = c.netProfit[lastMonth - 2] || 0;
-          if (prev !== 0) {
-            const diff = cur - prev, better = diff > 0;
-            insights.push({ kind: better ? 'good' : 'info', icon: better ? '📈' : '📉',
-              title: 'ผลเดือน ' + PL_MONTHS_TH[lastMonth - 1] + ' ' + (better ? 'ดีขึ้น' : 'แย่ลง') + ' ' + PL_fmt(Math.abs(diff)) + ' จากเดือนก่อน',
-              body: PL_MONTHS_TH[lastMonth - 2] + ' ' + PL_fmt(prev) + ' → ' + PL_MONTHS_TH[lastMonth - 1] + ' ' + PL_fmt(cur) });
+        const rev      = PL_sum(c.totalRevenue, lastMonth);   // รวมรายได้ (ขาย+บริการ + อื่น)
+        const cogsYtd  = PL_sum(groups.cogs, lastMonth);      // ต้นทุนขาย
+        const sellYtd  = PL_sum(groups.selling, lastMonth);   // ค่าใช้จ่ายในการขาย
+        const adminYtd = PL_sum(groups.admin, lastMonth);     // ค่าใช้จ่ายในการบริหาร
+        const finYtd   = PL_sum(groups.finance, lastMonth);   // ต้นทุนทางการเงิน
+        const gpYtd    = PL_sum(c.grossProfit, lastMonth);    // กำไรขั้นต้น
+        const netYtd   = PL_sum(c.netProfit, lastMonth);      // กำไร(ขาดทุน)สุทธิ
+        const opExYtd  = sellYtd + adminYtd;                  // ค่าใช้จ่ายขาย+บริหาร (ไม่รวมการเงิน)
+        const ebitYtd  = gpYtd - opExYtd;                     // กำไรจากการดำเนินงาน (ก่อนต้นทุนการเงิน)
+
+        // ค่าเสื่อมราคา/ตัดจำหน่าย (5410/5420) — สำหรับ EBITDA (แสดงเมื่อค้นเจอในผังบัญชี)
+        const accts = (model && model.accounts) || {};
+        const isDA  = (a) => {
+          const cn = String(a.code || '').replace(/[^0-9]/g, '');
+          if (cn.slice(0, 4) === '5410' || cn.slice(0, 4) === '5420') return true;
+          return /ค่าเสื่อม|เสื่อมราคา|ตัดจำหน่าย/.test(String(a.name || ''));
+        };
+        let daYtd = 0;
+        PL_GROUP_ORDER.forEach(g => (accts[g] || []).forEach(a => { if (isDA(a)) daYtd += PL_sum(a.arr, lastMonth); }));
+        const ebitdaYtd = ebitYtd + daYtd;
+
+        const pctOf = (num) => (rev ? num / rev * 100 : NaN);
+        const f = (v) => PL_fmt(v);   // บาท (2 ตำแหน่ง, ติดลบในวงเล็บ)
+
+        const kpis = [
+          { icon: '📈', label: 'อัตรากำไรขั้นต้น', en: 'Gross Profit Margin', value: pctOf(gpYtd), dir: 'higher', good: 20,
+            formula: 'กำไรขั้นต้น ' + f(gpYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Gross Profit” ÷ “รวมรายได้” ในงบ' },
+          { icon: '⚙️', label: 'อัตรากำไรจากการดำเนินงาน', en: 'Operating Margin (EBIT)', value: pctOf(ebitYtd), dir: 'higher', good: 10,
+            formula: 'กำไรดำเนินงาน ' + f(ebitYtd) + '\n= กำไรขั้นต้น ' + f(gpYtd) + ' − (ขาย ' + f(sellYtd) + ' + บริหาร ' + f(adminYtd) + ')\n÷ รวมรายได้ ' + f(rev),
+            src: 'กำไรขั้นต้น − (Selling + Administrative) ÷ รวมรายได้ · ยังไม่รวมต้นทุนการเงิน' },
+          { icon: '💰', label: 'อัตรากำไรสุทธิ', en: 'Net Profit Margin', value: pctOf(netYtd), dir: 'higher', good: 5,
+            formula: 'กำไร(ขาดทุน)สุทธิ ' + f(netYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Net Profit” ÷ “รวมรายได้” ในงบ' },
+          { icon: '🏭', label: 'สัดส่วนต้นทุนขาย', en: 'COGS to Revenue', value: pctOf(cogsYtd), dir: 'lower', good: 75,
+            formula: 'ต้นทุนขาย ' + f(cogsYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Cost of goods sold” ÷ “รวมรายได้”' },
+          { icon: '🧾', label: 'สัดส่วนค่าใช้จ่ายขาย+บริหาร', en: 'SG&A to Revenue', value: pctOf(opExYtd), dir: 'lower', good: 20,
+            formula: 'ขาย ' + f(sellYtd) + ' + บริหาร ' + f(adminYtd) + ' = ' + f(opExYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'Selling + Administrative expenses ÷ รวมรายได้' },
+          { icon: '🏦', label: 'ภาระต้นทุนทางการเงิน', en: 'Finance Cost to Revenue', value: pctOf(finYtd), dir: 'lower', good: 5,
+            formula: 'ต้นทุนการเงิน ' + f(finYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Finance costs” ÷ “รวมรายได้” · ดอกเบี้ยจ่าย/เช่าซื้อ' },
+        ];
+        // EBITDA — เพิ่มถัดจาก EBIT เฉพาะเมื่อพบค่าเสื่อม/ตัดจำหน่ายในผังบัญชี
+        if (daYtd > 0) kpis.splice(2, 0, {
+          icon: '📊', label: 'อัตรากำไร EBITDA', en: 'EBITDA Margin', value: pctOf(ebitdaYtd), dir: 'higher', good: 15,
+          formula: 'EBITDA ' + f(ebitdaYtd) + '\n= กำไรดำเนินงาน ' + f(ebitYtd) + ' + ค่าเสื่อม/ตัดจำหน่าย ' + f(daYtd) + '\n÷ รวมรายได้ ' + f(rev),
+          src: 'กำไรจากการดำเนินงาน + ค่าเสื่อมราคา/ตัดจำหน่าย (บัญชี 5410/5420) ÷ รวมรายได้',
+        });
+
+        // สถานะ (chip) — margin: ยิ่งสูงยิ่งดี · cost ratio: ยิ่งต่ำยิ่งดี
+        const statusOf = (kpi) => {
+          const v = kpi.value;
+          if (v == null || isNaN(v)) return { txt: 'ไม่มีข้อมูล', accent: '#64748b', bg: '#f1f5f9' };
+          if (kpi.dir === 'higher') {
+            if (v < 0)        return { txt: 'ขาดทุน', accent: '#dc2626', bg: '#fee2e2' };
+            if (v < kpi.good) return { txt: 'บาง',    accent: '#d97706', bg: '#fef3c7' };
+            return                   { txt: 'แข็งแรง', accent: '#16a34a', bg: '#dcfce7' };
           }
-        }
-        if (insights.length === 0) {
-          insights.push({ kind: 'good', icon: '🎉', title: 'ไม่พบประเด็นเสี่ยงสำคัญ', body: 'ผลประกอบการอยู่ในเกณฑ์ปกติ' });
-        }
+          if (v > 100)        return { txt: 'เกินรายได้', accent: '#dc2626', bg: '#fee2e2' };
+          if (v > kpi.good)   return { txt: 'สูง',        accent: '#d97706', bg: '#fef3c7' };
+          return                     { txt: 'คุมได้',      accent: '#16a34a', bg: '#dcfce7' };
+        };
 
         return (
           <>
             <div className="pnl-section-head" style={{ marginTop: 22 }}>
-              <h2>🤖 AI วิเคราะห์จุดเสี่ยง / โฟกัส</h2>
-              <span className="pnl-tag">วิเคราะห์ YTD: โครงสร้างต้นทุน · อัตรากำไร · แนวโน้ม</span>
+              <h2>📊 ตัวชี้วัดทางการเงิน (Financial KPIs)</h2>
+              <span className="pnl-tag">อัตราส่วนสำคัญจากงบ YTD {elapsed} เดือน · ทุกตัวมีแหล่งที่มา</span>
             </div>
-            <div className="card pnl-card" style={{ padding: 14 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {insights.map((ins, i) => {
-                  const palette = {
-                    critical: { bg: '#fef2f2', border: '#fca5a5', accent: '#dc2626' },
-                    risk:     { bg: '#fffbeb', border: '#fcd34d', accent: '#d97706' },
-                    good:     { bg: '#f0fdf4', border: '#86efac', accent: '#16a34a' },
-                    info:     { bg: '#eff6ff', border: '#9ed3ad', accent: '#2e8b4a' },
-                  }[ins.kind] || { bg: '#f8fafc', border: '#cbd5e1', accent: '#475569' };
-                  return (
-                    <div key={i} style={{
-                      background: palette.bg, border: '1px solid ' + palette.border,
-                      borderLeft: '4px solid ' + palette.accent,
-                      borderRadius: 8, padding: '12px 14px',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontSize: 16 }}>{ins.icon}</span>
-                        <strong style={{ fontSize: 13, color: palette.accent }}>{ins.title}</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+              {kpis.map((kpi, i) => {
+                const s = statusOf(kpi);
+                return (
+                  <div key={i} style={{
+                    background: 'white', borderRadius: 12, padding: 16,
+                    border: '1px solid #e2e8f0', borderTop: '3px solid ' + s.accent,
+                    boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
+                    display: 'flex', flexDirection: 'column', gap: 11,
+                  }}>
+                    {/* header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 34, height: 34, borderRadius: 9, background: s.bg, display: 'grid', placeItems: 'center', fontSize: 17, flexShrink: 0 }}>{kpi.icon}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.25 }}>{kpi.label}</div>
+                        <div style={{ fontSize: 10.5, color: '#94a3b8', letterSpacing: '0.2px' }}>{kpi.en}</div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6, paddingLeft: 24 }}>{ins.body}</div>
                     </div>
-                  );
-                })}
-              </div>
-              <div style={{ marginTop: 12, fontSize: 10.5, color: '#94a3b8', textAlign: 'center' }}>
-                * วิเคราะห์อัตโนมัติจากข้อมูลงบ YTD — เป็น guideline ไม่ใช่คำแนะนำการลงทุน
-              </div>
+                    {/* value + status chip */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: s.accent, letterSpacing: '-0.5px', lineHeight: 1 }}>{PL_fmtPct(kpi.value)}</div>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', background: s.bg, color: s.accent, fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 12 }}>{s.txt}</span>
+                    </div>
+                    {/* แหล่งที่มา · การคำนวณ */}
+                    <div style={{ background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 8, padding: '9px 11px', marginTop: 'auto' }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 4 }}>แหล่งที่มา · การคำนวณ</div>
+                      <div style={{ fontSize: 11.5, color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-line', fontVariantNumeric: 'tabular-nums' }}>{kpi.formula}</div>
+                      <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 5 }}>
+                        <span style={{ flexShrink: 0 }}>📄</span><span>{kpi.src}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 10.5, color: '#94a3b8', textAlign: 'center' }}>
+              * ทุกตัวคำนวณจากงบกำไรขาดทุน (ชีต PL · ฐาน DATA) สะสม YTD {elapsed} เดือน · ปีบัญชี {plYear} · ตัวเลขในกล่องแหล่งที่มา = บาท · เกณฑ์สถานะเป็นแนวทางทั่วไป
             </div>
           </>
         );

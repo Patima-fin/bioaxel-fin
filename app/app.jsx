@@ -465,7 +465,7 @@ function App() {
     if (!isLoggedIn || !window.WTPAuth) return;
     if (!window.WTPAuth.canViewPage(route)) {
       // Pull routes object below — at this point it's not defined yet, fallback inline
-      const order = ['home','daily','warroom1','warroom2','cashflow','cashflow_present','pnl','budget','debt','debt_ledger',
+      const order = ['home','daily','warroom1','warroom2','cashflow','cashflow_present','pnl','balance_sheet','budget','debt','debt_ledger',
                      'iv_report','receipts','bank_diary','interest_calc','sts_calc','sts_workflow',
                      'projects','invoices','checks','data_forecast','data_bank','data_pv','data_payable'];
       const allowed = window.WTPAuth.firstAllowedPage(order);
@@ -542,6 +542,7 @@ function App() {
     users:         { label: 'จัดการผู้ใช้',         title: 'Users · จัดการผู้ใช้ระบบ', icon: 'settings' },
     daily_balance: { label: 'บันทึกยอดธนาคาร',     title: 'บันทึกยอดธนาคารรายวัน', icon: 'bank' },
     pnl:           { label: 'งบกำไรขาดทุน (P&L)',   title: 'Profit & Loss Statement', icon: 'forecast' },
+    balance_sheet: { label: 'งบแสดงฐานะการเงิน',    title: 'Statement of Financial Position', icon: 'money' },
     budget:        { label: 'Budget Control Center', title: 'Budget Control Center', icon: 'projects' },
     investor:      { label: 'Investor Dashboard', title: 'Investor Dashboard', icon: 'chart' },
   };
@@ -577,6 +578,7 @@ function App() {
     case 'users':          page = <UsersPage data={data} setData={setData} toast={pushToast} />; break;
     case 'daily_balance':  page = <DailyBalancePage data={data} setData={setData} toast={pushToast} />; break;
     case 'pnl':            page = <PnLPage data={data} setData={setData} toast={pushToast} />; break;
+    case 'balance_sheet':  page = <BalanceSheetPage data={data} setData={setData} toast={pushToast} />; break;
     case 'budget':         page = <BudgetControlPage toast={pushToast} />; break;
     case 'daily':          page = <DailyRevenueDashboard data={data} setData={setData} toast={pushToast} />; break;
     default:               page = <HomePage data={data} />;
@@ -813,6 +815,7 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
             ['cashflow', 'Weekly Forecast', 'chart'],
             ['cashflow_present', 'พรีเซนต์ Cash Flow', 'chart'],
             ['pnl',      'งบกำไรขาดทุน (P&L)',     'forecast'],
+            ['balance_sheet', 'งบแสดงฐานะการเงิน',  'money'],
             ['budget',   'Budget Control Center',  'projects'],
             ['investor', 'Investor Dashboard',     'chart'],
           ])}
@@ -965,7 +968,7 @@ function PresentModeToggle() {
 function Topbar({ route, routes, data, onReset, onMenuClick }) {
   const r = routes[route] || routes.daily;
   const today = new Date().toLocaleDateString('th-TH-u-ca-gregory', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-  const isPresentation = ['daily', 'warroom1', 'warroom2', 'cashflow', 'cashflow_present', 'pnl', 'projects', 'budget', 'investor'].includes(route);
+  const isPresentation = ['daily', 'warroom1', 'warroom2', 'cashflow', 'cashflow_present', 'pnl', 'balance_sheet', 'projects', 'budget', 'investor'].includes(route);
   return (
     <div className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
