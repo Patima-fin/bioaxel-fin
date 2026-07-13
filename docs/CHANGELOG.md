@@ -820,3 +820,7 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
   - **CFO Insight (สรุปเชิงผู้บริหาร)**: summary+bullets+recs พอร์ต `finInsight`.
 - **⚠️ cross-file global dependency**: `page_pnl.jsx` ใช้ `BS_SEED`/`BS_find` จาก `page_balance_sheet.jsx` — ต้อง guard `typeof BS_find==='function'` (กันกรณีไฟล์ยังไม่โหลด แม้ปกติ render หลังโหลดครบ). **อย่าลบ/เปลี่ยนชื่อ `BS_SEED`/`BS_find`** จะทำให้คะแนนสุขภาพ P&L พัง.
 - **verify** (Node + เบราว์เซอร์ผ่าน static server เพราะ `.claude/server.ps1` เป็น PS single-thread ค้างกับไฟล์ไทย): งบฐานะ — โดนัท 7 ชิ้น (ส่วนปรับปรุงที่ดิน 57%…) + แถบเงินทุนถูกต้อง · อัตราส่วน 5 ตัว + insight ครบ. P&L — 4 ชาร์ตเรนเดอร์ + เกจ 10/100 + คลิกสภาพคล่องกางเห็น 28.08M/151.03M=0.19 เท่า (ถ่วง 20%) + CFO insight ("รายได้ 17.76M ลดลง 94% … ขาดทุนสุทธิ (30.19M) … ทุนติดลบ (78.98M)"). ไม่มี console error.
+
+## 2026-07-13 — P&L: ลบส่วน "ตัวชี้วัดทางการเงิน (Financial KPIs)" ออก [pnl `?v=…k`]
+- เตยขอเอาส่วน **"📊 ตัวชี้วัดทางการเงิน (Financial KPIs)"** (8 การ์ด margin: Gross/Operating/EBITDA/Net margin + COGS/Selling/Admin/Finance to revenue พร้อมแหล่งอ้างอิง) ออกจากหน้า P&L — ซ้ำ/รกกับส่วน "วิเคราะห์ผลประกอบการ (Charts & Analytics)" ที่เพิ่งเพิ่ม. ลบทั้ง IIFE (100 บรรทัด) ที่ render บล็อกนี้; ตอนนี้ตาราง P&L → ต่อด้วย `<PLAnalytics>` เลย.
+- `PLKpiCard` (คอมโพเนนต์การ์ด) กลายเป็น **orphan** (นิยามไว้แต่ไม่ถูกเรียก) — คงไว้ไม่ลบเพื่อลด churn/กันพังลูกโซ่. verify: reload หน้า P&L — ไม่เจอ "ตัวชี้วัดทางการเงิน" แล้ว, ส่วนวิเคราะห์ยังครบ, ไม่มี console error.
