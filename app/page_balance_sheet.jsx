@@ -184,20 +184,59 @@ function BS_parseWorkbook(f) {
   });
 }
 
-// ── แถวอัตราส่วน (คลิกกางดู สูตร/ค่า/ผลลัพธ์/เกณฑ์/ที่มา) — เลย์เอาต์เลียนแบบ finance-tools ──
+// ── ให้คะแนน 0–100 จากค่าอัตราส่วน (piecewise-linear ตามจุดเกณฑ์) — self-contained ในไฟล์นี้ ──
+function BS_scoreLinear(v, pts) {
+  if (v == null || isNaN(v)) return null;
+  if (v <= pts[0][0]) return pts[0][1];
+  for (let i = 0; i < pts.length - 1; i++) { const [v0, s0] = pts[i], [v1, s1] = pts[i + 1]; if (v <= v1) return s0 + (s1 - s0) * (v - v0) / (v1 - v0); }
+  return pts[pts.length - 1][1];
+}
+
+// ── แถวอัตราส่วน (แถบคะแนน 0–100 + คลิกกางดู สูตร/ค่า/ผลลัพธ์/เกณฑ์คะแนน/ที่มา) — เลย์เอาต์เลียนแบบ finance-tools ──
 function BSRatioRow({ r, last }) {
   const [open, setOpen] = bsState(false);
-  const scol = r.status === 'good' ? '#16a34a' : (r.status === 'warn' ? '#d97706' : '#dc2626');
+  const statusCol = r.status === 'good' ? '#16a34a' : (r.status === 'warn' ? '#d97706' : '#dc2626');
+  const scol = r.score == null ? statusCol : (r.score >= 70 ? '#16a34a' : (r.score >= 45 ? '#d97706' : '#dc2626'));
   const dt = r.detail || {};
+  const sb = dt.scoreBand;
   const hdRow = { display: 'flex', gap: 10, padding: '2px 0' };
   const hdK = { color: '#94a3b8', minWidth: 88, flexShrink: 0 };
+  const fmtBT = (t, unit) => unit === '%' ? (Math.round(t * 100) + '%') : (unit === 'x' ? (t.toFixed(1) + '×') : (t.toFixed(Number.isInteger(t) ? 1 : 2) + ' เท่า'));
+  const renderBands = (band) => {
+    const pts = band.pts, v = band.value;
+    let loIdx = 0, hiIdx = pts.length - 1;
+    if (v != null && !isNaN(v)) {
+      if (v <= pts[0][0]) { loIdx = hiIdx = 0; }
+      else if (v >= pts[pts.length - 1][0]) { loIdx = hiIdx = pts.length - 1; }
+      else { for (let i = 0; i < pts.length - 1; i++) { if (v >= pts[i][0] && v <= pts[i + 1][0]) { loIdx = i; hiIdx = i + 1; break; } } }
+    }
+    return (
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {pts.map((p, i) => {
+            const on = v != null && !isNaN(v) && i >= loIdx && i <= hiIdx;
+            return <span key={i} style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 6, whiteSpace: 'nowrap', border: on ? '1px solid #8b5cf6' : '1px solid #e2e8f0', background: on ? '#f5f3ff' : '#fff', color: on ? '#6d28d9' : '#94a3b8', boxShadow: on ? '0 1px 3px rgba(139,92,246,0.25)' : 'none' }}>{fmtBT(p[0], band.unit)} → {p[1]}</span>;
+          })}
+        </div>
+        <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 5 }}>
+          คะแนน 0–100 (ยิ่งสูงยิ่งดี){band.lowerBetter ? ' · ค่ายิ่งต่ำยิ่งได้คะแนนมาก' : ''}
+          {v != null && !isNaN(v) ? <> · <b style={{ color: '#4338ca' }}>ค่าปัจจุบัน {fmtBT(v, band.unit)} → คะแนน {r.score}</b></> : ''}
+        </div>
+      </div>
+    );
+  };
   return (
     <div style={{ borderBottom: last ? 'none' : '1px solid #f1f5f9' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 2px', fontSize: 12.5, cursor: 'pointer' }}>
-        <span style={{ width: 14, color: '#94a3b8', fontSize: 11, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-        <span style={{ flex: 1, color: '#334155', fontWeight: 600, minWidth: 0 }}>{r.name}</span>
-        <span style={{ fontWeight: 800, color: '#0f172a', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{r.valueText}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, whiteSpace: 'nowrap', background: scol + '1f', color: scol }}>{r.statusText}</span>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 150px) minmax(44px, 1fr) 30px minmax(0, 116px)', alignItems: 'center', gap: 10, padding: '9px 2px', fontSize: 12.5, cursor: 'pointer' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ width: 12, color: '#94a3b8', fontSize: 10, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: scol, flexShrink: 0 }} />
+          <span style={{ color: '#334155', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+        </span>
+        <span style={{ textAlign: 'right', color: '#475569', fontWeight: 700, fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.valueText}</span>
+        <span style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }} title={r.score != null ? 'คะแนน ' + r.score + '/100' : ''}>{r.score != null && <span style={{ display: 'block', height: '100%', width: Math.max(0, Math.min(100, r.score)) + '%', background: scol, borderRadius: 5 }} />}</span>
+        <span style={{ textAlign: 'right', fontWeight: 800, color: scol, fontVariantNumeric: 'tabular-nums' }}>{r.score != null ? r.score : '—'}</span>
+        <span style={{ textAlign: 'right', color: scol, fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.statusText}</span>
       </div>
       {open && (
         <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, padding: '10px 12px', margin: '2px 0 8px', fontSize: 12 }}>
@@ -208,12 +247,29 @@ function BSRatioRow({ r, last }) {
             </div>
           ))}
           <div style={hdRow}><span style={hdK}>ผลลัพธ์</span><b style={{ color: '#2e8b4a', fontVariantNumeric: 'tabular-nums' }}>{dt.result}</b></div>
-          <div style={hdRow}><span style={hdK}>เกณฑ์</span><span style={{ color: '#64748b' }}>{dt.bands}</span></div>
+          <div style={{ ...hdRow, alignItems: 'flex-start' }}><span style={hdK}>เกณฑ์คะแนน</span>{sb ? renderBands(sb) : <span style={{ color: '#64748b' }}>{dt.bands}</span>}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', color: '#94a3b8', fontSize: 11 }}>
             <span>📄</span><span>ที่มา: {dt.src}</span>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── เกจคะแนนฐานะการเงินรวม (วงกลม conic-gradient) — สไตล์เดียวกับการ์ดสุขภาพหน้า P&L ──
+function BSGauge({ score }) {
+  const col = score >= 70 ? '#22c55e' : (score >= 45 ? '#f59e0b' : '#ef4444');
+  const stat = score >= 70 ? 'ดี' : (score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ');
+  return (
+    <div style={{ textAlign: 'center', padding: '6px 4px' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>คะแนนฐานะการเงินรวม</div>
+      <div style={{ width: 150, height: 150, borderRadius: '50%', margin: '0 auto', background: 'conic-gradient(' + col + ' ' + (score * 3.6) + 'deg, #e2e8f0 0)', display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 112, height: 112, borderRadius: '50%', background: 'white', display: 'grid', placeItems: 'center' }}>
+          <div><span style={{ fontSize: 34, fontWeight: 800, color: '#0f172a' }}>{score}</span><span style={{ fontSize: 13, color: '#94a3b8' }}>/100</span></div>
+        </div>
+      </div>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: col, color: '#fff', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />{stat}</div>
     </div>
   );
 }
@@ -419,28 +475,34 @@ function BalanceSheetPage({ data, setData, toast }) {
   const ratios = bsMemo(() => {
     const ca = m.curAssets.cur, cl = m.curLiab.cur, ta = m.totalAssets.cur, tl = m.totalLiab.cur, eq = m.equity.cur;
     const R = [];
-    const P = (name, valueText, status, statusText, detail) => R.push({ name, valueText, status, statusText, detail });
+    const P = (name, valueText, status, statusText, detail, score) => R.push({ name, valueText, status, statusText, detail, score: (score == null || isNaN(score)) ? null : Math.round(score) });
     // 1) สภาพคล่อง
     if (ca != null && cl) { const cr = ca / cl;
       P('อัตราส่วนสภาพคล่อง (Current Ratio)', cr.toFixed(2) + ' เท่า',
         cr >= 1.5 ? 'good' : (cr >= 1 ? 'warn' : 'bad'), cr >= 1.5 ? 'แข็งแรง' : (cr >= 1 ? 'พอใช้' : 'ตึงตัว'),
         { formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน',
           inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
-          result: cr.toFixed(2) + ' เท่า', bands: '≥ 1.5 = แข็งแรง · 1–1.5 = พอใช้ · < 1 = ตึงตัว', src: 'งบแสดงฐานะการเงิน' }); }
+          result: cr.toFixed(2) + ' เท่า', bands: '≥ 1.5 = แข็งแรง · 1–1.5 = พอใช้ · < 1 = ตึงตัว', src: 'งบแสดงฐานะการเงิน',
+          scoreBand: { pts: [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 96]], value: cr, unit: 'เท่า' } },
+        BS_scoreLinear(cr, [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 96]])); }
     // 2) เงินทุนหมุนเวียนสุทธิ
-    if (ca != null && cl != null) { const wc = ca - cl;
+    if (ca != null && cl != null) { const wc = ca - cl, wcx = cl ? wc / cl : (wc > 0 ? 2 : -1);
       P('เงินทุนหมุนเวียนสุทธิ (Working Capital)', BS_fmt(wc) + ' บาท',
         wc > 0 ? 'good' : 'bad', wc > 0 ? 'เป็นบวก' : 'ติดลบ',
         { formula: 'สินทรัพย์หมุนเวียน − หนี้สินหมุนเวียน',
           inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }],
-          result: BS_fmt(wc) + ' บาท', bands: 'เป็นบวก = มีสภาพคล่องหมุนเวียน · ติดลบ = ต้องเสริมเงินทุน', src: 'งบแสดงฐานะการเงิน' }); }
+          result: BS_fmt(wc) + ' บาท', bands: 'เป็นบวก = มีสภาพคล่องหมุนเวียน · ติดลบ = ต้องเสริมเงินทุน', src: 'งบแสดงฐานะการเงิน',
+          scoreBand: { pts: [[-0.5, 10], [0, 45], [0.5, 68], [1, 84], [2, 96]], value: wcx, unit: 'x' } },
+        BS_scoreLinear(wcx, [[-0.5, 10], [0, 45], [0.5, 68], [1, 84], [2, 96]])); }
     // 3) หนี้สินต่อสินทรัพย์
     if (tl != null && ta) { const dr = tl / ta;
       P('อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', dr.toFixed(2) + ' เท่า (' + (dr * 100).toFixed(0) + '%)',
         dr < 0.6 ? 'good' : (dr < 1 ? 'warn' : 'bad'), dr < 0.6 ? 'ปลอดภัย' : (dr < 1 ? 'เฝ้าระวัง' : 'หนี้เกินสินทรัพย์'),
         { formula: 'หนี้สินรวม ÷ สินทรัพย์รวม',
           inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }],
-          result: dr.toFixed(2) + ' เท่า', bands: '< 0.6 = ปลอดภัย · 0.6–1 = เฝ้าระวัง · > 1 = หนี้เกินสินทรัพย์', src: 'งบแสดงฐานะการเงิน' }); }
+          result: dr.toFixed(2) + ' เท่า', bands: '< 0.6 = ปลอดภัย · 0.6–1 = เฝ้าระวัง · > 1 = หนี้เกินสินทรัพย์', src: 'งบแสดงฐานะการเงิน',
+          scoreBand: { pts: [[0.3, 92], [0.6, 68], [1, 42], [2, 20], [4, 8]], value: dr, unit: 'เท่า', lowerBetter: true } },
+        BS_scoreLinear(dr, [[0.3, 92], [0.6, 68], [1, 42], [2, 20], [4, 8]])); }
     // 4) หนี้สินต่อทุน (D/E)
     if (tl != null && eq != null) { const neg = eq < 0, de = eq !== 0 ? tl / eq : null;
       P('อัตราส่วนหนี้สินต่อทุน (D/E)', neg ? 'ทุนติดลบ' : (de != null ? de.toFixed(2) + ' เท่า' : '—'),
@@ -448,16 +510,33 @@ function BalanceSheetPage({ data, setData, toast }) {
         { formula: 'หนี้สินรวม ÷ ส่วนของผู้ถือหุ้น',
           inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมส่วนของผู้ถือหุ้น', value: eq }],
           result: neg ? 'คำนวณไม่ได้ (ส่วนของผู้ถือหุ้นติดลบ)' : de.toFixed(2) + ' เท่า',
-          bands: '< 1.5 = เหมาะสม · 1.5–3 = สูง · ทุนติดลบ = ต้องเพิ่มทุน', src: 'งบแสดงฐานะการเงิน' }); }
+          bands: '< 1.5 = เหมาะสม · 1.5–3 = สูง · ทุนติดลบ = ต้องเพิ่มทุน', src: 'งบแสดงฐานะการเงิน',
+          scoreBand: neg ? null : { pts: [[0.5, 90], [1, 72], [2, 45], [3, 28], [5, 10]], value: de, unit: 'เท่า', lowerBetter: true } },
+        neg ? 5 : (de != null ? BS_scoreLinear(de, [[0.5, 90], [1, 72], [2, 45], [3, 28], [5, 10]]) : 8)); }
     // 5) ส่วนของผู้ถือหุ้น (Equity Ratio)
     if (eq != null && ta) { const er = eq / ta;
       P('อัตราส่วนส่วนของผู้ถือหุ้น (Equity Ratio)', (er * 100).toFixed(0) + '%',
         er >= 0.4 ? 'good' : (er > 0 ? 'warn' : 'bad'), er >= 0.4 ? 'ทุนหนา' : (er > 0 ? 'ทุนบาง' : 'ขาดทุนเกินทุน'),
         { formula: 'ส่วนของผู้ถือหุ้น ÷ สินทรัพย์รวม',
           inputs: [{ label: 'รวมส่วนของผู้ถือหุ้น', value: eq }, { label: 'รวมสินทรัพย์', value: ta }],
-          result: (er * 100).toFixed(0) + '%', bands: '≥ 40% = ทุนหนา · 0–40% = ทุนบาง · ติดลบ = ขาดทุนเกินทุน', src: 'งบแสดงฐานะการเงิน' }); }
+          result: (er * 100).toFixed(0) + '%', bands: '≥ 40% = ทุนหนา · 0–40% = ทุนบาง · ติดลบ = ขาดทุนเกินทุน', src: 'งบแสดงฐานะการเงิน',
+          scoreBand: { pts: [[-0.2, 5], [0, 20], [0.2, 50], [0.4, 72], [0.6, 92]], value: er, unit: '%' } },
+        BS_scoreLinear(er, [[-0.2, 5], [0, 20], [0.2, 50], [0.4, 72], [0.6, 92]])); }
     return R;
   }, [m]);
+
+  // คะแนนฐานะการเงินรวม = ถ่วงน้ำหนักคะแนนอัตราส่วน 5 ตัว (renormalize ถ้าตัวไหนไม่มีคะแนน)
+  const overallScore = bsMemo(() => {
+    const W = { 'Current Ratio': 0.25, 'Working Capital': 0.15, 'Debt Ratio': 0.25, 'D/E': 0.15, 'Equity Ratio': 0.20 };
+    let wsum = 0, acc = 0;
+    ratios.forEach(r => {
+      if (r.score == null) return;
+      const key = Object.keys(W).find(k => r.name.indexOf(k) >= 0);
+      const w = key ? W[key] : 0.1;
+      wsum += w; acc += r.score * w;
+    });
+    return wsum ? Math.round(acc / wsum) : null;
+  }, [ratios]);
 
   const heroBtn = { background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.25)',
     borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 };
@@ -586,11 +665,15 @@ function BalanceSheetPage({ data, setData, toast }) {
       {/* RATIOS — เลย์เอาต์รายการแบบ finance-tools (คลิกกางดูสูตร + ที่มา) */}
       <div className="bs-section-head" style={{ marginTop: 22 }}>
         <h2>📊 อัตราส่วนทางการเงิน</h2>
-        <span className="bs-tag">🖱️ คลิกดูสูตร + ที่มา · {bs.curLabel}</span>
+        <span className="bs-tag">🖱️ คลิกดูสูตร + เกณฑ์คะแนน · {bs.curLabel}</span>
       </div>
-      <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: '8px 16px 12px' }}>
-        <div style={{ fontSize: 11.5, color: '#94a3b8', margin: '8px 0 4px' }}>คำนวณจากงบแสดงฐานะการเงิน {bs.asOf}</div>
-        {ratios.map((r, i) => <BSRatioRow key={i} r={r} last={i === ratios.length - 1} />)}
+      <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16, display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' }}>
+        {overallScore != null && <div style={{ flex: '0 0 auto', width: 196 }}><BSGauge score={overallScore} /></div>}
+        <div style={{ flex: '1 1 440px', minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>อัตราส่วนรายตัว <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกดูสูตร + เกณฑ์คะแนน</span></div>
+          <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 8px' }}>คำนวณจากงบแสดงฐานะการเงิน {bs.asOf} · ให้คะแนน <b style={{ color: '#475569' }}>0–100</b> (เขียว ≥ 70 · เหลือง ≥ 45 · แดง &lt; 45) · คะแนนรวม = ถ่วงน้ำหนัก (สภาพคล่อง 25% · หนี้/สินทรัพย์ 25% · ทุน 20% · เงินทุนหมุนเวียน 15% · D/E 15%)</div>
+          {ratios.map((r, i) => <BSRatioRow key={i} r={r} last={i === ratios.length - 1} />)}
+        </div>
       </div>
 
       {/* วิเคราะห์ฐานะการเงิน (Auto Generated) — พอร์ตจาก finBalInsight */}

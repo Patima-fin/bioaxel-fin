@@ -392,6 +392,59 @@ function PLHealthRow({ s }) {
   );
 }
 
+// คำนวณคะแนนสุขภาพการเงิน 5 มิติ — ใช้ร่วมทั้งหน้า P&L และงบฐานะ (global)
+// inp: { rev, net, gross, opex, revA, bal:{ca,cl,tl,ta,eq} } → { overall, subs, gcol, gstat }
+function PL_buildHealth(inp) {
+  const rev = inp.rev, net = inp.net, gross = inp.gross, opex = inp.opex, revA = inp.revA || [], bal = inp.bal || {};
+  const netMargin = net / (rev || 1), opexRatio = opex / (rev || 1);
+  const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
+  const ca = bal.ca, cl = bal.cl, tl = bal.tl, ta = bal.ta, eq = bal.eq;
+  const debtRatio = (tl != null && ta) ? tl / ta : null;
+  const ptsProf = [[-0.5, 5], [-0.2, 20], [0, 45], [0.05, 68], [0.15, 92]];
+  const ptsGrow = [[-0.5, 10], [0, 50], [0.3, 75], [0.8, 90], [1.5, 97]];
+  const ptsEff = [[0.2, 95], [0.4, 75], [0.6, 55], [0.9, 32], [1.5, 12]];
+  const ptsRisk = [[0.3, 90], [0.6, 65], [1, 42], [2, 20], [4, 8]];
+  const sProf = PL_scoreLinear(netMargin, ptsProf);
+  const sGrow = PL_scoreLinear(growth, ptsGrow);
+  const sEff = PL_scoreLinear(opexRatio, ptsEff);
+  let sRisk = debtRatio != null ? PL_scoreLinear(debtRatio, ptsRisk) : 50;
+  if (eq != null && eq < 0) sRisk = Math.min(sRisk, 12);
+  const m0 = revA[0], m1 = revA[revA.length - 1];
+  const subs = [
+    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.35, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsProf, value: netMargin, unit: '%' } } },
+    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.20, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', band: { pts: ptsGrow, value: growth, unit: '%' } } },
+    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.20, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsEff, value: opexRatio, unit: '%', lowerBetter: true } } },
+    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.25, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsRisk, value: debtRatio, unit: 'เท่า', lowerBetter: true } } },
+  ];
+  subs.forEach(s => { s.label = s.score >= 70 ? 'ดี' : s.score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ'; s.color = s.score >= 70 ? '#22c55e' : s.score >= 45 ? '#f59e0b' : '#ef4444'; });
+  const overall = Math.round(sProf * 0.35 + sRisk * 0.25 + sGrow * 0.20 + sEff * 0.20);
+  const gcol = overall >= 70 ? '#22c55e' : overall >= 45 ? '#f59e0b' : '#ef4444';
+  const gstat = overall >= 70 ? 'ดี' : overall >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ';
+  return { overall, subs, gcol, gstat };
+}
+
+// การ์ดคะแนนสุขภาพการเงิน (เกจ /100 + คะแนนย่อย 5 มิติ) — ใช้ร่วมทั้ง P&L และงบฐานะ (global)
+function PLHealthCard({ overall, subs, gcol, gstat }) {
+  return (
+    <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16, display: 'grid', gridTemplateColumns: 'minmax(200px, 240px) 1fr', gap: 18, alignItems: 'start', marginBottom: 14 }}>
+      <div style={{ textAlign: 'center', padding: '6px 4px' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>คะแนนสุขภาพทางการเงิน</div>
+        <div style={{ width: 150, height: 150, borderRadius: '50%', margin: '0 auto', background: 'conic-gradient(' + gcol + ' ' + (overall * 3.6) + 'deg, #e2e8f0 0)', display: 'grid', placeItems: 'center' }}>
+          <div style={{ width: 112, height: 112, borderRadius: '50%', background: 'white', display: 'grid', placeItems: 'center' }}>
+            <div><span style={{ fontSize: 34, fontWeight: 800, color: '#0f172a' }}>{overall}</span><span style={{ fontSize: 13, color: '#94a3b8' }}>/100</span></div>
+          </div>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: gcol, color: '#fff', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />{gstat}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>คะแนนย่อยรายมิติ <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกแต่ละมิติเพื่อดูสูตร + ตัวเลขที่ใช้</span></div>
+        <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 6px' }}>คำนวณจากงบกำไรขาดทุน + งบแสดงฐานะการเงิน · คะแนนรวม = ถ่วงน้ำหนัก (ทำกำไร 35% · ความเสี่ยง 25% · เติบโต 20% · ประสิทธิภาพ 20%)</div>
+        {subs.map((s, i) => <PLHealthRow key={i} s={s} />)}
+      </div>
+    </div>
+  );
+}
+
 // กล่องวิเคราะห์ P&L ทั้งหมด: 4 ชาร์ต + คะแนนสุขภาพ + CFO Insight
 function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const cardBox = { background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 };
@@ -434,29 +487,8 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
   const { ca, cl, tl, ta, eq } = bal;
   const curRatio = (ca != null && cl) ? ca / cl : null, debtRatio = (tl != null && ta) ? tl / ta : null;
-  const ptsLiq = [[0.5, 12], [1, 45], [1.5, 70], [2, 85], [3, 95]];
-  const ptsProf = [[-0.5, 5], [-0.2, 20], [0, 45], [0.05, 68], [0.15, 92]];
-  const ptsGrow = [[-0.5, 10], [0, 50], [0.3, 75], [0.8, 90], [1.5, 97]];
-  const ptsEff = [[0.2, 95], [0.4, 75], [0.6, 55], [0.9, 32], [1.5, 12]];
-  const ptsRisk = [[0.3, 90], [0.6, 65], [1, 42], [2, 20], [4, 8]];
-  const sLiq = curRatio != null ? PL_scoreLinear(curRatio, ptsLiq) : 50;
-  const sProf = PL_scoreLinear(netMargin, ptsProf);
-  const sGrow = PL_scoreLinear(growth, ptsGrow);
-  const sEff = PL_scoreLinear(opexRatio, ptsEff);
-  let sRisk = debtRatio != null ? PL_scoreLinear(debtRatio, ptsRisk) : 50;
-  if (eq != null && eq < 0) sRisk = Math.min(sRisk, 12);
+  const H = PL_buildHealth({ rev, net, gross, opex, revA, bal });
   const m0 = revA[0], m1 = revA[revA.length - 1];
-  const subs = [
-    { name: 'สภาพคล่อง', score: Math.round(sLiq), weight: 0.20, detail: { metric: 'อัตราส่วนสภาพคล่อง (Current Ratio)', formula: 'สินทรัพย์หมุนเวียน ÷ หนี้สินหมุนเวียน', inputs: [{ label: 'รวมสินทรัพย์หมุนเวียน', value: ca }, { label: 'รวมหนี้สินหมุนเวียน', value: cl }], result: curRatio != null ? curRatio.toFixed(2) + ' เท่า' : '— (ยังไม่มีข้อมูลงบแสดงฐานะการเงิน)', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsLiq, value: curRatio, unit: 'เท่า' } } },
-    { name: 'ความสามารถทำกำไร', score: Math.round(sProf), weight: 0.30, detail: { metric: 'อัตรากำไรสุทธิ (Net Margin)', formula: 'กำไร(ขาดทุน)สุทธิ ÷ รายได้รวม', inputs: [{ label: 'กำไร(ขาดทุน)สุทธิ', value: net }, { label: 'รายได้รวม', value: rev }], result: (netMargin * 100).toFixed(1) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsProf, value: netMargin, unit: '%' } } },
-    { name: 'การเติบโต', score: Math.round(sGrow), weight: 0.15, detail: { metric: 'การเติบโตของรายได้ (เดือนแรก → เดือนล่าสุด)', formula: '(รายได้เดือนล่าสุด − รายได้เดือนแรก) ÷ รายได้เดือนแรก', inputs: [{ label: 'รายได้เดือนล่าสุด', value: m1 }, { label: 'รายได้เดือนแรก', value: m0 }], result: (growth * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน (รายเดือน)', band: { pts: ptsGrow, value: growth, unit: '%' } } },
-    { name: 'ประสิทธิภาพ', score: Math.round(sEff), weight: 0.15, detail: { metric: 'สัดส่วนค่าใช้จ่ายขายและบริหารต่อรายได้ (OPEX Ratio)', formula: 'รวมค่าใช้จ่ายขายและบริหาร ÷ รายได้รวม', inputs: [{ label: 'รวมค่าใช้จ่ายขายและบริหาร', value: opex }, { label: 'รายได้รวม', value: rev }], result: (opexRatio * 100).toFixed(0) + '%', src: 'งบกำไรขาดทุน', band: { pts: ptsEff, value: opexRatio, unit: '%', lowerBetter: true } } },
-    { name: 'ความเสี่ยง', score: Math.round(sRisk), weight: 0.20, detail: { metric: 'อัตราส่วนหนี้สินต่อสินทรัพย์ (Debt Ratio)', formula: 'หนี้สินรวม ÷ สินทรัพย์รวม', inputs: [{ label: 'รวมหนี้สิน', value: tl }, { label: 'รวมสินทรัพย์', value: ta }].concat((eq != null && eq < 0) ? [{ label: 'ส่วนของผู้ถือหุ้น (ติดลบ = เสี่ยงสูง)', value: eq }] : []), result: debtRatio != null ? debtRatio.toFixed(2) + ' เท่า' + ((eq != null && eq < 0) ? ' · ส่วนของผู้ถือหุ้นติดลบ' : '') : '—', src: 'งบแสดงฐานะการเงิน', band: { pts: ptsRisk, value: debtRatio, unit: 'เท่า', lowerBetter: true } } },
-  ];
-  subs.forEach(s => { s.label = s.score >= 70 ? 'ดี' : s.score >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ'; s.color = s.score >= 70 ? '#22c55e' : s.score >= 45 ? '#f59e0b' : '#ef4444'; });
-  const overall = Math.round(sLiq * 0.2 + sProf * 0.3 + sGrow * 0.15 + sEff * 0.15 + sRisk * 0.2);
-  const gcol = overall >= 70 ? '#22c55e' : overall >= 45 ? '#f59e0b' : '#ef4444';
-  const gstat = overall >= 70 ? 'ดี' : overall >= 45 ? 'เฝ้าระวัง' : 'ต้องดำเนินการ';
   // CFO Insight
   const f = (v) => PL_fmt(v), pc = (v) => (v * 100).toFixed(1) + '%';
   const top = cats[0];
@@ -532,22 +564,7 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
         </div>
       </div>
       {/* คะแนนสุขภาพการเงิน */}
-      <div style={{ ...cardBox, display: 'grid', gridTemplateColumns: 'minmax(200px, 240px) 1fr', gap: 18, alignItems: 'start', marginBottom: 14 }}>
-        <div style={{ textAlign: 'center', padding: '6px 4px' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>คะแนนสุขภาพทางการเงิน</div>
-          <div style={{ width: 150, height: 150, borderRadius: '50%', margin: '0 auto', background: 'conic-gradient(' + gcol + ' ' + (overall * 3.6) + 'deg, #e2e8f0 0)', display: 'grid', placeItems: 'center' }}>
-            <div style={{ width: 112, height: 112, borderRadius: '50%', background: 'white', display: 'grid', placeItems: 'center' }}>
-              <div><span style={{ fontSize: 34, fontWeight: 800, color: '#0f172a' }}>{overall}</span><span style={{ fontSize: 13, color: '#94a3b8' }}>/100</span></div>
-            </div>
-          </div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, background: gcol, color: '#fff', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />{gstat}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>คะแนนย่อยรายมิติ <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกแต่ละมิติเพื่อดูสูตร + ตัวเลขที่ใช้</span></div>
-          <div style={{ fontSize: 11, color: '#94a3b8', margin: '3px 0 6px' }}>คำนวณจากงบกำไรขาดทุน + งบแสดงฐานะการเงิน · คะแนนรวม = ถ่วงน้ำหนัก (ทำกำไร 30% · สภาพคล่อง 20% · ความเสี่ยง 20% · เติบโต 15% · ประสิทธิภาพ 15%)</div>
-          {subs.map((s, i) => <PLHealthRow key={i} s={s} />)}
-        </div>
-      </div>
+      <PLHealthCard overall={H.overall} subs={H.subs} gcol={H.gcol} gstat={H.gstat} />
       {/* CFO Insight */}
       <div style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
