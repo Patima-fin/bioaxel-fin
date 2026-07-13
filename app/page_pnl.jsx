@@ -1106,29 +1106,33 @@ function PnLPage({ data, setData, toast }) {
         const pctOf = (num) => (rev ? num / rev * 100 : NaN);
         const f = (v) => PL_fmt(v);   // บาท (2 ตำแหน่ง, ติดลบในวงเล็บ)
 
+        // เกณฑ์ปกติ (bench) = "แนวทางทั่วไป (rule of thumb)" — ไม่ใช่มาตรฐานตายตัว ต่างกันตามอุตสาหกรรม (ดูหมายเหตุท้ายส่วน)
         const kpis = [
-          { icon: '📈', label: 'อัตรากำไรขั้นต้น', en: 'Gross Profit Margin', value: pctOf(gpYtd), dir: 'higher', good: 20,
+          { icon: '📈', label: 'อัตรากำไรขั้นต้น', en: 'Gross Profit Margin', value: pctOf(gpYtd), dir: 'higher', good: 20, bench: 'ทั่วไป ≥ 20–30% (แล้วแต่ธุรกิจ)',
             formula: 'กำไรขั้นต้น ' + f(gpYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Gross Profit” ÷ “รวมรายได้” ในงบ' },
-          { icon: '⚙️', label: 'อัตรากำไรจากการดำเนินงาน', en: 'Operating Margin (EBIT)', value: pctOf(ebitYtd), dir: 'higher', good: 10,
+          { icon: '⚙️', label: 'อัตรากำไรจากการดำเนินงาน', en: 'Operating Margin (EBIT)', value: pctOf(ebitYtd), dir: 'higher', good: 10, bench: 'ทั่วไป ≥ 10%',
             formula: 'กำไรดำเนินงาน ' + f(ebitYtd) + '\n= กำไรขั้นต้น ' + f(gpYtd) + ' − (ขาย ' + f(sellYtd) + ' + บริหาร ' + f(adminYtd) + ')\n÷ รวมรายได้ ' + f(rev),
             src: 'กำไรขั้นต้น − (Selling + Administrative) ÷ รวมรายได้ · ยังไม่รวมต้นทุนการเงิน' },
-          { icon: '💰', label: 'อัตรากำไรสุทธิ', en: 'Net Profit Margin', value: pctOf(netYtd), dir: 'higher', good: 5,
+          { icon: '💰', label: 'อัตรากำไรสุทธิ', en: 'Net Profit Margin', value: pctOf(netYtd), dir: 'higher', good: 5, bench: 'ทั่วไป ≥ 5%',
             formula: 'กำไร(ขาดทุน)สุทธิ ' + f(netYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Net Profit” ÷ “รวมรายได้” ในงบ' },
-          { icon: '🏭', label: 'สัดส่วนต้นทุนขาย', en: 'COGS to Revenue', value: pctOf(cogsYtd), dir: 'lower', good: 75,
+          { icon: '🏭', label: 'สัดส่วนต้นทุนขาย', en: 'COGS to Revenue', value: pctOf(cogsYtd), dir: 'lower', good: 75, bench: 'ทั่วไป ≤ 70–80%',
             formula: 'ต้นทุนขาย ' + f(cogsYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Cost of goods sold” ÷ “รวมรายได้”' },
-          { icon: '🧾', label: 'สัดส่วนค่าใช้จ่ายขาย+บริหาร', en: 'SG&A to Revenue', value: pctOf(opExYtd), dir: 'lower', good: 20,
-            formula: 'ขาย ' + f(sellYtd) + ' + บริหาร ' + f(adminYtd) + ' = ' + f(opExYtd) + '\n÷ รวมรายได้ ' + f(rev),
-            src: 'Selling + Administrative expenses ÷ รวมรายได้' },
-          { icon: '🏦', label: 'ภาระต้นทุนทางการเงิน', en: 'Finance Cost to Revenue', value: pctOf(finYtd), dir: 'lower', good: 5,
+          { icon: '🏷️', label: 'สัดส่วนค่าใช้จ่ายในการขาย', en: 'Selling Expenses to Revenue', value: pctOf(sellYtd), dir: 'lower', good: 10, bench: 'ทั่วไป ≤ 10%',
+            formula: 'ค่าใช้จ่ายในการขาย ' + f(sellYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Selling expenses” ÷ “รวมรายได้”' },
+          { icon: '🏢', label: 'สัดส่วนค่าใช้จ่ายในการบริหาร', en: 'Admin Expenses to Revenue', value: pctOf(adminYtd), dir: 'lower', good: 15, bench: 'ทั่วไป ≤ 10–15%',
+            formula: 'ค่าใช้จ่ายในการบริหาร ' + f(adminYtd) + '\n÷ รวมรายได้ ' + f(rev),
+            src: 'บรรทัด “Administrative expenses” ÷ “รวมรายได้”' },
+          { icon: '🏦', label: 'ภาระต้นทุนทางการเงิน', en: 'Finance Cost to Revenue', value: pctOf(finYtd), dir: 'lower', good: 5, bench: 'ทั่วไป ≤ 3–5%',
             formula: 'ต้นทุนการเงิน ' + f(finYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Finance costs” ÷ “รวมรายได้” · ดอกเบี้ยจ่าย/เช่าซื้อ' },
         ];
         // EBITDA — เพิ่มถัดจาก EBIT เฉพาะเมื่อพบค่าเสื่อม/ตัดจำหน่ายในผังบัญชี
         if (daYtd > 0) kpis.splice(2, 0, {
-          icon: '📊', label: 'อัตรากำไร EBITDA', en: 'EBITDA Margin', value: pctOf(ebitdaYtd), dir: 'higher', good: 15,
+          icon: '📊', label: 'อัตรากำไร EBITDA', en: 'EBITDA Margin', value: pctOf(ebitdaYtd), dir: 'higher', good: 15, bench: 'ทั่วไป ≥ 15%',
           formula: 'EBITDA ' + f(ebitdaYtd) + '\n= กำไรดำเนินงาน ' + f(ebitYtd) + ' + ค่าเสื่อม/ตัดจำหน่าย ' + f(daYtd) + '\n÷ รวมรายได้ ' + f(rev),
           src: 'กำไรจากการดำเนินงาน + ค่าเสื่อมราคา/ตัดจำหน่าย (บัญชี 5410/5420) ÷ รวมรายได้',
         });
@@ -1183,13 +1187,21 @@ function PnLPage({ data, setData, toast }) {
                       <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 5 }}>
                         <span style={{ flexShrink: 0 }}>📄</span><span>{kpi.src}</span>
                       </div>
+                      {kpi.bench && (
+                        <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 5, display: 'flex', gap: 5 }}>
+                          <span style={{ flexShrink: 0 }}>📏</span><span>เกณฑ์ปกติ: {kpi.bench}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ marginTop: 10, fontSize: 10.5, color: '#94a3b8', textAlign: 'center' }}>
-              * ทุกตัวคำนวณจากงบกำไรขาดทุน (ชีต PL · ฐาน DATA) สะสม YTD {elapsed} เดือน · ปีบัญชี {plYear} · ตัวเลขในกล่องแหล่งที่มา = บาท · เกณฑ์สถานะเป็นแนวทางทั่วไป
+            <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 10, padding: '11px 15px', fontSize: 11, color: '#475569', lineHeight: 1.75 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 5 }}>ที่มาของหลักการ · ตัวเลข · เกณฑ์</div>
+              <div><b>📐 หลักการ/วิธีคำนวณ:</b> การวิเคราะห์งบแบบย่อส่วน <b>(Common-size analysis)</b> — เอาแต่ละบรรทัดในงบ ÷ รวมรายได้ = สัดส่วน % ของรายได้ · เป็นเทคนิคมาตรฐานของการวิเคราะห์งบการเงิน (financial statement analysis)</div>
+              <div><b>🔢 ตัวเลข:</b> คำนวณจาก<b>งบกำไรขาดทุนจริงของบริษัท</b> (ชีต PL · ฐาน DATA) สะสม YTD {elapsed} เดือน · ปีบัญชี {plYear} · หน่วย = บาท</div>
+              <div><b>📏 เกณฑ์ปกติ:</b> เป็น<b>แนวทางทั่วไป (rule of thumb)</b> <u>ไม่ใช่มาตรฐานตายตัว</u> — สัดส่วนที่ “ปกติ” <b>ต่างกันมากตามอุตสาหกรรม</b> · เกณฑ์ที่แม่นยำที่สุดคือเทียบกับ <b>งบประมาณบริษัท · ผลปีก่อน · ค่าเฉลี่ยอุตสาหกรรม</b> (ตัวเลขเกณฑ์ในการ์ดเป็นช่วงกว้างไว้อ้างอิงหยาบๆ เท่านั้น)</div>
             </div>
           </>
         );
