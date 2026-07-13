@@ -455,6 +455,19 @@ function BalanceSheetPage({ data, setData, toast }) {
   const heroBtn = { background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.25)',
     borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 };
 
+  // การ์ด KPI 1 ใบ (ใช้ทั้งใบเดี่ยว "สินทรัพย์" และ 2 ย่อยใน "แหล่งเงินทุน")
+  const bsKpiTile = (t) => (
+    <div className="bs-kpi-card" style={{ flex: 1, minWidth: 0, background: t.danger ? 'linear-gradient(180deg,#fef2f2 0%,#fff 100%)' : 'white',
+      borderRadius: 12, padding: 16, border: '1px solid ' + (t.danger ? '#fecaca' : '#e2e8f0'), boxShadow: '0 1px 3px rgba(15,23,42,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: t.iconBg, display: 'grid', placeItems: 'center' }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke={t.iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{t.icon}</svg>
+      </div>
+      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>{t.label} <span style={{ color: '#94a3b8', fontSize: 10.5 }}>· {t.en}</span></div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: t.danger ? '#dc2626' : '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>{BS_fmt(t.v)}</div>
+      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>{bs.curLabel}</div>
+    </div>
+  );
+
   return (
     <div className="page bs-page present-page" ref={pageRef}>
       <style>{BS_CSS}</style>
@@ -488,21 +501,19 @@ function BalanceSheetPage({ data, setData, toast }) {
         </div>
       </div>
 
-      {/* KPI TILES */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 16 }}>
-        {kpiTiles.map((t, i) => {
-          return (
-            <div key={i} className="bs-kpi-card" style={{ background: t.danger ? 'linear-gradient(180deg,#fef2f2 0%,#fff 100%)' : 'white',
-              borderRadius: 12, padding: 18, border: '1px solid ' + (t.danger ? '#fecaca' : '#e2e8f0'), boxShadow: '0 1px 3px rgba(15,23,42,0.05)', display: 'flex', flexDirection: 'column', gap: 9 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 9, background: t.iconBg, display: 'grid', placeItems: 'center' }}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={t.iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{t.icon}</svg>
-              </div>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>{t.label} <span style={{ color: '#94a3b8', fontSize: 10.5 }}>· {t.en}</span></div>
-              <div style={{ fontSize: 23, fontWeight: 800, color: t.danger ? '#dc2626' : '#0f172a', letterSpacing: '-0.5px', lineHeight: 1.1 }}>{BS_fmt(t.v)}</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>{bs.curLabel}</div>
-            </div>
-          );
-        })}
+      {/* KPI TILES — สินทรัพย์ (ซ้าย) + การ์ดใหญ่ "แหล่งเงินทุน" ครอบ หนี้สิน+ทุน (ขวา) */}
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16, alignItems: 'stretch' }}>
+        <div style={{ flex: '1 1 240px', display: 'flex' }}>{bsKpiTile(kpiTiles[0])}</div>
+        <div style={{ flex: '2 1 400px', background: 'linear-gradient(180deg,#f8fafc,#fff)', borderRadius: 14, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 14, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>หนี้สินและส่วนของผู้ถือหุ้น</span>
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>· แหล่งเงินทุน = รวมสินทรัพย์ {BS_fmt(m.totalAssets.cur)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', flex: 1 }}>
+            <div style={{ flex: '1 1 190px', display: 'flex' }}>{bsKpiTile(kpiTiles[1])}</div>
+            <div style={{ flex: '1 1 190px', display: 'flex' }}>{bsKpiTile(kpiTiles[2])}</div>
+          </div>
+        </div>
       </div>
 
       {/* BALANCE CHECK */}
