@@ -1210,13 +1210,6 @@ function PnLPage({ data, setData, toast }) {
                 );
               })}
             </div>
-            <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 10, padding: '11px 15px', fontSize: 11, color: '#475569', lineHeight: 1.75 }}>
-              <div style={{ fontSize: 9.5, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 5 }}>ที่มาของหลักการ · ตัวเลข · เกณฑ์</div>
-              <div><b>📐 หลักการ/วิธีคำนวณ:</b> การวิเคราะห์งบแบบย่อส่วน <b>(Common-size analysis)</b> — เอาแต่ละบรรทัดในงบ ÷ รวมรายได้ = สัดส่วน % ของรายได้ · เป็นเทคนิคมาตรฐานของการวิเคราะห์งบการเงิน (financial statement analysis)</div>
-              <div><b>🔢 ตัวเลข:</b> คำนวณจาก<b>งบกำไรขาดทุนจริงของบริษัท</b> (ชีต PL · ฐาน DATA) สะสม YTD {elapsed} เดือน · ปีบัญชี {plYear} · หน่วย = บาท</div>
-              <div><b>📏 เกณฑ์ปกติ:</b> เป็น<b>แนวทางทั่วไป (rule of thumb)</b> <u>ไม่ใช่มาตรฐานตายตัว</u> — สัดส่วนที่ “ปกติ” <b>ต่างกันมากตามอุตสาหกรรม</b> · เกณฑ์ที่แม่นยำที่สุดคือเทียบกับ <b>งบประมาณบริษัท · ผลปีก่อน · ค่าเฉลี่ยอุตสาหกรรม</b></div>
-              <div style={{ marginTop: 5, paddingTop: 6, borderTop: '1px dashed #e2e8f0' }}><b>📚 แหล่งอ้างอิงเกณฑ์:</b> Corporate Finance Institute — corporatefinanceinstitute.com (นิยาม+เกณฑ์อัตรากำไร · สุทธิ 5/10/20%) · Wall Street Prep — wallstreetprep.com + The Hackett Group 2025 U.S. SG&A Cost Study (SG&A 10–20% ของรายได้ · เฉลี่ยจริง ~14.3%) · <b>ทุกแหล่งย้ำ: เกณฑ์ต่างตามอุตสาหกรรม — ควรเทียบคู่แข่งกลุ่มเดียวกัน + แนวโน้มบริษัทเอง</b></div>
-            </div>
           </>
         );
       })()}
