@@ -654,11 +654,11 @@ function BalanceSheetPage({ data, setData, toast }) {
         </div>
       </div>
 
-      {/* PARETO — โครงสร้างสินทรัพย์ + โครงสร้างหนี้สิน (เรียงมาก→น้อย · ไฮไลต์ TOP 80%) */}
+      {/* PARETO — โครงสร้างสินทรัพย์ + โครงสร้างหนี้สิน (เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14, marginTop: 14 }}>
-        <ParetoBreakdown title="โครงสร้างสินทรัพย์" titleEn="Asset Breakdown" sub="สัดส่วนต่อสินทรัพย์รวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+        <ParetoBreakdown title="โครงสร้างสินทรัพย์" titleEn="Asset Breakdown" sub="สัดส่วนต่อสินทรัพย์รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={bsCharts.assetLines} palette={['#3b82f6', '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#14b8a6']} />
-        <ParetoBreakdown title="โครงสร้างหนี้สิน" titleEn="Liabilities Breakdown" sub="สัดส่วนต่อหนี้สินรวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+        <ParetoBreakdown title="โครงสร้างหนี้สิน" titleEn="Liabilities Breakdown" sub="สัดส่วนต่อหนี้สินรวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={bsCharts.liabLines} palette={['#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#3b82f6', '#14b8a6']} />
       </div>
 

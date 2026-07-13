@@ -1315,11 +1315,12 @@ function ParetoBreakdown({ title, titleEn, sub, items, palette, unit }) {
   const list = (items || []).filter(x => x && Math.abs(Number(x.value)) > 0.005).slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   const total = list.reduce((s, x) => s + Math.abs(x.value), 0) || 1;
   const maxV = list.length ? Math.abs(list[0].value) : 1;
-  let cum = 0, mainCount = 0;
-  for (let i = 0; i < list.length; i++) { cum += Math.abs(list[i].value); mainCount = i + 1; if (cum / total >= 0.8) break; }
-  if (!mainCount && list.length) mainCount = 1;
+  const [showMinor, setShowMinor] = React.useState(false);
+  const mainCount = Math.min(3, list.length);   // แสดงรายการหลัก 3 อันดับแรกเสมอ · ที่เหลือซ่อน (กดขยายได้)
   const main = list.slice(0, mainCount), minor = list.slice(mainCount);
   const mainPct = main.reduce((s, x) => s + Math.abs(x.value), 0) / total;
+  const remainRaw = (1 - mainPct) * 100;
+  const remainTxt = (remainRaw > 0 && remainRaw < 0.5) ? '<1' : String(Math.max(0, Math.round(remainRaw)));
   const fmt = (v) => fmtNum(v, 2);
   const row = (x, idx, muted) => {
     const color = muted ? '#cbd5e1' : pal[idx % pal.length];
@@ -1350,8 +1351,13 @@ function ParetoBreakdown({ title, titleEn, sub, items, palette, unit }) {
       {main.map((x, i) => row(x, i, false))}
       {minor.length > 0 && (
         <>
-          <div style={{ fontSize: 10.5, color: '#94a3b8', margin: '8px 0 3px', paddingTop: 8, borderTop: '1px dashed #e2e8f0' }}>ที่เหลืออีก {Math.max(0, Math.round((1 - mainPct) * 100))}% ({minor.length} รายการย่อย)</div>
-          {minor.map((x, i) => row(x, mainCount + i, true))}
+          <div onClick={() => setShowMinor(s => !s)} title={showMinor ? 'คลิกเพื่อซ่อน' : 'คลิกเพื่อดูรายการที่เหลือ'}
+            style={{ cursor: 'pointer', userSelect: 'none', fontSize: 10.5, color: '#94a3b8', margin: '8px 0 3px', paddingTop: 8, borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, width: 10, flexShrink: 0 }}>{showMinor ? '▾' : '▸'}</span>
+            <span>ที่เหลืออีก {remainTxt}% ({minor.length} รายการย่อย)</span>
+            <span style={{ marginLeft: 'auto', color: '#6366f1', fontWeight: 700 }}>{showMinor ? 'ซ่อน' : 'ดูทั้งหมด'}</span>
+          </div>
+          {showMinor && minor.map((x, i) => row(x, mainCount + i, true))}
         </>
       )}
     </div>

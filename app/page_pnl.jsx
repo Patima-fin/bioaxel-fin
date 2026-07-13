@@ -524,9 +524,9 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
         <span className="pnl-tag">รายเดือน · โครงสร้างค่าใช้จ่าย · สุขภาพการเงิน · สรุปผู้บริหาร</span>
       </div>
       <div style={gridStyle}>
-        <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+        <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={revItems} palette={['#10b981', '#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6']} />
-        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={expItems} palette={['#ef4444', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#14b8a6']} />
       </div>
       <div style={gridStyle}>
