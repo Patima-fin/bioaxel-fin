@@ -328,13 +328,18 @@ function BalanceSheetPage({ data, setData, toast }) {
       <div className="anim-in bs-hero" style={{ background: 'linear-gradient(135deg, #2e8b4a 0%, #154524 100%)',
         borderRadius: 16, padding: '22px 28px', color: 'white', marginBottom: 18, boxShadow: '0 10px 28px rgba(30,58,138,0.18)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
-          <div style={{ minWidth: 0 }}>
-            <h1 style={{ margin: 0, fontSize: 25, fontWeight: 800, letterSpacing: '-0.4px' }}>
-              {bs.title}
-              {isSeed && <span style={{ marginLeft: 10, fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(252,211,77,0.3)', verticalAlign: 'middle', fontWeight: 600 }}>ข้อมูลตั้งต้น (จากไฟล์เตย)</span>}
-            </h1>
-            <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>{bs.company} · {bs.titleEn}</div>
-            <div style={{ fontSize: 12.5, opacity: 0.82, marginTop: 2 }}>{bs.asOf} · หน่วย: {bs.unit}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+            <div style={{ width: 60, height: 60, borderRadius: 14, background: 'white', display: 'grid', placeItems: 'center', flexShrink: 0, padding: 9, boxShadow: '0 3px 12px rgba(0,0,0,0.2)' }}>
+              <img src="bioaxel_logo.png" alt="BIOAXEL" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontSize: 25, fontWeight: 800, letterSpacing: '-0.4px' }}>
+                {bs.title}
+                {isSeed && <span style={{ marginLeft: 10, fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(252,211,77,0.3)', verticalAlign: 'middle', fontWeight: 600 }}>ข้อมูลตั้งต้น (จากไฟล์เตย)</span>}
+              </h1>
+              <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>{bs.company} · {bs.titleEn}</div>
+              <div style={{ fontSize: 12.5, opacity: 0.82, marginTop: 2 }}>{bs.asOf} · หน่วย: {bs.unit}</div>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} data-no-capture="1">
             <button onClick={saveImage} style={heroBtn}><Icon name="download" size={13} /> บันทึกรูป</button>
