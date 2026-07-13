@@ -318,14 +318,21 @@ function BalanceSheetPage({ data, setData, toast }) {
     };
   }, [rows]);
 
-  // ── โครงสร้างสินทรัพย์ (donut) + แหล่งเงินทุน (bars) — พอร์ตจาก finBalAssetComp/finBalFunding ──
+  // ── โครงสร้างสินทรัพย์ (donut) + แหล่งเงินทุน (bars) + Pareto รายการ — พอร์ตจาก finBalAssetComp/finBalFunding ──
   const bsCharts = bsMemo(() => {
-    // รายการสินทรัพย์ (เฉพาะ kind 'line' ใต้ section "สินทรัพย์")
-    let inAssets = false; const alines = [];
+    // รายการสินทรัพย์ / หนี้สิน (เฉพาะ kind 'line')
+    const aIcon = (n) => /เงินสด/.test(n) ? '💵' : (/ลูกหนี้/.test(n) ? '🧾' : (/เงินลงทุน/.test(n) ? '📈' : (/ให้กู้|กู้ยืม/.test(n) ? '🤝' : (/สินค้า|คงเหลือ/.test(n) ? '📦' : (/ที่ดิน|อาคาร|อุปกรณ์|ปรับปรุง/.test(n) ? '🏭' : (/ไม่มีตัวตน/.test(n) ? '💠' : (/ธนาคาร|ฝาก/.test(n) ? '🏦' : '🔹')))))));
+    const lIcon = (n) => /เจ้าหนี้/.test(n) ? '🧾' : (/กู้ยืม|เงินกู้/.test(n) ? '🏦' : (/พนักงาน|ผลประโยชน์/.test(n) ? '👥' : (/เช่า/.test(n) ? '📄' : (/ดอกเบี้ย/.test(n) ? '💸' : '🔻'))));
+    let inAssets = false, inLiab = false; const alines = [], llines = [];
     for (const r of rows) {
-      if (r.kind === 'section') { inAssets = (r.label === 'สินทรัพย์'); continue; }
-      if (inAssets && r.kind === 'line' && r.cur != null && Math.abs(r.cur) > 0.01) alines.push({ name: r.label, value: r.cur });
+      if (r.kind === 'section') { inAssets = (r.label === 'สินทรัพย์'); inLiab = /หนี้สิน/.test(r.label); continue; }
+      if (r.kind === 'group' && /ส่วนของผู้ถือหุ้น/.test(r.label)) inLiab = false;   // เข้าโซนทุน → หยุดเก็บหนี้สิน
+      if (r.kind === 'line' && r.cur != null && Math.abs(r.cur) > 0.01) {
+        if (inAssets) alines.push({ name: r.label, value: r.cur, icon: aIcon(r.label) });
+        else if (inLiab) llines.push({ name: r.label, value: r.cur, icon: lIcon(r.label) });
+      }
     }
+    const assetLines = alines.slice(), liabLines = llines.slice();
     alines.sort((a, b) => b.value - a.value);
     let lines = alines;
     if (lines.length > 7) { const top = lines.slice(0, 6); const rest = lines.slice(6).reduce((s, x) => s + x.value, 0); top.push({ name: 'อื่น ๆ', value: rest }); lines = top; }
@@ -340,7 +347,7 @@ function BalanceSheetPage({ data, setData, toast }) {
     ].filter(x => x.value != null);
     const base = Math.abs(m.totalAssets.cur) || 1;
     const funding = items.map(x => ({ name: x.name, value: x.value, color: x.value < 0 ? '#dc2626' : x.color, pct: x.value / base }));
-    return { assetComp, funding };
+    return { assetComp, funding, assetLines, liabLines };
   }, [rows, m]);
 
   // ── บันทึกรูป / พิมพ์ ──
@@ -566,6 +573,14 @@ function BalanceSheetPage({ data, setData, toast }) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* PARETO — โครงสร้างสินทรัพย์ + โครงสร้างหนี้สิน (เรียงมาก→น้อย · ไฮไลต์ TOP 80%) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14, marginTop: 14 }}>
+        <ParetoBreakdown title="โครงสร้างสินทรัพย์" titleEn="Asset Breakdown" sub="สัดส่วนต่อสินทรัพย์รวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+          items={bsCharts.assetLines} palette={['#3b82f6', '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#14b8a6']} />
+        <ParetoBreakdown title="โครงสร้างหนี้สิน" titleEn="Liabilities Breakdown" sub="สัดส่วนต่อหนี้สินรวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+          items={bsCharts.liabLines} palette={['#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#3b82f6', '#14b8a6']} />
       </div>
 
       {/* RATIOS — เลย์เอาต์รายการแบบ finance-tools (คลิกกางดูสูตร + ที่มา) */}

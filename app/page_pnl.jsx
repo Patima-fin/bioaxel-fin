@@ -387,6 +387,16 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   expAccts.sort((a, b) => b.total - a.total);
   const topExp = expAccts.slice(0, 6);
   const topMax = topExp.length ? topExp[0].total : 1;
+  // Pareto: แหล่งรายได้ (บัญชีรายได้) + สัดส่วนค่าใช้จ่าย (4 หมวด)
+  const revIcon = (n) => /ดอกเบี้ย/.test(n) ? '💰' : (/บริการ|จัดส่ง|ขนส่ง/.test(n) ? '🚚' : (/platform|แพลตฟอร์ม/i.test(n) ? '🖥️' : (/ส่วนลด/.test(n) ? '🏷️' : (/ขาย/.test(n) ? '🛒' : '💵'))));
+  const revItems = [];
+  ['saleGoods', 'otherIncome'].forEach(g => (accts[g] || []).forEach(a => { const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) revItems.push({ name: a.name || a.code, value: v, icon: revIcon(String(a.name || '')) }); }));
+  const expItems = [
+    { name: 'ต้นทุนขาย', value: cogs, icon: '📦' },
+    { name: 'ค่าใช้จ่ายในการขาย', value: sell, icon: '🏷️' },
+    { name: 'ค่าใช้จ่ายในการบริหาร', value: adm, icon: '🏢' },
+    { name: 'ต้นทุนทางการเงิน', value: fin, icon: '🏦' },
+  ];
   // คะแนนสุขภาพ
   const netMargin = net / (rev || 1), grossMargin = gross / (rev || 1), opexRatio = opex / (rev || 1);
   const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
@@ -443,6 +453,12 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
       <div className="pnl-section-head" style={{ marginTop: 22 }}>
         <h2>📈 วิเคราะห์ผลประกอบการ (Charts & Analytics)</h2>
         <span className="pnl-tag">รายเดือน · โครงสร้างค่าใช้จ่าย · สุขภาพการเงิน · สรุปผู้บริหาร</span>
+      </div>
+      <div style={gridStyle}>
+        <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+          items={revItems} palette={['#10b981', '#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6']} />
+        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · ไฮไลต์ TOP 80%"
+          items={expItems} palette={['#ef4444', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#14b8a6']} />
       </div>
       <div style={gridStyle}>
         <div style={cardBox}>

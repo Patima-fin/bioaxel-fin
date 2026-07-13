@@ -1307,11 +1307,62 @@ function wtpUsersByDept(deptKey) {
   });
 }
 
+// ─── ParetoBreakdown — การ์ด "แหล่ง…/สัดส่วน…" (เรียงมาก→น้อย · ไฮไลต์ TOP 80%) ──
+// items: [{ name, value, icon? }] · เรียง desc, รายการหลัก = prefix ที่สะสม ≥ 80%, ที่เหลือ = ย่อย
+function ParetoBreakdown({ title, titleEn, sub, items, palette, unit }) {
+  const pal = palette || ['#10b981', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6', '#94a3b8'];
+  const u = unit || 'บาท';
+  const list = (items || []).filter(x => x && Math.abs(Number(x.value)) > 0.005).slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const total = list.reduce((s, x) => s + Math.abs(x.value), 0) || 1;
+  const maxV = list.length ? Math.abs(list[0].value) : 1;
+  let cum = 0, mainCount = 0;
+  for (let i = 0; i < list.length; i++) { cum += Math.abs(list[i].value); mainCount = i + 1; if (cum / total >= 0.8) break; }
+  if (!mainCount && list.length) mainCount = 1;
+  const main = list.slice(0, mainCount), minor = list.slice(mainCount);
+  const mainPct = main.reduce((s, x) => s + Math.abs(x.value), 0) / total;
+  const fmt = (v) => fmtNum(v, 2);
+  const row = (x, idx, muted) => {
+    const color = muted ? '#cbd5e1' : pal[idx % pal.length];
+    const pct = Math.abs(x.value) / total;
+    const w = Math.max(2, Math.abs(x.value) / maxV * 100);
+    return (
+      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 0' }}>
+        <span style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, display: 'grid', placeItems: 'center', fontSize: 13, background: muted ? '#f1f5f9' : (color + '22') }}>{x.icon || '•'}</span>
+        <span style={{ width: '32%', minWidth: 0, fontSize: 12, color: muted ? '#94a3b8' : '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={x.name}>{x.name}</span>
+        <span style={{ flex: 1, height: 9, borderRadius: 6, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: w + '%', background: color, borderRadius: 6 }} /></span>
+        <span style={{ width: 108, textAlign: 'right', fontSize: 12, fontWeight: 700, color: muted ? '#94a3b8' : '#0f172a', fontVariantNumeric: 'tabular-nums' }}>{fmt(x.value)}</span>
+        <span style={{ width: 44, textAlign: 'right', fontSize: 11, color: muted ? '#cbd5e1' : '#64748b', fontVariantNumeric: 'tabular-nums' }}>{(pct * 100).toFixed(1)}%</span>
+      </div>
+    );
+  };
+  return (
+    <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{title}</span>
+        {titleEn && <span style={{ fontSize: 11, color: '#94a3b8' }}>({titleEn})</span>}
+      </div>
+      {sub && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{sub}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '11px 0 8px', flexWrap: 'wrap' }}>
+        <span style={{ background: '#eef2ff', color: '#4f46e5', fontWeight: 800, fontSize: 15, padding: '3px 12px', borderRadius: 10 }}>TOP {Math.round(mainPct * 100)}%</span>
+        <span style={{ fontSize: 11.5, color: '#64748b' }}>{mainCount} รายการหลัก</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#64748b' }}>รวม {fmt(total)} {u}</span>
+      </div>
+      {main.map((x, i) => row(x, i, false))}
+      {minor.length > 0 && (
+        <>
+          <div style={{ fontSize: 10.5, color: '#94a3b8', margin: '8px 0 3px', paddingTop: 8, borderTop: '1px dashed #e2e8f0' }}>ที่เหลืออีก {Math.max(0, Math.round((1 - mainPct) * 100))}% ({minor.length} รายการย่อย)</div>
+          {minor.map((x, i) => row(x, mainCount + i, true))}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Export to globals ───────────────────────────────────────────────────────
 Object.assign(window, {
   fmtNum, fmtInt, fmtMoney, fmtDate, fmtDateLong, parseDateFlexible,
   useCountUp, AnimatedNumber, Icon, Modal, useToasts, Badge, KpiTile, EditableCell,
-  useSortable, SortHeader, StatusPill,
+  useSortable, SortHeader, StatusPill, ParetoBreakdown,
   exportRowsToExcel, ExportButton, PrintButton,
   ColFilterDropdown, FilterableColHeader,
   WTPOverride, EditableNumber, EditModeToggle, useOverrideSub, useOverrideSubAny,
