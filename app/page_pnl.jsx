@@ -476,12 +476,10 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const revIcon = (n) => /ดอกเบี้ย/.test(n) ? '💰' : (/บริการ|จัดส่ง|ขนส่ง/.test(n) ? '🚚' : (/platform|แพลตฟอร์ม/i.test(n) ? '🖥️' : (/ส่วนลด/.test(n) ? '🏷️' : (/ขาย/.test(n) ? '🛒' : '💵'))));
   const revItems = [];
   ['saleGoods', 'otherIncome'].forEach(g => (accts[g] || []).forEach(a => { const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) revItems.push({ name: a.name || a.code, value: v, icon: revIcon(String(a.name || '')) }); }));
-  const expItems = [
-    { name: 'ต้นทุนขาย', value: cogs, icon: '📦' },
-    { name: 'ค่าใช้จ่ายในการขาย', value: sell, icon: '🏷️' },
-    { name: 'ค่าใช้จ่ายในการบริหาร', value: adm, icon: '🏢' },
-    { name: 'ต้นทุนทางการเงิน', value: fin, icon: '🏦' },
-  ];
+  // สัดส่วนค่าใช้จ่าย = รายบัญชี (ไม่ใช่ 4 กลุ่มใหญ่) เรียงมาก→น้อย · ไอคอนตามกลุ่มของบัญชี
+  const expGIcon = { cogs: '📦', selling: '🏷️', admin: '🏢', finance: '🏦' };
+  const expItems = [];
+  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) expItems.push({ name: a.name || a.code, value: v, icon: expGIcon[g] }); }));
   // คะแนนสุขภาพ
   const netMargin = net / (rev || 1), grossMargin = gross / (rev || 1), opexRatio = opex / (rev || 1);
   const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
@@ -526,7 +524,7 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
       <div style={gridStyle}>
         <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={revItems} palette={['#10b981', '#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6']} />
-        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
+        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="รายบัญชี · ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
           items={expItems} palette={['#ef4444', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#14b8a6']} />
       </div>
       <div style={gridStyle}>
