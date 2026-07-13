@@ -294,7 +294,7 @@ function PL_scoreLinear(v, pts) {
 
 // combo chart: แท่งรายได้ + แท่งค่าใช้จ่าย + เส้นกำไรสุทธิ (SVG ล้วน)
 function PLComboChart({ months, rev, exp, net }) {
-  const W = 720, padL = 44, padR = 14, padT = 26, padB = 26, height = 240;
+  const W = 720, padL = 44, padR = 14, padT = 34, padB = 26, height = 240;
   const n = Math.max(1, months.length);
   const innerW = W - padL - padR, innerH = height - padT - padB;
   const lo = Math.min(0, ...net), hi = Math.max(1, ...rev, ...exp, ...net), span = (hi - lo) || 1;
@@ -311,6 +311,13 @@ function PLComboChart({ months, rev, exp, net }) {
         <g key={i}>
           <rect x={cx(i) - bw - 1} y={Math.min(yv(rev[i]), y0)} width={bw} height={Math.abs(yv(rev[i]) - y0)} rx={3} fill="#3b82f6" />
           <rect x={cx(i) + 1} y={Math.min(yv(exp[i]), y0)} width={bw} height={Math.abs(yv(exp[i]) - y0)} rx={3} fill="#cbd5e1" />
+        </g>
+      ))}
+      {/* ตัวเลขบนหัวแท่ง รายได้ (น้ำเงิน) + ค่าใช้จ่าย (เทา) */}
+      {months.map((_, i) => (
+        <g key={'v' + i}>
+          {Math.abs(rev[i]) > 0.5 && <text x={cx(i) - bw / 2 - 1} y={yv(rev[i]) - 3} fontSize="8" textAnchor="middle" fill="#2563eb" fontWeight="700" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(rev[i])}</text>}
+          {Math.abs(exp[i]) > 0.5 && <text x={cx(i) + bw / 2 + 1} y={yv(exp[i]) - 3} fontSize="8" textAnchor="middle" fill="#64748b" fontWeight="600" style={{ fontVariantNumeric: 'tabular-nums' }}>{kf(exp[i])}</text>}
         </g>
       ))}
       <polyline points={netPts} fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinejoin="round" />
