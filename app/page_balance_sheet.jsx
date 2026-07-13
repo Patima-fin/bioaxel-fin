@@ -438,13 +438,6 @@ function BalanceSheetPage({ data, setData, toast }) {
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 12, background: '#f8fafc', border: '1px solid #eef2f6', borderRadius: 10, padding: '11px 15px', fontSize: 11, color: '#475569', lineHeight: 1.75 }}>
-        <div style={{ fontSize: 9.5, fontWeight: 800, color: '#94a3b8', letterSpacing: '0.7px', marginBottom: 5 }}>ที่มาของหลักการ · ตัวเลข · เกณฑ์</div>
-        <div><b>📐 หลักการ:</b> อัตราส่วนวิเคราะห์งบการเงินมาตรฐาน (สภาพคล่อง/หนี้สิน · financial ratio analysis)</div>
-        <div><b>🔢 ตัวเลข:</b> จากงบแสดงฐานะการเงินจริงของบริษัท {bs.curLabel} · หน่วย = บาท</div>
-        <div><b>📏 เกณฑ์ปกติ:</b> แนวทางทั่วไป <u>ไม่ใช่มาตรฐานตายตัว</u> ต่างตามอุตสาหกรรม — ควรเทียบ <b>งบประมาณ · ปีก่อน · คู่แข่ง</b></div>
-        <div style={{ marginTop: 5, paddingTop: 6, borderTop: '1px dashed #e2e8f0' }}><b>📚 แหล่งอ้างอิงเกณฑ์:</b> Corporate Finance Institute — corporatefinanceinstitute.com · Current Ratio 1.5–2.0 เท่า, D/E 1.0–2.0 เท่า (Farseer 2026 · Business Supervisor 2026) · <b>เกณฑ์ต่างตามอุตสาหกรรม — ควรเทียบคู่แข่ง</b></div>
-      </div>
 
       {/* UPLOAD MODAL */}
       <Modal open={uploadOpen} onClose={() => { setUploadOpen(false); setFile(null); }} wide title="อัปโหลดงบแสดงฐานะการเงิน">
