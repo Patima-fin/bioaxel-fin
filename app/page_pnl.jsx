@@ -467,8 +467,10 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const donutData = cats.map(x => ({ label: x.name, value: x.total, valueLabel: (x.pct * 100).toFixed(0) + '%', color: x.color }));
   // ค่าใช้จ่ายสูงสุด (top expense accounts)
   const accts = (model && model.accounts) || {};
+  // สต็อก/สินค้าคงเหลือ (ต้นงวด/ปลายงวด) ในสูตรต้นทุนขาย = ไม่ใช่ค่าใช้จ่ายจริง → ตัดออกจากมุมมองรายบัญชี
+  const PL_isStock = (n) => /ต้นงวด|ปลายงวด|คงเหลือ|สำเร็จรูป|ระหว่างผลิต|ระหว่างทำ|สต็อก|stock|inventory/i.test(String(n || ''));
   const expAccts = [];
-  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { const t = PL_sum(a.arr, nMon); if (Math.abs(t) > 0.01) expAccts.push({ name: a.name || a.code, total: t }); }));
+  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { if (PL_isStock(a.name)) return; const t = PL_sum(a.arr, nMon); if (Math.abs(t) > 0.01) expAccts.push({ name: a.name || a.code, total: t }); }));
   expAccts.sort((a, b) => b.total - a.total);
   const topExp = expAccts.slice(0, 6);
   const topMax = topExp.length ? topExp[0].total : 1;
@@ -476,10 +478,10 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const revIcon = (n) => /ดอกเบี้ย/.test(n) ? '💰' : (/บริการ|จัดส่ง|ขนส่ง/.test(n) ? '🚚' : (/platform|แพลตฟอร์ม/i.test(n) ? '🖥️' : (/ส่วนลด/.test(n) ? '🏷️' : (/ขาย/.test(n) ? '🛒' : '💵'))));
   const revItems = [];
   ['saleGoods', 'otherIncome'].forEach(g => (accts[g] || []).forEach(a => { const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) revItems.push({ name: a.name || a.code, value: v, icon: revIcon(String(a.name || '')) }); }));
-  // สัดส่วนค่าใช้จ่าย = รายบัญชี (ไม่ใช่ 4 กลุ่มใหญ่) เรียงมาก→น้อย · ไอคอนตามกลุ่มของบัญชี
+  // สัดส่วนค่าใช้จ่าย = รายบัญชี (ไม่ใช่ 4 กลุ่มใหญ่ · ตัดสต็อก/สินค้าคงเหลือออก) เรียงมาก→น้อย · ไอคอนตามกลุ่มของบัญชี
   const expGIcon = { cogs: '📦', selling: '🏷️', admin: '🏢', finance: '🏦' };
   const expItems = [];
-  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) expItems.push({ name: a.name || a.code, value: v, icon: expGIcon[g] }); }));
+  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { if (PL_isStock(a.name)) return; const v = PL_sum(a.arr, nMon); if (Math.abs(v) > 0.5) expItems.push({ name: a.name || a.code, value: v, icon: expGIcon[g] }); }));
   // คะแนนสุขภาพ
   const netMargin = net / (rev || 1), grossMargin = gross / (rev || 1), opexRatio = opex / (rev || 1);
   const growth = (revA.length >= 2 && revA[0]) ? (revA[revA.length - 1] - revA[0]) / Math.abs(revA[0]) : 0;
