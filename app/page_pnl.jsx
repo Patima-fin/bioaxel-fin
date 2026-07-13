@@ -465,15 +465,10 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const cats = catDefs.map((x, i) => ({ name: x.name, total: x.total, color: PL_ANAL_PALETTE[i], pct: x.total / grand }))
     .filter(x => Math.abs(x.total) > 0.01).sort((a, b) => b.total - a.total);
   const donutData = cats.map(x => ({ label: x.name, value: x.total, valueLabel: (x.pct * 100).toFixed(0) + '%', color: x.color }));
-  // ค่าใช้จ่ายสูงสุด (top expense accounts)
+  // บัญชีรายตัว (accts) + ตัวกรองสต็อก/สินค้าคงเหลือ — ใช้กับ Pareto แหล่งรายได้/สัดส่วนค่าใช้จ่าย
   const accts = (model && model.accounts) || {};
   // สต็อก/สินค้าคงเหลือ (ต้นงวด/ปลายงวด) ในสูตรต้นทุนขาย = ไม่ใช่ค่าใช้จ่ายจริง → ตัดออกจากมุมมองรายบัญชี
   const PL_isStock = (n) => /ต้นงวด|ปลายงวด|คงเหลือ|สำเร็จรูป|ระหว่างผลิต|ระหว่างทำ|สต็อก|stock|inventory/i.test(String(n || ''));
-  const expAccts = [];
-  ['cogs', 'selling', 'admin', 'finance'].forEach(g => (accts[g] || []).forEach(a => { if (PL_isStock(a.name)) return; const t = PL_sum(a.arr, nMon); if (Math.abs(t) > 0.01) expAccts.push({ name: a.name || a.code, total: t }); }));
-  expAccts.sort((a, b) => b.total - a.total);
-  const topExp = expAccts.slice(0, 6);
-  const topMax = topExp.length ? topExp[0].total : 1;
   // Pareto: แหล่งรายได้ (บัญชีรายได้) + สัดส่วนค่าใช้จ่าย (4 หมวด)
   const revIcon = (n) => /ดอกเบี้ย/.test(n) ? '💰' : (/บริการ|จัดส่ง|ขนส่ง/.test(n) ? '🚚' : (/platform|แพลตฟอร์ม/i.test(n) ? '🖥️' : (/ส่วนลด/.test(n) ? '🏷️' : (/ขาย/.test(n) ? '🛒' : '💵'))));
   const revItems = [];
@@ -542,25 +537,6 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
         <div style={cardBox}>
           <div style={cardH}>โครงสร้างค่าใช้จ่ายทั้งหมด</div>
           {donutData.length ? <Donut size={170} thickness={22} data={donutData} animate={false} /> : <div style={{ color: '#94a3b8', fontSize: 12 }}>ไม่มีข้อมูลค่าใช้จ่าย</div>}
-        </div>
-      </div>
-      <div style={gridStyle}>
-        <div style={cardBox}>
-          <div style={cardH}>ค่าใช้จ่ายสูงสุด ({nMon} เดือน)</div>
-          <div style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 10 }}>บัญชีค่าใช้จ่ายอันดับต้น ๆ ที่เป็นตัวแปรหลักของผลกำไร</div>
-          {topExp.map((x, i) => (
-            <div key={i} style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
-                <span style={{ color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{x.name}</span>
-                <span style={{ fontWeight: 700, color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>{PL_fmt(x.total)} · {(x.total / (grand) * 100).toFixed(0)}%</span>
-              </div>
-              <div style={{ height: 8, borderRadius: 5, background: '#f1f5f9', overflow: 'hidden' }}><span style={{ display: 'block', height: '100%', width: Math.max(2, x.total / topMax * 100) + '%', background: PL_ANAL_PALETTE[i % PL_ANAL_PALETTE.length], borderRadius: 5 }} /></div>
-            </div>
-          ))}
-        </div>
-        <div style={cardBox}>
-          <div style={cardH}>แนวโน้มกำไร(ขาดทุน)สุทธิรายเดือน</div>
-          <AreaChart data={months.map((mo, i) => ({ label: mo, value: netA[i] }))} height={220} color="#dc2626" />
         </div>
       </div>
       {/* คะแนนสุขภาพการเงิน */}
