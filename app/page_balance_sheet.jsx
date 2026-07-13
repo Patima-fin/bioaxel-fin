@@ -297,14 +297,16 @@ function BalanceSheetPage({ data, setData, toast }) {
       st: isNaN(v) ? { t: 'ไม่มีข้อมูล', a: '#64748b', bg: '#f1f5f9' } : (ok ? { t: 'แข็งแรง', a: '#16a34a', bg: '#dcfce7' } : (v >= 0.5 ? { t: 'ตึงตัว', a: '#d97706', bg: '#fef3c7' } : { t: 'เสี่ยงสภาพคล่อง', a: '#dc2626', bg: '#fee2e2' })),
       formula: 'สินทรัพย์หมุนเวียน ' + BS_fmt(m.curAssets.cur) + '\n÷ หนี้สินหมุนเวียน ' + BS_fmt(m.curLiab.cur),
       src: 'บรรทัด “รวมสินทรัพย์หมุนเวียน” ÷ “รวมหนี้สินหมุนเวียน”',
-      bench: 'ทั่วไป 1.5–2.0 เท่า · < 1.0 = เสี่ยงสภาพคล่อง', ref: 'เกณฑ์วิเคราะห์สภาพคล่อง (CFI · Farseer 2026)' }; })(),
+      bench: 'ทั่วไป 1.5–2.0 เท่า · < 1.0 = เสี่ยงสภาพคล่อง', ref: 'เกณฑ์สภาพคล่อง (Farseer 2026)',
+      refUrl: 'https://www.farseer.com/blog/balance-sheet-ratios/' }; })(),
     (() => { const v = m.debtToAssets, ok = v <= 100; return {
       icon: '⚖️', label: 'หนี้สินต่อสินทรัพย์', en: 'Debt to Assets',
       display: BS_fmtPct(v),
       st: isNaN(v) ? { t: 'ไม่มีข้อมูล', a: '#64748b', bg: '#f1f5f9' } : (v > 100 ? { t: 'หนี้เกินสินทรัพย์', a: '#dc2626', bg: '#fee2e2' } : (v > 70 ? { t: 'สูง', a: '#d97706', bg: '#fef3c7' } : { t: 'คุมได้', a: '#16a34a', bg: '#dcfce7' })),
       formula: 'รวมหนี้สิน ' + BS_fmt(m.totalLiab.cur) + '\n÷ รวมสินทรัพย์ ' + BS_fmt(m.totalAssets.cur),
       src: 'บรรทัด “รวมหนี้สิน” ÷ “รวมสินทรัพย์”',
-      bench: 'ยิ่งต่ำยิ่งดี · > 100% = หนี้เกินสินทรัพย์', ref: 'อัตราส่วนหนี้สิน/leverage (CFI)' }; })(),
+      bench: 'ยิ่งต่ำยิ่งดี · > 100% = หนี้เกินสินทรัพย์', ref: 'อัตราส่วนหนี้สิน/leverage (Farseer 2026)',
+      refUrl: 'https://www.farseer.com/blog/balance-sheet-ratios/' }; })(),
     (() => { const eq = m.equity.cur || 0, neg = eq < 0; return {
       icon: '🏛️', label: 'ส่วนของผู้ถือหุ้น', en: 'Shareholders’ Equity',
       display: BS_fmt(eq),
@@ -318,7 +320,8 @@ function BalanceSheetPage({ data, setData, toast }) {
       st: na ? { t: 'ทุนติดลบ — ตีความไม่ได้', a: '#dc2626', bg: '#fee2e2' } : (v <= 2 ? { t: 'คุมได้', a: '#16a34a', bg: '#dcfce7' } : { t: 'สูง', a: '#d97706', bg: '#fef3c7' }),
       formula: 'รวมหนี้สิน ' + BS_fmt(m.totalLiab.cur) + '\n÷ ส่วนของผู้ถือหุ้น ' + BS_fmt(eq),
       src: 'บรรทัด “รวมหนี้สิน” ÷ “รวมส่วนของผู้ถือหุ้น” · ทุนติดลบ ⇒ ตีความไม่ได้ (N/M)',
-      bench: 'ทั่วไป 1.0–2.0 เท่า · < 1.0 = ทุน > หนี้ · ทุนเข้มข้น 2.0–3.0', ref: 'เกณฑ์ D/E (CFI · Business Supervisor 2026)' }; })(),
+      bench: 'ทั่วไป 1.0–2.0 เท่า · < 1.0 = ทุน > หนี้ · ทุนเข้มข้น 2.0–3.0', ref: 'เกณฑ์ D/E (Business Supervisor 2026)',
+      refUrl: 'https://www.businesssupervisor.com/what-is-a-good-debt-to-equity-ratio/' }; })(),
   ];
 
   const heroBtn = { background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.25)',
@@ -431,7 +434,10 @@ function BalanceSheetPage({ data, setData, toast }) {
               )}
               {r.ref && (
                 <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 5 }}>
-                  <span style={{ flexShrink: 0 }}>📚</span><span>อ้างอิง: {r.ref}</span>
+                  <span style={{ flexShrink: 0 }}>📚</span>
+                  {r.refUrl
+                    ? <a href={r.refUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>อ้างอิง: {r.ref} ↗</a>
+                    : <span>อ้างอิง: {r.ref}</span>}
                 </div>
               )}
             </div>

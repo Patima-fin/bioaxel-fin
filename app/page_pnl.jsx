@@ -1110,30 +1110,37 @@ function PnLPage({ data, setData, toast }) {
         const kpis = [
           { icon: '📈', label: 'อัตรากำไรขั้นต้น', en: 'Gross Profit Margin', value: pctOf(gpYtd), dir: 'higher', good: 20,
             bench: 'ต่างตามอุตสาหกรรม (ธุรกิจบริการสูง · ผลิตสินค้าต่ำ) — เทียบคู่แข่ง', ref: 'Corporate Finance Institute — Gross Margin Ratio',
+            refUrl: 'https://corporatefinanceinstitute.com/resources/accounting/gross-margin-ratio/',
             formula: 'กำไรขั้นต้น ' + f(gpYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Gross Profit” ÷ “รวมรายได้” ในงบ' },
           { icon: '⚙️', label: 'อัตรากำไรจากการดำเนินงาน', en: 'Operating Margin (EBIT)', value: pctOf(ebitYtd), dir: 'higher', good: 10,
             bench: 'ทั่วไป ≥ 10% ถือว่าดี (แล้วแต่ธุรกิจ)', ref: 'Corporate Finance Institute — Operating Profit Margin',
+            refUrl: 'https://corporatefinanceinstitute.com/resources/accounting/operating-profit-margin/',
             formula: 'กำไรดำเนินงาน ' + f(ebitYtd) + '\n= กำไรขั้นต้น ' + f(gpYtd) + ' − (ขาย ' + f(sellYtd) + ' + บริหาร ' + f(adminYtd) + ')\n÷ รวมรายได้ ' + f(rev),
             src: 'กำไรขั้นต้น − (Selling + Administrative) ÷ รวมรายได้ · ยังไม่รวมต้นทุนการเงิน' },
           { icon: '💰', label: 'อัตรากำไรสุทธิ', en: 'Net Profit Margin', value: pctOf(netYtd), dir: 'higher', good: 10,
             bench: 'CFI: 5% = ต่ำ · 10% = ปานกลาง · 20% = สูง', ref: 'Corporate Finance Institute — Net Profit Margin',
+            refUrl: 'https://corporatefinanceinstitute.com/resources/accounting/net-profit-margin-formula/',
             formula: 'กำไร(ขาดทุน)สุทธิ ' + f(netYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Net Profit” ÷ “รวมรายได้” ในงบ' },
           { icon: '🏭', label: 'สัดส่วนต้นทุนขาย', en: 'COGS to Revenue', value: pctOf(cogsYtd), dir: 'lower', good: 75,
             bench: '= 100% − อัตรากำไรขั้นต้น · ต่างตามอุตสาหกรรม', ref: 'Corporate Finance Institute — Gross Margin Ratio',
+            refUrl: 'https://corporatefinanceinstitute.com/resources/accounting/gross-margin-ratio/',
             formula: 'ต้นทุนขาย ' + f(cogsYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Cost of goods sold” ÷ “รวมรายได้”' },
           { icon: '🏷️', label: 'สัดส่วนค่าใช้จ่ายในการขาย', en: 'Selling Expenses to Revenue', value: pctOf(sellYtd), dir: 'lower', good: 12,
             bench: 'ขาย+บริหาร (SG&A) รวมปกติ 10–20% ของรายได้', ref: 'Wall Street Prep · The Hackett Group 2025 SG&A Study',
+            refUrl: 'https://www.wallstreetprep.com/knowledge/selling-general-administrative-sga/',
             formula: 'ค่าใช้จ่ายในการขาย ' + f(sellYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Selling expenses” ÷ “รวมรายได้”' },
           { icon: '🏢', label: 'สัดส่วนค่าใช้จ่ายในการบริหาร', en: 'Admin Expenses to Revenue', value: pctOf(adminYtd), dir: 'lower', good: 12,
             bench: 'ขาย+บริหาร (SG&A) รวมปกติ 10–20% ของรายได้', ref: 'Wall Street Prep · The Hackett Group 2025 SG&A Study',
+            refUrl: 'https://www.wallstreetprep.com/knowledge/selling-general-administrative-sga/',
             formula: 'ค่าใช้จ่ายในการบริหาร ' + f(adminYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Administrative expenses” ÷ “รวมรายได้”' },
           { icon: '🏦', label: 'ภาระต้นทุนทางการเงิน', en: 'Finance Cost to Revenue', value: pctOf(finYtd), dir: 'lower', good: 5,
-            bench: 'ไม่มีเกณฑ์ตายตัว · มาตรวัดหลัก = Interest Coverage (EBIT ÷ ดอกเบี้ย ควร ≥ 3 เท่า)', ref: 'มาตรฐาน Interest Coverage Ratio (Allianz Trade / CFI)',
+            bench: 'ไม่มีเกณฑ์ตายตัว · มาตรวัดหลัก = Interest Coverage (EBIT ÷ ดอกเบี้ย ควร ≥ 3 เท่า)', ref: 'มาตรฐาน Interest Coverage Ratio (Allianz Trade)',
+            refUrl: 'https://www.allianz-trade.com/en_US/insights/interest-coverage-ratio.html',
             formula: 'ต้นทุนการเงิน ' + f(finYtd) + '\n÷ รวมรายได้ ' + f(rev),
             src: 'บรรทัด “Finance costs” ÷ “รวมรายได้” · ดอกเบี้ยจ่าย/เช่าซื้อ' },
         ];
@@ -1141,6 +1148,7 @@ function PnLPage({ data, setData, toast }) {
         if (daYtd > 0) kpis.splice(2, 0, {
           icon: '📊', label: 'อัตรากำไร EBITDA', en: 'EBITDA Margin', value: pctOf(ebitdaYtd), dir: 'higher', good: 15,
           bench: 'ทั่วไป ≥ 15% (แล้วแต่ธุรกิจ)', ref: 'Corporate Finance Institute — Profitability Ratios',
+          refUrl: 'https://corporatefinanceinstitute.com/resources/accounting/profitability-ratios/',
           formula: 'EBITDA ' + f(ebitdaYtd) + '\n= กำไรดำเนินงาน ' + f(ebitYtd) + ' + ค่าเสื่อม/ตัดจำหน่าย ' + f(daYtd) + '\n÷ รวมรายได้ ' + f(rev),
           src: 'กำไรจากการดำเนินงาน + ค่าเสื่อมราคา/ตัดจำหน่าย (บัญชี 5410/5420) ÷ รวมรายได้',
         });
@@ -1202,7 +1210,10 @@ function PnLPage({ data, setData, toast }) {
                       )}
                       {kpi.ref && (
                         <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4, display: 'flex', gap: 5 }}>
-                          <span style={{ flexShrink: 0 }}>📚</span><span>อ้างอิง: {kpi.ref}</span>
+                          <span style={{ flexShrink: 0 }}>📚</span>
+                          {kpi.refUrl
+                            ? <a href={kpi.refUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>อ้างอิง: {kpi.ref} ↗</a>
+                            : <span>อ้างอิง: {kpi.ref}</span>}
                         </div>
                       )}
                     </div>
