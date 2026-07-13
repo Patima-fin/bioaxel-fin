@@ -143,7 +143,7 @@
 
   function cfpAccountLabel(raw) {
     const s = String(raw || '');
-    const m = s.match(/([SC])\/A#\s*([A-Za-z]*)\s*([\d-]+)\s*(.*)/);
+    const m = s.match(/([A-Za-z])\/A#\s*([A-Za-z]*)\s*([\d-]+)\s*(.*)/);
     if (m) {
       const bank = (m[2] || '').toUpperCase();
       const name = (m[4] || '').trim();
@@ -213,30 +213,71 @@
     return { txns, matched, cats: cats.map(c => c.name) };
   }
 
-  /* ---------- parse STM ---------- */
+  /* ---------- parse STM ----------
+   * รองรับ 2 รูปแบบด้วยการ map คอลัมน์ตาม "ชื่อหัวตาราง" (header-driven):
+   *  (A) STM รายบัญชี (STM BA.xlsx): แต่ละบัญชีเป็นบล็อกคั่นด้วย "C/A#…" + มีแถว "ยอดยกมา"
+   *      วันที่=คอลัมน์แรก. บัญชีมาจาก header block.
+   *  (B) ชีต "รวมทุกบัญชี" (ในไฟล์งบกระแสเงินสด): ทุกบัญชีรวมตารางเดียว มีคอลัมน์
+   *      "บัญชีธนาคาร" ในทุกแถว, ไม่มี "ยอดยกมา" → คำนวณยอดต้นงวด = ยอดคงเหลือ − กระแส
+   *      ของแถวที่เก่าสุดต่อบัญชี. รูปแบบนี้มักครบเดือนกว่า (เช่น ลากถึง มิ.ย.).
+   */
   function cfpParseStm(aoa) {
+    // 1) หา header row + map ชื่อคอลัมน์ → index (แถวที่มีทั้ง "วันที่" และ "ยอดถอน/ยอดฝาก")
+    let COL = null;
+    for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+      const hr = (aoa[i] || []).map(x => String(x == null ? '' : x).trim());
+      const find = re => hr.findIndex(c => re.test(c));
+      const dC = find(/^วันที่$/), wC = find(/ยอดถอน/), pC = find(/ยอดฝาก/);
+      if (dC >= 0 && (wC >= 0 || pC >= 0)) {
+        COL = {
+          date: dC, withdraw: wC, deposit: pC,
+          balance: find(/ยอดคงเหลือ/),
+          doc: (find(/เลขที่เอกสาร/) >= 0 ? find(/เลขที่เอกสาร/) : hr.findIndex(c => /เลขที่/.test(c) && !/บัญชี/.test(c))),
+          note: find(/หมายเหตุ/),
+          category: find(/หมวด/),
+          activity: find(/ประเภทกิจกรรม/),
+          acct: find(/บัญชีธนาคาร/),   // -1 ถ้าเป็นรูปแบบ (A) ที่ไม่มีคอลัมน์บัญชี
+        };
+        break;
+      }
+    }
+    // fallback = index เดิมของ STM รายบัญชี (เผื่อหัวตารางอ่านไม่เจอ) — backward-compatible
+    if (!COL) COL = { date: 0, withdraw: 3, deposit: 4, balance: 5, doc: 2, note: 7, category: 8, activity: 9, acct: -1 };
+    const at = (cells, k) => (k >= 0 ? cells[k] : '');
+    const hasAcctCol = COL.acct >= 0;
+
     const txns = []; const openingByAcct = {}; let curAcct = '';
+    const openTrack = {};   // (รูปแบบ B) acct → {iso, bal, flow} ของแถวเก่าสุด → opening = bal − flow
     for (let i = 0; i < aoa.length; i++) {
       const row = aoa[i] || []; const cells = row.map(x => (x == null ? '' : x));
-      const joined = cells.map(String).join(' ');
-      const acctHit = joined.match(/[SC]\/A#\s*[A-Za-z]*\s*[\d-]+[^\d]*/);
-      if (acctHit) curAcct = cfpAccountLabel(acctHit[0]);
-      if (cells.some(x => String(x).trim() === 'ยอดยกมา')) {
-        let bal = 0; for (let k = cells.length - 1; k >= 0; k--) { const n = cfpNum(cells[k]); if (n !== 0) { bal = n; break; } }
-        if (curAcct) openingByAcct[curAcct] = (openingByAcct[curAcct] || 0) + bal;
-        continue;
+      // รูปแบบ (A): จับชื่อบัญชีจาก header block + ยอดยกมา (ข้ามถ้ามีคอลัมน์บัญชีแล้ว)
+      if (!hasAcctCol) {
+        const joined = cells.map(String).join(' ');
+        const acctHit = joined.match(/[A-Za-z]\/A#\s*[A-Za-z]*\s*[\d-]+[^\d]*/);
+        if (acctHit) curAcct = cfpAccountLabel(acctHit[0]);
+        if (cells.some(x => String(x).trim() === 'ยอดยกมา')) {
+          let bal = 0; for (let k = cells.length - 1; k >= 0; k--) { const n = cfpNum(cells[k]); if (n !== 0) { bal = n; break; } }
+          if (curAcct) openingByAcct[curAcct] = (openingByAcct[curAcct] || 0) + bal;
+          continue;
+        }
       }
-      const iso = cfpToISO(cells[0]); if (!iso) continue;
-      const withdraw = cfpNum(cells[3]), deposit = cfpNum(cells[4]);
+      const iso = cfpToISO(at(cells, COL.date)); if (!iso) continue;
+      const withdraw = cfpNum(at(cells, COL.withdraw)), deposit = cfpNum(at(cells, COL.deposit));
       if (withdraw === 0 && deposit === 0) continue;
-      const category = String(cells[8] || '').trim(), activity = String(cells[9] || '').trim();
+      const acct = hasAcctCol ? (cfpAccountLabel(at(cells, COL.acct)) || '(ไม่ระบุบัญชี)') : (curAcct || '(ไม่ระบุบัญชี)');
+      const balance = cfpNum(at(cells, COL.balance)), flow = deposit - withdraw;
+      const category = String(at(cells, COL.category) || '').trim(), activity = String(at(cells, COL.activity) || '').trim();
+      // รูปแบบ (B): จำแถวเก่าสุดต่อบัญชี เพื่อคำนวณยอดต้นงวด (ไม่มี "ยอดยกมา")
+      if (hasAcctCol && COL.balance >= 0) { const p = openTrack[acct]; if (!p || iso < p.iso) openTrack[acct] = { iso, bal: balance, flow }; }
       txns.push({
-        account: curAcct || '(ไม่ระบุบัญชี)', iso, month: cfpMonth(iso),
-        docNo: String(cells[2] || '').trim(), note: String(cells[7] || '').trim(),
+        account: acct, iso, month: cfpMonth(iso),
+        docNo: String(at(cells, COL.doc) || '').trim(), note: String(at(cells, COL.note) || '').trim(),
         category: category || '(ไม่ระบุหมวด)', actKey: cfpActKey(activity, category),
-        withdraw, deposit, balance: cfpNum(cells[5]), flow: deposit - withdraw,
+        withdraw, deposit, balance, flow,
       });
     }
+    // รูปแบบ (B): opening ต่อบัญชี = ยอดคงเหลือแถวเก่าสุด − กระแสของแถวนั้น (= ยอดก่อนรายการแรก)
+    if (hasAcctCol) Object.keys(openTrack).forEach(a => { const o = openTrack[a]; openingByAcct[a] = o.bal - o.flow; });
     let opening = 0; Object.keys(openingByAcct).forEach(k => { opening += openingByAcct[k]; });
     return { txns, opening, openingByAcct };
   }
@@ -276,6 +317,20 @@
       out.rows.push({ label, vals, total, type, actKey });
     }
     return out;
+  }
+
+  // ป้ายงวด: ถ้ารายการ (STM) ครอบคลุมเดือน "มากกว่า" ที่งบสรุประบุ → ใช้ช่วงจากรายการจริง
+  //   (กันป้ายล้าสมัย เช่น งบสรุปมีถึง พ.ค. แต่ชีตรวมทุกบัญชีลากถึง มิ.ย. → ต้องขึ้น "ถึง มิถุนายน")
+  //   ปีใส่ดิบได้ (พ.ศ./ค.ศ.) เพราะผลลัพธ์ถูกครอบด้วย cfpCeText ที่แปลง พ.ศ.→ค.ศ. อีกชั้น
+  const CFP_MONTHS_FULL = { 1: 'มกราคม', 2: 'กุมภาพันธ์', 3: 'มีนาคม', 4: 'เมษายน', 5: 'พฤษภาคม', 6: 'มิถุนายน', 7: 'กรกฎาคม', 8: 'สิงหาคม', 9: 'กันยายน', 10: 'ตุลาคม', 11: 'พฤศจิกายน', 12: 'ธันวาคม' };
+  function cfpPeriodLabel(summary, months, txns) {
+    const sumN = (summary && summary.monthLabels) ? summary.monthLabels.length : 0;
+    const yr = (txns && txns.length) ? String(txns[0].iso).slice(0, 4) : String(new Date().getFullYear());
+    if (months.length && months.length > sumN) {
+      const a = CFP_MONTHS_FULL[months[0]] || months[0], b = CFP_MONTHS_FULL[months[months.length - 1]] || months[months.length - 1];
+      return 'สำหรับงวด ' + a + ' ถึง ' + b + ' ' + yr;
+    }
+    return (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + yr) : '');
   }
 
   /* ---------- build model ---------- */
@@ -340,7 +395,7 @@
       accounts: Object.keys(accounts), interest, payroll, inflowTotal, topInflow,
       summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
       monthLabels: ((summary && summary.monthLabels) || []).map(cfpCeText),
-      periodLabel: cfpCeText((summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + new Date().getFullYear()) : '')),
+      periodLabel: cfpCeText(cfpPeriodLabel(summary, months, txns)),
     };
   }
 
@@ -1067,11 +1122,16 @@
       persist({ stm: stored.stm, summary: (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: at }).then(r => { toast && toast('บันทึกการจัดประเภทบัญชีแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); });
     }
 
-    async function readAoa(file) {
+    // อ่าน "ทุกชีต" ในไฟล์ (ไม่ใช่แค่ชีตแรก) — คืน [{name, aoa}] เพื่อให้ไฟล์เดียวที่มี
+    //   ทั้งชีตงบสรุป + ชีต "รวมทุกบัญชี" (รายการดีเทล) ใช้จบในไฟล์เดียวได้.
+    async function readSheets(file) {
       return new Promise((resolve, reject) => {
         if (!window.XLSX) { reject(new Error('ไม่พบ SheetJS — รีเฟรชหน้า')); return; }
         const r = new FileReader();
-        r.onload = e => { try { const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false }); resolve(window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false, defval: '' })); } catch (err) { reject(err); } };
+        r.onload = e => { try {
+          const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false });
+          resolve(wb.SheetNames.map(nm => ({ name: nm, aoa: window.XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, blankrows: false, defval: '' }) })));
+        } catch (err) { reject(err); } };
         r.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ')); r.readAsArrayBuffer(file);
       });
     }
@@ -1079,11 +1139,20 @@
     async function onUpload(files) { cfpEraHint = era;
       setUploading(true);
       try {
-        let stm = null, summary = null, sawStm = false;
-        for (const f of files) { const aoa = await readAoa(f); const kind = detectKind(aoa);
-          if (kind === 'stm') { stm = cfpParseStm(aoa); sawStm = true; }
-          else if (kind === 'summary') { summary = cfpParseSummary(aoa); }
-          else if (!sawStm) { const guess = cfpParseStm(aoa); if (guess.txns.length) { stm = guess; sawStm = true; } } }
+        let stm = null, summary = null;
+        // เลือก STM ที่ "มีรายการมากสุด" จากทุกชีตทุกไฟล์ → ชีต "รวมทุกบัญชี" (ครบเดือนกว่า)
+        //   ชนะชีต STM รายบัญชีเก่า/subset ที่อาจอยู่ในไฟล์เดียวกัน (เช่น Sheet1).
+        const takeStm = g => { if (g && g.txns.length && (!stm || g.txns.length > stm.txns.length)) stm = g; };
+        for (const f of files) {
+          const sheets = await readSheets(f);
+          for (const sh of sheets) {
+            const kind = detectKind(sh.aoa);
+            if (kind === 'stm') takeStm(cfpParseStm(sh.aoa));
+            else if (kind === 'summary' && !summary) summary = cfpParseSummary(sh.aoa);
+          }
+          // เผื่อไม่มีชีตไหน detect เป็น STM แต่มีรายการเดินบัญชีซ่อนอยู่ → เดาจากทุกชีต
+          if (!stm) sheets.forEach(sh => takeStm(cfpParseStm(sh.aoa)));
+        }
         if (!stm || !stm.txns.length) {
           if (summary && stored && stored.stm) { const r = await persist({ stm: stored.stm, summary, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null }); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
           else { toast && toast('ต้องมีไฟล์ STM (รายการเดินบัญชี)', 'error'); }
