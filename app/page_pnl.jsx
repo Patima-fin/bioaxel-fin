@@ -176,6 +176,53 @@ function PL_costDate(v) {
   return s;
 }
 
+// parse ชีต "ต้นทุน" (ต้นทุน/กำไรต่อเครื่อง BA รายเครื่อง) จาก workbook → [{date,item,price,machine,overhead,labor,cost,profit}]
+// ใช้ร่วม: parseWorkbook (ไฟล์งบรวม) + handleCostUpload (อัปต้นทุนแยกไฟล์)
+function PL_parseCostBA(wb, X) {
+  const out = [];
+  try {
+    const csn = wb.SheetNames.find(n => String(n).trim() === 'ต้นทุน');
+    if (!csn) return out;
+    const num = (v) => {
+      if (v == null || v === '') return 0;
+      if (typeof v === 'number') return v;
+      let s = String(v).trim(), neg = false;
+      if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+      s = s.replace(/[^0-9.\-]/g, '');
+      const n = Number(s);
+      return isNaN(n) ? 0 : (neg ? -Math.abs(n) : n);
+    };
+    const caoa = X.utils.sheet_to_json(wb.Sheets[csn], { header: 1, blankrows: false });
+    let chi = -1;
+    for (let i = 0; i < Math.min(caoa.length, 12); i++) {
+      const r = (caoa[i] || []).map(x => String(x == null ? '' : x));
+      if (r.some(c => /ราคาขาย/.test(c)) && r.some(c => /ต้นทุนรวม/.test(c))) { chi = i; break; }
+    }
+    if (chi < 0) return out;
+    const hdr = (caoa[chi] || []).map(x => String(x == null ? '' : x).trim());
+    const fc = (re) => hdr.findIndex(h => re.test(h));
+    const col = {
+      date: fc(/ว\.?ด\.?ป|วันที่/), item: fc(/รายการ/), price: fc(/ราคาขาย/),
+      machine: fc(/ต้นทุนเครื่อง/), overhead: fc(/โสหุ้ย/), labor: fc(/ค่าแรง/),
+      cost: fc(/ต้นทุนรวม/), profit: fc(/กำไร|ขาดทุน/),
+    };
+    const cv = (row, c) => (c >= 0 && row[c] != null) ? row[c] : '';
+    for (let i = chi + 1; i < caoa.length; i++) {
+      const row = caoa[i] || [];
+      const item = String(cv(row, col.item)).trim();
+      if (!item || /^รวม|^total/i.test(item)) continue;   // ข้ามแถวว่าง/แถวรวม
+      const price = num(cv(row, col.price)), cost = num(cv(row, col.cost));
+      if (!price && !cost) continue;
+      out.push({
+        date: PL_costDate(cv(row, col.date)), item,
+        price, machine: num(cv(row, col.machine)), overhead: num(cv(row, col.overhead)),
+        labor: num(cv(row, col.labor)), cost, profit: num(cv(row, col.profit)),
+      });
+    }
+  } catch (_) { return out; }
+  return out;
+}
+
 // Sample data (design mock) — used ONLY when ฐาน DATA can't be read yet.
 const PL_SAMPLE = {
   year: 2569,
@@ -638,6 +685,7 @@ function PnLPage({ data, setData, toast }) {
   const [uploadOpen, setUploadOpen] = plState(false);   // upload modal
   const [viewMode, setViewMode]     = plState('month'); // 'month' | 'quarter'
   const fileInputRef = plRef(null);
+  const costInputRef = plRef(null);   // อัปโหลดต้นทุนเครื่องแยกไฟล์
 
   const userCanEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
 
@@ -808,40 +856,7 @@ function PnLPage({ data, setData, toast }) {
         // ── ข้อมูลเสริม: ชีต "ต้นทุน" (ต้นทุน/กำไรต่อเครื่อง BA รายเครื่อง) ──
         // ตารางแยกต่างหากในไฟล์งบ (รายเครื่อง: ราคาขาย/ต้นทุนเครื่อง/โสหุ้ย/ค่าแรง/กำไร)
         // ผลรวม "ต้นทุนรวม" = บรรทัด "ต้นทุนขาย-เครื่อง BA (5101-01)" ในงบ → โชว์เป็นการ์ดกดดูได้
-        let costBA = [];
-        try {
-          const csn = wb.SheetNames.find(n => String(n).trim() === 'ต้นทุน');
-          if (csn) {
-            const caoa = aoaOf(csn);
-            let chi = -1;
-            for (let i = 0; i < Math.min(caoa.length, 12); i++) {
-              const r = (caoa[i] || []).map(x => String(x == null ? '' : x));
-              if (r.some(c => /ราคาขาย/.test(c)) && r.some(c => /ต้นทุนรวม/.test(c))) { chi = i; break; }
-            }
-            if (chi >= 0) {
-              const hdr = (caoa[chi] || []).map(x => String(x == null ? '' : x).trim());
-              const fc = (re) => hdr.findIndex(h => re.test(h));
-              const col = {
-                date: fc(/ว\.?ด\.?ป|วันที่/), item: fc(/รายการ/), price: fc(/ราคาขาย/),
-                machine: fc(/ต้นทุนเครื่อง/), overhead: fc(/โสหุ้ย/), labor: fc(/ค่าแรง/),
-                cost: fc(/ต้นทุนรวม/), profit: fc(/กำไร|ขาดทุน/),
-              };
-              const cv = (row, c) => (c >= 0 && row[c] != null) ? row[c] : '';
-              for (let i = chi + 1; i < caoa.length; i++) {
-                const row = caoa[i] || [];
-                const item = String(cv(row, col.item)).trim();
-                if (!item || /^รวม|^total/i.test(item)) continue;   // ข้ามแถวว่าง/แถวรวม
-                const price = num(cv(row, col.price)), cost = num(cv(row, col.cost));
-                if (!price && !cost) continue;
-                costBA.push({
-                  date: PL_costDate(cv(row, col.date)), item,
-                  price, machine: num(cv(row, col.machine)), overhead: num(cv(row, col.overhead)),
-                  labor: num(cv(row, col.labor)), cost, profit: num(cv(row, col.profit)),
-                });
-              }
-            }
-          }
-        } catch (_) { costBA = []; }
+        const costBA = PL_parseCostBA(wb, X);
 
         resolve({ accounts, monthsPresent, year, monthsLabel, costBA });
       } catch (err) { reject(err); }
@@ -849,6 +864,30 @@ function PnLPage({ data, setData, toast }) {
     reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
     reader.readAsArrayBuffer(f);
   });
+
+  // อัปโหลดต้นทุนเครื่องแยกไฟล์ (ไฟล์มีเฉพาะชีต "ต้นทุน") → อัปเดต override pnl.costBA เท่านั้น ไม่แตะงบ P&L (pnlBase)
+  const handleCostUpload = (f) => {
+    if (!f) return;
+    if (!window.XLSX) { toast('ไม่พบไลบรารี SheetJS — รีเฟรชหน้า'); return; }
+    setBusy(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = window.XLSX.read(e.target.result, { type: 'array', cellDates: false });
+        const rows = PL_parseCostBA(wb, window.XLSX);
+        if (!rows.length) { toast('ไม่พบข้อมูลต้นทุนในไฟล์ — ต้องมีชีตชื่อ “ต้นทุน” + คอลัมน์ ราคาขาย/ต้นทุนรวม'); setBusy(false); return; }
+        if (window.WTPOverride) {
+          const now = new Date().toISOString().slice(0, 10);
+          WTPOverride.setRaw('pnl.costBA', JSON.stringify({ rows, monthsLabel: (costBA && costBA.monthsLabel) || '', updatedAt: now }));
+        }
+        toast('อัปโหลดต้นทุนเครื่องสำเร็จ ' + rows.length + ' รายการ — กำลังรีเฟรช');
+        setTimeout(loadData, 500);
+      } catch (err) { toast('ผิดพลาด: ' + (err && err.message || err)); }
+      finally { setBusy(false); }
+    };
+    reader.onerror = () => { toast('อ่านไฟล์ไม่สำเร็จ'); setBusy(false); };
+    reader.readAsArrayBuffer(f);
+  };
 
   const handleVerify = async () => {
     if (!file) { toast('โปรดเลือกไฟล์ก่อนนำเข้า'); return; }
@@ -1119,6 +1158,16 @@ function PnLPage({ data, setData, toast }) {
               }} title="อัปโหลดชีต PL (งบเปรียบเทียบรายเดือน) — แทนที่ข้อมูลทั้งหมด">
                 <Icon name="upload" size={13} /> อัปโหลดข้อมูล
               </button>
+            )}
+            {userCanEdit && (
+              <>
+                <button onClick={() => costInputRef.current && costInputRef.current.click()} style={pnlHeroBtn}
+                  title='อัปโหลดต้นทุนเครื่อง BA แยกไฟล์ (ไฟล์มีชีต "ต้นทุน") — อัปเดตเฉพาะการ์ดต้นทุน ไม่แตะงบ P&L'>
+                  <Icon name="upload" size={13} /> อัปต้นทุนเครื่อง
+                </button>
+                <input ref={costInputRef} type="file" accept=".xlsx,.xls" hidden
+                  onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) handleCostUpload(f); e.target.value = ''; }} />
+              </>
             )}
             <button onClick={() => setMapOpen(true)} style={pnlHeroBtn}>
               <Icon name="filter" size={13} /> ผังการจัดกลุ่ม
