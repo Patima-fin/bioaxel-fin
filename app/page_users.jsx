@@ -13,6 +13,21 @@ const ROLE_LABELS = {
   owner:   { label: 'Owner',   color: 'b-violet', desc: 'ดูได้ทุกหน้า แต่แก้/ลบไม่ได้' },
 };
 
+// ─── helpers: "หน้าที่เข้าถึงได้" รายคน (ฟิลด์ `pages` = CSV, ว่าง = ตาม role) ──
+// กลุ่ม/ชื่อหน้า มาจาก window.WTP_PAGE_GROUPS ใน app.jsx — เพิ่มหน้าใหม่ที่นั่นที่เดียว
+const uPageGroups = () => window.WTP_PAGE_GROUPS || [];
+const uParsePages = (v) => (window.wtpParsePages ? window.wtpParsePages(v) : []);
+const uRolePages  = (role) => (window.WTPAuth && window.WTPAuth.rolePages) ? window.WTPAuth.rolePages(role) : [];
+// ตัดหน้ากลุ่ม "ระบบ" ออกถ้า role ไม่ใช่ manager — กันค่าค้างตอนลดสิทธิ์ manager→staff
+// (WTPAuth บล็อกให้อยู่แล้ว แต่เก็บ CSV ให้ตรงความจริงจะได้ไม่หลอกตาคนอ่าน)
+const uStripPages = (pages, role) => {
+  const keys = uParsePages(pages);
+  if (!keys.length || role === 'manager') return keys.join(',');
+  const mo = new Set(uPageGroups().filter(g => g.managerOnly)
+    .reduce((a, g) => a.concat(g.items.map(it => it[0])), []));
+  return keys.filter(k => !mo.has(k)).join(',');
+};
+
 // ─── หน่วยงาน (department) — ตัวเลือกมาตรฐาน · "การเงิน" ใช้กรอง dropdown "ผู้รับผิดชอบ"
 //   หน้ากระทบยอดธนาคาร (wtpUsersByDept('finance')) · เก็บเป็น label ไทยตรงๆ ──
 const DEPARTMENTS = ['การเงิน', 'บัญชี', 'ธุรการ', 'จัดซื้อ', 'ผู้บริหาร', 'อื่นๆ'];
@@ -33,6 +48,8 @@ function UsersPage({ data, setData, toast }) {
 
   const sheetUsers   = (data && data.users) || [];
   const configUsers  = (window.WTP_CONFIG && window.WTP_CONFIG.USERS) || [];
+  // login ผ่าน Supabase Auth → ช่อง password ในตารางนี้ไม่ได้ใช้ตรวจ login อีกแล้ว
+  const authViaSupabase = !!(window.WTP_CONFIG && window.WTP_CONFIG.USE_SUPABASE_AUTH);
 
   // Show Sheet users + config users (read-only). Sheet users have actual id.
   // _source values: 'sheet' (Sheet only) | 'config' (config only) | 'both' (มีทั้งใน Sheet และ config.js — มี bootstrap fallback)
@@ -110,10 +127,13 @@ function UsersPage({ data, setData, toast }) {
   const onlineCount = presenceRows.filter(p => p.online).length;
 
   // ── CRUD handlers ──────────────────────────────────────────────────────
-  const save = (row) => {
+  const save = (row0) => {
+    const row = { ...row0, pages: uStripPages(row0.pages, row0.role) };
     // Validate
     if (!row.username || !row.username.trim()) { toast('กรุณากรอก username'); return; }
-    if (!row.password) { toast('กรุณากรอก password'); return; }
+    // ★ USE_SUPABASE_AUTH:true → รหัสผ่านอยู่ฝั่ง Supabase Auth (ช่องนี้ไม่ได้ใช้ login แล้ว)
+    //   → ห้ามบังคับ ไม่งั้น user ที่สร้างผ่าน auth-setup (ไม่มีรหัสในตาราง) จะแก้สิทธิ์ไม่ได้เลย
+    if (!authViaSupabase && !row.password) { toast('กรุณากรอก password'); return; }
     if (!row.role) { toast('กรุณาเลือก role'); return; }
 
     // Prevent duplicate username (unless editing same row)
@@ -192,7 +212,7 @@ function UsersPage({ data, setData, toast }) {
     } else { doImport([]); }
   };
 
-  const emptyUser = { username: '', password: '', displayName: '', role: 'staff', active: 'true', department: '', note: '' };
+  const emptyUser = { username: '', password: '', displayName: '', role: 'staff', active: 'true', department: '', note: '', pages: '' };
 
   return (
     <div className="page">
@@ -205,12 +225,19 @@ function UsersPage({ data, setData, toast }) {
         </div>
         <div className="page-head-r">
           <ExportButton
-            rows={filtered.map(u => ({ ...u, password: '••••••' }))}   // mask passwords on export
+            rows={filtered.map(u => ({
+              ...u,
+              password: '••••••',   // mask passwords on export
+              _pages: uParsePages(u.pages).length
+                ? uParsePages(u.pages).map(k => (window.WTP_PAGE_LABEL || {})[k] || k).join(', ')
+                : 'ตาม Role',
+            }))}
             columns={[
               { key: 'username',    label: 'Username' },
               { key: 'displayName', label: 'ชื่อผู้ใช้' },
               { key: 'department',  label: 'หน่วยงาน' },
               { key: 'role',        label: 'Role' },
+              { key: '_pages',      label: 'หน้าที่เห็น' },
               { key: 'active',      label: 'สถานะ' },
               { key: 'note',        label: 'หมายเหตุ' },
             ]}
@@ -301,6 +328,7 @@ function UsersPage({ data, setData, toast }) {
                   { k: 'displayName', label: 'ชื่อผู้ใช้' },
                   { k: 'department',  label: 'หน่วยงาน',  w: 150 },
                   { k: 'role',        label: 'Role',      w: 130 },
+                  { k: null,          label: 'หน้าที่เห็น', w: 150 },
                   { k: null,          label: 'Password',  w: 180 },
                   { k: '_source',     label: 'แหล่ง',     w: 90 },
                   { k: null,          label: '',          w: 110 },
@@ -317,7 +345,7 @@ function UsersPage({ data, setData, toast }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} style={{ padding: 36, textAlign: 'center' }} className="muted">ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข</td></tr>
+                <tr><td colSpan={8} style={{ padding: 36, textAlign: 'center' }} className="muted">ไม่พบผู้ใช้ที่ตรงกับเงื่อนไข</td></tr>
               )}
               {filtered.map(u => {
                 const meta = ROLE_LABELS[u.role] || { label: u.role || '—', color: 'b-gray' };
@@ -336,6 +364,20 @@ function UsersPage({ data, setData, toast }) {
                     </td>
                     <td>
                       <Badge kind={meta.color} dot={false}>{meta.label}</Badge>
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {(() => {
+                        const picked = uParsePages(u.pages);
+                        if (!picked.length) {
+                          return <span className="muted" title={'ตามสิทธิ์ Role — ' + (meta.desc || '')}>ตาม Role · {uRolePages(u.role).length} หน้า</span>;
+                        }
+                        const names = picked.map(k => (window.WTP_PAGE_LABEL || {})[k] || k);
+                        return (
+                          <span title={names.join('\n')} style={{ color: 'var(--brand-700)', fontWeight: 600, cursor: 'help' }}>
+                            เลือกเอง · {picked.length} หน้า
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={{ fontFamily: 'ui-monospace', fontSize: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -381,7 +423,12 @@ function UsersPage({ data, setData, toast }) {
       <div className="card" style={{ marginTop: 14, padding: 14, background: '#fffbeb', borderLeft: '4px solid #f6ad55', fontSize: 12, color: 'var(--ink-700)' }}>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>💡 หมายเหตุ</div>
         <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
-          <li>ผู้ใช้ที่อยู่ใน <code>config.js</code> (สีส้ม) แก้ใน UI ไม่ได้ — ใช้เป็น bootstrap account สำหรับ first-time login</li>
+          <li><b>หน้าที่เห็น</b> — ค่าเริ่มต้นคือ "ตาม Role"; กด <b>แก้ไข</b> → <b>เลือกเอง</b> เพื่อติ๊กเป็นรายหน้าให้คนนั้นโดยเฉพาะ ·
+              ผู้ใช้ที่เปิดเว็บค้างอยู่จะเห็นผลภายใน ~2 นาที (รอบ sync) ไม่ต้อง logout</li>
+          <li><b>Role ยังคุมสิทธิ์แก้ไขเสมอ</b> — การติ๊กเปิดหน้าให้ Viewer/Owner จะได้แค่ "เห็น" ไม่ได้สิทธิ์แก้
+              (ฝั่งฐานข้อมูลกันด้วย RLS ตาม role อีกชั้น) · หน้ากลุ่ม <b>ระบบ</b> เปิดให้เฉพาะ Manager</li>
+          <li>ผู้ใช้ที่อยู่ใน <code>config.js</code> (สีส้ม) แก้ใน UI ไม่ได้ — ใช้เป็น bootstrap account สำหรับ first-time login
+              (ตั้งสิทธิ์รายหน้าไม่ได้ ต้องนำเข้าชีตก่อน)</li>
           <li>ผู้ใช้ใน Sheet (สีเขียว) สามารถแก้/ลบได้ที่นี่</li>
           <li>ผู้ใช้ที่มี <b>Sheet + config.js</b> (เขียว+ส้ม) = login ได้แน่นอนทุกเครื่องแม้ Sheet ยังไม่ sync</li>
           <li>การเปลี่ยน password ต้องให้ user logout แล้ว login ใหม่จึง active</li>
@@ -401,10 +448,100 @@ function UsersPage({ data, setData, toast }) {
   );
 }
 
+// ─── ตัวเลือก "หน้าที่เข้าถึงได้" รายคน ─────────────────────────────────────
+//  2 โหมด: "ตาม Role" (pages ว่าง — ค่าเริ่มต้นเดิม) · "เลือกเอง" (ติ๊กทีละหน้า)
+//  ⚠️ หน้ากลุ่ม "ระบบ" (Users/Audit/Backup) เลือกให้ role ที่ไม่ใช่ manager ไม่ได้ —
+//     WTPAuth.canViewPage บล็อกไว้เป็นพื้นบังคับ ต่อให้ติ๊กมาก็ไม่เปิด
+function UserPagePicker({ role, value, onChange }) {
+  const isManager = role === 'manager';
+  const groups  = uPageGroups().filter(g => !g.managerOnly || isManager);
+  const allKeys = uMemo(() => groups.reduce((a, g) => a.concat(g.items.map(it => it[0])), []), [isManager]);
+  const sel     = uMemo(() => new Set(uParsePages(value)), [value]);
+  const custom  = sel.size > 0;
+
+  // เขียนกลับเป็น CSV เรียงตามลำดับในเมนูเสมอ (อ่านง่าย + ไม่ขึ้นกับลำดับที่กดติ๊ก)
+  const emit = (next) => onChange(allKeys.filter(k => next.has(k)).join(','));
+  const toggle = (k) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); emit(n); };
+  const setGroup = (g, on) => {
+    const n = new Set(sel);
+    g.items.forEach(([k]) => on ? n.add(k) : n.delete(k));
+    emit(n);
+  };
+
+  const chip = (label, onClick, active) => (
+    <button type="button" onClick={onClick}
+      style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, cursor: 'pointer',
+               border: '1px solid ' + (active ? 'var(--brand-500)' : 'var(--ink-200)'),
+               background: active ? 'var(--brand-50)' : 'var(--surface)',
+               color: active ? 'var(--brand-700)' : 'var(--ink-600)',
+               fontWeight: active ? 600 : 400 }}>{label}</button>
+  );
+
+  return (
+    <div>
+      {/* โหมด */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: custom ? 10 : 0, flexWrap: 'wrap' }}>
+        {chip('ตาม Role (ค่าเริ่มต้น)', () => onChange(''), !custom)}
+        {/* เปลี่ยนมา "เลือกเอง" → ตั้งต้นด้วยหน้าที่ role นี้เห็นอยู่แล้ว จะได้ตัดออกทีละหน้าได้เลย */}
+        {chip('เลือกเอง', () => onChange(uRolePages(role).join(',')), custom)}
+        <span className="muted" style={{ fontSize: 11, alignSelf: 'center' }}>
+          {custom
+            ? `เลือกไว้ ${sel.size} หน้า จาก ${allKeys.length} หน้า`
+            : `เห็น ${uRolePages(role).length} หน้า ตามสิทธิ์ของ Role นี้`}
+        </span>
+      </div>
+
+      {!custom ? (
+        <div className="muted" style={{ fontSize: 11.5 }}>
+          ใช้หน้าที่มากับ Role — {(ROLE_LABELS[role] || {}).desc || ''}
+        </div>
+      ) : (
+        <div style={{ border: '1px solid var(--ink-200)', borderRadius: 10, padding: 10,
+                      maxHeight: 260, overflowY: 'auto', background: 'var(--ink-50)' }}>
+          {groups.map(g => {
+            const keys = g.items.map(it => it[0]);
+            const on   = keys.filter(k => sel.has(k)).length;
+            return (
+              <div key={g.key} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-500)', letterSpacing: 0.3 }}>
+                    {g.label} <span className="muted" style={{ fontWeight: 400 }}>({on}/{keys.length})</span>
+                  </span>
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '1px 7px', fontSize: 10.5 }}
+                    onClick={() => setGroup(g, on < keys.length)}>
+                    {on < keys.length ? 'เลือกทั้งกลุ่ม' : 'ล้างทั้งกลุ่ม'}
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 2 }}>
+                  {g.items.map(([k, label]) => (
+                    <label key={k} title={k}
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+                               padding: '4px 6px', borderRadius: 6, fontSize: 12.5,
+                               background: sel.has(k) ? 'var(--brand-50)' : 'transparent' }}>
+                      <input type="checkbox" checked={sel.has(k)} onChange={() => toggle(k)} style={{ cursor: 'pointer' }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {!isManager && (
+            <div className="muted" style={{ fontSize: 11, borderTop: '1px solid var(--ink-200)', paddingTop: 7 }}>
+              หน้ากลุ่ม <b>ระบบ</b> (จัดการผู้ใช้ · Audit Log · สำรองข้อมูล) เปิดให้เฉพาะ Role = Manager เท่านั้น
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Edit/Add modal ───────────────────────────────────────────────────────
 function UserEditModal({ row, onSave, onClose }) {
   const [draft, setDraft] = uState(null);
   const [showPw, setShowPw] = uState(false);
+  const authViaSupabase = !!(window.WTP_CONFIG && window.WTP_CONFIG.USE_SUPABASE_AUTH);
 
   uEffect(() => { setDraft(row ? { ...row } : null); }, [row]);
   if (!row || !draft) return null;
@@ -445,12 +582,12 @@ function UserEditModal({ row, onSave, onClose }) {
             placeholder="เช่น สมหญิง การเงิน" />
         </div>
         <div className="field" style={{ gridColumn: '1/-1' }}>
-          <label>Password *</label>
+          <label>Password {authViaSupabase ? '' : '*'}</label>
           <div style={{ position: 'relative' }}>
             <input className="input" type={showPw ? 'text' : 'password'}
               value={draft.password || ''}
               onChange={e => set('password', e.target.value)}
-              placeholder="อย่างน้อย 6 ตัวอักษร"
+              placeholder={authViaSupabase ? 'ไม่ต้องกรอก — ไม่ได้ใช้ล็อกอิน' : 'อย่างน้อย 6 ตัวอักษร'}
               style={{ paddingRight: 70 }} />
             <button type="button" onClick={() => setShowPw(v => !v)}
               style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
@@ -458,6 +595,12 @@ function UserEditModal({ row, onSave, onClose }) {
               {showPw ? 'ซ่อน' : 'แสดง'}
             </button>
           </div>
+          {authViaSupabase && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
+              ระบบนี้ล็อกอินผ่าน Supabase Auth — รหัสผ่านเก็บฝั่งเซิร์ฟเวอร์ ช่องนี้ไม่มีผลกับการล็อกอิน
+              (ตั้ง/เปลี่ยนรหัสที่ <code>tools/supabase-auth-setup.html</code>)
+            </div>
+          )}
         </div>
         <div className="field">
           <label>สถานะการใช้งาน</label>
@@ -477,6 +620,11 @@ function UserEditModal({ row, onSave, onClose }) {
               <option value={draft.department}>{draft.department}</option>}
           </select>
           <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>ฝ่าย "การเงิน" จะเลือกเป็นผู้รับผิดชอบในหน้ากระทบยอดธนาคารได้</div>
+        </div>
+        <div className="field" style={{ gridColumn: '1/-1' }}>
+          <label>หน้าที่เข้าถึงได้</label>
+          <UserPagePicker role={draft.role || 'staff'} value={draft.pages || ''}
+            onChange={v => set('pages', v)} />
         </div>
         <div className="field" style={{ gridColumn: '1/-1' }}>
           <label>หมายเหตุ</label>

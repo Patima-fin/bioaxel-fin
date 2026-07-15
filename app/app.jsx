@@ -31,12 +31,81 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "sidebarStyle": "filled"
 }/*EDITMODE-END*/;
 
+// ─── Page catalog — แหล่งความจริงเดียวของ "หน้าทั้งหมด + กลุ่มในเมนู" ─────────
+// ใช้ร่วมกัน 3 ที่: (ก) เมนู sidebar (ข) ตัวช้อยส์ "เลือกหน้าที่เข้าถึงได้" รายคน
+// ในหน้า Users (ค) ลำดับ fallback ตอน redirect. เพิ่มหน้าใหม่ → เพิ่มที่นี่ที่เดียว
+// (แล้วต่อ route + case ใน App ตามปกติ) ไม่งั้นหน้าใหม่จะไม่โผล่ในตัวเลือกสิทธิ์.
+const PAGE_GROUPS = [
+  { key: 'dash', label: 'แดชบอร์ด', items: [
+    ['home',             'หน้าหลัก',              'home'],
+    ['daily',            'รายงานรับเงินรายวัน',   'daily'],
+    ['warroom1',         'War Room · รายรับ',      'receivables'],
+    ['warroom2',         'War Room · รายปี',       'forecast'],
+    ['cashflow',         'Weekly Forecast',        'chart'],
+    ['cashflow_present', 'พรีเซนต์ Cash Flow',     'chart'],
+    ['pnl',              'งบกำไรขาดทุน (P&L)',    'forecast'],
+    ['balance_sheet',    'งบแสดงฐานะการเงิน',      'money'],
+    ['budget',           'Budget Control Center',  'projects'],
+    ['investor',         'Investor Dashboard',     'chart'],
+  ] },
+  { key: 'reports', label: 'รายงาน / วิเคราะห์', items: [
+    ['cashflow_forecast', 'ประมาณการรายรับ-รายจ่าย', 'chart'],
+    ['recurring',         'ค่าใช้จ่ายประจำ',        'forecast'],
+    ['debt',              'ภาระหนี้ทั้งหมด',        'money'],
+    ['debt_ledger',       'Debt Ledger · ดอกเบี้ย', 'money'],
+    ['iv_report',         'รายงานติดตาม IV',        'invoice'],
+    ['receipts',          'ประวัติรับเงิน',          'receivables'],
+    ['bank_diary',        'Bank Daily',             'bank'],
+    ['bank_recon',        'กระทบยอดธนาคาร',         'bank'],
+    ['interest_calc',     'คำนวณดอกเบี้ย',          'money'],
+    ['sts_calc',          'STS Calculator',         'money'],
+    ['sts_workflow',      'STS Workflow',           'invoice'],
+  ] },
+  { key: 'manage', label: 'จัดการข้อมูล', items: [
+    ['projects',      'โครงการ',          'projects'],
+    ['invoices',      'ลูกหนี้คงค้าง',    'invoice'],
+    ['checks',        'เช็คจ่ายล่วงหน้า', 'money'],
+    ['data_forecast', 'ประมาณการรายจ่าย', 'forecast'],
+    ['data_bank',     'บัญชีธนาคาร',      'bank'],
+    ['data_pv',       'ใบสำคัญจ่าย',      'money'],
+    ['data_payable',  'เจ้าหนี้คงค้าง',   'arrow_up'],
+    ['daily_balance', 'บันทึกยอดธนาคาร',  'bank'],
+  ] },
+  // ระบบ — manager เท่านั้น (บังคับใน canViewPage — เลือกให้ role อื่นไม่ได้)
+  { key: 'system', label: 'ระบบ', managerOnly: true, items: [
+    ['audit_log', 'Audit Log',            'settings'],
+    ['backup',    'สำรอง / กู้คืนข้อมูล', 'settings'],
+    ['users',     'จัดการผู้ใช้',         'settings'],
+  ] },
+];
+const PAGE_ORDER   = PAGE_GROUPS.reduce((a, g) => a.concat(g.items.map(it => it[0])), []);
+const PAGE_KEY_SET = new Set(PAGE_ORDER);
+const PAGE_LABEL   = {};
+PAGE_GROUPS.forEach(g => g.items.forEach(([k, label]) => { PAGE_LABEL[k] = label; }));
+const MANAGER_ONLY_PAGES = new Set(PAGE_GROUPS
+  .filter(g => g.managerOnly)
+  .reduce((a, g) => a.concat(g.items.map(it => it[0])), []));
+
+// ─── "หน้าที่เลือกเอง" รายคน ────────────────────────────────────────────────
+// เก็บเป็น CSV string ในฟิลด์ `pages` ของแถว users (สตริงล้วน → sync ผ่าน jsonb
+// ได้เหมือนฟิลด์อื่น เช่น active:'true'). ว่าง = ไม่กำหนดเอง → ใช้ตาม role.
+// รับทั้ง array และ string เผื่อ backend คืนคนละรูป.
+function wtpParsePages(raw) {
+  const arr = Array.isArray(raw) ? raw : String(raw == null ? '' : raw).split(',');
+  return arr.map(s => String(s).trim()).filter(s => PAGE_KEY_SET.has(s));
+}
+function wtpPagesToStr(raw) { return wtpParsePages(raw).join(','); }
+
 // ─── Role-based permission system ──────────────────────────────────────────
 //
 // Routes accessible per role + action flags. Read via window.WTPAuth.* helpers
 // from any page. Role is set at login (in handleLogin) and persists in the
 // session object in localStorage; it never changes mid-session so a simple
 // global-object pattern is enough (no Context / re-render churn needed).
+//
+// ★ role = ค่าตั้งต้นของ "หน้าที่เห็น" + เป็นตัวคุม "สิทธิ์แก้ไข" (canEdit/canDelete/…)
+//   เสมอ. ถ้า manager ตั้ง `pages` (เลือกเอง) ให้ user คนไหน → รายการนั้นชนะเฉพาะ
+//   เรื่อง "หน้าที่เห็น" ส่วนสิทธิ์แก้ไขยังอิง role เดิม.
 const ROLE_PERMS = {
   // ผู้บริหาร — เห็นเฉพาะ Dashboard (รายงานรับเงินรายวัน + War Room) — ไม่เห็นประมาณการ
   viewer: {
@@ -59,26 +128,45 @@ const ROLE_PERMS = {
     canEdit: false, canDelete: false, canApprove: false, canManageUsers: false,
   },
 };
+function _getSession() {
+  try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch { return null; }
+}
 function _getRole() {
-  try {
-    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
-    return (s && s.role) || 'viewer';
-  } catch { return 'viewer'; }
+  const s = _getSession();
+  return (s && s.role) || 'viewer';
 }
 function _getPerms(role) { return ROLE_PERMS[role] || ROLE_PERMS.viewer; }
+// หน้าที่ manager เลือกไว้ให้ user คนนี้ — null = ไม่ได้กำหนด → ใช้ตาม role
+// (session.pages ถูกเติมจากแถว users ตอน sync — ดู effect ใน App)
+function _getCustomPages() {
+  const list = wtpParsePages((_getSession() || {}).pages);
+  return list.length ? new Set(list) : null;
+}
 window.WTPAuth = {
   role() { return _getRole(); },
   can(action) { return _getPerms(_getRole())[action] === true; },
+  // หน้าที่ role นี้เห็นตามค่าตั้งต้น (ยังไม่คิดรายการที่เลือกเอง) — หน้า Users ใช้ตั้งค่าเริ่มต้นให้ช่องติ๊ก
+  rolePages(role) {
+    const p = _getPerms(role || _getRole());
+    if (p.pages === '*') return PAGE_ORDER.filter(k => !(p.excludePages && p.excludePages.has(k)));
+    return PAGE_ORDER.filter(k => p.pages.has(k));
+  },
+  hasCustomPages() { return !!_getCustomPages(); },
   canViewPage(route) {
     const p = _getPerms(_getRole());
+    // ★ พื้นบังคับ: หน้ากลุ่ม "ระบบ" ต้องเป็น manager เสมอ — รายการที่เลือกเองข้ามข้อนี้ไม่ได้
+    if (MANAGER_ONLY_PAGES.has(route) && p.canManageUsers !== true) return false;
+    const custom = _getCustomPages();
+    if (custom) return custom.has(route);
     if (p.pages === '*') return !p.excludePages || !p.excludePages.has(route);
     return p.pages.has(route);
   },
-  // First page this role is allowed to see — used for redirecting after login
+  // First page this user is allowed to see — used for redirecting after login
   firstAllowedPage(allRoutes) {
-    return allRoutes.find(r => this.canViewPage(r)) || 'daily';
+    return (allRoutes || PAGE_ORDER).find(r => this.canViewPage(r)) || 'daily';
   },
 };
+Object.assign(window, { WTP_PAGE_GROUPS: PAGE_GROUPS, WTP_PAGE_LABEL: PAGE_LABEL, wtpParsePages, wtpPagesToStr });
 
 // ★ Loading state กลางจอ — โชว์ระหว่างดึงข้อมูลจาก server รอบแรก (แทนหน้าว่าง/ศูนย์)
 function DataLoadingState() {
@@ -460,21 +548,39 @@ function App() {
     setRoute(r);
   };
 
+  // ── เติม "หน้าที่เลือกเอง" + ตั้งค่าเตือน จากแถว users เข้า session ──────────
+  // Supabase Auth (Phase 4) คืนแค่ username/displayName/role จาก JWT — ฟิลด์ที่ manager
+  // ตั้งในหน้า Users (pages, notifyDailyBalance) อยู่ในตาราง `users` เท่านั้น → ต้อง
+  // merge เข้ามาเองหลังข้อมูล sync ถึง WTPAuth.canViewPage (อ่าน session) จะเห็น.
+  // ★ ห้ามทับ `role` — role จาก JWT คือตัวจริงที่ RLS ใช้; ถ้าแถวในตารางไม่ตรงจะกลาย
+  //   เป็น UI โชว์สิทธิ์ที่ server ไม่ให้ → กดแล้ว error งงๆ.
+  // ผลพลอยได้: manager แก้สิทธิ์ → เครื่องปลายทางเห็นผลใน ~2 นาที (รอบ sync) ไม่ต้อง re-login.
+  aEffect(() => {
+    if (!isLoggedIn || !currentUser) return;
+    const uname = String(currentUser.username || '').trim().toLowerCase();
+    if (!uname) return;
+    const row = (data.users || []).find(u => String((u && u.username) || '').trim().toLowerCase() === uname);
+    if (!row) return;   // ไม่มีแถวในตาราง (เช่น bootstrap config user) → คงสิทธิ์ตาม role
+    const nextPages  = wtpPagesToStr(row.pages);
+    const nextNotify = String(row.notifyDailyBalance || '');
+    if (nextPages === wtpPagesToStr(currentUser.pages) &&
+        nextNotify === String(currentUser.notifyDailyBalance || '')) return;   // เหมือนเดิม → เลิก (กัน loop)
+    const merged = { ...currentUser, pages: nextPages, notifyDailyBalance: nextNotify };
+    try { localStorage.setItem('bio-session', JSON.stringify(merged)); } catch (_) {}
+    setCurrentUser(merged);
+  }, [data.users, isLoggedIn, currentUser]);
+
   // Route guard — if user can't view current route, redirect to first allowed page
   aEffect(() => {
     if (!isLoggedIn || !window.WTPAuth) return;
     if (!window.WTPAuth.canViewPage(route)) {
-      // Pull routes object below — at this point it's not defined yet, fallback inline
-      const order = ['home','daily','warroom1','warroom2','cashflow','cashflow_present','pnl','balance_sheet','budget','debt','debt_ledger',
-                     'iv_report','receipts','bank_diary','interest_calc','sts_calc','sts_workflow',
-                     'projects','invoices','checks','data_forecast','data_bank','data_pv','data_payable'];
-      const allowed = window.WTPAuth.firstAllowedPage(order);
+      const allowed = window.WTPAuth.firstAllowedPage(PAGE_ORDER);
       if (allowed !== route) {
         window.location.hash = '#' + allowed;
         setRoute(allowed);
       }
     }
-  }, [route, isLoggedIn]);
+  }, [route, isLoggedIn, currentUser]);
 
   // Apply tweaks to CSS vars
   aEffect(() => {
@@ -801,74 +907,22 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
         )}
       </div>
 
-      {/* ── Scrollable nav area ── */}
+      {/* ── Scrollable nav area — สร้างจาก PAGE_GROUPS (แหล่งความจริงเดียวกับตัวเลือกสิทธิ์ในหน้า Users) ── */}
       <nav style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingBottom: 6 }}>
-        <div>
-          <div className="sb-section" style={secHdrStyle} onClick={() => tog('dash')}>
-            <span>แดชบอร์ด</span>{chevron(sec.dash)}
-          </div>
-          {(sec.dash || collapsed) && navItems([
-            ['home',     'หน้าหลัก',               'home'],
-            ['daily',    'รายงานรับเงินรายวัน',    'daily'],
-            ['warroom1', 'War Room · รายรับ',       'receivables'],
-            ['warroom2', 'War Room · รายปี',        'forecast'],
-            ['cashflow', 'Weekly Forecast', 'chart'],
-            ['cashflow_present', 'พรีเซนต์ Cash Flow', 'chart'],
-            ['pnl',      'งบกำไรขาดทุน (P&L)',     'forecast'],
-            ['balance_sheet', 'งบแสดงฐานะการเงิน',  'money'],
-            ['budget',   'Budget Control Center',  'projects'],
-            ['investor', 'Investor Dashboard',     'chart'],
-          ])}
-        </div>
-
-        <div>
-          <div className="sb-section" style={secHdrStyle} onClick={() => tog('reports')}>
-            <span>รายงาน / วิเคราะห์</span>{chevron(sec.reports)}
-          </div>
-          {(sec.reports || collapsed) && navItems([
-            ['cashflow_forecast', 'ประมาณการรายรับ-รายจ่าย', 'chart'],
-            ['recurring',     'ค่าใช้จ่ายประจำ',       'forecast'],
-            ['debt',          'ภาระหนี้ทั้งหมด',       'money'],
-            ['debt_ledger',   'Debt Ledger · ดอกเบี้ย','money'],
-            ['iv_report',     'รายงานติดตาม IV',       'invoice'],
-            ['receipts',      'ประวัติรับเงิน',         'receivables'],
-            ['bank_diary',    'Bank Daily',             'bank'],
-            ['bank_recon',    'กระทบยอดธนาคาร',         'bank'],
-            ['interest_calc', 'คำนวณดอกเบี้ย',         'money'],
-            ['sts_calc',      'STS Calculator',         'money'],
-            ['sts_workflow',  'STS Workflow',           'invoice'],
-          ])}
-        </div>
-
-        <div>
-          <div className="sb-section" style={secHdrStyle} onClick={() => tog('manage')}>
-            <span>จัดการข้อมูล</span>{chevron(sec.manage)}
-          </div>
-          {(sec.manage || collapsed) && navItems([
-            ['projects',      'โครงการ',          'projects'],
-            ['invoices',      'ลูกหนี้คงค้าง',    'invoice'],
-            ['checks',        'เช็คจ่ายล่วงหน้า', 'money'],
-            ['data_forecast', 'ประมาณการรายจ่าย', 'forecast'],
-            ['data_bank',     'บัญชีธนาคาร',      'bank'],
-            ['data_pv',       'ใบสำคัญจ่าย',      'money'],
-            ['data_payable',  'เจ้าหนี้คงค้าง',   'arrow_up'],
-            ['daily_balance', 'บันทึกยอดธนาคาร',  'bank'],
-          ])}
-        </div>
-
-        {/* ระบบ — only visible to manager (audit_log + users) */}
-        {(window.WTPAuth && window.WTPAuth.can('canManageUsers')) && (
-          <div>
-            <div className="sb-section" style={secHdrStyle} onClick={() => tog('system')}>
-              <span>ระบบ</span>{chevron(sec.system !== false)}
+        {PAGE_GROUPS.map(g => {
+          if (g.managerOnly && !(window.WTPAuth && window.WTPAuth.can('canManageUsers'))) return null;
+          const links = navItems(g.items);
+          if (!links.length) return null;   // ทุกหน้าในกลุ่มถูกซ่อน → ไม่ต้องโชว์หัวข้อกลุ่มลอยๆ
+          const open = sec[g.key] !== false;
+          return (
+            <div key={g.key}>
+              <div className="sb-section" style={secHdrStyle} onClick={() => tog(g.key)}>
+                <span>{g.label}</span>{chevron(open)}
+              </div>
+              {(open || collapsed) && links}
             </div>
-            {(sec.system !== false || collapsed) && navItems([
-              ['audit_log',     'Audit Log',         'settings'],
-              ['backup',        'สำรอง / กู้คืนข้อมูล', 'settings'],
-              ['users',         'จัดการผู้ใช้',     'settings'],
-            ])}
-          </div>
-        )}
+          );
+        })}
       </nav>
 
       {/* ── Pinned user / logout ── */}
