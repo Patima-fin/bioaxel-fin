@@ -2103,7 +2103,9 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                         : matched
                         ? <><strong style={{ color: 'var(--good)' }}>✓ วิธีคิดนี้ตรงกับข้อมูลเดิม</strong> — ตารางนี้พร้อมสลับเป็น "คำนวณอัตโนมัติ"</>
                         : <>ปรับ "วิธีคิด" จนผลต่าง = <strong style={{ color: 'var(--good)' }}>✓ ตรงกัน</strong> (ส่วนต่างเล็กน้อยใช้ปุ่มแก้ดอกเบี้ยรายเดือนปรับได้)</>}
-                      {canEdit && (
+                      {/* onAdoptAuto ต้องมีจริงถึงจะโชว์ปุ่ม — หน้าที่ลืมส่ง prop จะได้ "ไม่มีปุ่ม"
+                          (เห็นชัด) แทน "ปุ่มกดแล้วเงียบสนิท" (จับไม่ได้เลย) */}
+                      {canEdit && onAdoptAuto && (
                         <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                           <button
                             onClick={() => {

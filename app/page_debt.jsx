@@ -1191,7 +1191,11 @@ function DebtPage({ data, setData, toast }) {
       />
 
       {/* Interest schedule popup — inline, no page jump.
-          Defined in page_debt_ledger.jsx; available as global at runtime. */}
+          Defined in page_debt_ledger.jsx; available as global at runtime.
+          ⚠️ ต้องส่ง props ให้ "ครบเท่ากับ" ที่ page_debt_ledger.jsx ส่ง — popup ตัวเดียวกัน
+          เป๊ะ ๆ แต่ทุก handler ถูกเรียกแบบ `onX && onX(...)` ⇒ prop ที่ลืมส่ง = ปุ่มนั้น
+          "กดแล้วเงียบสนิท" ไม่มี error/toast ให้จับ. เคยขาด 7 ตัว (adopt/auto/แก้-ลบ event/
+          ลบแถว/เติมข้อมูลสัญญา/ปิดสัญญา) → ปุ่ม "ใช้แบบอัตโนมัติจริง" กดแล้วไม่เกิดอะไรเลย. */}
       {scheduleFor && (
         <InterestSchedulePopup
           master={scheduleFor}
@@ -1202,7 +1206,14 @@ function DebtPage({ data, setData, toast }) {
           onClearPayment={actions.clearPayment}
           onOverrideInterest={actions.overrideInterest}
           onAddPrincipalEvent={actions.addPrincipalEvent}
+          onEditEvent={actions.editPrincipalEvent}
+          onDeleteEvent={actions.deletePrincipalEvent}
+          onDeleteLedgerRow={actions.deleteLedgerRow}
+          onAdoptAuto={actions.adoptAutoMode}
+          onSetAutoMode={actions.setAutoMode}
+          onSaveMasterFields={actions.saveMasterFields}
           onRollover={actions.doRollover}
+          onSetContractStatus={actions.setContractStatus}
           canEdit={canEdit}
         />
       )}
