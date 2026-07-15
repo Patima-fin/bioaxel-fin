@@ -206,20 +206,21 @@ function buildAutoSchedule(master, events, asOf, cfg) {
   if (!start)      missing.push('วันเริ่ม/วันรับเงิน');
   if (!rate)       missing.push('อัตราดอกเบี้ย');
   if (!principal0) missing.push('เงินต้น');
-  // วันจบ: โหมดเทียบใช้ endCap · มิฉะนั้น maturityDate · Active เอาสิ้นเดือนปัจจุบัน · Close เอา closedDate
-  let end = cfg.endCap || master.maturityDate
-          || (master.status === 'Active' ? _monthEndStr(asOf) : (master.closedDate || ''));
+  // วันจบ: โหมดเทียบใช้ endCap · Active = สิ้นเดือนปัจจุบันเสมอ (เลยกำหนดแล้วก็เดินดอกต่อ และไม่ปั่น
+  // แถวล่วงหน้าเกินเดือนนี้แม้ยังไม่ถึงวันครบสัญญา — ไม่งั้น "ดอกเบี้ยค้างจ่าย" จะบวมด้วยดอกในอนาคต)
+  // · Close = maturityDate/closedDate
+  let end = cfg.endCap
+          || (master.status === 'Active' ? _monthEndStr(asOf) : (master.maturityDate || master.closedDate || ''));
   if (!end) missing.push('วันครบสัญญา');
   if (missing.length) return { rows: [], total: 0, error: 'ข้อมูลไม่ครบ', missing };
-  // Active เลยกำหนด → เดินดอกถึงเดือนปัจจุบัน (เฉพาะตอนไม่ได้อยู่โหมดเทียบ)
-  if (master.status === 'Active' && !cfg.endCap) { const me = _monthEndStr(asOf); if (me > end) end = me; }
   if (start >= end) return { rows: [], total: 0, error: 'วันเริ่ม ≥ วันสิ้นสุดงวด', missing: [], start, end };
 
-  // ไทม์ไลน์เงินต้นจาก events (เฉพาะที่อยู่ระหว่างสัญญา)
+  // ไทม์ไลน์เงินต้นจาก events (เฉพาะที่อยู่ระหว่างสัญญา — นับวันเดียวกับวันเริ่มสัญญาด้วย:
+  // เบิกเพิ่ม/คืนวันแรกต้องมีผลตั้งแต่วันแรก ไม่งั้นเงินต้นในตารางไม่ตรงกับการ์ด "เงินต้นรวม (เบิก)")
   const evs = (events || [])
     .filter(e => (e.contractId === master.id || e.contractNo === master.contractNo) && e.eventDate)
     .map(e => ({ date: e.eventDate, delta: (e.eventType === 'repayment' ? -1 : 1) * (Number(e.amount) || 0) }))
-    .filter(e => e.date > start && e.date < end)
+    .filter(e => e.date >= start && e.date < end)
     .sort((a, b) => a.date.localeCompare(b.date));
   const principalAt = (d) => {
     let p = principal0;
@@ -2086,12 +2087,32 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                       </table>
                     </div>
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ink-100)', fontSize: 11.5, color: 'var(--ink-500)', lineHeight: 1.7 }}>
-                      {matched
+                      {sortedRows.length === 0
+                        ? <>สัญญานี้ยังไม่มีตารางดอกเบี้ยเลย — ตรวจตัวเลขข้างบนให้ตรงก่อน แล้วกดปุ่มเขียวเพื่อสร้างตาราง</>
+                        : matched
                         ? <><strong style={{ color: 'var(--good)' }}>✓ วิธีคิดนี้ตรงกับข้อมูลเดิม</strong> — ตารางนี้พร้อมสลับเป็น "คำนวณอัตโนมัติ"</>
                         : <>ปรับ "วิธีคิด" จนผลต่าง = <strong style={{ color: 'var(--good)' }}>✓ ตรงกัน</strong> (ส่วนต่างเล็กน้อยใช้ปุ่มแก้ดอกเบี้ยรายเดือนปรับได้)</>}
-                      <div style={{ marginTop: 4, color: 'var(--ink-400)' }}>
-                        🔒 ปุ่ม "ใช้แบบอัตโนมัติจริง" ปิดไว้ชั่วคราว — จะเปิดพร้อมการย้ายฐานข้อมูลออกจาก Google Sheets (ตอนนี้ตาราง = Sheets เป็นเจ้าของ เขียนทับแล้วไม่ติด)
-                      </div>
+                      {canEdit && (
+                        <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => {
+                              const msg = `ใช้แบบอัตโนมัติกับสัญญา ${master.contractNo}?\n\n`
+                                + `• สร้างตารางดอกเบี้ย ${cmp.rows.length} เดือน · รวม ${fmtNum(cmp.total, 2)} บาท\n`
+                                + `• วิธีคิด ${cmpMethod} · ${cmpDayCount === 'include_end' ? 'นับวันคืนด้วย' : 'ไม่นับวันคืน'}\n`
+                                + (sortedRows.length ? `• เขียนทับตารางเดิม ${sortedRows.length} แถว (วันจ่าย + ยอดที่แก้มือไว้ ยังอยู่)\n` : '')
+                                + `\nเดือนถัดไปกด "อัปเดตถึงเดือนล่าสุด" เพื่อเดินดอกต่อ`;
+                              if (confirm(msg)) onAdoptAuto && onAdoptAuto(master, sortedRows, { method: cmpMethod, dayCount: cmpDayCount });
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8,
+                                     cursor: 'pointer', border: '1px solid #059669', background: '#10b981', color: '#fff',
+                                     fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit' }}>
+                            ✅ ใช้แบบอัตโนมัติจริง — สร้างตารางดอกเบี้ย {cmp.rows.length} เดือน
+                          </button>
+                          <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>
+                            เขียนลงตารางข้างบนจริง · แก้ดอกเบี้ยรายเดือน/ลบแถว ทีหลังได้
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
