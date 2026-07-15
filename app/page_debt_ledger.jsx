@@ -1089,18 +1089,29 @@ function useDebtContractActions(setData, toast) {
         const sched = buildAutoSchedule({ ...mNow, balance: newBal }, events, today, { method: cfg.method, dayCount: cfg.dayCount, endCap: cap });
         // SAFETY: ถ้าคำนวณไม่ได้/ไม่มีแถว → ยกเลิก ไม่แตะข้อมูลเดิม (กันตารางหาย)
         if (sched.error || !sched.rows.length) { msg = 'ERR:' + (sched.error || 'ไม่มีงวดที่คำนวณได้'); updated = null; return d; }
-        // เก็บสถานะจ่าย/override เดิมรายเดือน (แถว interest จริง — ไม่เอา marker)
+        // เก็บสถานะจ่าย/override เดิมรายเดือน (แถว interest จริง — ไม่เอา marker) + คิว id เดิมรายเดือน
+        // ★ ต้องใช้ id เดิมซ้ำ (แถวใหม่ = update ทับที่เดิม) ห้ามแจก newId() รัวทั้งตาราง —
+        //   ไม่งั้น diff ของ sync = ลบเก่าทั้งหมด + เพิ่มใหม่ทั้งหมด แล้วโดน "เกราะกัน mass-delete"
+        //   ใน data_supabase.pushDiff ปัด deleteIds ทิ้งเงียบ ๆ (เงื่อนไข: ลบ > max(8, 50% ของทั้งตาราง))
+        //   ส่วน upsert ยังไหลต่อ → แถวเก่าค้างบน server + แถวใหม่เข้าไป = ตารางดอกเบี้ยเบิ้ล 2 เท่า
+        //   (โดนจริงมาแล้ว: สัญญาที่แถวเป็นเกินครึ่งของทั้ง debtLedger → 37 แถว กลายเป็น 74)
         const oldByMonth = {};
+        const idPool = {};
         (ledgerRows || []).forEach(r => {
           const isMarker = /คืนเงิน|เบิก|ชำระต้น/.test(String(r.note || r.paymentNote || ''));
           if (isMarker) return;
           const k = `${r.year}-${r.month}`;
           if (!oldByMonth[k] || r.paymentDate) oldByMonth[k] = r;
+          if (r.id) (idPool[k] || (idPool[k] = [])).push(r.id);
         });
         const newRows = sched.rows.map(row => {
-          const old = oldByMonth[`${row.year}-${row.month}`] || {};
+          const k = `${row.year}-${row.month}`;
+          const old = oldByMonth[k] || {};
+          const pool = idPool[k];
           const nr = {
-            id: WTPData.newId(), contractNo: master.contractNo,
+            // เดือนเดิมมีอยู่แล้ว → ใช้ id เดิม (เดือนที่แตกหลายแถวก็หยิบจากคิวทีละใบ) · ไม่มีค่อยออกใหม่
+            id: (pool && pool.length) ? pool.shift() : WTPData.newId(),
+            contractNo: master.contractNo,
             year: row.year, month: row.month,
             principal: row.principal, interestRate: Number(mNow.interestRate) || 0,
             days: row.days, interestAmount: row.interest, outstanding: row.balanceAfter,
