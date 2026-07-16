@@ -286,7 +286,14 @@ function buildAutoSchedule(master, events, asOf, cfg) {
     const p = principalAt(a);
     let days = method === '30/360' ? _thirty360(a, b) : _daysBetween(a, b);
     if (days <= 0) continue;
-    if (dayCount === 'include_end' && (b === end || evs.some(e => e.date === b))) days += 1;
+    if (dayCount === 'include_end') {
+      // นับวันปลายงวด (วันคืน/วันครบกำหนด) ด้วย — "นับวันคืน"
+      if (b === end || evs.some(e => e.date === b)) days += 1;
+      // ★ ห้ามนับซ้ำ: งวดที่ "เริ่มต้นที่วัน event" งวดก่อนหน้านับวันนั้นไปแล้ว (ผ่าน +1 ข้างบน)
+      //   ไม่งั้นเดือนที่มีคืน/เบิกกลางเดือน จำนวนวันรวมเกินจำนวนวันจริงของเดือน 1 วัน
+      //   (เช่น ก.ค. คืนวันที่ 4 → งวด1=4วัน (1-4) + งวด2=28วัน (4-31) = 32 > 31 ; ต้องเป็น 4 + 27)
+      if (a !== start && evs.some(e => e.date === a)) days -= 1;
+    }
     const basis = (method === 'ACT/360' || method === '30/360') ? 360
                 : method === 'ACT/ACT' ? _daysInYear(Number(a.slice(0, 4)))
                 : 365;
@@ -605,9 +612,10 @@ function InterestPaymentModal({ open, row, master, onClose, onSave }) {
 }
 
 // ── Interest override popup ─────────────────────────────────────────────────
-function InterestOverridePopup({ open, row, onClose, onSave }) {
+function InterestOverridePopup({ open, row, master, onClose, onSave }) {
   const [val,  setVal]  = React.useState('');
   const [note, setNote] = React.useState('');
+  const [daysVal, setDaysVal] = React.useState('');
   React.useEffect(() => {
     if (open && row) {
       const cur = row.interestOverride != null && row.interestOverride !== ''
@@ -615,12 +623,18 @@ function InterestOverridePopup({ open, row, onClose, onSave }) {
         : (row.interestAmount || '');
       setVal(String(cur));
       setNote(row.overrideNote || '');
+      setDaysVal(String(row.days || ''));
     }
   }, [open, row]);
   if (!open || !row) return null;
   const computed = Number(row.interestAmount) || 0;
   const next     = Number(val);
   const diff     = next - computed;
+  const rPrincipal = Number(row.principal) || 0;
+  const rRate      = Number(row.interestRate) || 0;
+  const rBasis     = _basisFor(master && master.interestCalc && master.interestCalc.method, row.year);
+  const dNum       = Number(daysVal) || 0;
+  const fromDays   = rBasis ? rPrincipal * rRate * (dNum / rBasis) : 0;
   return (
     <Modal
       open={open}
@@ -630,12 +644,12 @@ function InterestOverridePopup({ open, row, onClose, onSave }) {
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
         {row.interestOverride != null && row.interestOverride !== '' && (
-          <button className="btn btn-ghost" onClick={() => onSave(null, '')}
+          <button className="btn btn-ghost" onClick={() => onSave(null, '', null)}
             style={{ borderColor: '#fca5a5', color: '#991b1b', background: '#fef2f2' }}>
             ล้างค่า override
           </button>
         )}
-        <button className="btn btn-primary" onClick={() => onSave(next, note)}
+        <button className="btn btn-primary" onClick={() => onSave(next, note, dNum)}
           disabled={!isFinite(next) || next < 0}>
           <Icon name="check" size={14} /> บันทึก
         </button>
@@ -665,6 +679,27 @@ function InterestOverridePopup({ open, row, onClose, onSave }) {
             color: diff === 0 ? 'var(--ink-500)' : diff > 0 ? 'var(--bad)' : 'var(--good)',
           }}>{diff === 0 ? '—' : (diff > 0 ? '+' : '') + fmtNum(diff, 2)}</div>
         </div>
+      </div>
+      {/* แก้จำนวนวัน → คิดดอกเบี้ยให้อัตโนมัติ (เหมือนตอนเพิ่มการคำนวนเอง) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr', gap: 10, marginBottom: 8 }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>เงินต้น</label>
+          <div className="input" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', background: 'var(--ink-50)', fontVariantNumeric: 'tabular-nums', fontSize: 12.5 }}>{fmtNum(rPrincipal, 2)}</div>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>อัตรา/ปี</label>
+          <div className="input" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', background: 'var(--ink-50)', fontSize: 12.5 }}>{(rRate * 100).toFixed(2)}%</div>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label>จำนวนวัน</label>
+          <input className="input" type="number" min="0" value={daysVal} onChange={e => setDaysVal(e.target.value)}
+            style={{ textAlign: 'right', fontWeight: 600 }} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 12, color: 'var(--ink-600)', flexWrap: 'wrap' }}>
+        <span>คิดจาก {dNum} วัน (÷{rBasis}) = <strong style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--brand-700)' }}>{fmtNum(fromDays, 2)}</strong></span>
+        <button type="button" className="btn btn-ghost" onClick={() => setVal(fromDays.toFixed(2))}
+          style={{ fontSize: 11.5, padding: '3px 10px' }}>⟵ ใช้ค่านี้เป็นดอกเบี้ย</button>
       </div>
       <div className="field" style={{ marginBottom: 10 }}>
         <label>ดอกเบี้ยที่ถูกต้อง (บาท) *</label>
@@ -1327,17 +1362,20 @@ function useDebtContractActions(setData, toast) {
       syncAfter(updated);
       toast('ล้างสถานะการจ่ายแล้ว');
     },
-    overrideInterest(row, value, note) {
+    overrideInterest(row, value, note, days) {
       const at  = new Date().toISOString();
+      // แก้จำนวนวันมาด้วย → อัปเดต r.days (ถ้าต่างจากเดิม + > 0). ★ เป็น override ระดับแสดง;
+      // ถ้าสั่ง "อัปเดตอัตโนมัติ" ใหม่ auto จะคำนวณ days ใหม่ทับ (แต่ตอนนี้ auto คิด days ถูกแล้ว)
+      const dPatch = (days != null && Number(days) > 0 && Number(days) !== Number(row.days)) ? { days: Number(days) } : {};
       let updated;
       setData(d => {
         const next = (d.debtLedger || []).map(r => {
           if (r.id !== row.id) return r;
           if (value == null || value === '') {
             const { interestOverride, overrideBy, overrideAt, overrideNote, ...rest } = r;
-            return rest;
+            return { ...rest, ...dPatch };
           }
-          return { ...r, interestOverride: Number(value), overrideBy: username, overrideAt: at, overrideNote: note || '' };
+          return { ...r, ...dPatch, interestOverride: Number(value), overrideBy: username, overrideAt: at, overrideNote: note || '' };
         });
         updated = { ...d, debtLedger: next };
         return updated;
@@ -2622,9 +2660,10 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
       <InterestOverridePopup
         open={!!overrideRow}
         row={overrideRow}
+        master={master}
         onClose={() => setOverrideRow(null)}
-        onSave={(value, note) => {
-          onOverrideInterest(overrideRow, value, note);
+        onSave={(value, note, days) => {
+          onOverrideInterest(overrideRow, value, note, days);
           setOverrideRow(null);
         }}
       />
@@ -2667,12 +2706,60 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   );
 }
 
+// ── ตัวกรองแบบเลือกได้หลายค่า (ติ๊ก) — ปุ่มกดกางเมนู checkbox ──────────────────────
+// selected = Set (ว่าง = ทุกค่า) · onChange(newSet)
+function OvFilterSelect({ label, options, selected, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const summary = selected.size === 0 ? ('ทุก' + label)
+    : selected.size === 1 ? [...selected][0]
+    : selected.size + ' ' + label;
+  const toggle = (v) => { const n = new Set(selected); n.has(v) ? n.delete(v) : n.add(v); onChange(n); };
+  return (
+    <div ref={ref} style={{ position: 'relative', flex: '1 1 0', minWidth: 0 }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', height: 34, padding: '0 12px', borderRadius: 8, border: '1px solid var(--line, #e2e8f0)',
+                 background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                 gap: 8, fontSize: 12.5, fontFamily: 'inherit' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                       color: selected.size ? 'var(--ink-800)' : 'var(--ink-500)', fontWeight: selected.size ? 600 : 400 }}>{summary}</span>
+        <span style={{ color: 'var(--ink-400)', fontSize: 10, flexShrink: 0 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 40, background: 'var(--surface)',
+                      border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,0.16)',
+                      maxHeight: 280, overflowY: 'auto', padding: 6 }}>
+          <div style={{ display: 'flex', gap: 6, padding: '2px 4px 6px', borderBottom: '1px solid var(--ink-100)', marginBottom: 4 }}>
+            <button type="button" onClick={() => onChange(new Set(options))}
+              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid var(--ink-200)', background: '#fff', cursor: 'pointer' }}>เลือกทั้งหมด</button>
+            <button type="button" onClick={() => onChange(new Set())}
+              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid var(--ink-200)', background: '#fff', cursor: 'pointer' }}>ล้าง</button>
+          </div>
+          {options.length === 0 && <div style={{ padding: 8, fontSize: 11.5, color: 'var(--ink-400)' }}>ไม่มีตัวเลือก</div>}
+          {options.map(o => (
+            <label key={o} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+              <input type="checkbox" checked={selected.has(o)} onChange={() => toggle(o)} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา) — ยอดรวม + ตามเจ้าหนี้ (กางดูรายย่อย) + ประวัติรายวัน ──
 function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
   const [view, setView] = React.useState('year');          // 'creditor' | 'year'
   const [expanded, setExpanded] = React.useState({});      // expand keys (creditor / year>cat>contract path)
-  const [fCat,  setFCat]  = React.useState('all');         // กรองหมวด
-  const [fCred, setFCred] = React.useState('all');         // กรองเจ้าหนี้
+  const [fCats,  setFCats]  = React.useState(new Set());    // กรองหมวด (ว่าง = ทุกหมวด, เลือกได้หลายค่า)
+  const [fCreds, setFCreds] = React.useState(new Set());    // กรองเจ้าหนี้ (ว่าง = ทุกเจ้าหนี้)
   const catOptions  = React.useMemo(() => [...new Set((masters || []).map(m => m.debtCategory).filter(Boolean))].sort(), [masters]);
   const credOptions = React.useMemo(() => [...new Set((masters || []).map(m => (m.borrowerName || '').trim()).filter(Boolean))].sort(), [masters]);
   const agg = React.useMemo(() => {
@@ -2680,8 +2767,8 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
     const byCreditor = {};
     let totalInterest = 0, totalPaid = 0;
     const sel = (masters || []).filter(m =>
-      (fCat === 'all' || m.debtCategory === fCat) &&
-      (fCred === 'all' || (((m.borrowerName || '').trim()) || '—') === fCred));
+      (fCats.size === 0  || fCats.has(m.debtCategory)) &&
+      (fCreds.size === 0 || fCreds.has((((m.borrowerName || '').trim()) || '—'))));
     sel.forEach(m => {
       const rows = (ledgerByContract && ledgerByContract[m.contractNo]) || [];
       const name = ((m.borrowerName || '').trim()) || '—';
@@ -2738,7 +2825,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
     }));
     const payDays = new Set(rounds.map(r => r.payDate).filter(Boolean)).size;
     return { rounds, creditors, years, totalInterest, totalPaid, totalOutstanding: Math.max(0, totalInterest - totalPaid), roundCount: rounds.length, payDays };
-  }, [masters, ledgerByContract, fCat, fCred]);
+  }, [masters, ledgerByContract, fCats, fCreds]);
   if (!open) return null;
   const toggle = (k) => setExpanded(e => ({ ...e, [k]: !e[k] }));
   const kpi = (label, value, color) => (
@@ -2750,19 +2837,9 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
   return (
     <Modal open={open} maxWidth={980} wide title="📊 ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา)" onClose={onClose}
       footer={<button className="btn btn-ghost" onClick={onClose}>ปิด</button>}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ fontSize: 12, color: 'var(--ink-500)', fontWeight: 600 }}>กรอง:</span>
-        <select className="select input" value={fCat} onChange={e => setFCat(e.target.value)} style={{ height: 32, fontSize: 12.5 }}>
-          <option value="all">ทุกหมวด</option>
-          {catOptions.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select className="select input" value={fCred} onChange={e => setFCred(e.target.value)} style={{ height: 32, fontSize: 12.5, maxWidth: 280 }}>
-          <option value="all">ทุกเจ้าหนี้</option>
-          {credOptions.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        {(fCat !== 'all' || fCred !== 'all') && (
-          <button className="btn btn-ghost" onClick={() => { setFCat('all'); setFCred('all'); }} style={{ fontSize: 12 }}>ล้างตัวกรอง</button>
-        )}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+        <OvFilterSelect label="หมวด" options={catOptions} selected={fCats} onChange={setFCats} />
+        <OvFilterSelect label="เจ้าหนี้" options={credOptions} selected={fCreds} onChange={setFCreds} />
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         {kpi('ดอกเบี้ยรวมทั้งหมด', fmtNum(agg.totalInterest, 2))}
