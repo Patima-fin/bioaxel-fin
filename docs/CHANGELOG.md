@@ -978,3 +978,10 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - ผล: วงเงินสัญญา 01 = **3,000,000** (2.5M เดิม + 0.5M เบิกเพิ่ม) = คงเหลือ · KPI วงเงินรวม Active **8.5M → 9M** · Active tab วงเงิน=คงเหลือ=9M (ไม่มี "คงเหลือ > วงเงิน" อีก).
 - ไฟล์: `app/page_debt_ledger.jsx` (helper), `app/page_debt.jsx` (enrich + 5 จุดแสดงผล + strip), `index.html` (`?v=20260716g` ทั้งสองไฟล์).
 - verify: node — Babel OK ทั้ง 2 ไฟล์ · รัน `debtGrossPrincipal` จริง: c1 2.5M+0.5M draw=3M (ไม่นับ repayment/สัญญาอื่น), ไม่มี event=base, match by contractNo ก็ได้, null=0 ✓ · enrich→strip: `_grossPrincipal` หลุดออกก่อนบันทึก, principalAmount คง 2.5M ✓ · KPI Active=9M ✓
+
+## 2026-07-16 (8) — ตัวเลข "เงินต้น/คืนเงินกู้" ในแท็บคืนเงินต้น (drawer) โชว์ทศนิยม 2 ตำแหน่ง
+- **คำขอ (เตย)**: แท็บ "💵 คืนเงินต้น" ใน `InterestSchedulePopup` โชว์ตัวเลขเงินต้นแบบปัดจำนวนเต็ม (`fmtNum(x,0)`) — แต่บางครั้งคืนเงินต้นแบบมีเศษ (เช่น 590,021.34) → ทศนิยมหาย. อยากให้โชว์ทศนิยมทั้งหมด.
+- **แก้**: เปลี่ยน `fmtNum(x, 0)` → `fmtNum(x, 2)` เฉพาะตัวเลข **เงินต้น** 8 จุดในแท็บคืนเงินต้น: KPI hero (เงินต้นรวมเบิก `principalIn` · คืนเงินต้นแล้ว `principalOut` · คงเหลือเงินต้น `debtDisplayBalance`), แถบสรุปเหนือตาราง (คืนแล้ว/คงเหลือ), ตารางรายการรับ/คืนเงินกู้ (จำนวนเงิน `e.amount` · คงเหลือเงินต้นสะสม `balAfter`), และข้อความ confirm ตอนลบ. **ดอกเบี้ย (ดอกเบี้ยรวม/ค้างจ่าย) คงเดิม** (คนละหมวด ผู้ใช้ชี้ที่เงินต้น).
+- popup นี้ใช้ทั้ง `#debt_ledger` + `#debt` (global ใน `page_debt_ledger.jsx`) → แก้ที่เดียวมีผลทั้งสองหน้า. ไม่แตะหน้าทะเบียน `#debt` (คอลัมน์วงเงิน/คงเหลือยังจำนวนเต็ม — ถ้าต้องการทศนิยมด้วยค่อยขยาย).
+- ไฟล์: `app/page_debt_ledger.jsx` (8 จุด), `index.html` (`?v=20260716h`). (page_debt.jsx ไม่ต้อง bump — ยืม global เดิม)
+- verify: node — Babel OK · grep ยืนยัน 8 จุดเป็น `,2)` ครบ ไม่มี `,0)` เงินต้นหลงเหลือ · fmtNum(x,2) render: 590,021.34→"590,021.34", 2,100,000→"2,100,000.00", 4,309,978.66→"4,309,978.66" ✓

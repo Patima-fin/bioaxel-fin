@@ -1910,19 +1910,19 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
         }}>
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>เงินต้นรวม (เบิก)</div>
-            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(principalIn, 0)}</div>
+            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(principalIn, 2)}</div>
             {drawdownsExtra.length > 0 && <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>+{drawdownsExtra.length} drawdown</div>}
           </div>
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>คืนเงินต้นแล้ว</div>
-            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(principalOut, 0)}</div>
+            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(principalOut, 2)}</div>
             {repaymentsAll.length > 0 && <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>{repaymentsAll.length} ครั้ง</div>}
           </div>
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>คงเหลือเงินต้น</div>
             <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums',
                           color: (debtDisplayBalance(master)) > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-              {fmtNum(debtDisplayBalance(master), 0)}
+              {fmtNum(debtDisplayBalance(master), 2)}
             </div>
           </div>
           <div>
@@ -2043,9 +2043,9 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                 {myEvents.length} รายการ
               </span>
               <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-500)' }}>
-                คืนแล้ว <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(principalOut, 0)}</strong>
+                คืนแล้ว <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(principalOut, 2)}</strong>
                 <span style={{ color: 'var(--ink-300)', margin: '0 6px' }}>·</span>
-                คงเหลือ <strong style={{ fontVariantNumeric: 'tabular-nums', color: debtDisplayBalance(master) > 0 ? 'var(--bad)' : 'var(--good)' }}>{fmtNum(debtDisplayBalance(master), 0)}</strong>
+                คงเหลือ <strong style={{ fontVariantNumeric: 'tabular-nums', color: debtDisplayBalance(master) > 0 ? 'var(--bad)' : 'var(--good)' }}>{fmtNum(debtDisplayBalance(master), 2)}</strong>
               </span>
             </div>
             <div style={{ borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(16,24,40,0.04)' }}>
@@ -2087,14 +2087,14 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                           </td>
                           <td style={{ padding: '6px 14px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700,
                                        fontSize: 13, color: isRepay ? 'var(--good)' : '#b45309', whiteSpace: 'nowrap' }}>
-                            {isRepay ? '−' : '+'}{fmtNum(Number(e.amount), 0)}
+                            {isRepay ? '−' : '+'}{fmtNum(Number(e.amount), 2)}
                           </td>
                           <td style={{ padding: '6px 14px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                               <div style={{ width: 70, height: 4, borderRadius: 3, background: 'var(--ink-100, #e2e8f0)', overflow: 'hidden' }}>
                                 <div style={{ height: '100%', width: pct + '%', background: accent, borderRadius: 3, transition: 'width .2s' }} />
                               </div>
-                              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--ink-700)', minWidth: 78, textAlign: 'right' }}>{fmtNum(balAfter, 0)}</span>
+                              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--ink-700)', minWidth: 78, textAlign: 'right' }}>{fmtNum(balAfter, 2)}</span>
                             </div>
                           </td>
                           <td style={{ padding: '6px 14px', color: 'var(--ink-400)', fontSize: 11.5, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.note || ''}>
@@ -2109,7 +2109,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                                 <Icon name="edit" size={12} />
                               </button>
                               <button onClick={() => {
-                                  if (confirm(`ลบรายการ ${isRepay ? 'คืนเงินต้น' : 'เบิกเพิ่ม'} ${fmtNum(Number(e.amount), 0)} วันที่ ${fmtDate(e.eventDate)}?\nระบบจะคำนวณยอดคงเหลือเงินต้นใหม่ให้`)) {
+                                  if (confirm(`ลบรายการ ${isRepay ? 'คืนเงินต้น' : 'เบิกเพิ่ม'} ${fmtNum(Number(e.amount), 2)} วันที่ ${fmtDate(e.eventDate)}?\nระบบจะคำนวณยอดคงเหลือเงินต้นใหม่ให้`)) {
                                     onDeleteEvent && onDeleteEvent(e.id, master);
                                   }
                                 }}
