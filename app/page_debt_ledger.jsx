@@ -258,6 +258,31 @@ function buildAutoSchedule(master, events, asOf, cfg) {
   return { rows, total: rows.reduce((s, r) => s + r.interest, 0), error: null, missing: [] };
 }
 
+// ตัวหารฐานวัน/ปี ตามวิธีคิด (ให้ตรงกับ buildAutoSchedule เป๊ะ ๆ)
+function _basisFor(method, year) {
+  return (method === 'ACT/360' || method === '30/360') ? 360
+       : method === 'ACT/ACT' ? _daysInYear(Number(year))
+       : 365;
+}
+
+// วันสิ้นสุดการคิดดอกของสัญญาที่ "ปิดแล้ว" = วันคืนเงินต้นจริงที่ช้าที่สุด (closedDate หรือวันคืนล่าสุดใน events)
+// — ไม่ใช่ maturityDate: สัญญาที่คืน "ช้ากว่า" วันครบกำหนดต้องเดินดอกต่อถึงวันคืนจริง (เดิม cap = maturityDate
+//   มาก่อน → คืน 2/12 แต่ครบกำหนด 29/11 ทำให้ ธ.ค. หายทั้งเดือน) · คืน "ก่อน" ครบกำหนดก็หยุดที่วันคืนจริงเช่นกัน
+//   · ไม่มีวันคืน/closedDate ค่อย fallback → maturityDate → สิ้นเดือนของแถวสุดท้ายในตาราง
+// ★ ใช้ทั้งใน adoptAutoMode และแผงเทียบ 🔬 เพื่อให้ "พรีวิว = ตอนกดใช้จริง" เสมอ
+function _closedEndDate(master, events, ledgerRows) {
+  const repayDates = (events || [])
+    .filter(e => (e.contractId === master.id || e.contractNo === master.contractNo)
+              && e.eventType === 'repayment' && e.eventDate)
+    .map(e => e.eventDate);
+  const real = [master.closedDate, ...repayDates].filter(Boolean).sort();
+  if (real.length) return real[real.length - 1];   // วันคืนจริงช้าสุด
+  if (master.maturityDate) return master.maturityDate;
+  const last = (ledgerRows || []).slice().sort((a, b) =>
+    (Number(a.year) || 0) - (Number(b.year) || 0) || (Number(a.month) || 0) - (Number(b.month) || 0)).pop();
+  return last ? _monthEndStr(`${last.year}-${String(last.month).padStart(2, '0')}-01`) : null;
+}
+
 const CALC_METHODS = [
   { k: 'ACT/365', label: 'ACT/365 — วันจริง ÷ 365' },
   { k: 'ACT/360', label: 'ACT/360 — วันจริง ÷ 360' },
@@ -490,6 +515,165 @@ function InterestOverridePopup({ open, row, onClose, onSave }) {
       <div className="field">
         <label>เหตุผล / อ้างอิง</label>
         <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น ปรับตามใบรับเงินจริง / สัญญาฉบับใหม่" />
+      </div>
+    </Modal>
+  );
+}
+
+// ใส่คอมม่าคั่นหลักพัน "โดยคงทศนิยมดิบไว้ตามที่พิมพ์" (ไม่ปัดเศษเหมือน fmtNum) — เช่น 10958.90 → 10,958.90
+function dlCommaFmt(raw) {
+  if (raw === '' || raw == null) return '';
+  const s = String(raw);
+  const neg = s.startsWith('-');
+  const body = neg ? s.slice(1) : s;
+  const [intp, decp] = body.split('.');
+  const intFmt = (intp || '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (neg ? '-' : '') + (decp != null ? intFmt + '.' + decp : intFmt);
+}
+
+// ช่องกรอกเลขที่ "โชว์คอมม่าตอนไม่ได้พิมพ์ · เป็นเลขดิบตอนโฟกัส" — อ่านง่ายแต่แก้ไขง่าย
+// value/onChange เป็นสตริงเลขดิบเสมอ (ไม่มีคอมม่าใน state) — parse ด้วย Number() ได้ตรง
+function DLCommaInput({ value, onChange, ...rest }) {
+  const [focused, setFocused] = React.useState(false);
+  const raw = (value == null ? '' : String(value));
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="decimal"
+      value={focused ? raw : dlCommaFmt(raw)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={e => onChange(e.target.value.replace(/[^0-9.\-]/g, ''))}
+    />
+  );
+}
+
+// ── เพิ่มแถวดอกเบี้ยรายเดือนด้วยมือ (safety net เผื่อ auto คิดตกหล่นบางเดือน) ──
+function AddLedgerRowModal({ open, master, ledgerRows, onClose, onSave }) {
+  const [year,   setYear]   = React.useState('');
+  const [month,  setMonth]  = React.useState('');
+  const [principal, setPrincipal] = React.useState('');
+  const [ratePct, setRatePct] = React.useState('');
+  const [days,   setDays]   = React.useState('');
+  const [method, setMethod] = React.useState('ACT/365');
+  const [interest, setInterest] = React.useState('');
+  const [touched, setTouched] = React.useState(false); // ดอกเบี้ยถูกพิมพ์เองแล้วหรือยัง
+  const [note,   setNote]   = React.useState('');
+
+  React.useEffect(() => {
+    if (!open || !master) return;
+    const sorted = [...(ledgerRows || [])].sort((a, b) =>
+      (Number(a.year) || 0) - (Number(b.year) || 0) || (Number(a.month) || 0) - (Number(b.month) || 0));
+    const last = sorted[sorted.length - 1];
+    // เดือน/ปี = เดือนถัดจากแถวสุดท้าย (เผื่อเติมเดือนท้ายที่ตกหล่น) · ไม่มีแถว → ใช้ปัจจุบัน (CE)
+    let ny = last ? Number(last.year) : (new Date().getFullYear());
+    let nm = last ? Number(last.month) + 1 : (new Date().getMonth() + 1);
+    if (nm > 12) { nm = 1; ny += 1; }
+    setYear(String(ny)); setMonth(String(nm));
+    setPrincipal(String(last ? (Number(last.outstanding) || Number(last.principal) || masterBalance(master)) : masterBalance(master)));
+    setRatePct(master.interestRate ? String((Number(master.interestRate) * 100)) : '');
+    setDays('');
+    setMethod((master.interestCalc && master.interestCalc.method) || 'ACT/365');
+    setInterest(''); setTouched(false); setNote('');
+  }, [open, master]);
+
+  if (!open || !master) return null;
+
+  const p = Number(principal) || 0;
+  const rate = (Number(ratePct) || 0) / 100;
+  const dnum = Number(days) || 0;
+  const basis = _basisFor(method, year);
+  const computed = p * rate * (dnum / basis);
+  const effInterest = touched ? (Number(interest) || 0) : computed;
+  const canSave = !!year && !!month && dnum > 0 && effInterest >= 0;
+
+  return (
+    <Modal
+      open={open}
+      maxWidth={560}
+      title={`เพิ่มแถวดอกเบี้ยเอง · ${master.contractNo}`}
+      onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={!canSave}
+          onClick={() => onSave({
+            year: Number(year), month: Number(month), principal: p,
+            interestRate: rate, days: dnum, interest: effInterest,
+            outstanding: p, note,
+          })}>
+          <Icon name="check" size={14} /> เพิ่มแถว {TH_MONTH[Number(month)] || month} {year}
+        </button>
+      </>}
+    >
+      <div style={{ padding: 12, marginBottom: 14, borderRadius: 10, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, color: 'var(--ink-700)', lineHeight: 1.6 }}>
+        ➕ เพิ่มดอกเบี้ยของ <strong>1 เดือน</strong> เข้าตารางเอง — ใช้เมื่อคำนวณอัตโนมัติ<strong>คิดตกหล่น</strong> (เช่น เดือนท้ายที่คืนเงินช้ากว่าวันครบกำหนด)
+        <br />กรอกวัน แล้วระบบคำนวณดอกเบี้ยให้ตามสูตร หรือจะพิมพ์ยอดเองก็ได้
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div className="field">
+          <label>เดือน *</label>
+          <select className="input" value={month} onChange={e => { setMonth(e.target.value); setTouched(false); }}>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(m =>
+              <option key={m} value={m}>{TH_MONTH[m]}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>ปี (ค.ศ.) *</label>
+          <input className="input" type="number" value={year} onChange={e => { setYear(e.target.value); setTouched(false); }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div className="field">
+          <label>เงินต้น (บาท)</label>
+          <DLCommaInput className="input" value={principal} onChange={v => { setPrincipal(v); setTouched(false); }}
+            style={{ textAlign: 'right', fontFamily: 'ui-monospace' }} />
+        </div>
+        <div className="field">
+          <label>อัตรา (%)</label>
+          <input className="input" type="number" step="0.01" value={ratePct} onChange={e => { setRatePct(e.target.value); setTouched(false); }}
+            style={{ textAlign: 'right', fontFamily: 'ui-monospace' }} />
+        </div>
+        <div className="field">
+          <label>จำนวนวัน *</label>
+          <input className="input" type="number" value={days} onChange={e => { setDays(e.target.value); setTouched(false); }}
+            style={{ textAlign: 'right', fontFamily: 'ui-monospace' }} autoFocus />
+        </div>
+      </div>
+
+      <div className="field" style={{ marginBottom: 10 }}>
+        <label>วิธีคิด</label>
+        <select className="input" value={method} onChange={e => { setMethod(e.target.value); setTouched(false); }}>
+          {CALC_METHODS.map(m => <option key={m.k} value={m.k}>{m.label}</option>)}
+        </select>
+      </div>
+
+      {/* สูตรคำนวณ + ดอกเบี้ยที่จะบันทึก */}
+      <div style={{ padding: '10px 12px', borderRadius: 9, background: 'var(--ink-50)', border: '1px solid var(--ink-100)', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-500)', marginBottom: 6 }}>
+          สูตร: {fmtNum(p, 0)} × {(rate * 100).toFixed(2)}% × {dnum || 0}/{basis} =
+          <strong style={{ color: 'var(--brand-700)', marginLeft: 4, fontFamily: 'ui-monospace' }}>{fmtNum(computed, 2)}</strong>
+          {touched && (
+            <button type="button" onClick={() => { setInterest(''); setTouched(false); }}
+              style={{ marginLeft: 8, fontSize: 10, padding: '1px 8px', borderRadius: 10, border: '1px solid var(--brand-300)', background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }}>
+              ↺ ใช้ค่าที่คำนวณ
+            </button>
+          )}
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label style={{ fontSize: 11 }}>ดอกเบี้ยที่จะบันทึก (บาท) *</label>
+          <DLCommaInput className="input"
+            value={touched ? interest : computed.toFixed(2)}
+            onChange={v => { setInterest(v); setTouched(true); }}
+            style={{ textAlign: 'right', fontFamily: 'ui-monospace', fontWeight: 700 }} />
+        </div>
+      </div>
+
+      <div className="field">
+        <label>หมายเหตุ</label>
+        <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น ดอกเบี้ยช่วงคืนช้ากว่าครบกำหนด 29/11→2/12" />
       </div>
     </Modal>
   );
@@ -1056,6 +1240,31 @@ function useDebtContractActions(setData, toast) {
       syncAfter(updated);
       toast('ลบแถวดอกเบี้ยแล้ว');
     },
+    // เพิ่มแถวดอกเบี้ยรายเดือน "ด้วยมือ" (safety net — เผื่อ auto คิดตกหล่นบางเดือน
+    // เช่น เดือนท้ายที่คืนช้ากว่าครบกำหนดแล้วยังไม่ได้บันทึกวันคืน) — insert แถวเดียว id ใหม่
+    // (ปลอดภัยกับเกราะกัน mass-delete: ไม่ได้แจก id ใหม่ทั้งชุด)
+    addLedgerRow(master, row) {
+      const at = new Date().toISOString();
+      const nr = {
+        id: WTPData.newId(),
+        contractNo: master.contractNo,
+        year: Number(row.year) || 0, month: Number(row.month) || 0,
+        principal: Number(row.principal) || 0,
+        interestRate: Number(row.interestRate) || 0,
+        days: Number(row.days) || 0,
+        interestAmount: Number(row.interest) || 0,
+        outstanding: Number(row.outstanding) || 0,
+        paymentDate: '', paidBy: '', paidAt: '', paymentNote: row.note || '',
+        manual: true, addedBy: username, addedAt: at,
+      };
+      let updated;
+      setData(d => {
+        updated = { ...d, debtLedger: [...(d.debtLedger || []), nr] };
+        return updated;
+      });
+      syncAfter(updated);
+      toast(`เพิ่มแถวดอกเบี้ย ${TH_MONTH[nr.month] || nr.month} ${nr.year} แล้ว`);
+    },
     // เปิด/อัปเดต "คำนวณอัตโนมัติ" ให้สัญญา — migrate คืนเงินต้นจาก marker เข้า events
     // + สร้างตารางดอกเบี้ยใหม่ (materialize) ถึงเดือนปัจจุบัน โดยคงสถานะจ่าย/override เดิมไว้
     adoptAutoMode(master, ledgerRows, cfg) {
@@ -1075,17 +1284,9 @@ function useDebtContractActions(setData, toast) {
         }
         const mNow = (d.debtMaster || []).find(m => m.id === master.id) || master;
         const newBal = recalcBalance(mNow, events);
-        // วันจบ: Active → ไม่ cap (เดินถึงเดือนปัจจุบัน) · Close → maturity/closedDate/วันคืนล่าสุด/สิ้นเดือนแถวสุดท้าย
-        let cap = null;
-        if (mNow.status !== 'Active') {
-          const evDates = events
-            .filter(e => e.contractId === master.id || e.contractNo === master.contractNo)
-            .map(e => e.eventDate).filter(Boolean).sort();
-          const lastRow = (ledgerRows || []).slice().sort((a, b) =>
-            (Number(a.year) || 0) - (Number(b.year) || 0) || (Number(a.month) || 0) - (Number(b.month) || 0)).pop();
-          const lastRowEnd = lastRow ? _monthEndStr(`${lastRow.year}-${String(lastRow.month).padStart(2, '0')}-01`) : null;
-          cap = mNow.maturityDate || mNow.closedDate || (evDates.length ? evDates[evDates.length - 1] : null) || lastRowEnd;
-        }
+        // วันจบ: Active → ไม่ cap (เดินถึงเดือนปัจจุบัน) · Close → วันคืนจริง (ช้าสุด) ไม่ใช่แค่ครบกำหนด
+        // — คืนช้ากว่าครบกำหนดต้องเดินดอกต่อถึงวันคืนจริง (helper เดียวกับแผงเทียบ → พรีวิว = ผลจริง)
+        const cap = mNow.status !== 'Active' ? _closedEndDate(mNow, events, ledgerRows) : null;
         const sched = buildAutoSchedule({ ...mNow, balance: newBal }, events, today, { method: cfg.method, dayCount: cfg.dayCount, endCap: cap });
         // SAFETY: ถ้าคำนวณไม่ได้/ไม่มีแถว → ยกเลิก ไม่แตะข้อมูลเดิม (กันตารางหาย)
         if (sched.error || !sched.rows.length) { msg = 'ERR:' + (sched.error || 'ไม่มีงวดที่คำนวณได้'); updated = null; return d; }
@@ -1497,7 +1698,7 @@ function MissingFieldsEditor({ master, onSave }) {
 // ── Monthly schedule popup ──────────────────────────────────────────────────
 function InterestSchedulePopup({ master, ledgerRows, events, onClose,
     onSavePayments, onClearPayment, onOverrideInterest,
-    onAddPrincipalEvent, onEditEvent, onDeleteEvent, onDeleteLedgerRow,
+    onAddPrincipalEvent, onEditEvent, onDeleteEvent, onDeleteLedgerRow, onAddLedgerRow,
     onAdoptAuto, onSetAutoMode, onSaveMasterFields, onRollover, onSetContractStatus, canEdit }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [confirmOpen, setConfirmOpen] = React.useState(false);
@@ -1511,6 +1712,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   const [cmpOpen,     setCmpOpen]     = React.useState(false);
   const [cmpMethod,   setCmpMethod]   = React.useState('ACT/365');
   const [cmpDayCount, setCmpDayCount] = React.useState('exclude_end');
+  const [addRowOpen,  setAddRowOpen]  = React.useState(false); // เพิ่มแถวดอกเบี้ยเอง
 
   React.useEffect(() => { setSelectedIds(new Set()); }, [master]);
 
@@ -1847,8 +2049,19 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
               ✓ จ่ายแล้ว ({sortedRows.filter(r => !!r.paymentDate).length})
             </button>
           </div>
-          <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-400)' }}>
-            แสดง {visibleRows.length} แถว
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* onAddLedgerRow ต้องมีจริงถึงจะโชว์ปุ่ม — หน้าที่ลืมส่ง prop จะได้ "ไม่มีปุ่ม"
+                (เห็นชัด) แทน "ปุ่มกดแล้วเงียบสนิท" (จับไม่ได้) */}
+            {canEdit && onAddLedgerRow && (
+              <button onClick={() => setAddRowOpen(true)}
+                title="เพิ่มแถวดอกเบี้ยรายเดือนเอง (เผื่อ auto คิดตกหล่น)"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 8,
+                         border: '1px solid var(--brand-300)', background: 'var(--brand-50, #f0f6ff)',
+                         color: 'var(--brand-700)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>
+                ➕ เพิ่มแถวเอง
+              </button>
+            )}
+            <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>แสดง {visibleRows.length} แถว</span>
           </div>
         </div>
 
@@ -2008,15 +2221,19 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
             const todayStr = new Date().toISOString().slice(0, 10);
             // เทียบช่วงเวลาเดียวกับข้อมูลเดิม: หยุดที่ "วันสุดท้ายจริง" ของข้อมูลเดิม
             // ถ้าแถวสุดท้ายเป็น marker คืนเงินต้น → หยุดที่วันจ่ายนั้น มิฉะนั้นสิ้นเดือนของแถวสุดท้าย
-            const lastStored = sortedRows.length ? sortedRows[sortedRows.length - 1] : null;
-            const lastIsMarker = lastStored && /คืนเงิน|เบิก|ชำระต้น/.test(String(lastStored.note || lastStored.paymentNote || ''));
-            const endCap = !lastStored ? null
-              : (lastIsMarker && lastStored.paymentDate) ? lastStored.paymentDate
-              : _monthEndStr(`${lastStored.year}-${String(lastStored.month).padStart(2, '0')}-01`);
             // ถ้าสัญญายังไม่มี events → ดึงคืนเงินต้นจากแถว marker เดิมมาใช้เทียบ (ยังไม่บันทึก)
             const myExisting = (events || []).filter(e => e.contractId === master.id || e.contractNo === master.contractNo);
             const extracted  = myExisting.length ? [] : extractEventsFromLedger(sortedRows, master);
             const effEvents  = myExisting.length ? events : extracted;
+            const lastStored = sortedRows.length ? sortedRows[sortedRows.length - 1] : null;
+            const lastIsMarker = lastStored && /คืนเงิน|เบิก|ชำระต้น/.test(String(lastStored.note || lastStored.paymentNote || ''));
+            // สัญญาปิดแล้ว → หยุดที่ "วันคืนจริง" (helper เดียวกับตอนกดใช้จริง → พรีวิวตรงกับผลจริงเสมอ)
+            //   ไม่งั้น → marker คืนเงินต้น (ถ้าแถวสุดท้ายเป็น marker) หรือสิ้นเดือนของแถวสุดท้าย (เทียบช่วงเดิม)
+            const endCap = master.status !== 'Active'
+              ? _closedEndDate(master, effEvents, sortedRows)
+              : !lastStored ? null
+              : (lastIsMarker && lastStored.paymentDate) ? lastStored.paymentDate
+              : _monthEndStr(`${lastStored.year}-${String(lastStored.month).padStart(2, '0')}-01`);
             const cmp = buildAutoSchedule(master, effEvents, todayStr, { method: cmpMethod, dayCount: cmpDayCount, endCap });
             const diff = cmp.error ? 0 : cmp.total - totalInterest;
             const matched = !cmp.error && Math.abs(diff) < 1;
@@ -2181,6 +2398,16 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           onRollover && onRollover(master, payload);
           setRolloverOpen(false);
           onClose && onClose();
+        }}
+      />
+      <AddLedgerRowModal
+        open={addRowOpen}
+        master={master}
+        ledgerRows={sortedRows}
+        onClose={() => setAddRowOpen(false)}
+        onSave={(payload) => {
+          onAddLedgerRow && onAddLedgerRow(master, payload);
+          setAddRowOpen(false);
         }}
       />
     </>
@@ -2514,7 +2741,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   // ── Mutations (shared hook) ─────────────────────────────────────────────
   const actions = useDebtContractActions(setData, toast);
   const { savePayments, clearPayment, overrideInterest, addPrincipalEvent,
-          editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow,
+          editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow,
           adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus } = actions;
 
   // Refresh selectedMaster from store (so popup reflects latest state)
@@ -2712,6 +2939,7 @@ function DebtLedgerPage({ data, setData, toast }) {
         onEditEvent={editPrincipalEvent}
         onDeleteEvent={deletePrincipalEvent}
         onDeleteLedgerRow={deleteLedgerRow}
+        onAddLedgerRow={addLedgerRow}
         onAdoptAuto={adoptAutoMode}
         onSetAutoMode={setAutoMode}
         onSaveMasterFields={saveMasterFields}

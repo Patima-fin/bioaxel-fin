@@ -1209,6 +1209,7 @@ function DebtPage({ data, setData, toast }) {
           onEditEvent={actions.editPrincipalEvent}
           onDeleteEvent={actions.deletePrincipalEvent}
           onDeleteLedgerRow={actions.deleteLedgerRow}
+          onAddLedgerRow={actions.addLedgerRow}
           onAdoptAuto={actions.adoptAutoMode}
           onSetAutoMode={actions.setAutoMode}
           onSaveMasterFields={actions.saveMasterFields}
