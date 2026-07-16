@@ -192,7 +192,17 @@ function parseDebtImportFile(file, onDone, onErr) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      // Template มีแถวหัวเรื่อง (merged title) อยู่บรรทัดแรก แถวคีย์จริง (contractNo…) อยู่บรรทัด 2.
+      // ต้องหา "แถว header จริง" ก่อน แล้วสั่ง sheet_to_json ให้เริ่มอ่านจากตรงนั้น (range: hdrIdx)
+      // ไม่งั้น SheetJS จะเอาแถว title เป็น header → r.contractNo = undefined ทุกแถว →
+      // ตัวกรอง (ต้องมี contractNo) ตัดทิ้งหมด → "นำเข้า 0 รายการ" แม้กรอกไฟล์ถูก.
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+      let hdrIdx = aoa.findIndex(row =>
+        Array.isArray(row) && row.some(c => String(c).trim() === 'contractNo'));
+      if (hdrIdx < 0) hdrIdx = 0; // เผื่อไฟล์ไม่มีแถว title (คีย์อยู่บรรทัดแรก) หรือไฟล์อื่น
+      // raw:true → เซลล์วันที่แบบ Excel serial ได้เป็น "ตัวเลข" (ไม่ใช่ข้อความตาม locale เครื่อง)
+      // ทำให้แปลงวันได้ตรง ไม่สลับวัน/เดือน — เช่น 5/10/22 = 10 พ.ค. ไม่ใช่ 5 ต.ค.
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true, range: hdrIdx });
       // Drop helper-header rows (Thai labels / notes) — keep only rows that have a contractNo
       const valid = rows.filter(r => {
         const cn = String(r.contractNo || '').trim();
@@ -203,10 +213,16 @@ function parseDebtImportFile(file, onDone, onErr) {
       // Normalize
       const normalized = valid.map(r => {
         const parseDate = v => {
-          if (!v) return '';
+          if (v === '' || v == null) return '';
+          // Excel date serial (ตัวเลข) → แปลงแบบไม่พึ่ง timezone/locale (ชัดเจน ไม่สลับวัน-เดือน)
+          if (typeof v === 'number' && isFinite(v) && XLSX.SSF && XLSX.SSF.parse_date_code) {
+            const dc = XLSX.SSF.parse_date_code(v);
+            if (dc && dc.y) return `${dc.y}-${String(dc.m).padStart(2, '0')}-${String(dc.d).padStart(2, '0')}`;
+          }
           const d = parseDateFlexible(v);
           if (!d) return '';
-          return d.toISOString().slice(0, 10);
+          // ใช้ค่า local (ไม่ใช่ toISOString) กัน off-by-one จาก timezone +7
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         };
         const num = v => {
           if (v == null || v === '') return 0;
