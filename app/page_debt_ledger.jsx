@@ -2761,7 +2761,19 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
   const [fCats,  setFCats]  = React.useState(new Set());    // กรองหมวด (ว่าง = ทุกหมวด, เลือกได้หลายค่า)
   const [fCreds, setFCreds] = React.useState(new Set());    // กรองเจ้าหนี้ (ว่าง = ทุกเจ้าหนี้)
   const catOptions  = React.useMemo(() => [...new Set((masters || []).map(m => m.debtCategory).filter(Boolean))].sort(), [masters]);
-  const credOptions = React.useMemo(() => [...new Set((masters || []).map(m => (m.borrowerName || '').trim()).filter(Boolean))].sort(), [masters]);
+  // เจ้าหนี้ตามหมวดที่เลือก — เลือกหมวดแล้วรายชื่อเจ้าหนี้เปลี่ยนตาม (ว่าง = ทุกหมวด → เจ้าหนี้ทั้งหมด)
+  const credOptions = React.useMemo(() => [...new Set((masters || [])
+    .filter(m => fCats.size === 0 || fCats.has(m.debtCategory))
+    .map(m => (m.borrowerName || '').trim()).filter(Boolean))].sort(), [masters, fCats]);
+  // หมวดเปลี่ยน → ตัดเจ้าหนี้ที่เลือกไว้แต่ไม่อยู่ในหมวดใหม่ออก (กันกรองแล้วว่างเปล่า)
+  React.useEffect(() => {
+    setFCreds(prev => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(credOptions);
+      const next = new Set([...prev].filter(c => valid.has(c)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [credOptions]);
   const agg = React.useMemo(() => {
     const rounds = [];            // ทุกรอบจ่ายแบบแบน
     const byCreditor = {};

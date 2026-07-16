@@ -1031,3 +1031,8 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - **แก้ 2 ชั้น**: (1) **นิยาม `--surface: #ffffff` ใน `styles.css`** → fix ทุกจุดทั้งแอปที่ root (dropdown/หัวตาราง sticky อื่น ๆ ที่ latent อยู่ด้วย). (2) `page_debt_ledger.jsx` เปลี่ยน `var(--surface)`→`var(--panel)` (token ที่นิยามชัด #fff) 10 จุด เพื่อความชัดเจน.
 - ไฟล์: `app/styles.css` (นิยาม --surface), `app/page_debt_ledger.jsx` (→ --panel), `index.html` (`styles.css?v=20260717a` · `page_debt_ledger.jsx?v=20260716o`).
 - verify: node — Babel OK · `var(--surface)` เหลือ 0 ในไฟล์ ledger, `var(--panel)` 11 จุด · `--panel`/`--surface` = #ffffff ทึบ.
+
+- **คำขอ (เตย)**: เลือกหมวด (เช่น WCI) แล้ว dropdown เจ้าหนี้ควรโชว์เฉพาะเจ้าหนี้ในหมวดนั้น (เดิมโชว์ทุกคนเสมอ).
+- **แก้**: `credOptions` filter ด้วย `fCats` (`size===0 → ทุกหมวด`) + deps เพิ่ม `fCats` → เลือกหมวดแล้วรายชื่อเจ้าหนี้เปลี่ยนตาม. + **effect prune**: หมวดเปลี่ยน → ตัดเจ้าหนี้ที่เลือกไว้แต่ไม่อยู่ในหมวดใหม่ออก (กันกรองแล้วว่างเปล่า; เจ้าหนี้ที่อยู่หลายหมวดคงไว้).
+- ไฟล์: `app/page_debt_ledger.jsx`, `index.html` (`?v=20260717b`).
+- verify: node — Babel OK · WCI→เฉพาะเจ้าหนี้ WCI, STS→เฉพาะ STS · prune: เลือกเจ้าหนี้ที่มีแค่ WCI แล้วสลับ STS → ถูกตัด; เจ้าหนี้ที่อยู่ทั้ง 2 หมวด → คงไว้ ✓
