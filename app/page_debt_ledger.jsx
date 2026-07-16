@@ -2331,6 +2331,8 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                   const eff = effectiveInterest(r);
                   const paidAmt = interestPaid(r);
                   const remain = interestRemaining(r);
+                  const roundCount = interestPayments(r).length;
+                  const canOpenPay = canEdit && onSaveInterestPayments && payStatus !== 'unpaid';
                   const computed = Number(r.interestAmount) || 0;
                   const isSelected = selectedIds.has(r.id);
                   return (
@@ -2362,17 +2364,17 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                         )}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(Number(r.outstanding) || 0, 0)}</td>
-                      <td style={{ fontSize: 11.5, whiteSpace: 'nowrap',
+                      <td onClick={canOpenPay ? () => setPayModalRow(r) : undefined}
+                          title={canOpenPay ? 'คลิกเพื่อดู/แก้รอบการจ่าย' : (isPartial ? `จ่ายแล้ว ${fmtNum(paidAmt, 2)} · คงเหลือ ${fmtNum(remain, 2)}` : (r.paidBy ? `บันทึกโดย ${r.paidBy}` : ''))}
+                          style={{ fontSize: 11.5, whiteSpace: 'nowrap',
                                    color: isPaid ? 'var(--good)' : isPartial ? '#b45309' : 'var(--bad)',
-                                   fontWeight: isPaid ? 500 : 600 }}>
+                                   fontWeight: isPaid ? 500 : 600,
+                                   cursor: canOpenPay ? 'pointer' : undefined,
+                                   textDecoration: canOpenPay ? 'underline dotted var(--ink-300)' : undefined, textUnderlineOffset: 3 }}>
                         {isPaid ? (
-                          <span title={r.paidBy ? `บันทึกโดย ${r.paidBy}` : ''}>
-                            ✓ {fmtDate(r.paymentDate)}
-                          </span>
+                          <span>✓ {fmtDate(r.paymentDate)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
                         ) : isPartial ? (
-                          <span title={`จ่ายแล้ว ${fmtNum(paidAmt, 2)} · คงเหลือ ${fmtNum(remain, 2)}`}>
-                            จ่าย {fmtNum(paidAmt, 0)} / ค้าง {fmtNum(remain, 0)}
-                          </span>
+                          <span>จ่าย {fmtNum(paidAmt, 0)} / ค้าง {fmtNum(remain, 0)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
                         ) : 'ค้าง'}
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--ink-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }} title={r.note || r.paymentNote || ''}>
@@ -2662,6 +2664,158 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
         }}
       />
     </>
+  );
+}
+
+// ── ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา) — ยอดรวม + ตามเจ้าหนี้ (กางดูรายย่อย) + ประวัติรายวัน ──
+function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
+  const [view, setView] = React.useState('creditor');      // 'creditor' | 'log'
+  const [expanded, setExpanded] = React.useState({});      // creditor name → เปิด/ปิด
+  const agg = React.useMemo(() => {
+    const rounds = [];            // ทุกรอบจ่ายแบบแบน
+    const byCreditor = {};
+    let totalInterest = 0, totalPaid = 0;
+    (masters || []).forEach(m => {
+      const rows = (ledgerByContract && ledgerByContract[m.contractNo]) || [];
+      const name = ((m.borrowerName || '').trim()) || '—';
+      const c = byCreditor[name] || (byCreditor[name] = { name, contracts: new Set(), total: 0, paid: 0, rounds: [] });
+      c.contracts.add(m.contractNo);
+      rows.forEach(r => {
+        const eff = effectiveInterest(r);
+        totalInterest += eff; c.total += eff;
+        interestPayments(r).forEach(p => {
+          const amt = Number(p.amount) || 0;
+          if (amt <= 0) return;
+          const rec = { payDate: p.date || '', amount: amt, note: p.note || '', contractNo: m.contractNo,
+                        borrowerName: name, debtCategory: m.debtCategory || '',
+                        monthLabel: (TH_MONTH[Number(r.month)] || r.month) + ' ' + r.year };
+          rounds.push(rec); c.rounds.push(rec);
+          totalPaid += amt; c.paid += amt;
+        });
+      });
+    });
+    rounds.sort((x, y) => (y.payDate || '').localeCompare(x.payDate || ''));
+    const creditors = Object.values(byCreditor)
+      .map(c => ({ name: c.name, contractCount: c.contracts.size, total: c.total, paid: c.paid,
+                   outstanding: Math.max(0, c.total - c.paid),
+                   rounds: c.rounds.slice().sort((x, y) => (y.payDate || '').localeCompare(x.payDate || '')) }))
+      .filter(c => c.total > 0.005 || c.paid > 0.005)
+      .sort((x, y) => y.paid - x.paid);
+    const payDays = new Set(rounds.map(r => r.payDate).filter(Boolean)).size;
+    return { rounds, creditors, totalInterest, totalPaid, totalOutstanding: Math.max(0, totalInterest - totalPaid), roundCount: rounds.length, payDays };
+  }, [masters, ledgerByContract]);
+  if (!open) return null;
+  const toggle = (k) => setExpanded(e => ({ ...e, [k]: !e[k] }));
+  const kpi = (label, value, color) => (
+    <div style={{ flex: '1 1 150px', padding: '10px 14px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--ink-100)' }}>
+      <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: color || 'var(--ink-800)' }}>{value}</div>
+    </div>
+  );
+  return (
+    <Modal open={open} maxWidth={980} wide title="📊 ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา)" onClose={onClose}
+      footer={<button className="btn btn-ghost" onClick={onClose}>ปิด</button>}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        {kpi('ดอกเบี้ยรวมทั้งหมด', fmtNum(agg.totalInterest, 2))}
+        {kpi('จ่ายแล้ว', fmtNum(agg.totalPaid, 2), 'var(--good)')}
+        {kpi('ค้างจ่าย', fmtNum(agg.totalOutstanding, 2), 'var(--bad)')}
+        {kpi('จำนวนรอบจ่าย', `${agg.roundCount} รอบ · ${agg.payDays} วัน`)}
+      </div>
+      <div style={{ display: 'inline-flex', gap: 4, marginBottom: 12, background: 'var(--ink-100, #eef1f6)', borderRadius: 9, padding: 3, border: '1px solid var(--line)' }}>
+        {[{ k: 'creditor', l: '👤 ตามเจ้าหนี้' }, { k: 'log', l: '📅 ตามวันจ่าย' }].map(t => (
+          <button key={t.k} type="button" onClick={() => setView(t.k)}
+            style={{ padding: '6px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
+                     background: view === t.k ? 'linear-gradient(135deg, var(--brand-500), var(--brand-700))' : 'transparent',
+                     color: view === t.k ? '#fff' : 'var(--ink-500)' }}>{t.l}</button>
+        ))}
+      </div>
+
+      {view === 'creditor' ? (
+        <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden' }}>
+          <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+            <thead><tr>
+              <th style={{ width: 24 }}></th><th>เจ้าหนี้</th>
+              <th style={{ textAlign: 'center', width: 70 }}>สัญญา</th>
+              <th style={{ textAlign: 'right' }}>ดอกเบี้ยรวม</th>
+              <th style={{ textAlign: 'right' }}>จ่ายแล้ว</th>
+              <th style={{ textAlign: 'right' }}>ค้าง</th>
+            </tr></thead>
+            <tbody>
+              {agg.creditors.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีข้อมูล</td></tr>}
+              {agg.creditors.map(c => (
+                <React.Fragment key={c.name}>
+                  <tr onClick={() => toggle(c.name)} style={{ cursor: 'pointer' }}>
+                    <td style={{ textAlign: 'center', color: 'var(--ink-400)' }}>{expanded[c.name] ? '▾' : '▸'}</td>
+                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td style={{ textAlign: 'center' }}>{c.contractCount}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(c.total, 2)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(c.paid, 2)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: c.outstanding > 0.005 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(c.outstanding, 2)}</td>
+                  </tr>
+                  {expanded[c.name] && (
+                    <tr><td colSpan={6} style={{ padding: 0, background: 'var(--ink-25, #fafbfc)' }}>
+                      <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+                        <thead><tr style={{ color: 'var(--ink-400)' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 10px 4px 40px' }}>วันจ่าย</th>
+                          <th style={{ textAlign: 'left' }}>สัญญา</th><th style={{ textAlign: 'left' }}>เดือนดอกเบี้ย</th>
+                          <th style={{ textAlign: 'right' }}>จำนวน</th><th style={{ textAlign: 'left', paddingRight: 10 }}>โน้ต</th>
+                        </tr></thead>
+                        <tbody>
+                          {c.rounds.length === 0 && <tr><td colSpan={5} style={{ padding: '6px 40px', color: 'var(--ink-400)' }}>ยังไม่มีการจ่าย</td></tr>}
+                          {c.rounds.map((p, i) => (
+                            <tr key={i}>
+                              <td style={{ padding: '3px 10px 3px 40px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.payDate ? fmtDate(p.payDate) : '—'}</td>
+                              <td style={{ fontFamily: 'ui-monospace', fontSize: 10.5 }}>{p.contractNo}</td>
+                              <td>{p.monthLabel}</td>
+                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtNum(p.amount, 2)}</td>
+                              <td style={{ color: 'var(--ink-500)', paddingRight: 10 }}>{p.note || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: 800, background: 'var(--ink-50)', borderTop: '2px solid var(--ink-200)' }}>
+                <td></td><td>รวมทั้งหมด</td><td></td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(agg.totalInterest, 2)}</td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(agg.totalPaid, 2)}</td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--bad)' }}>{fmtNum(agg.totalOutstanding, 2)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
+        <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden', maxHeight: '55vh', overflowY: 'auto' }}>
+          <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}><tr>
+              <th style={{ width: 108 }}>วันจ่าย</th><th>เจ้าหนี้</th><th>สัญญา</th><th>เดือนดอกเบี้ย</th>
+              <th style={{ textAlign: 'right' }}>จำนวน</th><th>โน้ต</th>
+            </tr></thead>
+            <tbody>
+              {agg.rounds.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีการจ่าย</td></tr>}
+              {agg.rounds.map((p, i) => (
+                <tr key={i}>
+                  <td style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.payDate ? fmtDate(p.payDate) : '—'}</td>
+                  <td style={{ fontWeight: 600 }}>{p.borrowerName}</td>
+                  <td style={{ fontFamily: 'ui-monospace', fontSize: 10.5 }}>{p.contractNo}</td>
+                  <td>{p.monthLabel}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--good)' }}>{fmtNum(p.amount, 2)}</td>
+                  <td style={{ color: 'var(--ink-500)' }}>{p.note || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr style={{ fontWeight: 800, background: 'var(--ink-50)', borderTop: '2px solid var(--ink-200)' }}>
+              <td colSpan={4}>รวมจ่ายทั้งหมด ({agg.roundCount} รอบ)</td>
+              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(agg.totalPaid, 2)}</td><td></td>
+            </tr></tfoot>
+          </table>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -2967,6 +3121,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   const [colFilters, setColFilters]         = React.useState({});
   const [openCol,    setOpenCol]            = React.useState(null);
   const [exportOpen, setExportOpen]         = React.useState(false);
+  const [overviewOpen, setOverviewOpen]     = React.useState(false);
   const [repairOpen, setRepairOpen]         = React.useState(false);   // เครื่องมือซ่อมรายการกำพร้า
 
   // ── Cross-page focus: open contract specified by #debt page button ───────
@@ -3102,6 +3257,10 @@ function DebtLedgerPage({ data, setData, toast }) {
           </div>
         </div>
         <div className="page-head-r">
+          <button className="btn btn-ghost" onClick={() => setOverviewOpen(true)}
+            title="ภาพรวมการจ่ายดอกเบี้ยทุกสัญญา — ยอดรวม + ตามเจ้าหนี้ + ประวัติรายวัน">
+            📊 ภาพรวมจ่ายดอกเบี้ย
+          </button>
           <button className="btn btn-ghost" onClick={() => setExportOpen(true)}
             title="ส่งออก Excel (เลือกรูปแบบ: สรุป หรือ แยกแต่ละสัญญา)">
             <Icon name="download" size={14} /> Excel
@@ -3315,6 +3474,13 @@ function DebtLedgerPage({ data, setData, toast }) {
         ledgerByContract={ledgerByContract}
         eventsByContract={eventsByContract}
         onClose={() => setExportOpen(false)}
+      />
+
+      <InterestOverviewModal
+        open={overviewOpen}
+        masters={masters}
+        ledgerByContract={ledgerByContract}
+        onClose={() => setOverviewOpen(false)}
       />
 
       <OrphanRepairModal
