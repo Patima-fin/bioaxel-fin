@@ -1006,3 +1006,9 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - **แท็บใหม่ "📅 ตามปี › หมวด › สัญญา"** (แทน flat log): สร้าง `years` tree จาก rounds — ปี(วันจ่าย) → หมวด → สัญญา → รอบ (แต่ละชั้นมี total+count, เรียงยอด desc). render แบบ flatten เป็น `vis` ตาม `expanded` (key = path `y:.. |c:.. |k:..`), indent ตาม lvl, คลิกแถวกาง/ยุบ, แถวรวมท้าย. แท็บ "👤 ตามเจ้าหนี้" คงเดิม (กางดูรายย่อย).
 - ไฟล์: `app/page_debt_ledger.jsx` (`InterestOverviewModal` filter+year tree), `index.html` (`?v=20260716k`).
 - verify: node — Babel OK · จำลอง agg จริง: year tree 2025 → WCI 200(1)/STS 130(3) เรียง desc ถูก · กรองหมวด=STS → paid130/รวม250/เฉพาะ STS · กรองเจ้าหนี้=คุณสมชาย → paid200/1 สัญญา ✓
+
+- **คำขอ (เตย)**: ตัวเลขเงินทั้งหมดในหน้า `#debt` (ภาระหนี้) + `#debt_ledger` (ดอกเบี้ย) ให้เป็นทศนิยม 2 ตำแหน่งเท่านั้น (เดิมหลายจุดเป็นจำนวนเต็ม `fmtNum(x,0)`).
+- **แก้**: เปลี่ยน `fmtNum(<เงิน>, 0)` → `fmtNum(<เงิน>, 2)` ทุกจุด (page_debt.jsx 15 จุด, page_debt_ledger.jsx 22 จุด) = วงเงิน/คงเหลือ/เงินต้น/ดอกเบี้ยรวม-จ่าย-ค้าง/ยอดรวมท้ายตาราง/KPI drawer/ตารางดอกเบี้ยรายเดือน/rollover/toast ฯลฯ. + ช่องกรอกเงิน `NumberInput digits={0}→{2}` (วงเงิน/คงเหลือในฟอร์มแก้, จำนวนคืน/เบิก, เงินต้น rollover/inline) — `digits` เป็น display-only (blur เก็บ `parseFloat` เต็ม ไม่ปัด).
+- **ไม่แตะ**: `digits={0}` ที่เป็น **จำนวนนับ** (KpiTile "ปิดสัญญาแล้ว" / "สัญญา Active") · KPI tile เงิน (`KpiTile` default `digits=2` อยู่แล้ว) · อัตรา % (`.toFixed(2)`) · วัน/รอบ/เดือน (ไม่ใช่ fmtNum).
+- ไฟล์: `app/page_debt.jsx`, `app/page_debt_ledger.jsx`, `index.html` (`debt?v=20260716i` · `ledger?v=20260716l`).
+- verify: node — Babel OK 2 ไฟล์ · grep ยืนยัน money `fmtNum(...,0)` เหลือ 0 · `digits={0}` เหลือเฉพาะ 2 จำนวนนับ · diff ทุกบรรทัดเป็น fmtNum/digits เท่านั้น (ไม่มี logic เปลี่ยน).

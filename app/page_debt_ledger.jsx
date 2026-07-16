@@ -435,21 +435,21 @@ function DebtLedgerRow({ master, summary, onOpen }) {
         <Badge kind={isActive ? 'b-blue' : 'b-gray'} dot={false}>{isActive ? 'Active' : 'Close'}</Badge>
       </td>
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
-        {fmtNum(principal, 0)} {isUSD && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>USD</span>}
+        {fmtNum(principal, 2)} {isUSD && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>USD</span>}
       </td>
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
         {rate > 0 ? (rate * 100).toFixed(2) + '%' : '—'}
       </td>
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, whiteSpace: 'nowrap' }}>
-        {fmtNum(s.totalInterest, 0)}
+        {fmtNum(s.totalInterest, 2)}
       </td>
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, color: 'var(--good)', whiteSpace: 'nowrap' }}>
-        {s.paidInterest > 0 ? fmtNum(s.paidInterest, 0) : '—'}
+        {s.paidInterest > 0 ? fmtNum(s.paidInterest, 2) : '—'}
         {s.paidMonths > 0 && <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>{s.paidMonths} เดือน</div>}
       </td>
       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 13,
                    color: s.outstandingInterest > 0 ? 'var(--bad)' : 'var(--ink-300)', whiteSpace: 'nowrap' }}>
-        {fmtNum(s.outstandingInterest, 0)}
+        {fmtNum(s.outstandingInterest, 2)}
         {s.unpaidMonths > 0 && <div style={{ fontSize: 10, color: 'var(--ink-400)', fontWeight: 400 }}>{s.unpaidMonths} เดือน</div>}
       </td>
       <td style={{ fontSize: 11.5, color: 'var(--ink-500)', whiteSpace: 'nowrap', textAlign: 'center' }}>
@@ -812,7 +812,7 @@ function AddLedgerRowModal({ open, master, ledgerRows, onClose, onSave }) {
       {/* สูตรคำนวณ + ดอกเบี้ยที่จะบันทึก */}
       <div style={{ padding: '10px 12px', borderRadius: 9, background: 'var(--ink-50)', border: '1px solid var(--ink-100)', marginBottom: 10 }}>
         <div style={{ fontSize: 11, color: 'var(--ink-500)', marginBottom: 6 }}>
-          สูตร: {fmtNum(p, 0)} × {(rate * 100).toFixed(2)}% × {dnum || 0}/{basis} =
+          สูตร: {fmtNum(p, 2)} × {(rate * 100).toFixed(2)}% × {dnum || 0}/{basis} =
           <strong style={{ color: 'var(--brand-700)', marginLeft: 4, fontFamily: 'ui-monospace' }}>{fmtNum(computed, 2)}</strong>
           {touched && (
             <button type="button" onClick={() => { setInterest(''); setTouched(false); }}
@@ -923,12 +923,12 @@ function PrincipalEventModal({ open, kind, master, editEvent, onClose, onSave })
           {isRepay && <button type="button"
             onClick={() => setAmount(String(balance))}
             style={{ marginLeft: 8, fontSize: 10, padding: '1px 8px', borderRadius: 10, border: '1px solid var(--brand-300)', background: 'var(--brand-50)', color: 'var(--brand-700)', cursor: 'pointer' }}>
-            ปิดสัญญา (คืนทั้งหมด {fmtNum(balance, 0)})
+            ปิดสัญญา (คืนทั้งหมด {fmtNum(balance, 2)})
           </button>}
         </label>
-        <NumberInput className="input" autoFocus value={amount} digits={0}
+        <NumberInput className="input" autoFocus value={amount} digits={2}
           onChange={n => setAmount(n)}
-          placeholder={isRepay ? `เช่น ${fmtNum(balance, 0)} หรือคืนแค่บางส่วน` : 'จำนวนที่ขอเบิกเพิ่ม'} />
+          placeholder={isRepay ? `เช่น ${fmtNum(balance, 2)} หรือคืนแค่บางส่วน` : 'จำนวนที่ขอเบิกเพิ่ม'} />
       </div>
       <div className="field" style={{ marginBottom: 10 }}>
         <label>หมายเหตุ / เลขอ้างอิง</label>
@@ -1087,11 +1087,11 @@ function RolloverModal({ open, master, onClose, onSave }) {
       onClose={onClose}
       footer={<>
         <span style={{ marginRight: 'auto', fontSize: 11.5, color: tooMuch ? 'var(--bad)' : 'var(--ink-500)' }}>
-          วงเงินเดิม <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(oldBalance, 0)}</strong> ·
-          วงเงินรวมใหม่ <strong style={{ fontVariantNumeric: 'tabular-nums', color: tooMuch ? 'var(--bad)' : 'var(--ink-700)' }}>{fmtNum(sumNew, 0)}</strong>
+          วงเงินเดิม <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(oldBalance, 2)}</strong> ·
+          วงเงินรวมใหม่ <strong style={{ fontVariantNumeric: 'tabular-nums', color: tooMuch ? 'var(--bad)' : 'var(--ink-700)' }}>{fmtNum(sumNew, 2)}</strong>
           {diff !== 0 && (
             <span style={{ marginLeft: 6, color: diff < 0 ? 'var(--good)' : 'var(--bad)' }}>
-              ({diff > 0 ? '+' : ''}{fmtNum(diff, 0)})
+              ({diff > 0 ? '+' : ''}{fmtNum(diff, 2)})
             </span>
           )}
         </span>
@@ -1137,7 +1137,7 @@ function RolloverModal({ open, master, onClose, onSave }) {
           {master.facilityType && <FacilityChip type={master.facilityType} />}
           <div>{master.borrowerName}</div>
           <div>วงเงิน {fmtNum(Number(master.principalAmount) || 0, 0)}</div>
-          <div>คงเหลือ <strong>{fmtNum(oldBalance, 0)}</strong></div>
+          <div>คงเหลือ <strong>{fmtNum(oldBalance, 2)}</strong></div>
           <div>อัตรา {((Number(master.interestRate) || 0) * 100).toFixed(2)}%/ปี</div>
         </div>
         <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '180px 1fr', gap: 10 }}>
@@ -1208,7 +1208,7 @@ function RolloverModal({ open, master, onClose, onSave }) {
               </div>
               <div className="field" style={{ margin: 0 }}>
                 <label>วงเงิน (Principal) *</label>
-                <NumberInput className="input" value={c.principalAmount} digits={0}
+                <NumberInput className="input" value={c.principalAmount} digits={2}
                   onChange={n => updateContract(i, { principalAmount: n, balance: n })} />
               </div>
               <div className="field" style={{ margin: 0 }}>
@@ -1246,7 +1246,7 @@ function RolloverModal({ open, master, onClose, onSave }) {
 
       {tooMuch && (
         <div style={{ marginTop: 12, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '8px 12px', borderRadius: 7, fontSize: 12 }}>
-          ⚠️ วงเงินรวมใหม่ ({fmtNum(sumNew, 0)}) <strong>เกิน</strong> ยอดคงเหลือเดิม ({fmtNum(oldBalance, 0)}) — ต้องไม่เกิน
+          ⚠️ วงเงินรวมใหม่ ({fmtNum(sumNew, 2)}) <strong>เกิน</strong> ยอดคงเหลือเดิม ({fmtNum(oldBalance, 2)}) — ต้องไม่เกิน
         </div>
       )}
     </Modal>
@@ -1373,7 +1373,7 @@ function useDebtContractActions(setData, toast) {
       });
       syncAfter(updated);
       const action = kind === 'repayment' ? 'คืนเงินต้น' : 'เบิกเงินกู้เพิ่ม';
-      toast(closedFlag ? `${action} ${fmtNum(amount, 0)} + ปิดสัญญาแล้ว` : `${action} ${fmtNum(amount, 0)} แล้ว`);
+      toast(closedFlag ? `${action} ${fmtNum(amount, 2)} + ปิดสัญญาแล้ว` : `${action} ${fmtNum(amount, 2)} แล้ว`);
     },
     // แก้ไขรายการรับ/คืนเงินกู้ที่คีย์ผิด — คำนวณยอดคงเหลือใหม่จาก events ทั้งหมด
     editPrincipalEvent(eventId, master, { date, amount, note, kind }) {
@@ -1912,7 +1912,7 @@ function MissingFieldsEditor({ master, onSave }) {
       </div>
       <div style={{ flex: '1 1 120px' }}>
         <Lbl>เงินต้น (บาท)</Lbl>
-        <NumberInput className="input" value={principal} digits={0} onChange={setPrincipal} style={{ fontSize: 12 }} />
+        <NumberInput className="input" value={principal} digits={2} onChange={setPrincipal} style={{ fontSize: 12 }} />
       </div>
       <button className="btn btn-primary" style={{ fontSize: 12 }}
         onClick={() => onSave && onSave(master, {
@@ -2060,14 +2060,14 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           </div>
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยรวม</div>
-            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(totalInterest, 0)}</div>
-            <div style={{ fontSize: 10, color: 'var(--good)' }}>จ่ายแล้ว {fmtNum(totalPaid, 0)}</div>
+            <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>{fmtNum(totalInterest, 2)}</div>
+            <div style={{ fontSize: 10, color: 'var(--good)' }}>จ่ายแล้ว {fmtNum(totalPaid, 2)}</div>
           </div>
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยค้างจ่าย</div>
             <div style={{ fontWeight: 700, fontSize: 19, fontVariantNumeric: 'tabular-nums',
                           color: outstanding > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-              {fmtNum(outstanding, 0)}
+              {fmtNum(outstanding, 2)}
             </div>
           </div>
         </div>
@@ -2374,7 +2374,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                         {isPaid ? (
                           <span>✓ {fmtDate(r.paymentDate)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
                         ) : isPartial ? (
-                          <span>จ่าย {fmtNum(paidAmt, 0)} / ค้าง {fmtNum(remain, 0)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
+                          <span>จ่าย {fmtNum(paidAmt, 2)} / ค้าง {fmtNum(remain, 2)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
                         ) : 'ค้าง'}
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--ink-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }} title={r.note || r.paymentNote || ''}>
@@ -2547,10 +2547,10 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                               <td style={{ whiteSpace: 'nowrap', fontWeight: 600, color: split ? 'var(--ink-400)' : undefined }}>
                                 {split ? '↳ ' : ''}{TH_MONTH[r.month]} {r.year}
                               </td>
-                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtNum(r.principal, 0)}</td>
+                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmtNum(r.principal, 2)}</td>
                               <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.days}</td>
                               <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtNum(r.interest, 2)}</td>
-                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.balanceAfter, 0)}</td>
+                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.balanceAfter, 2)}</td>
                             </tr>
                             );
                           })}

@@ -49,7 +49,7 @@ function DebtCategoryMiniCard({ cat, rawRows }) {
           <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>คงเหลือ</div>
           <div style={{ fontWeight: 700, fontSize: 13, fontVariantNumeric: 'tabular-nums',
                        color: activeBal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-            {fmtNum(activeBal, 0)} {isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}>USD</span>}
+            {fmtNum(activeBal, 2)} {isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}>USD</span>}
           </div>
         </div>
       </div>
@@ -84,8 +84,8 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
         <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
           <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>คงเหลือ Active</div>
           <div style={{ fontWeight: 800, fontSize: nested ? 16 : 20, fontVariantNumeric: 'tabular-nums',
-                       color: thbBal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(thbBal, 0)}</div>
-          {usdBal > 0 && <div style={{ fontSize: 11, color: 'var(--ink-500)', fontVariantNumeric: 'tabular-nums' }}>+ {fmtNum(usdBal, 0)} USD</div>}
+                       color: thbBal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(thbBal, 2)}</div>
+          {usdBal > 0 && <div style={{ fontSize: 11, color: 'var(--ink-500)', fontVariantNumeric: 'tabular-nums' }}>+ {fmtNum(usdBal, 2)} USD</div>}
         </div>
       </div>
       {open && (
@@ -117,7 +117,7 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
                             <b style={{ color: 'var(--ink-700)' }}>{act.length}</b><span style={{ color: 'var(--ink-300)' }}>/{catRows.length}</span> สัญญา
                           </td>
                           <td style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: bal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-                            {fmtNum(bal, 0)}{isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}> USD</span>}
+                            {fmtNum(bal, 2)}{isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}> USD</span>}
                           </td>
                         </tr>
                       );
@@ -390,7 +390,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
 
         <div className="field">
           <label>วงเงิน (Principal) *</label>
-          <NumberInput className="input" value={draft.principalAmount} digits={0}
+          <NumberInput className="input" value={draft.principalAmount} digits={2}
             onChange={n => set('principalAmount', n)} />
         </div>
         <div className="field">
@@ -400,7 +400,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
         </div>
         <div className="field">
           <label>ยอดคงเหลือ (ว่าง = วงเงิน)</label>
-          <NumberInput className="input" value={draft.balance} digits={0}
+          <NumberInput className="input" value={draft.balance} digits={2}
             onChange={n => set('balance', n)} />
         </div>
 
@@ -542,7 +542,7 @@ function ImportDebtModal({ open, existing, onClose, onImport }) {
                       <td>{r.debtCategory}</td>
                       <td style={{ fontFamily: 'ui-monospace' }}>{r.contractNo}</td>
                       <td>{r.borrowerName}</td>
-                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.principalAmount, 0)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(r.principalAmount, 2)}</td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{(r.interestRate * 100).toFixed(2)}%</td>
                     </tr>
                   );
@@ -980,14 +980,14 @@ function DebtPage({ data, setData, toast }) {
                         {fmtDate(r.maturityDate || r.endDate) || '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 12.5, whiteSpace: 'nowrap' }}>
-                        {fmtNum(principal, 0)} {isUSD && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>USD</span>}
+                        {fmtNum(principal, 2)} {isUSD && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>USD</span>}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
                         {rate > 0 ? (rate * 100).toFixed(2) + '%' : '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 13,
                                    color: balance > 0 ? 'var(--bad)' : 'var(--ink-300)', whiteSpace: 'nowrap' }}>
-                        {fmtNum(balance, 0)}
+                        {fmtNum(balance, 2)}
                       </td>
                       <td style={{ fontSize: 11.5, color: 'var(--ink-600)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.bankName || ''}>
                         {r.bankName || '—'}
@@ -1021,9 +1021,9 @@ function DebtPage({ data, setData, toast }) {
                     <td colSpan={6} style={{ textAlign: 'right', paddingRight: 10, fontSize: 12 }}>
                       รวม ({filtered.length} สัญญา)
                     </td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(filtPrincipal, 0)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(filtPrincipal, 2)}</td>
                     <td></td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--bad)', fontSize: 14 }}>{fmtNum(filtBalance, 0)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--bad)', fontSize: 14 }}>{fmtNum(filtBalance, 2)}</td>
                     <td colSpan={3}></td>
                   </tr>
                 </tfoot>
@@ -1131,28 +1131,28 @@ function DebtPage({ data, setData, toast }) {
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ยอดคงเหลือ (เงินต้น)</div>
                   <div style={{ fontWeight: 700, fontSize: 22, color: bal > 0 ? 'var(--bad)' : 'var(--ink-400)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(bal, 0)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{isUSD ? 'USD' : ''}</span>
+                    {fmtNum(bal, 2)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{isUSD ? 'USD' : ''}</span>
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยรวม</div>
                   <div style={{ fontWeight: 600, fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(interestTotal, 0)}
+                    {fmtNum(interestTotal, 2)}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--good)' }}>ชำระแล้ว {fmtNum(interestPaid, 0)}</div>
+                  <div style={{ fontSize: 10, color: 'var(--good)' }}>ชำระแล้ว {fmtNum(interestPaid, 2)}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ดอกเบี้ยค้างจ่าย</div>
                   <div style={{ fontWeight: 700, fontSize: 18, fontVariantNumeric: 'tabular-nums',
                                 color: interestDue > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-                    {fmtNum(interestDue, 0)}
+                    {fmtNum(interestDue, 2)}
                   </div>
                 </div>
               </div>
               {princ > 0 && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-500)', marginBottom: 4 }}>
-                    <span>ชำระเงินต้นแล้ว {fmtNum(paid, 0)} / วงเงิน {fmtNum(princ, 0)}</span>
+                    <span>ชำระเงินต้นแล้ว {fmtNum(paid, 2)} / วงเงิน {fmtNum(princ, 2)}</span>
                     <span>{paidPct.toFixed(1)}%</span>
                   </div>
                   <div style={{ height: 6, borderRadius: 3, background: 'var(--ink-100)', overflow: 'hidden' }}>
