@@ -1025,3 +1025,9 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - **(D) แก้จำนวนวันตอน override** — `InterestOverridePopup` เพิ่มช่อง **เงินต้น·อัตรา (read-only) + จำนวนวัน (แก้ได้)** + ปุ่ม "ใช้ค่านี้" (คิด `เงินต้น×อัตรา×วัน/basis` เหมือนตอนเพิ่มเอง). `overrideInterest(row,value,note,days)` อัปเดต `r.days` ด้วย (ถ้าต่าง+>0). **หมายเหตุ**: days เป็น override ระดับแสดง — สั่ง auto ใหม่จะคิดทับ (แต่ตอนนี้ auto คิด days ถูกแล้วจาก (C)).
 - ไฟล์: `app/page_debt_ledger.jsx`, `index.html` (`?v=20260716n`).
 - verify: node — Babel OK · **`buildAutoSchedule` ตัวจริง**: ก.ค. include_end คืนวันที่ 4 → งวด1=4/งวด2=27 รวม=31 ✓ (เดิม 4/28=32), exclude_end คงเดิม 31 ✓ · filter Set: ว่าง=3, {WCI}=2, {STS,WCI}=3, {X}=2, {WCI}+{X}=1 ✓ · fromDays 8.4M×15%×27/365=93,205.48 · dPatch(27,row28)={days:27}/(null)/(เท่าเดิม)={} ✓
+
+- **อาการ (เตย)**: เมนูติ๊กกรอง (`OvFilterSelect`) ในภาพรวมดอกเบี้ย **ไม่มีพื้นหลัง** → ทะลุเห็น KPI ด้านหลัง อ่านไม่ออก (ทั้ง 2 ฝั่ง หมวด/เจ้าหนี้).
+- **ต้นเหตุ**: โค้ดใช้ `var(--surface)` เป็นพื้นหลัง แต่ **`--surface` ไม่เคยถูกนิยามใน `app/styles.css`** → resolve เป็น `transparent`. ที่ผ่านมาไม่เห็นปัญหาเพราะส่วนใหญ่ทับพื้นขาวอยู่แล้ว (โปร่งใสทับขาว=ดูขาว) — จะเห็นเฉพาะตอนทับ content (dropdown ทับ KPI · หัวตาราง sticky ทับแถวตอนสกรอลล์). ใช้ทั่วแอป 10+ ไฟล์.
+- **แก้ 2 ชั้น**: (1) **นิยาม `--surface: #ffffff` ใน `styles.css`** → fix ทุกจุดทั้งแอปที่ root (dropdown/หัวตาราง sticky อื่น ๆ ที่ latent อยู่ด้วย). (2) `page_debt_ledger.jsx` เปลี่ยน `var(--surface)`→`var(--panel)` (token ที่นิยามชัด #fff) 10 จุด เพื่อความชัดเจน.
+- ไฟล์: `app/styles.css` (นิยาม --surface), `app/page_debt_ledger.jsx` (→ --panel), `index.html` (`styles.css?v=20260717a` · `page_debt_ledger.jsx?v=20260716o`).
+- verify: node — Babel OK · `var(--surface)` เหลือ 0 ในไฟล์ ledger, `var(--panel)` 11 จุด · `--panel`/`--surface` = #ffffff ทึบ.

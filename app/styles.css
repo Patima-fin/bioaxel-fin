@@ -25,6 +25,8 @@
 
   --bg: #f4f8f5;
   --panel: #ffffff;
+  --surface: #ffffff;   /* พื้นการ์ด/เมนู/หัวตารางแบบ sticky — เดิมไม่ได้นิยาม → var(--surface) โปร่งใส
+                           (dropdown/หัวตาราง sticky ทะลุเห็นด้านหลัง). ใช้ทั่วแอปหลายไฟล์. */
   --line: #e6ebf3;
   --line-soft: #eef2f7;
 

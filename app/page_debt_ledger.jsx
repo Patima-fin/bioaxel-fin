@@ -2338,7 +2338,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
         <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden' }}>
           <div style={{ maxHeight: 'min(420px, calc(100vh - 460px))', overflowY: 'auto' }}>
             <table className="tbl tbl-compact" style={{ width: '100%', fontSize: 12 }}>
-              <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 2 }}>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 2 }}>
                 <tr>
                   {canEdit && (
                     <th style={{ width: 34, textAlign: 'center' }}>
@@ -2570,7 +2570,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                     )}
                     <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--ink-100)', borderRadius: 8 }}>
                       <table className="tbl tbl-compact" style={{ width: '100%', fontSize: 11.5 }}>
-                        <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}><tr>
+                        <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}><tr>
                           <th>เดือน</th>
                           <th style={{ textAlign: 'right' }}>เงินต้น</th>
                           <th style={{ textAlign: 'right' }}>วัน</th>
@@ -2725,14 +2725,14 @@ function OvFilterSelect({ label, options, selected, onChange }) {
     <div ref={ref} style={{ position: 'relative', flex: '1 1 0', minWidth: 0 }}>
       <button type="button" onClick={() => setOpen(o => !o)}
         style={{ width: '100%', height: 34, padding: '0 12px', borderRadius: 8, border: '1px solid var(--line, #e2e8f0)',
-                 background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                 background: 'var(--panel)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                  gap: 8, fontSize: 12.5, fontFamily: 'inherit' }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                        color: selected.size ? 'var(--ink-800)' : 'var(--ink-500)', fontWeight: selected.size ? 600 : 400 }}>{summary}</span>
         <span style={{ color: 'var(--ink-400)', fontSize: 10, flexShrink: 0 }}>▾</span>
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 40, background: 'var(--surface)',
+        <div style={{ position: 'absolute', top: 38, left: 0, right: 0, zIndex: 40, background: 'var(--panel)',
                       border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 8px 24px rgba(16,24,40,0.16)',
                       maxHeight: 280, overflowY: 'auto', padding: 6 }}>
           <div style={{ display: 'flex', gap: 6, padding: '2px 4px 6px', borderBottom: '1px solid var(--ink-100)', marginBottom: 4 }}>
@@ -2829,7 +2829,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
   if (!open) return null;
   const toggle = (k) => setExpanded(e => ({ ...e, [k]: !e[k] }));
   const kpi = (label, value, color) => (
-    <div style={{ flex: '1 1 150px', padding: '10px 14px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--ink-100)' }}>
+    <div style={{ flex: '1 1 150px', padding: '10px 14px', borderRadius: 10, background: 'var(--panel)', border: '1px solid var(--ink-100)' }}>
       <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
       <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: color || 'var(--ink-800)' }}>{value}</div>
     </div>
@@ -2937,7 +2937,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
         return (
           <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden', maxHeight: '58vh', overflowY: 'auto' }}>
             <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
-              <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}><tr>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}><tr>
                 <th>ปี / หมวด / สัญญา <span style={{ fontWeight: 400, color: 'var(--ink-400)', fontSize: 11 }}>(คลิกเพื่อกาง)</span></th>
                 <th style={{ textAlign: 'center', width: 70 }}>รอบ</th>
                 <th style={{ textAlign: 'right', width: 150 }}>จ่ายรวม</th>
@@ -3217,7 +3217,7 @@ function OrphanRepairModal({ open, orphanGroups, masters, onClose, onRelink }) {
             const sel = pick[g.contractNo] || '';
             return (
               <div key={g.contractNo} style={{ display: 'grid', gridTemplateColumns: '1fr auto 1.3fr', gap: 10, alignItems: 'center',
-                padding: '10px 12px', borderRadius: 9, border: '1px solid var(--ink-100)', background: 'var(--surface)' }}>
+                padding: '10px 12px', borderRadius: 9, border: '1px solid var(--ink-100)', background: 'var(--panel)' }}>
                 <div>
                   <div style={{ fontFamily: 'ui-monospace', fontWeight: 700, fontSize: 12.5 }}>{g.contractNo}</div>
                   <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>{g.count} แถว · จ่ายแล้ว {g.paid}</div>
@@ -3438,7 +3438,7 @@ function DebtLedgerPage({ data, setData, toast }) {
       {/* ── ⚠️ รายการดอกเบี้ยกำพร้า (หลุดจากสัญญาเพราะ contractNo ไม่ตรง) — เครื่องมือซ่อม ── */}
       {canEdit && orphanGroups.length > 0 && (
         <div className="card anim-in" style={{ padding: '12px 16px', marginBottom: 12,
-          borderLeft: '4px solid var(--bad)', background: 'color-mix(in oklch, var(--bad) 6%, var(--surface))' }}>
+          borderLeft: '4px solid var(--bad)', background: 'color-mix(in oklch, var(--bad) 6%, var(--panel))' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 16 }}>🔧</span>
             <span style={{ fontWeight: 800, fontSize: 14, color: 'var(--ink-800)' }}>
@@ -3458,7 +3458,7 @@ function DebtLedgerPage({ data, setData, toast }) {
       {maturityAlerts.length > 0 && (
         <div className="card anim-in" style={{ padding: '12px 16px', marginBottom: 12,
           borderLeft: `4px solid ${matOverdue ? 'var(--bad)' : 'oklch(70% 0.16 70)'}`,
-          background: matOverdue ? 'color-mix(in oklch, var(--bad) 5%, var(--surface))' : 'color-mix(in oklch, oklch(70% 0.16 70) 7%, var(--surface))' }}>
+          background: matOverdue ? 'color-mix(in oklch, var(--bad) 5%, var(--panel))' : 'color-mix(in oklch, oklch(70% 0.16 70) 7%, var(--panel))' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 16 }}>⏰</span>
             <span style={{ fontWeight: 800, fontSize: 14, color: 'var(--ink-800)' }}>
@@ -3572,7 +3572,7 @@ function DebtLedgerPage({ data, setData, toast }) {
         <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'min(540px, calc(100vh - 380px))' }}>
             <table className="tbl tbl-compact" style={{ minWidth: 1200, tableLayout: 'fixed', width: '100%' }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--panel)' }}>
                 <tr>
                   <FilterableColHeader label="หมวดหนี้" sortKey="debtCategory" colKey="debtCategory" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={100} align="center" />
                   <FilterableColHeader label="เลขที่สัญญา" sortKey="contractNo" colKey="contractNo" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={150} align="center" />
