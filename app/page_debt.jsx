@@ -1235,6 +1235,7 @@ function DebtPage({ data, setData, toast }) {
           events={data?.debtEvents || []}
           onClose={() => setScheduleFor(null)}
           onSavePayments={actions.savePayments}
+          onSaveInterestPayments={actions.saveInterestPayments}
           onClearPayment={actions.clearPayment}
           onOverrideInterest={actions.overrideInterest}
           onAddPrincipalEvent={actions.addPrincipalEvent}

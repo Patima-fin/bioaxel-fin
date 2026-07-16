@@ -138,10 +138,12 @@ function buildInterestByContract(debtLedger) {
       };
     }
     const m = map[k];
-    const amt = effectiveInterest(r);
+    const amt  = effectiveInterest(r);
+    const paid = interestPaid(r);
     m.totalInterest += amt;
-    if (r.paymentDate) { m.paidInterest += amt; m.paidMonths += 1; }
-    else { m.outstandingInterest += amt; m.unpaidMonths += 1; }
+    m.paidInterest  += paid;
+    m.outstandingInterest += Math.max(0, amt - paid);
+    if (isInterestFullyPaid(r)) m.paidMonths += 1; else m.unpaidMonths += 1;
     const y = Number(r.year);
     if (y) {
       if (m.firstYear == null || y < m.firstYear) m.firstYear = y;
@@ -159,6 +161,27 @@ function effectiveInterest(r) {
   }
   return Number(r.interestAmount) || 0;
 }
+
+// ── ดอกเบี้ย: รองรับ "จ่ายหลายรอบ/บางส่วน" ต่อเดือน ─────────────────────────────
+// r.payments = [{date, amount, note, by, at}] เก็บใน jsonb ทั้งแถว (ไม่ต้องแก้ schema).
+// legacy: แถวจ่ายครบแบบเดิม (มี paymentDate แต่ไม่มี payments[]) นับเป็น 1 รอบเต็ม.
+// paymentDate ยังถูก set = วันจ่ายรอบสุดท้าย "เมื่อจ่ายครบ" (ว่างเมื่อจ่ายบางส่วน)
+// → โค้ดเดิมที่เช็ค r.paymentDate (แท็บจ่ายแล้ว/ไฮไลต์เขียว) ยังทำงานถูก.
+function interestPayments(r) {
+  if (Array.isArray(r.payments) && r.payments.length) {
+    return r.payments.filter(p => p && (Number(p.amount) || 0) > 0);
+  }
+  if (r.paymentDate) return [{ date: r.paymentDate, amount: effectiveInterest(r), note: r.paymentNote || '', by: r.paidBy || '', legacy: true }];
+  return [];
+}
+function interestPaid(r)      { return interestPayments(r).reduce((s, p) => s + (Number(p.amount) || 0), 0); }
+function interestRemaining(r) { return Math.max(0, effectiveInterest(r) - interestPaid(r)); }
+function isInterestFullyPaid(r) {
+  const eff = effectiveInterest(r);
+  if (eff <= 0.005) return !!r.paymentDate || (Array.isArray(r.payments) && r.payments.length > 0);
+  return interestPaid(r) >= eff - 0.005;
+}
+function interestPayStatus(r) { return isInterestFullyPaid(r) ? 'full' : (interestPaid(r) > 0 ? 'partial' : 'unpaid'); }
 
 // คงเหลือเงินต้น = เงินต้นตั้งต้น + Σเบิกเพิ่ม − Σคืนเงินต้น (คำนวณสดจาก events เสมอ
 // → แก้/ลบ event แล้วยอดคงเหลือ + ตารางดอกเบี้ย + การ์ดสรุป อัปเดตพร้อมกันไม่มีเพี้ยน)
@@ -447,7 +470,7 @@ function PaymentConfirmPopup({ open, selectedRows, master, onClose, onConfirm })
     }
   }, [open]);
   if (!open) return null;
-  const total = (selectedRows || []).reduce((s, r) => s + effectiveInterest(r), 0);
+  const total = (selectedRows || []).reduce((s, r) => s + interestRemaining(r), 0);
   return (
     <Modal
       open={open}
@@ -487,7 +510,7 @@ function PaymentConfirmPopup({ open, selectedRows, master, onClose, onConfirm })
             {(selectedRows || []).map(r => (
               <tr key={r.id}>
                 <td>{TH_MONTH[Number(r.month)] || r.month} {r.year}</td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(effectiveInterest(r), 2)}</td>
+                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(interestRemaining(r), 2)}</td>
               </tr>
             ))}
           </tbody>
@@ -502,6 +525,81 @@ function PaymentConfirmPopup({ open, selectedRows, master, onClose, onConfirm })
         <label>หมายเหตุ (ไม่บังคับ)</label>
         <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น เลขอ้างอิงรับเงิน / ช่องทาง" />
       </div>
+    </Modal>
+  );
+}
+
+// ── จ่ายดอกเบี้ยรายเดือน (หลายรอบ / บางส่วน) ───────────────────────────────────
+// เดือนเดียวจ่ายได้หลายรอบ (แต่ละรอบ = วันที่ + จำนวน + โน้ต) → เก็บใน row.payments[]
+function InterestPaymentModal({ open, row, master, onClose, onSave }) {
+  const [rounds, setRounds] = React.useState([]);
+  React.useEffect(() => {
+    if (open && row) {
+      const existing = interestPayments(row).map(p => ({ date: p.date || '', amount: Number(p.amount) || 0, note: p.note || '' }));
+      // เปิดครั้งแรก (ยังไม่มีรอบ) → ตั้งรอบเดียว = ยอดเต็ม + วันนี้ (จ่ายเต็มก็แค่กดบันทึก)
+      setRounds(existing.length ? existing : [{ date: new Date().toISOString().slice(0, 10), amount: effectiveInterest(row) || '', note: '' }]);
+    }
+  }, [open, row]);
+  if (!open || !row) return null;
+  const eff  = effectiveInterest(row);
+  const paid = rounds.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const remaining = Math.max(0, eff - paid);
+  const over = paid - eff;
+  const pct  = eff > 0 ? Math.min(100, paid / eff * 100) : (rounds.length ? 100 : 0);
+  const today = new Date().toISOString().slice(0, 10);
+  const setR  = (i, k, v) => setRounds(rs => rs.map((p, idx) => idx === i ? { ...p, [k]: v } : p));
+  const delR  = (i) => setRounds(rs => rs.filter((_, idx) => idx !== i));
+  const addR  = (amt) => setRounds(rs => [...rs, { date: today, amount: amt != null ? amt : '', note: '' }]);
+  const clean = rounds.filter(p => (Number(p.amount) || 0) > 0 && p.date);
+  return (
+    <Modal open={open} maxWidth={560}
+      title={`จ่ายดอกเบี้ย · ${TH_MONTH[Number(row.month)] || row.month} ${row.year}`}
+      onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" onClick={() => onSave(clean)}>
+          <Icon name="check" size={14} /> บันทึก ({clean.length} รอบ)
+        </button>
+      </>}>
+      <div style={{ padding: '10px 12px', marginBottom: 12, borderRadius: 10, background: '#f8fafc', border: '1px solid var(--ink-100)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 3 }}>
+          <span style={{ color: 'var(--ink-600)' }}>ดอกเบี้ยเดือนนี้</span>
+          <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(eff, 2)}</strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 3 }}>
+          <span style={{ color: 'var(--ink-600)' }}>จ่ายแล้ว</span>
+          <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(paid, 2)}</strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+          <span style={{ color: 'var(--ink-600)' }}>{over > 0.005 ? 'จ่ายเกิน' : 'คงเหลือ'}</span>
+          <strong style={{ fontVariantNumeric: 'tabular-nums', color: over > 0.005 ? '#b45309' : (remaining > 0.005 ? 'var(--bad)' : 'var(--ink-300)') }}>
+            {fmtNum(over > 0.005 ? over : remaining, 2)}
+          </strong>
+        </div>
+        <div style={{ height: 6, borderRadius: 3, background: 'var(--ink-100)', overflow: 'hidden', marginTop: 8 }}>
+          <div style={{ height: '100%', width: pct + '%', background: remaining > 0.005 ? 'var(--good)' : 'var(--brand-500)', transition: 'width .2s' }} />
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--ink-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>รอบการจ่าย</div>
+      {rounds.map((p, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 7 }}>
+          <span style={{ fontSize: 11, color: 'var(--ink-400)', width: 16 }}>{i + 1}.</span>
+          <input className="input" type="date" value={p.date} onChange={e => setR(i, 'date', e.target.value)} style={{ width: 148 }} />
+          <DLCommaInput className="input" value={p.amount} onChange={v => setR(i, 'amount', v)} placeholder="จำนวน" style={{ width: 118, textAlign: 'right' }} />
+          <input className="input" value={p.note} onChange={e => setR(i, 'note', e.target.value)} placeholder="โน้ต (เงินสด/โอน)" style={{ flex: 1, minWidth: 90 }} />
+          <button onClick={() => delR(i)} title="ลบรอบนี้"
+            style={{ display: 'inline-flex', padding: 6, borderRadius: 7, cursor: 'pointer', border: '1px solid #fecaca', background: '#fff', color: '#dc2626' }}>
+            <Icon name="trash" size={12} />
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+        <button className="btn btn-ghost" onClick={() => addR(remaining > 0.005 ? remaining : null)} style={{ fontSize: 12.5 }}>
+          <Icon name="plus" size={12} /> เพิ่มรอบจ่าย
+        </button>
+      </div>
+      {over > 0.005 && <div style={{ marginTop: 8, fontSize: 11.5, color: '#b45309' }}>⚠️ ยอดรวมเกินดอกเบี้ยเดือนนี้ {fmtNum(over, 2)} — ตรวจอีกครั้งได้</div>}
     </Modal>
   );
 }
@@ -1167,6 +1265,7 @@ function useDebtContractActions(setData, toast) {
   };
 
   return {
+    // จ่ายพร้อมกันหลายเดือน (เร็ว) — เติมรอบ "ส่วนที่เหลือ" ให้แต่ละเดือนจนครบ (รองรับเดือนที่จ่ายบางส่วนไว้แล้ว)
     savePayments(rows, { payDate, note }) {
       if (!rows.length) return;
       const ids = new Set(rows.map(r => r.id));
@@ -1175,7 +1274,12 @@ function useDebtContractActions(setData, toast) {
       setData(d => {
         const next = (d.debtLedger || []).map(r => {
           if (!ids.has(r.id)) return r;
-          return { ...r, paymentDate: payDate, paidBy: username, paidAt: at, paymentNote: note || r.paymentNote || '' };
+          const existing = (Array.isArray(r.payments) && r.payments.length)
+            ? r.payments.slice()
+            : (r.paymentDate ? [{ date: r.paymentDate, amount: effectiveInterest(r), note: r.paymentNote || '', by: r.paidBy || '', at: r.paidAt || '' }] : []);
+          const rem = Math.max(0, effectiveInterest(r) - existing.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+          if (rem > 0.005) existing.push({ date: payDate, amount: rem, note: note || '', by: username, at });
+          return { ...r, payments: existing, paymentDate: payDate, paidBy: username, paidAt: at, paymentNote: note || r.paymentNote || '' };
         });
         updated = { ...d, debtLedger: next };
         return updated;
@@ -1183,11 +1287,39 @@ function useDebtContractActions(setData, toast) {
       syncAfter(updated);
       toast(`บันทึกจ่ายดอกเบี้ย ${rows.length} เดือนแล้ว`);
     },
+    // จ่ายดอกเบี้ยเดือนเดียวแบบหลายรอบ/บางส่วน — payments = [{date, amount, note}]
+    // ถ้ารวมครบยอด → set paymentDate = วันรอบสุดท้าย (เข้าแท็บ "จ่ายแล้ว"); ถ้ายังไม่ครบ → paymentDate ว่าง (ค้างจ่าย)
+    saveInterestPayments(row, payments) {
+      const at = new Date().toISOString();
+      const clean = (payments || [])
+        .map(p => ({ date: p.date || '', amount: Number(p.amount) || 0, note: (p.note || '').trim(), by: p.by || username, at: p.at || at }))
+        .filter(p => p.amount > 0 && p.date)
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      const eff  = effectiveInterest(row);
+      const paid = clean.reduce((s, p) => s + p.amount, 0);
+      const full = eff > 0.005 ? paid >= eff - 0.005 : clean.length > 0;
+      const lastDate = clean.length ? clean[clean.length - 1].date : '';
+      let updated;
+      setData(d => {
+        const next = (d.debtLedger || []).map(r => r.id === row.id ? {
+          ...r, payments: clean,
+          paymentDate: full ? lastDate : '',
+          paidBy:      full ? username : '',
+          paidAt:      full ? at : '',
+          paymentNote: full ? (clean.length ? clean[clean.length - 1].note : (r.paymentNote || '')) : (r.paymentNote || ''),
+        } : r);
+        updated = { ...d, debtLedger: next };
+        return updated;
+      });
+      syncAfter(updated);
+      toast(full ? 'บันทึกจ่ายดอกเบี้ยครบแล้ว'
+                 : (paid > 0 ? `บันทึกจ่ายบางส่วน · คงเหลือ ${fmtNum(Math.max(0, eff - paid), 2)}` : 'ล้างการจ่ายแล้ว'));
+    },
     clearPayment(row) {
       let updated;
       setData(d => {
         const next = (d.debtLedger || []).map(r =>
-          r.id === row.id ? { ...r, paymentDate: '', paidBy: '', paidAt: '', paymentNote: '' } : r
+          r.id === row.id ? { ...r, payments: [], paymentDate: '', paidBy: '', paidAt: '', paymentNote: '' } : r
         );
         updated = { ...d, debtLedger: next };
         return updated;
@@ -1591,7 +1723,7 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
   masters.forEach(m => {
     const rows = ledgerByContract[m.contractNo] || [];
     const total = rows.reduce((s, r) => s + effectiveInterest(r), 0);
-    const paid  = rows.filter(r => r.paymentDate).reduce((s, r) => s + effectiveInterest(r), 0);
+    const paid  = rows.reduce((s, r) => s + interestPaid(r), 0);
     const { inSum, outSum } = principalInOut(eventsByContract[m.contractNo]);
     const principal = Number(m.principalAmount) || 0;
     summary.push([
@@ -1628,7 +1760,7 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
       const principal = Number(m.principalAmount) || 0;
       const balance   = Math.max(0, principal + inSum - outSum);
       const totEff  = rows.reduce((s, r) => s + effectiveInterest(r), 0);
-      const totPaid = rows.filter(r => r.paymentDate).reduce((s, r) => s + effectiveInterest(r), 0);
+      const totPaid = rows.reduce((s, r) => s + interestPaid(r), 0);
 
       const aoa = [];
       // ── หัวเรื่อง ──
@@ -1654,7 +1786,7 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
           Number(r.days) || '',
           computed, override, effectiveInterest(r),
           Number(r.outstanding) || 0,
-          r.paymentDate ? fmtDate(r.paymentDate) : 'ค้าง',
+          r.paymentDate ? fmtDate(r.paymentDate) : (interestPaid(r) > 0 ? 'บางส่วน' : 'ค้าง'),
           r.overrideNote || '',
           r.note || '',
         ]);
@@ -1795,7 +1927,7 @@ function MissingFieldsEditor({ master, onSave }) {
 
 // ── Monthly schedule popup ──────────────────────────────────────────────────
 function InterestSchedulePopup({ master, ledgerRows, events, onClose,
-    onSavePayments, onClearPayment, onOverrideInterest,
+    onSavePayments, onSaveInterestPayments, onClearPayment, onOverrideInterest,
     onAddPrincipalEvent, onEditEvent, onDeleteEvent, onDeleteLedgerRow, onAddLedgerRow,
     onAdoptAuto, onSetAutoMode, onSaveMasterFields, onRollover, onSetContractStatus, canEdit }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
@@ -1811,6 +1943,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   const [cmpMethod,   setCmpMethod]   = React.useState('ACT/365');
   const [cmpDayCount, setCmpDayCount] = React.useState('exclude_end');
   const [addRowOpen,  setAddRowOpen]  = React.useState(false); // เพิ่มแถวดอกเบี้ยเอง
+  const [payModalRow, setPayModalRow] = React.useState(null);  // จ่ายดอกเบี้ยเดือนนี้ (หลายรอบ/บางส่วน)
 
   React.useEffect(() => { setSelectedIds(new Set()); }, [master]);
 
@@ -1837,10 +1970,10 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   );
   const visibleRows = filter === 'all'
     ? sortedRows
-    : sortedRows.filter(r => filter === 'paid' ? !!r.paymentDate : !r.paymentDate);
+    : sortedRows.filter(r => filter === 'paid' ? isInterestFullyPaid(r) : !isInterestFullyPaid(r));
 
   const totalInterest = sortedRows.reduce((s, r) => s + effectiveInterest(r), 0);
-  const totalPaid     = sortedRows.filter(r => r.paymentDate).reduce((s, r) => s + effectiveInterest(r), 0);
+  const totalPaid     = sortedRows.reduce((s, r) => s + interestPaid(r), 0);
   const outstanding   = totalInterest - totalPaid;
   const cat = master.debtCategory || 'อื่นๆ';
   const color = DL_CATEGORY_COLOR[cat] || '#525252';
@@ -1854,14 +1987,14 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
       return n;
     });
   };
-  const selectableRows = visibleRows.filter(r => !r.paymentDate);
+  const selectableRows = visibleRows.filter(r => !isInterestFullyPaid(r));
   const allSelected = selectableRows.length > 0 && selectableRows.every(r => selectedIds.has(r.id));
   const toggleAll = () => {
     if (allSelected) setSelectedIds(new Set());
     else setSelectedIds(new Set(selectableRows.map(r => r.id)));
   };
   const selectedRows = sortedRows.filter(r => selectedIds.has(r.id));
-  const selectedTotal = selectedRows.reduce((s, r) => s + effectiveInterest(r), 0);
+  const selectedTotal = selectedRows.reduce((s, r) => s + interestRemaining(r), 0);
 
   return (
     <>
@@ -2140,11 +2273,11 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
             </button>
             <button className={filter === 'unpaid' ? 'active' : ''} onClick={() => setFilter('unpaid')}
               style={{ color: filter === 'unpaid' ? undefined : 'var(--bad)' }}>
-              ค้างจ่าย ({sortedRows.filter(r => !r.paymentDate).length})
+              ค้างจ่าย ({sortedRows.filter(r => !isInterestFullyPaid(r)).length})
             </button>
             <button className={filter === 'paid' ? 'active' : ''} onClick={() => setFilter('paid')}
               style={{ color: filter === 'paid' ? undefined : 'var(--good)' }}>
-              ✓ จ่ายแล้ว ({sortedRows.filter(r => !!r.paymentDate).length})
+              ✓ จ่ายแล้ว ({sortedRows.filter(r => isInterestFullyPaid(r)).length})
             </button>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2191,15 +2324,19 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                   <tr><td colSpan={canEdit ? 10 : 9} style={{ textAlign: 'center', padding: 36, color: 'var(--ink-400)' }}>ไม่มีข้อมูล</td></tr>
                 )}
                 {visibleRows.map((r, ri) => {
-                  const isPaid = !!r.paymentDate;
+                  const payStatus = interestPayStatus(r);
+                  const isPaid = payStatus === 'full';
+                  const isPartial = payStatus === 'partial';
                   const isOverridden = r.interestOverride != null && r.interestOverride !== '';
                   const eff = effectiveInterest(r);
+                  const paidAmt = interestPaid(r);
+                  const remain = interestRemaining(r);
                   const computed = Number(r.interestAmount) || 0;
                   const isSelected = selectedIds.has(r.id);
                   return (
                     <tr key={(r.id || '') + '|' + ri} style={{
                       background: isSelected ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' :
-                                  isPaid ? '#f0fdf4' : undefined,
+                                  isPaid ? '#f0fdf4' : isPartial ? '#fffdf3' : undefined,
                     }}>
                       {canEdit && (
                         <td style={{ textAlign: 'center' }}>
@@ -2226,11 +2363,15 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(Number(r.outstanding) || 0, 0)}</td>
                       <td style={{ fontSize: 11.5, whiteSpace: 'nowrap',
-                                   color: isPaid ? 'var(--good)' : 'var(--bad)',
+                                   color: isPaid ? 'var(--good)' : isPartial ? '#b45309' : 'var(--bad)',
                                    fontWeight: isPaid ? 500 : 600 }}>
                         {isPaid ? (
                           <span title={r.paidBy ? `บันทึกโดย ${r.paidBy}` : ''}>
                             ✓ {fmtDate(r.paymentDate)}
+                          </span>
+                        ) : isPartial ? (
+                          <span title={`จ่ายแล้ว ${fmtNum(paidAmt, 2)} · คงเหลือ ${fmtNum(remain, 2)}`}>
+                            จ่าย {fmtNum(paidAmt, 0)} / ค้าง {fmtNum(remain, 0)}
                           </span>
                         ) : 'ค้าง'}
                       </td>
@@ -2249,14 +2390,16 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                                          border: '1px solid #fca5a5', background: '#fef2f2', color: '#991b1b' }}>
                                 ล้าง
                               </button>
-                            ) : (
-                              <button onClick={() => { setSelectedIds(new Set([r.id])); setConfirmOpen(true); }}
-                                title="บันทึกจ่ายเดือนนี้ (เลือกวันที่จ่ายจริงได้)"
+                            ) : (onSaveInterestPayments ? (
+                              <button onClick={() => setPayModalRow(r)}
+                                title="บันทึกจ่ายเดือนนี้ (จ่ายหลายรอบ/บางส่วนได้)"
                                 style={{ fontSize: 10, padding: '2px 8px', borderRadius: 12, cursor: 'pointer',
-                                         border: '1px solid #86efac', background: '#f0fdf4', color: '#166534', fontWeight: 600 }}>
-                                ✓ จ่าย
+                                         border: isPartial ? '1px solid #fcd34d' : '1px solid #86efac',
+                                         background: isPartial ? '#fffbeb' : '#f0fdf4',
+                                         color: isPartial ? '#92400e' : '#166534', fontWeight: 600 }}>
+                                {isPartial ? 'จ่ายต่อ' : '✓ จ่าย'}
                               </button>
-                            )}
+                            ) : null)}
                             <button onClick={() => setOverrideRow(r)}
                               title="แก้ดอกเบี้ย (override) — เมื่อระบบคำนวณไม่ถูก"
                               style={{ fontSize: 10, padding: '2px 7px', borderRadius: 12, cursor: 'pointer',
@@ -2462,6 +2605,16 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           onSavePayments(selectedRows, { payDate, note });
           setConfirmOpen(false);
           setSelectedIds(new Set());
+        }}
+      />
+      <InterestPaymentModal
+        open={!!payModalRow}
+        row={payModalRow}
+        master={master}
+        onClose={() => setPayModalRow(null)}
+        onSave={(payments) => {
+          onSaveInterestPayments && onSaveInterestPayments(payModalRow, payments);
+          setPayModalRow(null);
         }}
       />
       <InterestOverridePopup
@@ -2927,7 +3080,7 @@ function DebtLedgerPage({ data, setData, toast }) {
 
   // ── Mutations (shared hook) ─────────────────────────────────────────────
   const actions = useDebtContractActions(setData, toast);
-  const { savePayments, clearPayment, overrideInterest, addPrincipalEvent,
+  const { savePayments, saveInterestPayments, clearPayment, overrideInterest, addPrincipalEvent,
           editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow, relinkOrphans,
           adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus } = actions;
 
@@ -3139,6 +3292,7 @@ function DebtLedgerPage({ data, setData, toast }) {
         events={allEvents}
         onClose={() => setSelectedMaster(null)}
         onSavePayments={savePayments}
+        onSaveInterestPayments={saveInterestPayments}
         onClearPayment={clearPayment}
         onOverrideInterest={overrideInterest}
         onAddPrincipalEvent={addPrincipalEvent}
