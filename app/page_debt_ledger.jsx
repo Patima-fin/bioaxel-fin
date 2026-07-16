@@ -283,6 +283,48 @@ function _closedEndDate(master, events, ledgerRows) {
   return last ? _monthEndStr(`${last.year}-${String(last.month).padStart(2, '0')}-01`) : null;
 }
 
+// จับคู่แถวลูก (ledger/event) กับสัญญาแม่ — ใช้ contractId (id ที่ไม่มีวันเปลี่ยน) เป็นหลัก
+// + contractNo เป็น fallback → แก้ contractNo แล้วแถวไม่หลุด (เหมือนที่ events ทำอยู่แล้ว เลยเป็นเหตุผล
+// ที่ "เบิก/คืนเงินต้น" ยังโชว์ตอนตารางดอกเบี้ยหาย). ★ ต้องเป็น global (page_debt.jsx ยืมไปใช้)
+function debtRowMatchesContract(row, master) {
+  if (!row || !master) return false;
+  return (row.contractId != null && row.contractId !== '' && row.contractId === master.id)
+      || (row.contractNo != null && row.contractNo !== '' && row.contractNo === master.contractNo);
+}
+
+// normalize เลขสัญญาเพื่อเดา master ปลายทางของแถวกำพร้า — ตัด prefix เลขนำ (เช่น "01-", "2-")
+// + ช่องว่าง/ตัวพิมพ์ ให้ "BIOXEL256710001A" ↔ "02-BIOXEL256710001A" จับคู่กันได้
+function debtNormNo(no) {
+  return String(no || '').trim().toUpperCase().replace(/\s+/g, '').replace(/^\d{1,3}-/, '');
+}
+
+// เดาสัญญาปลายทางของแถวกำพร้าจาก contractNo เดิม — normalize แล้วหา master ที่ตรง (unique เท่านั้น)
+function suggestMasterForOrphan(orphanNo, masters) {
+  const target = debtNormNo(orphanNo);
+  if (!target) return null;
+  const exact = (masters || []).filter(m => debtNormNo(m.contractNo) === target);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null; // กำกวม → ให้ผู้ใช้เลือกเอง
+  const contains = (masters || []).filter(m => {
+    const mn = debtNormNo(m.contractNo);
+    return mn && (mn.includes(target) || target.includes(mn));
+  });
+  return contains.length === 1 ? contains[0] : null;
+}
+
+// หาแถว debtLedger ที่ "กำพร้า" = ไม่ match สัญญาใดเลย (ทั้ง contractId และ contractNo)
+// คืน [{ contractNo, rows, count, paid, suggested }] จัดกลุ่มตาม contractNo เดิม เรียงมาก→น้อย
+function computeDebtOrphans(allLedger, masters) {
+  const orphans = (allLedger || []).filter(r => !(masters || []).some(m => debtRowMatchesContract(r, m)));
+  const byNo = {};
+  orphans.forEach(r => { const no = r.contractNo || '(ไม่มีเลขสัญญา)'; (byNo[no] = byNo[no] || []).push(r); });
+  return Object.entries(byNo).map(([contractNo, rows]) => ({
+    contractNo, rows, count: rows.length,
+    paid: rows.filter(r => r.paymentDate).length,
+    suggested: suggestMasterForOrphan(contractNo, masters),
+  })).sort((a, b) => b.count - a.count);
+}
+
 const CALC_METHODS = [
   { k: 'ACT/365', label: 'ACT/365 — วันจริง ÷ 365' },
   { k: 'ACT/360', label: 'ACT/360 — วันจริง ÷ 360' },
@@ -1247,7 +1289,7 @@ function useDebtContractActions(setData, toast) {
       const at = new Date().toISOString();
       const nr = {
         id: WTPData.newId(),
-        contractNo: master.contractNo,
+        contractNo: master.contractNo, contractId: master.id,   // ผูก id ด้วย → แก้ชื่อสัญญาแล้วไม่หลุด
         year: Number(row.year) || 0, month: Number(row.month) || 0,
         principal: Number(row.principal) || 0,
         interestRate: Number(row.interestRate) || 0,
@@ -1264,6 +1306,33 @@ function useDebtContractActions(setData, toast) {
       });
       syncAfter(updated);
       toast(`เพิ่มแถวดอกเบี้ย ${TH_MONTH[nr.month] || nr.month} ${nr.year} แล้ว`);
+    },
+    // ซ่อมรายการดอกเบี้ยกำพร้า — ย้ายแถวที่หลุดจากสัญญา (contractNo เดิมไม่ match ใครแล้ว)
+    // กลับเข้าสัญญาที่ผู้ใช้เลือก · upsert id เดิม + set contractNo/contractId ใหม่ (ไม่ลบอะไร
+    // → ปลอดภัยกับเกราะกัน mass-delete). pairs: [{ oldNo, masterId }]
+    relinkOrphans(pairs) {
+      const at = new Date().toISOString();
+      let updated, n = 0;
+      setData(d => {
+        const masters = d.debtMaster || [];
+        const byId = new Map(masters.map(m => [m.id, m]));
+        const map = new Map((pairs || []).map(p => [p.oldNo, p.masterId]));
+        const next = (d.debtLedger || []).map(r => {
+          // เฉพาะแถวที่ "ยังกำพร้าจริง" ณ ตอนนี้ + อยู่ในกลุ่มที่ผู้ใช้ยืนยัน (กันแก้ผิดแถว)
+          const stillOrphan = !masters.some(m => debtRowMatchesContract(r, m));
+          const tid = map.get(r.contractNo);
+          if (stillOrphan && tid && byId.has(tid)) {
+            const tgt = byId.get(tid); n++;
+            return { ...r, contractNo: tgt.contractNo, contractId: tgt.id, relinkedBy: username, relinkedAt: at };
+          }
+          return r;
+        });
+        updated = { ...d, debtLedger: next };
+        return updated;
+      });
+      if (!n) { toast('ไม่มีแถวที่ต้องย้าย'); return; }
+      syncAfter(updated);
+      toast(`ย้าย ${n} แถวกลับเข้าสัญญาแล้ว`);
     },
     // เปิด/อัปเดต "คำนวณอัตโนมัติ" ให้สัญญา — migrate คืนเงินต้นจาก marker เข้า events
     // + สร้างตารางดอกเบี้ยใหม่ (materialize) ถึงเดือนปัจจุบัน โดยคงสถานะจ่าย/override เดิมไว้
@@ -1312,7 +1381,7 @@ function useDebtContractActions(setData, toast) {
           const nr = {
             // เดือนเดิมมีอยู่แล้ว → ใช้ id เดิม (เดือนที่แตกหลายแถวก็หยิบจากคิวทีละใบ) · ไม่มีค่อยออกใหม่
             id: (pool && pool.length) ? pool.shift() : WTPData.newId(),
-            contractNo: master.contractNo,
+            contractNo: master.contractNo, contractId: master.id,   // ผูก id ด้วย → แก้ชื่อสัญญาแล้วไม่หลุด
             year: row.year, month: row.month,
             principal: row.principal, interestRate: Number(mNow.interestRate) || 0,
             days: row.days, interestAmount: row.interest, outstanding: row.balanceAfter,
@@ -1325,7 +1394,7 @@ function useDebtContractActions(setData, toast) {
           }
           return nr;
         });
-        const otherRows = (d.debtLedger || []).filter(r => r.contractNo !== master.contractNo);
+        const otherRows = (d.debtLedger || []).filter(r => !debtRowMatchesContract(r, master));
         const masters = (d.debtMaster || []).map(m => m.id === master.id
           ? { ...m, balance: newBal, interestCalc: { method: cfg.method, dayCount: cfg.dayCount, autoMode: true, adoptedBy: username, adoptedAt: at } }
           : m);
@@ -1344,7 +1413,17 @@ function useDebtContractActions(setData, toast) {
       setData(d => {
         const masters = (d.debtMaster || []).map(m => m.id === master.id
           ? { ...m, ...patch, editedBy: username, editedAt: at } : m);
-        updated = { ...d, debtMaster: masters };
+        let ledger = d.debtLedger, events = d.debtEvents;
+        // cascade: contractNo เปลี่ยน → อัปเดตรายการลูก (ledger + events) ให้ผูกถูกทั้ง contractNo + contractId
+        // ไม่งั้นรายการเดิมกลายเป็น orphan (ตารางดอกเบี้ยหาย) — ต้นเหตุที่โดนมา
+        if (patch && patch.contractNo && patch.contractNo !== master.contractNo) {
+          const oldNo = master.contractNo, newNo = patch.contractNo, cid = master.id;
+          const relink = (arr) => (arr || []).map(r =>
+            (r.contractId === cid || r.contractNo === oldNo) ? { ...r, contractNo: newNo, contractId: cid } : r);
+          ledger = relink(d.debtLedger);
+          events = relink(d.debtEvents);
+        }
+        updated = { ...d, debtMaster: masters, debtLedger: ledger, debtEvents: events };
         return updated;
       });
       syncAfter(updated);
@@ -2601,6 +2680,91 @@ function ExportOptionsModal({ open, masters, summaryByContract, ledgerByContract
   );
 }
 
+// ── เครื่องมือ "ซ่อมรายการดอกเบี้ยกำพร้า" ────────────────────────────────────
+// แสดงกลุ่มแถวดอกเบี้ยที่หลุดจากสัญญา (orphan) + ให้เลือกสัญญาปลายทาง แล้วย้ายกลับ (ไม่ลบอะไร)
+function OrphanRepairModal({ open, orphanGroups, masters, onClose, onRelink }) {
+  const [pick, setPick] = React.useState({});   // { [oldNo]: masterId | '' } (init จาก suggested)
+  React.useEffect(() => {
+    if (!open) return;
+    const init = {};
+    (orphanGroups || []).forEach(g => { init[g.contractNo] = g.suggested ? g.suggested.id : ''; });
+    setPick(init);
+  }, [open, orphanGroups]);
+  if (!open) return null;
+
+  const sortedMasters = [...(masters || [])].sort((a, b) =>
+    String(a.contractNo || '').localeCompare(String(b.contractNo || ''), 'th'));
+  const chosen = (orphanGroups || []).filter(g => pick[g.contractNo]);
+  const totalRows = chosen.reduce((s, g) => s + g.count, 0);
+
+  return (
+    <Modal
+      open={open}
+      maxWidth={760}
+      title="🔧 ซ่อมรายการดอกเบี้ยกำพร้า"
+      onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
+        <button className="btn btn-primary" disabled={!chosen.length}
+          onClick={() => {
+            const pairs = chosen.map(g => ({ oldNo: g.contractNo, masterId: pick[g.contractNo] }));
+            const lines = chosen.map(g => {
+              const m = sortedMasters.find(x => x.id === pick[g.contractNo]);
+              return `• ${g.contractNo} (${g.count} แถว) → ${m ? m.contractNo : '?'}`;
+            }).join('\n');
+            if (confirm(`ย้าย ${totalRows} แถว กลับเข้าสัญญา:\n\n${lines}\n\n(ใช้ id เดิม upsert ทับ · ไม่มีการลบข้อมูล)`))
+              onRelink(pairs);
+          }}>
+          <Icon name="check" size={14} /> ย้าย {totalRows} แถวกลับเข้าสัญญา
+        </button>
+      </>}
+    >
+      <div style={{ padding: 12, marginBottom: 12, borderRadius: 10, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12.5, color: 'var(--ink-700)', lineHeight: 1.7 }}>
+        พบรายการดอกเบี้ยที่ <strong>หลุดจากสัญญา</strong> (เลขสัญญาเดิมไม่ตรงกับสัญญาไหนแล้ว — มักเกิดจากแก้เลขสัญญาภายหลัง)
+        <br />เลือกสัญญาปลายทางให้แต่ละกลุ่ม แล้วกดย้าย — <strong>ใช้ id เดิม upsert ทับ ไม่มีการลบ</strong> และเติม contractId ให้ด้วยเพื่อไม่ให้หลุดอีก
+      </div>
+
+      {(!orphanGroups || !orphanGroups.length) ? (
+        <div style={{ textAlign: 'center', padding: 30, color: 'var(--good)', fontWeight: 600 }}>✓ ไม่มีรายการกำพร้า</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {orphanGroups.map(g => {
+            const sel = pick[g.contractNo] || '';
+            return (
+              <div key={g.contractNo} style={{ display: 'grid', gridTemplateColumns: '1fr auto 1.3fr', gap: 10, alignItems: 'center',
+                padding: '10px 12px', borderRadius: 9, border: '1px solid var(--ink-100)', background: 'var(--surface)' }}>
+                <div>
+                  <div style={{ fontFamily: 'ui-monospace', fontWeight: 700, fontSize: 12.5 }}>{g.contractNo}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>{g.count} แถว · จ่ายแล้ว {g.paid}</div>
+                </div>
+                <div style={{ fontSize: 16, color: 'var(--ink-300)' }}>→</div>
+                <div>
+                  <select value={sel} onChange={e => setPick(p => ({ ...p, [g.contractNo]: e.target.value }))}
+                    style={{ width: '100%', padding: '6px 9px', borderRadius: 7, fontSize: 12,
+                      border: `1.5px solid ${sel ? 'var(--brand-400, #7ca8e6)' : 'var(--ink-200)'}`,
+                      background: sel ? 'var(--brand-50, #f0f6ff)' : '#fff' }}>
+                    <option value="">— ข้าม (ไม่ย้าย) —</option>
+                    {sortedMasters.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.contractNo}{m.borrowerName ? ` · ${m.borrowerName}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {g.suggested && sel === g.suggested.id
+                    ? <div style={{ fontSize: 10.5, color: 'var(--good)', marginTop: 3 }}>✓ ระบบเดาให้ (ตรวจก่อนกดได้)</div>
+                    : !g.suggested
+                    ? <div style={{ fontSize: 10.5, color: '#b45309', marginTop: 3 }}>⚠️ เดาไม่ได้ — เลือกเอง</div>
+                    : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 function DebtLedgerPage({ data, setData, toast }) {
   const masters    = data?.debtMaster || [];
@@ -2620,6 +2784,9 @@ function DebtLedgerPage({ data, setData, toast }) {
     allEvents.forEach(e => { if (e.contractNo) (m[e.contractNo] = m[e.contractNo] || []).push(e); });
     return m;
   }, [allEvents]);
+  // แถวดอกเบี้ยที่ "หลุดจากสัญญา" (contractNo/contractId ไม่ match สัญญาไหนเลย) — สำหรับเครื่องมือซ่อม
+  const orphanGroups = React.useMemo(() => computeDebtOrphans(allLedger, masters), [allLedger, masters]);
+  const orphanRowCount = orphanGroups.reduce((s, g) => s + g.count, 0);
 
   const [tab, setTab]                       = React.useState('Active');  // all | Active | Close
   const [categoryFilter, setCategoryFilter] = React.useState('all');
@@ -2628,6 +2795,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   const [colFilters, setColFilters]         = React.useState({});
   const [openCol,    setOpenCol]            = React.useState(null);
   const [exportOpen, setExportOpen]         = React.useState(false);
+  const [repairOpen, setRepairOpen]         = React.useState(false);   // เครื่องมือซ่อมรายการกำพร้า
 
   // ── Cross-page focus: open contract specified by #debt page button ───────
   React.useEffect(() => {
@@ -2735,13 +2903,13 @@ function DebtLedgerPage({ data, setData, toast }) {
 
   const selectedLedger = React.useMemo(() => {
     if (!selectedMaster) return [];
-    return allLedger.filter(r => r.contractNo === selectedMaster.contractNo);
+    return allLedger.filter(r => debtRowMatchesContract(r, selectedMaster));
   }, [selectedMaster, allLedger]);
 
   // ── Mutations (shared hook) ─────────────────────────────────────────────
   const actions = useDebtContractActions(setData, toast);
   const { savePayments, clearPayment, overrideInterest, addPrincipalEvent,
-          editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow,
+          editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow, relinkOrphans,
           adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus } = actions;
 
   // Refresh selectedMaster from store (so popup reflects latest state)
@@ -2776,6 +2944,25 @@ function DebtLedgerPage({ data, setData, toast }) {
         <KpiTile animate={false} label="ดอกเบี้ยรวม (คำนวณ)"    value={totalInterest}        accent="oklch(52% 0.16 145)"   icon="arrow_up" />
         <KpiTile animate={false} label="สัญญา Active"            value={activeMasters.length} accent="var(--brand-500)"      icon="bank" unit=" สัญญา" digits={0} />
       </div>
+
+      {/* ── ⚠️ รายการดอกเบี้ยกำพร้า (หลุดจากสัญญาเพราะ contractNo ไม่ตรง) — เครื่องมือซ่อม ── */}
+      {canEdit && orphanGroups.length > 0 && (
+        <div className="card anim-in" style={{ padding: '12px 16px', marginBottom: 12,
+          borderLeft: '4px solid var(--bad)', background: 'color-mix(in oklch, var(--bad) 6%, var(--surface))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 16 }}>🔧</span>
+            <span style={{ fontWeight: 800, fontSize: 14, color: 'var(--ink-800)' }}>
+              พบรายการดอกเบี้ยหลุดจากสัญญา — {orphanRowCount} แถว ({orphanGroups.length} เลขสัญญา)
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>
+              ข้อมูลไม่ได้หาย แค่เลขสัญญาไม่ตรง (มักเกิดจากแก้เลขสัญญาภายหลัง) — ย้ายกลับได้ ไม่มีการลบ
+            </span>
+            <button className="btn btn-primary" onClick={() => setRepairOpen(true)} style={{ marginLeft: 'auto' }}>
+              🔧 ซ่อมรายการกำพร้า
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── แจ้งเตือนสัญญาครบกำหนด (Active ที่ใกล้/เลยวันครบ ภายใน 60 วัน) ───────────── */}
       {maturityAlerts.length > 0 && (
@@ -2955,6 +3142,14 @@ function DebtLedgerPage({ data, setData, toast }) {
         ledgerByContract={ledgerByContract}
         eventsByContract={eventsByContract}
         onClose={() => setExportOpen(false)}
+      />
+
+      <OrphanRepairModal
+        open={repairOpen}
+        orphanGroups={orphanGroups}
+        masters={masters}
+        onClose={() => setRepairOpen(false)}
+        onRelink={(pairs) => { relinkOrphans(pairs); setRepairOpen(false); }}
       />
     </div>
   );

@@ -568,7 +568,7 @@ function DebtPage({ data, setData, toast }) {
 
   const scheduleLedger = React.useMemo(() => {
     if (!scheduleFor) return [];
-    return (data?.debtLedger || []).filter(r => r.contractNo === scheduleFor.contractNo);
+    return (data?.debtLedger || []).filter(r => debtRowMatchesContract(r, scheduleFor));
   }, [scheduleFor, data?.debtLedger]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
@@ -635,13 +635,23 @@ function DebtPage({ data, setData, toast }) {
     let updated;
     setData(d => {
       const list = d.debtMaster || [];
-      let next;
+      let next, ledgerNext = d.debtLedger, eventsNext = d.debtEvents;
       if (mode === 'edit') {
+        const prev = list.find(x => x.id === row.id);
         next = list.map(x => x.id === row.id ? { ...x, ...row } : x);
+        // cascade: แก้ contractNo → อัปเดตรายการลูก (ledger+events) ให้ผูกถูกทั้ง contractNo + contractId
+        // ไม่งั้นตารางดอกเบี้ย/รายการเบิก-คืน ที่คีย์ไว้จะหลุดเป็น orphan หาสัญญาไม่เจอ (ต้นเหตุที่โดนมา)
+        if (prev && row.contractNo && prev.contractNo !== row.contractNo) {
+          const oldNo = prev.contractNo, newNo = row.contractNo, cid = row.id;
+          const relink = (arr) => (arr || []).map(r =>
+            (r.contractId === cid || r.contractNo === oldNo) ? { ...r, contractNo: newNo, contractId: cid } : r);
+          ledgerNext = relink(d.debtLedger);
+          eventsNext = relink(d.debtEvents);
+        }
       } else {
         next = [{ ...row, id: WTPData.newId() }, ...list];
       }
-      updated = { ...d, debtMaster: next };
+      updated = { ...d, debtMaster: next, debtLedger: ledgerNext, debtEvents: eventsNext };
       return updated;
     });
     if (updated && WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updated), 0);
@@ -1011,8 +1021,8 @@ function DebtPage({ data, setData, toast }) {
         const rate    = Number(view.interestRate) || 0;
         const paid    = princ > 0 ? Math.max(0, princ - bal) : 0;
         const paidPct = princ > 0 ? Math.min(100, (paid / princ) * 100) : 0;
-        // Look up summary from debtLedger
-        const ledgerRows = (data?.debtLedger || []).filter(L => L.contractNo === view.contractNo);
+        // Look up summary from debtLedger (จับคู่ด้วย contractId ด้วย → แก้ชื่อสัญญาแล้วไม่หลุด)
+        const ledgerRows = (data?.debtLedger || []).filter(L => debtRowMatchesContract(L, view));
         // ★ ใช้ effectiveInterest (override-aware, global จาก page_debt_ledger) ให้ "ดอกเบี้ยรวม/ค้างจ่าย"
         //   ในป๊อปอัปนี้ตรงกับหน้า Debt Ledger — เดิมอ่าน interestAmount ดิบ → เพิกเฉย override ที่ผู้ใช้แก้ → 2 หน้าไม่ตรงกัน
         const _ieff = (typeof effectiveInterest === 'function') ? effectiveInterest : (L => Number(L.interestAmount) || 0);
