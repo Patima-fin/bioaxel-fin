@@ -2695,6 +2695,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
           if (amt <= 0) return;
           const rec = { payDate: p.date || '', amount: amt, note: p.note || '', contractNo: m.contractNo,
                         borrowerName: name, debtCategory: m.debtCategory || '—',
+                        im: (Number(r.year) || 0) * 100 + (Number(r.month) || 0),
                         monthLabel: (TH_MONTH[Number(r.month)] || r.month) + ' ' + r.year };
           rounds.push(rec); c.rounds.push(rec);
           totalPaid += amt; c.paid += amt;
@@ -2708,23 +2709,31 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
                    rounds: c.rounds.slice().sort((x, y) => (y.payDate || '').localeCompare(x.payDate || '')) }))
       .filter(c => c.total > 0.005 || c.paid > 0.005)
       .sort((x, y) => y.paid - x.paid);
-    // ปี (วันจ่าย) → หมวด → สัญญา → รอบ
+    // ปี (วันจ่าย) → หมวด → สัญญา → รอบ(วันจ่าย) → เดือนที่จ่ายในรอบนั้น
+    // "รอบ" = จำนวนวันจ่ายที่ไม่ซ้ำ (จ่ายหลายเดือนในวันเดียวกัน = 1 รอบ)
     const yTree = {};
     rounds.forEach(p => {
       const y = (p.payDate || '').slice(0, 4) || '—';
-      const yt = yTree[y] || (yTree[y] = { year: y, total: 0, count: 0, cats: {} });
-      yt.total += p.amount; yt.count += 1;
-      const ct = yt.cats[p.debtCategory] || (yt.cats[p.debtCategory] = { cat: p.debtCategory, total: 0, count: 0, contracts: {} });
-      ct.total += p.amount; ct.count += 1;
-      const kt = ct.contracts[p.contractNo] || (ct.contracts[p.contractNo] = { contractNo: p.contractNo, borrowerName: p.borrowerName, total: 0, count: 0, rounds: [] });
-      kt.total += p.amount; kt.count += 1; kt.rounds.push(p);
+      const yt = yTree[y] || (yTree[y] = { year: y, total: 0, dates: new Set(), cats: {} });
+      yt.total += p.amount; yt.dates.add(p.payDate);
+      const ct = yt.cats[p.debtCategory] || (yt.cats[p.debtCategory] = { cat: p.debtCategory, total: 0, dates: new Set(), contracts: {} });
+      ct.total += p.amount; ct.dates.add(p.payDate);
+      const kt = ct.contracts[p.contractNo] || (ct.contracts[p.contractNo] = { contractNo: p.contractNo, borrowerName: p.borrowerName, total: 0, dates: new Set(), byDate: {} });
+      kt.total += p.amount; kt.dates.add(p.payDate);
+      const dg = kt.byDate[p.payDate] || (kt.byDate[p.payDate] = { date: p.payDate, total: 0, months: [] });
+      dg.total += p.amount; dg.months.push(p);
     });
     const years = Object.values(yTree).sort((a, b) => (b.year).localeCompare(a.year)).map(yt => ({
-      year: yt.year, total: yt.total, count: yt.count,
+      year: yt.year, total: yt.total, rounds: yt.dates.size,
       cats: Object.values(yt.cats).sort((a, b) => b.total - a.total).map(ct => ({
-        cat: ct.cat, total: ct.total, count: ct.count,
-        contracts: Object.values(ct.contracts).sort((a, b) => b.total - a.total)
-          .map(kt => ({ ...kt, rounds: kt.rounds.slice().sort((x, y) => (y.payDate || '').localeCompare(x.payDate || '')) })),
+        cat: ct.cat, total: ct.total, rounds: ct.dates.size,
+        contracts: Object.values(ct.contracts).sort((a, b) => b.total - a.total).map(kt => ({
+          contractNo: kt.contractNo, borrowerName: kt.borrowerName, total: kt.total, rounds: kt.dates.size,
+          dateGroups: Object.values(kt.byDate).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(dg => ({
+            date: dg.date, total: dg.total, count: dg.months.length,
+            months: dg.months.slice().sort((a, b) => (a.im || 0) - (b.im || 0)),
+          })),
+        })),
       })),
     }));
     const payDays = new Set(rounds.map(r => r.payDate).filter(Boolean)).size;
@@ -2759,7 +2768,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
         {kpi('ดอกเบี้ยรวมทั้งหมด', fmtNum(agg.totalInterest, 2))}
         {kpi('จ่ายแล้ว', fmtNum(agg.totalPaid, 2), 'var(--good)')}
         {kpi('ค้างจ่าย', fmtNum(agg.totalOutstanding, 2), 'var(--bad)')}
-        {kpi('จำนวนรอบจ่าย', `${agg.roundCount} รอบ · ${agg.payDays} วัน`)}
+        {kpi('จำนวนรอบจ่าย', `${agg.payDays} รอบ · ${agg.roundCount} รายการ`)}
       </div>
       <div style={{ display: 'inline-flex', gap: 4, marginBottom: 12, background: 'var(--ink-100, #eef1f6)', borderRadius: 9, padding: 3, border: '1px solid var(--line)' }}>
         {[{ k: 'creditor', l: '👤 ตามเจ้าหนี้' }, { k: 'year', l: '📅 ตามปี › หมวด › สัญญา' }].map(t => (
@@ -2833,14 +2842,18 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
         const vis = [];
         agg.years.forEach(yt => {
           const yk = 'y:' + yt.year;
-          vis.push({ lvl: 0, key: yk, kind: 'year', label: 'ปี ' + yt.year, total: yt.total, count: yt.count, open: !!expanded[yk] });
+          vis.push({ lvl: 0, key: yk, kind: 'year', label: 'ปี ' + yt.year, total: yt.total, count: yt.rounds, open: !!expanded[yk] });
           if (expanded[yk]) yt.cats.forEach(ct => {
             const ck = yk + '|c:' + ct.cat;
-            vis.push({ lvl: 1, key: ck, kind: 'cat', label: ct.cat, total: ct.total, count: ct.count, open: !!expanded[ck] });
+            vis.push({ lvl: 1, key: ck, kind: 'cat', label: ct.cat, total: ct.total, count: ct.rounds, open: !!expanded[ck] });
             if (expanded[ck]) ct.contracts.forEach(kt => {
               const kk = ck + '|k:' + kt.contractNo;
-              vis.push({ lvl: 2, key: kk, kind: 'contract', label: kt.contractNo, sub: kt.borrowerName, total: kt.total, count: kt.count, open: !!expanded[kk] });
-              if (expanded[kk]) kt.rounds.forEach((p, i) => vis.push({ lvl: 3, key: kk + '|r' + i, kind: 'round', round: p }));
+              vis.push({ lvl: 2, key: kk, kind: 'contract', label: kt.contractNo, sub: kt.borrowerName, total: kt.total, count: kt.rounds, open: !!expanded[kk] });
+              if (expanded[kk]) kt.dateGroups.forEach((dg, di) => {
+                const dk = kk + '|d:' + (dg.date || di);
+                vis.push({ lvl: 3, key: dk, kind: 'date', label: dg.date ? fmtDate(dg.date) : '—', sub: dg.count + ' เดือน', total: dg.total, count: dg.count, open: !!expanded[dk] });
+                if (expanded[dk]) dg.months.forEach((p, i) => vis.push({ lvl: 4, key: dk + '|m' + i, kind: 'month', round: p }));
+              });
             });
           });
         });
@@ -2854,10 +2867,10 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
               </tr></thead>
               <tbody>
                 {vis.length === 0 && <tr><td colSpan={3} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีการจ่าย</td></tr>}
-                {vis.map(row => row.kind === 'round' ? (
+                {vis.map(row => row.kind === 'month' ? (
                   <tr key={row.key} style={{ background: 'var(--ink-25, #fafbfc)' }}>
                     <td style={{ paddingLeft: 20 + row.lvl * 20, fontSize: 11.5, color: 'var(--ink-600)' }}>
-                      {row.round.payDate ? fmtDate(row.round.payDate) : '—'} · {row.round.monthLabel}{row.round.note ? ' · ' + row.round.note : ''}
+                      ดอกเบี้ยเดือน {row.round.monthLabel}{row.round.note ? ' · ' + row.round.note : ''}
                     </td>
                     <td></td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 11.5 }}>{fmtNum(row.round.amount, 2)}</td>
@@ -2867,16 +2880,17 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
                     <td style={{ paddingLeft: 8 + row.lvl * 20, fontWeight: row.lvl === 0 ? 700 : row.lvl === 1 ? 600 : 500 }}>
                       <span style={{ color: 'var(--ink-400)', marginRight: 4 }}>{row.open ? '▾' : '▸'}</span>
                       {row.kind === 'cat' && <span style={{ display: 'inline-block', fontSize: 9.5, background: 'var(--brand-50, #eff6ff)', color: 'var(--brand-700)', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>หมวด</span>}
+                      {row.kind === 'date' && <span style={{ display: 'inline-block', fontSize: 9.5, background: '#fffbeb', color: '#b45309', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>รอบ</span>}
                       {row.kind === 'contract' ? <span style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{row.label}</span> : row.label}
                       {row.sub && <span style={{ color: 'var(--ink-400)', fontWeight: 400, fontSize: 11 }}> · {row.sub}</span>}
                     </td>
-                    <td style={{ textAlign: 'center', color: 'var(--ink-500)', fontSize: 11.5 }}>{row.count}</td>
+                    <td style={{ textAlign: 'center', color: 'var(--ink-500)', fontSize: 11.5 }}>{row.kind === 'date' ? '' : row.count}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: row.lvl === 0 ? 800 : 600, color: 'var(--good)' }}>{fmtNum(row.total, 2)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot><tr style={{ fontWeight: 800, background: 'var(--ink-50)', borderTop: '2px solid var(--ink-200)' }}>
-                <td>รวมจ่ายทั้งหมด ({agg.roundCount} รอบ)</td><td></td>
+                <td>รวมจ่ายทั้งหมด ({agg.payDays} รอบ · {agg.roundCount} รายการ)</td><td></td>
                 <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(agg.totalPaid, 2)}</td>
               </tr></tfoot>
             </table>
