@@ -34,7 +34,7 @@ function DebtCategoryMiniCard({ cat, rawRows }) {
   const catRows = rawRows.filter(r => r.debtCategory === cat);
   const activeCnt = catRows.filter(r => r.status === 'Active').length;
   const activeBal = catRows.filter(r => r.status === 'Active')
-    .reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
+    .reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const isUSD = catRows.some(r => r.currency === 'USD');
   return (
     <div className="card" style={{ flex: '1 1 200px', padding: '10px 14px', borderLeft: `4px solid ${m.color}` }}>
@@ -64,8 +64,8 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
   const [open, setOpen] = React.useState(!!defaultOpen);
   const present = cats.filter(c => rawRows.some(r => r.debtCategory === c));
   const active  = rawRows.filter(r => cats.includes(r.debtCategory) && r.status === 'Active');
-  const thbBal  = active.filter(r => r.currency !== 'USD').reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
-  const usdBal  = active.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
+  const thbBal  = active.filter(r => r.currency !== 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
+  const usdBal  = active.filter(r => r.currency === 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   return (
     <div className="card" style={{ flex: nested ? '1 1 auto' : '1 1 360px', width: nested ? '100%' : undefined,
       padding: 0, overflow: 'hidden', borderLeft: `${nested ? 4 : 5}px solid ${color}`,
@@ -103,7 +103,7 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
                       const m = metaFor(cat);
                       const catRows = rawRows.filter(r => r.debtCategory === cat);
                       const act = catRows.filter(r => r.status === 'Active');
-                      const bal = act.reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
+                      const bal = act.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
                       const isUSD = act.some(r => r.currency === 'USD');
                       return (
                         <tr key={cat} style={{ borderTop: ci === 0 ? '1px solid var(--ink-100)' : '1px solid var(--ink-50, #f1f5f9)' }}>
@@ -592,8 +592,8 @@ function DebtPage({ data, setData, toast }) {
   const closedRows = rawRows.filter(r => r.status !== 'Active');
   const thbActive  = activeRows.filter(r => r.currency !== 'USD');
   const usdActive  = activeRows.filter(r => r.currency === 'USD');
-  const totalBalanceThb = thbActive.reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
-  const totalBalanceUsd = usdActive.reduce((s, r) => s + (Number(r.balance || r.principalAmount) || 0), 0);
+  const totalBalanceThb = thbActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
+  const totalBalanceUsd = usdActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const totalPrincipal  = thbActive.reduce((s, r) => s + (Number(r.principalAmount) || 0), 0);
   const categoriesPresent = [...new Set(rawRows.map(r => r.debtCategory).filter(Boolean))];
 
@@ -639,7 +639,7 @@ function DebtPage({ data, setData, toast }) {
   const { sorted, sort, toggle } = useSortable(filtered, 'debtCategory', 'asc');
 
   // ── Footer totals ─────────────────────────────────────────────────────────
-  const filtBalance   = filtered.reduce((s,r) => s + (Number(r.balance || r.principalAmount)||0), 0);
+  const filtBalance   = filtered.reduce((s,r) => s + debtDisplayBalance(r), 0);
   const filtPrincipal = filtered.reduce((s,r) => s + (Number(r.principalAmount)||0), 0);
 
   const cntAll    = rawRows.length;
@@ -941,7 +941,7 @@ function DebtPage({ data, setData, toast }) {
                 {sorted.map(r => {
                   const meta     = metaFor(r.debtCategory);
                   const isActive = r.status === 'Active';
-                  const balance  = Number(r.balance || r.principalAmount) || 0;
+                  const balance  = debtDisplayBalance(r);
                   const principal= Number(r.principalAmount) || 0;
                   const rate     = Number(r.interestRate) || 0;
                   const isUSD    = r.currency === 'USD';
@@ -1032,7 +1032,7 @@ function DebtPage({ data, setData, toast }) {
         const m       = metaFor(view.debtCategory);
         const isActive= view.status === 'Active';
         const isUSD   = view.currency === 'USD';
-        const bal     = Number(view.balance || view.principalAmount) || 0;
+        const bal     = debtDisplayBalance(view);
         const princ   = Number(view.principalAmount) || 0;
         const rate    = Number(view.interestRate) || 0;
         const paid    = princ > 0 ? Math.max(0, princ - bal) : 0;

@@ -176,6 +176,14 @@ function recalcBalance(master, events) {
 function masterBalance(m) {
   return (m.balance != null && m.balance !== '') ? (Number(m.balance) || 0) : (Number(m.principalAmount) || 0);
 }
+// ยอดคงเหลือสำหรับ "แสดงในทะเบียน/สรุป" — สัญญาที่ปิดแล้ว (Close) = ชำระครบ/โอนออกแล้ว = 0
+// (ปิดด้วยตนเองไม่ได้ล้าง field balance → masterBalance ยังคืนยอดเดิม; helper นี้กันไว้ที่ชั้นแสดงผล
+//  ไม่แตะข้อมูลที่เก็บ เพื่อให้ "เปิดกลับ Active" ได้ยอดเดิมคืน). ดู CHANGELOG 2026-07-16 (6).
+function debtDisplayBalance(m) {
+  if (!m) return 0;
+  if (m.status === 'Close') return 0;
+  return masterBalance(m);
+}
 
 // ── Auto interest schedule (Phase A — read-only เทียบกับของเดิม) ─────────────
 // คำนวณตารางดอกเบี้ยรายเดือนสดจาก สัญญา + events ตาม config การคิดวันต่อสัญญา
@@ -1902,8 +1910,8 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           <div>
             <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>คงเหลือเงินต้น</div>
             <div style={{ fontWeight: 700, fontSize: 17, fontVariantNumeric: 'tabular-nums',
-                          color: (masterBalance(master)) > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-              {fmtNum(masterBalance(master), 0)}
+                          color: (debtDisplayBalance(master)) > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
+              {fmtNum(debtDisplayBalance(master), 0)}
             </div>
           </div>
           <div>
@@ -2026,7 +2034,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
               <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-500)' }}>
                 คืนแล้ว <strong style={{ color: 'var(--good)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(principalOut, 0)}</strong>
                 <span style={{ color: 'var(--ink-300)', margin: '0 6px' }}>·</span>
-                คงเหลือ <strong style={{ fontVariantNumeric: 'tabular-nums', color: masterBalance(master) > 0 ? 'var(--bad)' : 'var(--good)' }}>{fmtNum(masterBalance(master), 0)}</strong>
+                คงเหลือ <strong style={{ fontVariantNumeric: 'tabular-nums', color: debtDisplayBalance(master) > 0 ? 'var(--bad)' : 'var(--good)' }}>{fmtNum(debtDisplayBalance(master), 0)}</strong>
               </span>
             </div>
             <div style={{ borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(16,24,40,0.04)' }}>
