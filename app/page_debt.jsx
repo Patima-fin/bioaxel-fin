@@ -558,7 +558,12 @@ function ImportDebtModal({ open, existing, onClose, onImport }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 function DebtPage({ data, setData, toast }) {
-  const rawRows = (data?.debtMaster || []);
+  // enrich ด้วย _grossPrincipal (วงเงินตั้งต้น + Σ เบิกเพิ่ม) สำหรับ "แสดง/เรียง/กรอง" คอลัมน์วงเงิน
+  // ให้ตรงกับคงเหลือ. เป็น view-field ขึ้นต้น _ → saveDebt strip ทิ้งก่อนบันทึก ไม่ให้รั่วลง DB.
+  const rawRows = React.useMemo(() => {
+    const evs = data?.debtEvents || [];
+    return (data?.debtMaster || []).map(m => ({ ...m, _grossPrincipal: debtGrossPrincipal(m, evs) }));
+  }, [data?.debtMaster, data?.debtEvents]);
   const [tab,           setTab]           = React.useState('all');   // all | Active | Close
   const [categoryFilter, setCategoryFilter] = React.useState('all');
   const [query,         setQuery]         = React.useState('');
@@ -594,7 +599,7 @@ function DebtPage({ data, setData, toast }) {
   const usdActive  = activeRows.filter(r => r.currency === 'USD');
   const totalBalanceThb = thbActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const totalBalanceUsd = usdActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
-  const totalPrincipal  = thbActive.reduce((s, r) => s + (Number(r.principalAmount) || 0), 0);
+  const totalPrincipal  = thbActive.reduce((s, r) => s + (r._grossPrincipal || 0), 0);
   const categoriesPresent = [...new Set(rawRows.map(r => r.debtCategory).filter(Boolean))];
 
   // Display value for each column filter
@@ -640,14 +645,15 @@ function DebtPage({ data, setData, toast }) {
 
   // ── Footer totals ─────────────────────────────────────────────────────────
   const filtBalance   = filtered.reduce((s,r) => s + debtDisplayBalance(r), 0);
-  const filtPrincipal = filtered.reduce((s,r) => s + (Number(r.principalAmount)||0), 0);
+  const filtPrincipal = filtered.reduce((s,r) => s + (r._grossPrincipal || 0), 0);
 
   const cntAll    = rawRows.length;
   const cntActive = activeRows.length;
   const cntClosed = closedRows.length;
 
   // ── CRUD helpers ──────────────────────────────────────────────────────────
-  const saveDebt = (row, mode /* 'add' | 'edit' */) => {
+  const saveDebt = (rowIn, mode /* 'add' | 'edit' */) => {
+    const { _grossPrincipal, ...row } = rowIn || {}; // strip view-only field ไม่ให้รั่วลง DB
     let updated;
     setData(d => {
       const list = d.debtMaster || [];
@@ -922,7 +928,7 @@ function DebtPage({ data, setData, toast }) {
                   <FilterableColHeader label="สถานะ" sortKey="status" colKey="status" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={80} align="center" />
                   <FilterableColHeader label="วันรับเงิน" sortKey="receiveDate" colKey="receiveDate" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={100} align="center" />
                   <FilterableColHeader label="ครบกำหนด" sortKey="maturityDate" colKey="maturityDate" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={100} align="center" />
-                  <FilterableColHeader label="วงเงิน" sortKey="principalAmount" colKey="principalAmount" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} align="right" width={120} />
+                  <FilterableColHeader label="วงเงิน" sortKey="_grossPrincipal" colKey="_grossPrincipal" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} getSortValue={(r) => r._grossPrincipal || 0} align="right" width={120} />
                   <FilterableColHeader label="ดอกเบี้ย/ปี" sortKey="interestRate" colKey="interestRate" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} align="right" width={88} />
                   <FilterableColHeader label="คงเหลือ" sortKey="balance" colKey="balance" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} align="right" width={120} />
                   <FilterableColHeader label="ธนาคาร" sortKey="bankName" colKey="bankName" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={110} align="center" />
@@ -942,7 +948,7 @@ function DebtPage({ data, setData, toast }) {
                   const meta     = metaFor(r.debtCategory);
                   const isActive = r.status === 'Active';
                   const balance  = debtDisplayBalance(r);
-                  const principal= Number(r.principalAmount) || 0;
+                  const principal= r._grossPrincipal || 0;
                   const rate     = Number(r.interestRate) || 0;
                   const isUSD    = r.currency === 'USD';
                   return (
@@ -1033,7 +1039,7 @@ function DebtPage({ data, setData, toast }) {
         const isActive= view.status === 'Active';
         const isUSD   = view.currency === 'USD';
         const bal     = debtDisplayBalance(view);
-        const princ   = Number(view.principalAmount) || 0;
+        const princ   = (view._grossPrincipal != null ? view._grossPrincipal : Number(view.principalAmount)) || 0;
         const rate    = Number(view.interestRate) || 0;
         const paid    = princ > 0 ? Math.max(0, princ - bal) : 0;
         const paidPct = princ > 0 ? Math.min(100, (paid / princ) * 100) : 0;

@@ -184,6 +184,17 @@ function debtDisplayBalance(m) {
   if (m.status === 'Close') return 0;
   return masterBalance(m);
 }
+// เงินต้นรวมที่เบิกจริง = วงเงินตั้งต้น (principalAmount) + Σ เบิกเพิ่ม (drawdown events) — ใช้แสดง
+// คอลัมน์ "วงเงิน" ในทะเบียนให้ตรงกับคงเหลือ + การ์ด "เงินต้นรวม (เบิก)" ใน drawer. เพราะพอ
+// นักลงทุนลงเพิ่ม/เบิกเพิ่ม คงเหลือจะโตเกินวงเงินตั้งต้น ("คงเหลือ > วงเงิน" ดูแปลก) → ให้วงเงินโตตาม.
+function debtGrossPrincipal(master, events) {
+  if (!master) return 0;
+  const base = Number(master.principalAmount) || 0;
+  const draw = (events || [])
+    .filter(e => (e.contractId === master.id || e.contractNo === master.contractNo) && e.eventType === 'drawdown')
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  return base + draw;
+}
 
 // ── Auto interest schedule (Phase A — read-only เทียบกับของเดิม) ─────────────
 // คำนวณตารางดอกเบี้ยรายเดือนสดจาก สัญญา + events ตาม config การคิดวันต่อสัญญา
