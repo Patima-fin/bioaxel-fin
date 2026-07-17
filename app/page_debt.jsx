@@ -37,6 +37,11 @@ function debtGroupOf(row) {
   return isAssignmentDebtCat(row && row.debtCategory) ? 'assign' : 'invest';
 }
 const debtGroupLabel = (row) => DEBT_GROUP_META[debtGroupOf(row)].label;
+/* ⚠️ ชื่อเจ้าหนี้ = key ที่ใช้ group ทุกหน้า (ภาพรวมดอกเบี้ย ฯลฯ) — สตริงต่างแม้ช่องว่างเดียว
+   = เจ้าหนี้คนละคนเงียบ ๆ. ของจริงมี "คุณธนกาญจน์··คอลลินส์·" (เว้นวรรคซ้อน+ท้าย) อยู่แล้ว.
+   → ทุกทางที่ "เขียนชื่อ" (ฟอร์ม/นำเข้า) และทุกรายการที่ "ให้เลือกชื่อ" ต้องผ่านตัวนี้ตัวเดียวกัน
+   ไม่งั้น list เสนอชื่อที่ล้างแล้ว แต่ DB เก็บชื่อสกปรก → เลือกจาก list = สร้างคนที่ 2 */
+const debtCleanName = (s) => String(s == null ? '' : s).trim().replace(/\s+/g, ' ');
 // ช่อง "กลุ่ม" จากไฟล์นำเข้า → 'assign' | 'invest' | '' (ว่าง/อ่านไม่ออก = อัตโนมัติตามหมวด)
 // รับทั้งภาษาไทยที่ผู้ใช้พิมพ์เอง ("โอนสิทธิ", "นักลงทุน") และคีย์ตรง ๆ (assign/invest)
 function parseDebtGroupCell(v) {
@@ -156,8 +161,62 @@ function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
 
 // Schedule popup opens inline (no page jump). Implemented via state below.
 
+/* ── เขียน .xlsx พร้อม "dropdown จริง" (Excel data validation) ────────────────
+   ⚠️ `ws['!dataValidation']` ใช้ไม่ได้ — xlsx-js-style มีแต่ parser ไม่มี writer
+      → ตั้งไปก็ถูก "ทิ้งเงียบ ๆ" ไฟล์ออกมาหน้าตาเหมือนเดิมแต่ไม่มี dropdown (พิสูจน์แล้ว).
+   วิธีที่ใช้: เขียนไฟล์ปกติ → แกะ zip ด้วย `XLSX.CFB` (มากับ xlsx.bundle.js อยู่แล้ว
+   ไม่ต้องเพิ่ม lib) → ยัด <dataValidations> เข้า sheet XML → ประกอบกลับ.
+   ต้องเดินผ่าน base64 + TextEncoder/TextDecoder เท่านั้น — เบราว์เซอร์ไม่มี Buffer
+   และ CFB.read(type:'array') พังกับ output ของ XLSX.write.
+   ตำแหน่ง <dataValidations> ต้องอยู่ "หลัง mergeCells ก่อน ignoredErrors" ตาม
+   ลำดับ schema CT_Worksheet ไม่งั้น Excel ฟ้องไฟล์เสีย.
+   dvs = [{ sheetIdx, sqref, ref, strict, title, msg }] · ref = ช่วงรายการ เช่น `_lists!$A$2:$A$9` */
+function xlsxWriteWithDropdowns(wb, filename, dvs) {
+  const CFB = XLSX.CFB;
+  if (!CFB || !CFB.utils || !CFB.utils.cfb_add) { XLSX.writeFile(wb, filename); return false; }
+  try {
+    const cfb = CFB.read(XLSX.write(wb, { type: 'base64', bookType: 'xlsx' }), { type: 'base64' });
+    const bySheet = {};
+    dvs.forEach(d => (bySheet[d.sheetIdx || 0] = bySheet[d.sheetIdx || 0] || []).push(d));
+    Object.keys(bySheet).forEach(idx => {
+      const path = '/xl/worksheets/sheet' + (Number(idx) + 1) + '.xml';
+      const ent = CFB.find(cfb, path);
+      if (!ent) return;
+      const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const list = bySheet[idx];
+      const xmlDv = '<dataValidations count="' + list.length + '">' + list.map(d =>
+        '<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1"'
+        + ' errorStyle="' + (d.strict ? 'stop' : 'warning') + '"'
+        + ' errorTitle="' + esc(d.title || 'ค่าไม่ตรงรายการ') + '"'
+        + ' error="' + esc(d.msg || 'กรุณาเลือกจากรายการที่กำหนด') + '"'
+        + ' sqref="' + d.sqref + '"><formula1>' + esc(d.ref) + '</formula1></dataValidation>'
+      ).join('') + '</dataValidations>';
+      let xml = new TextDecoder('utf-8').decode(new Uint8Array(ent.content));
+      xml = xml.indexOf('<ignoredErrors') >= 0
+        ? xml.replace('<ignoredErrors', xmlDv + '<ignoredErrors')
+        : xml.replace('</worksheet>', xmlDv + '</worksheet>');
+      CFB.utils.cfb_add(cfb, path, new TextEncoder().encode(xml));
+    });
+    const b64 = CFB.write(cfb, { fileType: 'zip', type: 'base64' });
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch (e) {
+    console.warn('[debt] ใส่ dropdown ไม่สำเร็จ → ดาวน์โหลดแบบไม่มี dropdown แทน:', e && e.message);
+    XLSX.writeFile(wb, filename);     // ไม่มี dropdown ดีกว่าไม่ได้ไฟล์
+    return false;
+  }
+}
+
 // ── Excel template for import ────────────────────────────────────────────────
-function downloadDebtImportTemplate() {
+// existing = แถวสัญญาที่มีอยู่ → ใช้สร้างรายการ dropdown ของ "หมวด" + "ผู้กู้/เจ้าหนี้"
+// (พิมพ์เองผิดตัวเดียว = กลายเป็นเจ้าหนี้คนละคนในทุกหน้าที่ group ด้วยชื่อ)
+function downloadDebtImportTemplate(existing) {
   if (typeof XLSX === 'undefined') {
     alert('ระบบ Export ยังไม่พร้อม (SheetJS โหลดไม่สำเร็จ) — กรุณารีเฟรชหน้า');
     return;
@@ -195,18 +254,61 @@ function downloadDebtImportTemplate() {
     '', '', '', '',
   ];
   const aoa = [
-    ['Template นำเข้าภาระหนี้ — แถวที่ 4 เป็นต้นไปคือข้อมูลจริง'],
+    ['Template นำเข้าภาระหนี้ — กรอกข้อมูลจริงตั้งแต่แถวที่ 5 (ทับแถวตัวอย่าง) · ช่องที่มีลูกศร ▾ ให้เลือกจากรายการ อย่าพิมพ์เอง'],
     cols,
     headersTh,
     noteRow,
     example,
   ];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = cols.map(() => ({ wch: 18 }));
+  ws['!cols'] = cols.map(k => ({ wch: k === 'borrowerName' ? 30 : 18 }));
   ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols.length - 1 } }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'DebtImport');
-  XLSX.writeFile(wb, 'debt_import_template.xlsx');
+
+  /* ── ชีต _lists (ซ่อน) = แหล่งข้อมูลของ dropdown ────────────────────────
+     strict:false = เตือนแต่ยังพิมพ์ค่าใหม่ได้ (หมวด/เจ้าหนี้ ต้องเพิ่มรายใหม่ได้)
+     strict:true  = บังคับเลือกเท่านั้น (คำศัพท์ปิด — พิมพ์เองผิด = ค่าหาย/เพี้ยน) */
+  const rows = existing || [];
+  const uniq = (arr) => [...new Set(arr.map(debtCleanName).filter(Boolean))];
+  const defs = [
+    { key: 'debtCategory', label: 'หมวด',     strict: false,
+      values: uniq([...DEBT_CATEGORIES, ...rows.map(r => r.debtCategory)]),
+      msg: 'ปกติเลือกจากรายการ — ถ้าเป็นหมวดใหม่จริง กด "ใช่" เพื่อใช้ค่าที่พิมพ์' },
+    { key: 'debtGroup',    label: 'กลุ่ม',    strict: true,
+      values: [DEBT_GROUP_META.assign.label, DEBT_GROUP_META.invest.label],
+      msg: 'เลือก "สินเชื่อโอนสิทธิ์" หรือ "นักลงทุน" · เว้นว่างได้ (ระบบจะเดาจากหมวด)' },
+    { key: 'borrowerName', label: 'ผู้กู้/เจ้าหนี้', strict: false,
+      values: uniq(rows.map(r => r.borrowerName)).sort((a, b) => a.localeCompare(b, 'th')),
+      msg: 'ถ้าเป็นเจ้าหนี้เดิม ให้เลือกจากรายการ — พิมพ์เองผิดแม้ตัวเดียว/เว้นวรรคเกิน = กลายเป็นเจ้าหนี้คนละคน' },
+    { key: 'status',       label: 'สถานะ',    strict: true,  values: ['Active', 'Close'] },
+    { key: 'facilityType', label: 'ประเภทวงเงิน', strict: true, values: FACILITY_TYPES.slice(),
+      msg: 'เลือกจากรายการ หรือเว้นว่าง — พิมพ์ค่าที่ไม่รู้จัก ระบบจะทิ้งเป็นค่าว่าง' },
+    { key: 'currency',     label: 'สกุลเงิน', strict: true,  values: ['THB', 'USD'] },
+  ].filter(d => d.values.length && cols.indexOf(d.key) >= 0);
+
+  const maxLen = Math.max(...defs.map(d => d.values.length));
+  const listAoa = [defs.map(d => d.label)];
+  for (let i = 0; i < maxLen; i++) listAoa.push(defs.map(d => d.values[i] || ''));
+  const wsL = XLSX.utils.aoa_to_sheet(listAoa);
+  wsL['!cols'] = defs.map(() => ({ wch: 30 }));
+  XLSX.utils.book_append_sheet(wb, wsL, '_lists');
+  wb.Workbook = { Sheets: [{}, { Hidden: 1 }] };   // ซ่อนชีต _lists (ผู้ใช้ไม่ต้องเห็น)
+
+  const FIRST = 5, LAST = 1000;                    // แถวข้อมูลจริง (แถว 5 = ตัวอย่าง ให้ทับได้)
+  const dvs = defs.map((d, li) => {
+    const dataCol = XLSX.utils.encode_col(cols.indexOf(d.key));
+    const listCol = XLSX.utils.encode_col(li);
+    return {
+      sheetIdx: 0,
+      sqref: dataCol + FIRST + ':' + dataCol + LAST,
+      ref: '_lists!$' + listCol + '$2:$' + listCol + '$' + (d.values.length + 1),
+      strict: d.strict,
+      title: d.strict ? 'ต้องเลือกจากรายการ' : 'ค่านี้ยังไม่มีในระบบ',
+      msg: d.msg || ('เลือก "' + d.label + '" จากรายการที่กำหนด'),
+    };
+  });
+  xlsxWriteWithDropdowns(wb, 'debt_import_template.xlsx', dvs);
 }
 
 // Parse uploaded xlsx → rows
@@ -265,7 +367,8 @@ function parseDebtImportFile(file, onDone, onErr) {
           debtCategory: String(r.debtCategory || '').trim() || 'อื่นๆ',
           debtGroup:    parseDebtGroupCell(r.debtGroup),
           contractNo:   String(r.contractNo || '').trim(),
-          borrowerName: String(r.borrowerName || '').trim(),
+          borrowerName: debtCleanName(r.borrowerName),   // ต้องล้างแบบเดียวกับ dropdown ใน template
+
           status:       (String(r.status || '').trim() === 'Close') ? 'Close' : 'Active',
           facilityType: ftMatch,
           receiveDate:  parseDate(r.receiveDate),
@@ -291,7 +394,7 @@ function parseDebtImportFile(file, onDone, onErr) {
 }
 
 // ── New / Edit debt form ─────────────────────────────────────────────────────
-function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
+function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
   const blank = {
     debtCategory: 'WCI', debtGroup: '', contractNo: '', borrowerName: '', status: 'Active',
     facilityType: '',
@@ -303,6 +406,10 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
   };
   const [draft, setDraft] = React.useState(blank);
   const [err, setErr]     = React.useState('');
+  // เจ้าหนี้ที่มีอยู่แล้ว → ใช้เป็นรายการให้เลือก (กันพิมพ์ใหม่แล้วกลายเป็นคนละคน)
+  const borrowerOptions = React.useMemo(() => [...new Set((existing || [])
+    .map(r => debtCleanName(r.borrowerName)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'th')), [existing]);
   React.useEffect(() => {
     if (open) {
       setDraft(initial ? { ...blank, ...initial } : blank);
@@ -318,6 +425,8 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
     if (!Number(draft.principalAmount)) { setErr('กรุณากรอกวงเงิน'); return; }
     onSave({
       ...draft,
+      borrowerName:    debtCleanName(draft.borrowerName),   // กันชื่อเดียวกันแตกเป็น 2 เจ้าหนี้
+      contractNo:      draft.contractNo.trim(),
       principalAmount: Number(draft.principalAmount) || 0,
       interestRate:    Number(draft.interestRate) || 0,
       balance:         Number(draft.balance || draft.principalAmount) || 0,
@@ -394,7 +503,19 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
         </div>
         <div className="field" style={{ gridColumn: 'span 2' }}>
           <label>ผู้กู้ / เจ้าหนี้ *</label>
-          <input className="input" value={draft.borrowerName} onChange={e => set('borrowerName', e.target.value)} placeholder="ชื่อ-นามสกุล หรือ ชื่อบริษัท" />
+          {/* datalist ของเจ้าหนี้เดิม — ชื่อคือ key ที่ใช้ group ทุกหน้า (ภาพรวมดอกเบี้ย ฯลฯ)
+              พิมพ์ต่างแม้ตัวเดียว/เว้นวรรคเกิน = กลายเป็นเจ้าหนี้คนละคนเงียบ ๆ */}
+          <input className="input" list="debt-borrower-list" value={draft.borrowerName}
+            onChange={e => set('borrowerName', e.target.value)}
+            placeholder="เลือกเจ้าหนี้เดิม หรือพิมพ์ชื่อใหม่" />
+          <datalist id="debt-borrower-list">
+            {borrowerOptions.map(n => <option key={n} value={n} />)}
+          </datalist>
+          {debtCleanName(draft.borrowerName) && !borrowerOptions.includes(debtCleanName(draft.borrowerName)) && borrowerOptions.length > 0 && (
+            <div style={{ fontSize: 10.5, color: '#b45309', marginTop: 3 }}>
+              ⚠️ ชื่อนี้ยังไม่มีในระบบ — จะถูกนับเป็นเจ้าหนี้รายใหม่ (ถ้าเป็นคนเดิม ให้เลือกจากรายการ)
+            </div>
+          )}
         </div>
         <div className="field">
           <label>ธนาคาร / เจ้าหนี้</label>
@@ -510,14 +631,15 @@ function ImportDebtModal({ open, existing, onClose, onImport }) {
         borderRadius: 7, color: 'var(--ink-700)', lineHeight: 1.65,
       }}>
         <div style={{ marginBottom: 6 }}>📋 <strong>ขั้นตอน:</strong></div>
-        <div>1. ดาวน์โหลด <strong>Template</strong> ก่อน → กรอกข้อมูล (เริ่มที่แถวที่ 5)</div>
-        <div>2. หมวด ใช้คำตรงตามรายการ: {DEBT_CATEGORIES.join(', ')}</div>
-        <div>3. อัตราดอกเบี้ย กรอกแบบทศนิยม เช่น 0.075 (7.5%) — หรือกรอก 7.5 ระบบจะแปลงให้</div>
-        <div>4. ระบบจะข้ามรายการที่ <strong>เลขที่สัญญาซ้ำ</strong> กับที่มีอยู่</div>
+        <div>1. ดาวน์โหลด <strong>Template</strong> ก่อน → กรอกข้อมูล (เริ่มที่แถวที่ 5 ทับแถวตัวอย่าง)</div>
+        <div>2. ช่องที่มี <strong>ลูกศร ▾</strong> (หมวด · กลุ่ม · ผู้กู้/เจ้าหนี้ · สถานะ · ประเภทวงเงิน · สกุลเงิน) <strong>ให้เลือกจากรายการ อย่าพิมพ์เอง</strong> — พิมพ์ผิดตัวเดียวหรือเว้นวรรคเกิน = กลายเป็นเจ้าหนี้/หมวดคนละอัน</div>
+        <div>3. <strong>กลุ่ม</strong> = สินเชื่อโอนสิทธิ์ หรือ นักลงทุน (เว้นว่าง = ระบบเดาจากหมวด)</div>
+        <div>4. อัตราดอกเบี้ย กรอกแบบทศนิยม เช่น 0.075 (7.5%) — หรือกรอก 7.5 ระบบจะแปลงให้</div>
+        <div>5. ระบบจะข้ามรายการที่ <strong>เลขที่สัญญาซ้ำ</strong> กับที่มีอยู่</div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-ghost" onClick={downloadDebtImportTemplate}
+        <button className="btn btn-ghost" onClick={() => downloadDebtImportTemplate(existing)}
           style={{ background: '#ecfeff', borderColor: '#06b6d4', color: '#0e7490' }}>
           <Icon name="download" size={14} /> ดาวน์โหลด Template
         </button>
@@ -1263,6 +1385,7 @@ function DebtPage({ data, setData, toast }) {
         open={showAdd}
         initial={null}
         isNew
+        existing={rawRows}
         onClose={() => setShowAdd(false)}
         onSave={row => saveDebt(row, 'add')}
       />
@@ -1270,6 +1393,7 @@ function DebtPage({ data, setData, toast }) {
         open={!!editRow}
         initial={editRow}
         isNew={false}
+        existing={rawRows}
         onClose={() => setEditRow(null)}
         onSave={row => saveDebt(row, 'edit')}
       />
