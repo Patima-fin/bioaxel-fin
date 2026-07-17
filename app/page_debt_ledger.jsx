@@ -2754,10 +2754,11 @@ function OvFilterSelect({ label, options, selected, onChange }) {
   );
 }
 
-// ── ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา) — ยอดรวม + ตามเจ้าหนี้ (กางดูรายย่อย) + ประวัติรายวัน ──
+// ── ภาพรวมการจ่ายดอกเบี้ย (ทุกสัญญา) — ยอดรวม + 2 มุมมองแบบกางทีละชั้น ──
+// เจ้าหนี้ › [จ่ายแล้ว | ยังไม่จ่าย] › สัญญา › รายการ   ·   วันจ่าย › หมวด › เจ้าหนี้ › สัญญา › เดือน
 function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
-  const [view, setView] = React.useState('year');          // 'creditor' | 'year'
-  const [expanded, setExpanded] = React.useState({});      // expand keys (creditor / year>cat>contract path)
+  const [view, setView] = React.useState('date');           // 'creditor' | 'date'
+  const [expanded, setExpanded] = React.useState({});       // expand keys (cr:… / d:… tree path)
   const [fCats,  setFCats]  = React.useState(new Set());    // กรองหมวด (ว่าง = ทุกหมวด, เลือกได้หลายค่า)
   const [fCreds, setFCreds] = React.useState(new Set());    // กรองเจ้าหนี้ (ว่าง = ทุกเจ้าหนี้)
   const catOptions  = React.useMemo(() => [...new Set((masters || []).map(m => m.debtCategory).filter(Boolean))].sort(), [masters]);
@@ -2784,53 +2785,81 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
     sel.forEach(m => {
       const rows = (ledgerByContract && ledgerByContract[m.contractNo]) || [];
       const name = ((m.borrowerName || '').trim()) || '—';
-      const c = byCreditor[name] || (byCreditor[name] = { name, contracts: new Set(), total: 0, paid: 0, rounds: [] });
+      const c = byCreditor[name] || (byCreditor[name] = { name, contracts: new Set(), total: 0, paid: 0, due: 0, paidK: {}, dueK: {} });
       c.contracts.add(m.contractNo);
       rows.forEach(r => {
         const eff = effectiveInterest(r);
         totalInterest += eff; c.total += eff;
+        const im = (Number(r.year) || 0) * 100 + (Number(r.month) || 0);
+        const monthLabel = (TH_MONTH[Number(r.month)] || r.month) + ' ' + r.year;
         interestPayments(r).forEach(p => {
           const amt = Number(p.amount) || 0;
           if (amt <= 0) return;
           const rec = { payDate: p.date || '', amount: amt, note: p.note || '', contractNo: m.contractNo,
-                        borrowerName: name, debtCategory: m.debtCategory || '—',
-                        im: (Number(r.year) || 0) * 100 + (Number(r.month) || 0),
-                        monthLabel: (TH_MONTH[Number(r.month)] || r.month) + ' ' + r.year };
-          rounds.push(rec); c.rounds.push(rec);
+                        borrowerName: name, debtCategory: m.debtCategory || '—', im, monthLabel };
+          rounds.push(rec);
+          const pk = c.paidK[m.contractNo] || (c.paidK[m.contractNo] = { contractNo: m.contractNo, total: 0, items: [] });
+          pk.total += amt; pk.items.push(rec);
           totalPaid += amt; c.paid += amt;
         });
+        // เดือนที่ยังจ่ายไม่ครบ → กลุ่ม "ยังไม่จ่าย" (partial = จ่ายบางส่วนแล้ว เหลือส่วนต่าง)
+        const rem = interestRemaining(r);
+        if (rem > 0.005) {
+          const dk = c.dueK[m.contractNo] || (c.dueK[m.contractNo] = { contractNo: m.contractNo, total: 0, items: [] });
+          dk.total += rem;
+          dk.items.push({ im, monthLabel, amount: rem, eff, paid: interestPaid(r), partial: interestPaid(r) > 0.005 });
+          c.due += rem;
+        }
       });
     });
     rounds.sort((x, y) => (y.payDate || '').localeCompare(x.payDate || ''));
+    const byTotalDesc = (a, b) => b.total - a.total;
+    // เรียงสัญญาตาม "เลขสัญญา" เสมอ (numeric:true → 02-STS ก่อน 10-STS ไม่ใช่เรียงแบบสตริงล้วน)
+    const byContractNo = (a, b) => String(a.contractNo || '').localeCompare(String(b.contractNo || ''), 'th', { numeric: true });
     const creditors = Object.values(byCreditor)
-      .map(c => ({ name: c.name, contractCount: c.contracts.size, total: c.total, paid: c.paid,
-                   outstanding: Math.max(0, c.total - c.paid),
-                   rounds: c.rounds.slice().sort((x, y) => (y.payDate || '').localeCompare(x.payDate || '')) }))
+      .map(c => ({
+        name: c.name, contractCount: c.contracts.size, total: c.total, paid: c.paid, due: c.due,
+        paidContracts: Object.values(c.paidK).sort(byContractNo).map(k => ({
+          contractNo: k.contractNo, total: k.total, count: k.items.length,
+          items: k.items.slice().sort((x, y) => (y.payDate || '').localeCompare(x.payDate || '')),
+        })),
+        paidCount: Object.values(c.paidK).reduce((s, k) => s + k.items.length, 0),
+        dueContracts: Object.values(c.dueK).sort(byContractNo).map(k => ({
+          contractNo: k.contractNo, total: k.total, count: k.items.length,
+          items: k.items.slice().sort((x, y) => (x.im || 0) - (y.im || 0)),
+        })),
+        dueCount: Object.values(c.dueK).reduce((s, k) => s + k.items.length, 0),
+      }))
       .filter(c => c.total > 0.005 || c.paid > 0.005)
       .sort((x, y) => y.paid - x.paid);
-    // ปี (วันจ่าย) → หมวด → สัญญา → รอบ(วันจ่าย) → เดือนที่จ่ายในรอบนั้น
-    // "รอบ" = จำนวนวันจ่ายที่ไม่ซ้ำ (จ่ายหลายเดือนในวันเดียวกัน = 1 รอบ)
+    // ปี → วันจ่าย (รอบ) → หมวด → เจ้าหนี้ → สัญญา → เดือนดอกเบี้ยที่จ่ายในรอบนั้น
+    // "รอบ" = 1 วันจ่าย (จ่ายหลายเดือน/หลายสัญญาในวันเดียวกัน = 1 รอบ)
     const yTree = {};
     rounds.forEach(p => {
       const y = (p.payDate || '').slice(0, 4) || '—';
-      const yt = yTree[y] || (yTree[y] = { year: y, total: 0, dates: new Set(), cats: {} });
-      yt.total += p.amount; yt.dates.add(p.payDate);
-      const ct = yt.cats[p.debtCategory] || (yt.cats[p.debtCategory] = { cat: p.debtCategory, total: 0, dates: new Set(), contracts: {} });
-      ct.total += p.amount; ct.dates.add(p.payDate);
-      const kt = ct.contracts[p.contractNo] || (ct.contracts[p.contractNo] = { contractNo: p.contractNo, borrowerName: p.borrowerName, total: 0, dates: new Set(), byDate: {} });
-      kt.total += p.amount; kt.dates.add(p.payDate);
-      const dg = kt.byDate[p.payDate] || (kt.byDate[p.payDate] = { date: p.payDate, total: 0, months: [] });
-      dg.total += p.amount; dg.months.push(p);
+      const yt = yTree[y] || (yTree[y] = { year: y, total: 0, count: 0, dates: {} });
+      yt.total += p.amount; yt.count++;
+      const dt = yt.dates[p.payDate || ''] || (yt.dates[p.payDate || ''] = { date: p.payDate || '', total: 0, count: 0, contracts: new Set(), cats: {} });
+      dt.total += p.amount; dt.count++; dt.contracts.add(p.contractNo);
+      const ct = dt.cats[p.debtCategory] || (dt.cats[p.debtCategory] = { cat: p.debtCategory, total: 0, count: 0, creds: {} });
+      ct.total += p.amount; ct.count++;
+      const rt = ct.creds[p.borrowerName] || (ct.creds[p.borrowerName] = { name: p.borrowerName, total: 0, count: 0, contracts: {} });
+      rt.total += p.amount; rt.count++;
+      const kt = rt.contracts[p.contractNo] || (rt.contracts[p.contractNo] = { contractNo: p.contractNo, total: 0, months: [] });
+      kt.total += p.amount; kt.months.push(p);
     });
-    const years = Object.values(yTree).sort((a, b) => (b.year).localeCompare(a.year)).map(yt => ({
-      year: yt.year, total: yt.total, rounds: yt.dates.size,
-      cats: Object.values(yt.cats).sort((a, b) => b.total - a.total).map(ct => ({
-        cat: ct.cat, total: ct.total, rounds: ct.dates.size,
-        contracts: Object.values(ct.contracts).sort((a, b) => b.total - a.total).map(kt => ({
-          contractNo: kt.contractNo, borrowerName: kt.borrowerName, total: kt.total, rounds: kt.dates.size,
-          dateGroups: Object.values(kt.byDate).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(dg => ({
-            date: dg.date, total: dg.total, count: dg.months.length,
-            months: dg.months.slice().sort((a, b) => (a.im || 0) - (b.im || 0)),
+    const years = Object.values(yTree).sort((a, b) => (b.year || '').localeCompare(a.year || '')).map(yt => ({
+      year: yt.year, total: yt.total, count: yt.count, rounds: Object.keys(yt.dates).length,
+      days: Object.values(yt.dates).sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(dt => ({
+        date: dt.date, total: dt.total, count: dt.count, contractCount: dt.contracts.size,
+        cats: Object.values(dt.cats).sort(byTotalDesc).map(ct => ({
+          cat: ct.cat, total: ct.total, count: ct.count,
+          creds: Object.values(ct.creds).sort(byTotalDesc).map(rt => ({
+            name: rt.name, total: rt.total, count: rt.count,
+            contracts: Object.values(rt.contracts).sort(byContractNo).map(kt => ({
+              contractNo: kt.contractNo, total: kt.total, count: kt.months.length,
+              months: kt.months.slice().sort((a, b) => (a.im || 0) - (b.im || 0)),
+            })),
           })),
         })),
       })),
@@ -2860,7 +2889,7 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
         {kpi('จำนวนรอบจ่าย', `${agg.payDays} รอบ · ${agg.roundCount} รายการ`)}
       </div>
       <div style={{ display: 'inline-flex', gap: 4, marginBottom: 12, background: 'var(--ink-100, #eef1f6)', borderRadius: 9, padding: 3, border: '1px solid var(--line)' }}>
-        {[{ k: 'creditor', l: '👤 ตามเจ้าหนี้' }, { k: 'year', l: '📅 ตามปี › หมวด › สัญญา' }].map(t => (
+        {[{ k: 'creditor', l: '👤 ตามเจ้าหนี้' }, { k: 'date', l: '📅 ตามปี › วันจ่าย › หมวด' }].map(t => (
           <button key={t.k} type="button" onClick={() => setView(t.k)}
             style={{ padding: '6px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit',
                      background: view === t.k ? 'linear-gradient(135deg, var(--brand-500), var(--brand-700))' : 'transparent',
@@ -2868,80 +2897,146 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
         ))}
       </div>
 
-      {view === 'creditor' ? (
-        <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden' }}>
-          <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
-            <thead><tr>
-              <th style={{ width: 24 }}></th><th>เจ้าหนี้</th>
-              <th style={{ textAlign: 'center', width: 70 }}>สัญญา</th>
-              <th style={{ textAlign: 'right' }}>ดอกเบี้ยรวม</th>
-              <th style={{ textAlign: 'right' }}>จ่ายแล้ว</th>
-              <th style={{ textAlign: 'right' }}>ค้าง</th>
-            </tr></thead>
-            <tbody>
-              {agg.creditors.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีข้อมูล</td></tr>}
-              {agg.creditors.map(c => (
-                <React.Fragment key={c.name}>
-                  <tr onClick={() => toggle(c.name)} style={{ cursor: 'pointer' }}>
-                    <td style={{ textAlign: 'center', color: 'var(--ink-400)' }}>{expanded[c.name] ? '▾' : '▸'}</td>
-                    <td style={{ fontWeight: 600 }}>{c.name}</td>
-                    <td style={{ textAlign: 'center' }}>{c.contractCount}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(c.total, 2)}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(c.paid, 2)}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: c.outstanding > 0.005 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(c.outstanding, 2)}</td>
-                  </tr>
-                  {expanded[c.name] && (
-                    <tr><td colSpan={6} style={{ padding: 0, background: 'var(--ink-25, #fafbfc)' }}>
-                      <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
-                        <thead><tr style={{ color: 'var(--ink-400)' }}>
-                          <th style={{ textAlign: 'left', padding: '4px 10px 4px 40px' }}>วันจ่าย</th>
-                          <th style={{ textAlign: 'left' }}>สัญญา</th><th style={{ textAlign: 'left' }}>เดือนดอกเบี้ย</th>
-                          <th style={{ textAlign: 'right' }}>จำนวน</th><th style={{ textAlign: 'left', paddingRight: 10 }}>โน้ต</th>
-                        </tr></thead>
-                        <tbody>
-                          {c.rounds.length === 0 && <tr><td colSpan={5} style={{ padding: '6px 40px', color: 'var(--ink-400)' }}>ยังไม่มีการจ่าย</td></tr>}
-                          {c.rounds.map((p, i) => (
-                            <tr key={i}>
-                              <td style={{ padding: '3px 10px 3px 40px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.payDate ? fmtDate(p.payDate) : '—'}</td>
-                              <td style={{ fontFamily: 'ui-monospace', fontSize: 10.5 }}>{p.contractNo}</td>
-                              <td>{p.monthLabel}</td>
-                              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmtNum(p.amount, 2)}</td>
-                              <td style={{ color: 'var(--ink-500)', paddingRight: 10 }}>{p.note || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </td></tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ fontWeight: 800, background: 'var(--ink-50)', borderTop: '2px solid var(--ink-200)' }}>
-                <td></td><td>รวมทั้งหมด</td><td></td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(agg.totalInterest, 2)}</td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(agg.totalPaid, 2)}</td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--bad)' }}>{fmtNum(agg.totalOutstanding, 2)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      ) : (() => {
-        // flatten ปี › หมวด › สัญญา › รอบ ตามที่กางไว้
+      {view === 'creditor' ? (() => {
+        // flatten เจ้าหนี้ › [จ่ายแล้ว | ยังไม่จ่าย] › สัญญา › รายการ ตามที่กางไว้
+        // ยอดของแต่ละแถวลงคอลัมน์ตาม `col` (total = แถวเจ้าหนี้ · paid / due = กลุ่มและลูกของมัน)
+        const vis = [];
+        agg.creditors.forEach(c => {
+          const rk = 'cr:' + c.name;
+          vis.push({ lvl: 0, key: rk, kind: 'creditor', label: c.name, cred: c, open: !!expanded[rk] });
+          if (!expanded[rk]) return;
+          [{ g: 'paid', label: '✅ จ่ายแล้ว', total: c.paid, count: c.paidCount, ks: c.paidContracts, col: 'paid' },
+           { g: 'due',  label: '⏳ ยังไม่จ่าย', total: c.due,  count: c.dueCount,  ks: c.dueContracts,  col: 'due'  }].forEach(grp => {
+            const gk = rk + '|g:' + grp.g;
+            vis.push({ lvl: 1, key: gk, kind: 'group', label: grp.label, sub: grp.count + ' รายการ',
+                       total: grp.total, col: grp.col, empty: grp.ks.length === 0, open: !!expanded[gk] });
+            if (!expanded[gk]) return;
+            if (grp.ks.length === 0) {
+              vis.push({ lvl: 2, key: gk + '|none', kind: 'none', label: grp.g === 'paid' ? 'ยังไม่มีการจ่าย' : 'จ่ายครบทุกเดือนแล้ว' });
+              return;
+            }
+            grp.ks.forEach(k => {
+              const kk = gk + '|k:' + k.contractNo;
+              vis.push({ lvl: 2, key: kk, kind: 'contract', label: k.contractNo, sub: k.count + (grp.g === 'paid' ? ' รายการ' : ' เดือน'),
+                         total: k.total, col: grp.col, open: !!expanded[kk] });
+              if (!expanded[kk]) return;
+              k.items.forEach((it, i) => vis.push({ lvl: 3, key: kk + '|i' + i, kind: grp.g === 'paid' ? 'round' : 'due',
+                                                    item: it, total: it.amount, col: grp.col }));
+            });
+          });
+        });
+        const amtCell = (row, col) => (
+          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+                       fontWeight: row.lvl === 0 ? 700 : row.lvl === 1 ? 700 : 500,
+                       color: col === 'paid' ? 'var(--good)' : col === 'due' ? 'var(--bad)' : 'var(--ink-800)' }}>
+            {row.col === col ? fmtNum(row.total, 2) : ''}
+          </td>
+        );
+        return (
+          <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden', maxHeight: '58vh', overflowY: 'auto' }}>
+            <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}><tr>
+                <th>เจ้าหนี้ <span style={{ fontWeight: 400, color: 'var(--ink-400)', fontSize: 11 }}>(คลิกเพื่อกาง)</span></th>
+                <th style={{ textAlign: 'center', width: 70 }}>สัญญา</th>
+                <th style={{ textAlign: 'right', width: 130 }}>ดอกเบี้ยรวม</th>
+                <th style={{ textAlign: 'right', width: 130 }}>จ่ายแล้ว</th>
+                <th style={{ textAlign: 'right', width: 130 }}>ค้าง</th>
+              </tr></thead>
+              <tbody>
+                {vis.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีข้อมูล</td></tr>}
+                {vis.map(row => {
+                  if (row.kind === 'creditor') {
+                    const c = row.cred;
+                    return (
+                      <tr key={row.key} onClick={() => toggle(row.key)} style={{ cursor: 'pointer', background: 'var(--ink-50, #f6f8fb)' }}>
+                        <td style={{ paddingLeft: 8, fontWeight: 700 }}>
+                          <span style={{ color: 'var(--ink-400)', marginRight: 4 }}>{row.open ? '▾' : '▸'}</span>{c.name}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>{c.contractCount}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{fmtNum(c.total, 2)}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--good)' }}>{fmtNum(c.paid, 2)}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: c.due > 0.005 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(c.due, 2)}</td>
+                      </tr>
+                    );
+                  }
+                  if (row.kind === 'none') return (
+                    <tr key={row.key} style={{ background: 'var(--ink-25, #fafbfc)' }}>
+                      <td colSpan={5} style={{ paddingLeft: 20 + row.lvl * 20, fontSize: 11.5, color: 'var(--ink-400)' }}>{row.label}</td>
+                    </tr>
+                  );
+                  if (row.kind === 'round' || row.kind === 'due') {
+                    const it = row.item;
+                    return (
+                      <tr key={row.key} style={{ background: 'var(--ink-25, #fafbfc)' }}>
+                        <td style={{ paddingLeft: 20 + row.lvl * 20, fontSize: 11.5, color: 'var(--ink-600)' }}>
+                          {row.kind === 'round'
+                            ? <>{it.payDate ? fmtDate(it.payDate) : '—'} · ดอกเบี้ยเดือน {it.monthLabel}{it.note ? ' · ' + it.note : ''}</>
+                            : <>ดอกเบี้ยเดือน {it.monthLabel}
+                                {it.partial && <span style={{ marginLeft: 5, fontSize: 9.5, background: '#fffbeb', color: '#b45309', borderRadius: 5, padding: '0 6px', fontWeight: 700 }}>
+                                  จ่ายบางส่วน {fmtNum(it.paid, 2)}/{fmtNum(it.eff, 2)}</span>}</>}
+                        </td>
+                        <td></td>
+                        <td></td>
+                        {amtCell(row, 'paid')}
+                        {amtCell(row, 'due')}
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={row.key} onClick={() => !row.empty && toggle(row.key)}
+                      style={{ cursor: row.empty ? 'default' : 'pointer', opacity: row.empty ? 0.55 : 1 }}>
+                      <td style={{ paddingLeft: 8 + row.lvl * 20, fontWeight: row.kind === 'group' ? 600 : 500 }}>
+                        <span style={{ color: 'var(--ink-400)', marginRight: 4 }}>{row.empty ? '·' : row.open ? '▾' : '▸'}</span>
+                        {row.kind === 'contract' ? <span style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{row.label}</span> : row.label}
+                        {row.sub && <span style={{ color: 'var(--ink-400)', fontWeight: 400, fontSize: 11 }}> · {row.sub}</span>}
+                      </td>
+                      <td></td>
+                      <td></td>
+                      {amtCell(row, 'paid')}
+                      {amtCell(row, 'due')}
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 800, background: 'var(--ink-50)', borderTop: '2px solid var(--ink-200)' }}>
+                  <td>รวมทั้งหมด</td><td></td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(agg.totalInterest, 2)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--good)' }}>{fmtNum(agg.totalPaid, 2)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--bad)' }}>{fmtNum(agg.totalOutstanding, 2)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        );
+      })() : (() => {
+        // flatten ปี › วันจ่าย › หมวด › เจ้าหนี้ › สัญญา › เดือน ตามที่กางไว้
         const vis = [];
         agg.years.forEach(yt => {
           const yk = 'y:' + yt.year;
-          vis.push({ lvl: 0, key: yk, kind: 'year', label: 'ปี ' + yt.year, total: yt.total, count: yt.rounds, open: !!expanded[yk] });
-          if (expanded[yk]) yt.cats.forEach(ct => {
-            const ck = yk + '|c:' + ct.cat;
-            vis.push({ lvl: 1, key: ck, kind: 'cat', label: ct.cat, total: ct.total, count: ct.rounds, open: !!expanded[ck] });
-            if (expanded[ck]) ct.contracts.forEach(kt => {
-              const kk = ck + '|k:' + kt.contractNo;
-              vis.push({ lvl: 2, key: kk, kind: 'contract', label: kt.contractNo, sub: kt.borrowerName, total: kt.total, count: kt.rounds, open: !!expanded[kk] });
-              if (expanded[kk]) kt.dateGroups.forEach((dg, di) => {
-                const dk = kk + '|d:' + (dg.date || di);
-                vis.push({ lvl: 3, key: dk, kind: 'date', label: dg.date ? fmtDate(dg.date) : '—', sub: dg.count + ' เดือน', total: dg.total, count: dg.count, open: !!expanded[dk] });
-                if (expanded[dk]) dg.months.forEach((p, i) => vis.push({ lvl: 4, key: dk + '|m' + i, kind: 'month', round: p }));
+          vis.push({ lvl: 0, key: yk, kind: 'year', label: 'ปี ' + yt.year, sub: yt.rounds + ' รอบ',
+                     total: yt.total, count: yt.count, open: !!expanded[yk] });
+          if (!expanded[yk]) return;
+          yt.days.forEach((dt, di) => {
+            const dk = yk + '|d:' + (dt.date || di);
+            vis.push({ lvl: 1, key: dk, kind: 'date', label: dt.date ? fmtDate(dt.date) : 'ไม่ระบุวันจ่าย',
+                       sub: dt.contractCount + ' สัญญา', total: dt.total, count: dt.count, open: !!expanded[dk] });
+            if (!expanded[dk]) return;
+            dt.cats.forEach(ct => {
+              const ck = dk + '|c:' + ct.cat;
+              vis.push({ lvl: 2, key: ck, kind: 'cat', label: ct.cat, total: ct.total, count: ct.count, open: !!expanded[ck] });
+              if (!expanded[ck]) return;
+              ct.creds.forEach(rt => {
+                const rk = ck + '|r:' + rt.name;
+                vis.push({ lvl: 3, key: rk, kind: 'cred', label: rt.name, sub: rt.contracts.length + ' สัญญา',
+                           total: rt.total, count: rt.count, open: !!expanded[rk] });
+                if (!expanded[rk]) return;
+                rt.contracts.forEach(kt => {
+                  const kk = rk + '|k:' + kt.contractNo;
+                  vis.push({ lvl: 4, key: kk, kind: 'contract', label: kt.contractNo, sub: kt.count + ' เดือน',
+                             total: kt.total, count: kt.count, open: !!expanded[kk] });
+                  if (expanded[kk]) kt.months.forEach((p, i) => vis.push({ lvl: 5, key: kk + '|m' + i, kind: 'month', round: p }));
+                });
               });
             });
           });
@@ -2950,15 +3045,15 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
           <div style={{ borderRadius: 10, border: '1px solid var(--ink-100)', overflow: 'hidden', maxHeight: '58vh', overflowY: 'auto' }}>
             <table className="tbl" style={{ width: '100%', fontSize: 12.5 }}>
               <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)', zIndex: 1 }}><tr>
-                <th>ปี / หมวด / สัญญา <span style={{ fontWeight: 400, color: 'var(--ink-400)', fontSize: 11 }}>(คลิกเพื่อกาง)</span></th>
-                <th style={{ textAlign: 'center', width: 70 }}>รอบ</th>
+                <th>ปี / วันจ่าย / หมวด / เจ้าหนี้ / สัญญา <span style={{ fontWeight: 400, color: 'var(--ink-400)', fontSize: 11 }}>(คลิกเพื่อกาง)</span></th>
+                <th style={{ textAlign: 'center', width: 80 }}>รายการ</th>
                 <th style={{ textAlign: 'right', width: 150 }}>จ่ายรวม</th>
               </tr></thead>
               <tbody>
                 {vis.length === 0 && <tr><td colSpan={3} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-400)' }}>ยังไม่มีการจ่าย</td></tr>}
                 {vis.map(row => row.kind === 'month' ? (
                   <tr key={row.key} style={{ background: 'var(--ink-25, #fafbfc)' }}>
-                    <td style={{ paddingLeft: 20 + row.lvl * 20, fontSize: 11.5, color: 'var(--ink-600)' }}>
+                    <td style={{ paddingLeft: 20 + row.lvl * 18, fontSize: 11.5, color: 'var(--ink-600)' }}>
                       ดอกเบี้ยเดือน {row.round.monthLabel}{row.round.note ? ' · ' + row.round.note : ''}
                     </td>
                     <td></td>
@@ -2966,14 +3061,16 @@ function InterestOverviewModal({ open, masters, ledgerByContract, onClose }) {
                   </tr>
                 ) : (
                   <tr key={row.key} onClick={() => toggle(row.key)} style={{ cursor: 'pointer', background: row.lvl === 0 ? 'var(--ink-50, #f6f8fb)' : undefined }}>
-                    <td style={{ paddingLeft: 8 + row.lvl * 20, fontWeight: row.lvl === 0 ? 700 : row.lvl === 1 ? 600 : 500 }}>
+                    <td style={{ paddingLeft: 8 + row.lvl * 18, fontWeight: row.lvl === 0 ? 700 : row.lvl <= 2 ? 600 : 500 }}>
                       <span style={{ color: 'var(--ink-400)', marginRight: 4 }}>{row.open ? '▾' : '▸'}</span>
-                      {row.kind === 'cat' && <span style={{ display: 'inline-block', fontSize: 9.5, background: 'var(--brand-50, #eff6ff)', color: 'var(--brand-700)', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>หมวด</span>}
                       {row.kind === 'date' && <span style={{ display: 'inline-block', fontSize: 9.5, background: '#fffbeb', color: '#b45309', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>รอบ</span>}
+                      {row.kind === 'cat' && <span style={{ display: 'inline-block', fontSize: 9.5, background: 'var(--brand-50, #eff6ff)', color: 'var(--brand-700)', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>หมวด</span>}
+                      {row.kind === 'cred' && <span style={{ display: 'inline-block', fontSize: 9.5, background: '#f0fdf4', color: '#15803d', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>เจ้าหนี้</span>}
+                      {row.kind === 'contract' && <span style={{ display: 'inline-block', fontSize: 9.5, background: 'var(--ink-100, #eef1f6)', color: 'var(--ink-500)', borderRadius: 5, padding: '0 6px', marginRight: 5, fontWeight: 700 }}>สัญญา</span>}
                       {row.kind === 'contract' ? <span style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>{row.label}</span> : row.label}
                       {row.sub && <span style={{ color: 'var(--ink-400)', fontWeight: 400, fontSize: 11 }}> · {row.sub}</span>}
                     </td>
-                    <td style={{ textAlign: 'center', color: 'var(--ink-500)', fontSize: 11.5 }}>{row.kind === 'date' ? '' : row.count}</td>
+                    <td style={{ textAlign: 'center', color: 'var(--ink-500)', fontSize: 11.5 }}>{row.count}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: row.lvl === 0 ? 800 : 600, color: 'var(--good)' }}>{fmtNum(row.total, 2)}</td>
                   </tr>
                 ))}
