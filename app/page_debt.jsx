@@ -17,12 +17,34 @@ const DEBT_CATEGORIES = Object.keys(CATEGORY_META);
 // กลุ่มใหญ่ BANK / NON-BANK (ผู้ใช้เคาะ: BANK = ธนาคารอย่างเดียว · ที่เหลือทั้งหมด = NON-BANK)
 const DEBT_BANK_CATS = ['ธนาคาร'];
 const isDebtBankCat = (cat) => DEBT_BANK_CATS.includes(cat);
-// NON-BANK แยกเป็น 2 กลุ่มย่อย: "สินเชื่อโอนสิทธิ์" (STS, WCI, Project) vs "นักลงทุน" (Non-WCI, กรรมการ, LockWood, Zigo, Employyim, BHG, ที่เหลือ)
+/* NON-BANK แยกเป็น 2 กลุ่มย่อย: "สินเชื่อโอนสิทธิ์" vs "นักลงทุน"
+   ⚠️ หมวดอย่างเดียวตัดสินไม่ได้ — WCI เป็นได้ทั้ง 2 อย่าง (ผู้ใช้เคาะ 2026-07-17)
+   → กลุ่มจริงอ่านจาก `debtGroup` รายสัญญา (ตั้งในฟอร์ม) · ไม่ได้ตั้ง = เดาจากหมวดด้วยกฎล่างนี้.
+   ห้ามเรียก isAssignmentDebtCat ตรง ๆ เพื่อจัดกลุ่ม — ใช้ debtGroupOf(row) เสมอ ไม่งั้นค่าที่ตั้งรายสัญญาถูกมองข้าม. */
+const DEBT_GROUP_META = {
+  assign: { label: 'สินเชื่อโอนสิทธิ์', color: '#15803d' },
+  invest: { label: 'นักลงทุน',          color: '#7c3aed' },
+};
 function isAssignmentDebtCat(cat) {
   const c = String(cat || '').trim();
   if (/non-?wci/i.test(c)) return false;                 // Non-WCI = นักลงทุน
-  return /\bsts\b/i.test(c) || /\bwci\b/i.test(c)
-      || /project/i.test(c) || /โอนสิทธิ/.test(c);
+  return /\bsts\b/i.test(c) || /project/i.test(c) || /โอนสิทธิ/.test(c);
+}
+// กลุ่มของสัญญา: ค่าที่ตั้งไว้รายสัญญามาก่อน → ว่าง = อัตโนมัติตามหมวด
+function debtGroupOf(row) {
+  const g = String((row && row.debtGroup) || '').trim();
+  if (g === 'assign' || g === 'invest') return g;
+  return isAssignmentDebtCat(row && row.debtCategory) ? 'assign' : 'invest';
+}
+const debtGroupLabel = (row) => DEBT_GROUP_META[debtGroupOf(row)].label;
+// ช่อง "กลุ่ม" จากไฟล์นำเข้า → 'assign' | 'invest' | '' (ว่าง/อ่านไม่ออก = อัตโนมัติตามหมวด)
+// รับทั้งภาษาไทยที่ผู้ใช้พิมพ์เอง ("โอนสิทธิ", "นักลงทุน") และคีย์ตรง ๆ (assign/invest)
+function parseDebtGroupCell(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  if (!s) return '';
+  if (s === 'assign' || /โอนสิทธิ/.test(s)) return 'assign';
+  if (s === 'invest' || /นักลงทุน/.test(s)) return 'invest';
+  return '';
 }
 function metaFor(cat) {
   return CATEGORY_META[cat] || { color: '#525252', bg: '#f5f5f5', label: cat || '—' };
@@ -59,11 +81,13 @@ function DebtCategoryMiniCard({ cat, rawRows }) {
 
 /* การ์ดกลุ่มใหญ่ BANK / NON-BANK — ย่อ=ยอดรวม Active (THB + USD แยก) · กดกางดูข้างใน
    subGroups (option) = กลุ่มย่อยซ้อนในการ์ดเดียว (เช่น NON-BANK → สินเชื่อโอนสิทธิ์ / นักลงทุน)
-   nested = การ์ดย่อยซ้อนในการ์ดใหญ่ (สไตล์บางลง) */
-function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, nested }) {
+   nested = การ์ดย่อยซ้อนในการ์ดใหญ่ (สไตล์บางลง)
+   ⚠️ รับ `rows` = แถวของกลุ่มนี้ (กรองมาแล้วจากข้างนอก) — ไม่ใช่ `cats`
+   เพราะกลุ่มย่อยแบ่งด้วย debtGroupOf(row) รายสัญญา หมวดเดียวจึงอยู่ได้ทั้ง 2 กลุ่มย่อย */
+function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
   const [open, setOpen] = React.useState(!!defaultOpen);
-  const present = cats.filter(c => rawRows.some(r => r.debtCategory === c));
-  const active  = rawRows.filter(r => cats.includes(r.debtCategory) && r.status === 'Active');
+  const present = [...new Set((rows || []).map(r => String(r.debtCategory || '').trim()).filter(Boolean))];
+  const active  = (rows || []).filter(r => r.status === 'Active');
   const thbBal  = active.filter(r => r.currency !== 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const usdBal  = active.filter(r => r.currency === 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   return (
@@ -91,7 +115,7 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
       {open && (
         subGroups
           ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 14px 14px' }}>
-              {subGroups.map(sg => <DebtGroupCard key={sg.label} label={sg.label} color={sg.color} cats={sg.cats} rawRows={rawRows} nested />)}
+              {subGroups.map(sg => <DebtGroupCard key={sg.label} label={sg.label} color={sg.color} rows={sg.rows} nested />)}
             </div>
           : present.length === 0
             ? <div style={{ padding: '0 16px 14px', fontSize: 12, color: 'var(--ink-400)' }}>— ไม่มีรายการในกลุ่มนี้ —</div>
@@ -101,7 +125,7 @@ function DebtGroupCard({ label, color, cats, rawRows, defaultOpen, subGroups, ne
                   <tbody>
                     {present.map((cat, ci) => {
                       const m = metaFor(cat);
-                      const catRows = rawRows.filter(r => r.debtCategory === cat);
+                      const catRows = rows.filter(r => r.debtCategory === cat);
                       const act = catRows.filter(r => r.status === 'Active');
                       const bal = act.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
                       const isUSD = act.some(r => r.currency === 'USD');
@@ -139,25 +163,26 @@ function downloadDebtImportTemplate() {
     return;
   }
   const cols = [
-    'debtCategory', 'contractNo', 'borrowerName', 'status', 'facilityType',
+    'debtCategory', 'debtGroup', 'contractNo', 'borrowerName', 'status', 'facilityType',
     'receiveDate', 'startDate', 'maturityDate',
     'principalAmount', 'interestRate', 'balance', 'currency',
     'bankName', 'projectCode', 'projectName', 'note',
   ];
   const headersTh = [
-    'หมวด*', 'เลขที่สัญญา*', 'ผู้กู้/เจ้าหนี้*', 'สถานะ (Active/Close)', 'ประเภทวงเงิน',
+    'หมวด*', 'กลุ่ม (โอนสิทธิ์/นักลงทุน)', 'เลขที่สัญญา*', 'ผู้กู้/เจ้าหนี้*', 'สถานะ (Active/Close)', 'ประเภทวงเงิน',
     'วันที่รับเงิน (DD/MM/YYYY)', 'วันเริ่มสัญญา', 'วันครบกำหนด',
     'วงเงิน*', 'อัตราดอกเบี้ย/ปี (เช่น 0.075 หรือ 7.5)', 'คงเหลือ', 'สกุลเงิน (THB/USD)',
     'ธนาคาร/เจ้าหนี้', 'รหัสโครงการ', 'ชื่อโครงการ', 'หมายเหตุ',
   ];
   const example = [
-    'WCI', 'WCI-2026-001', 'นายสมชาย ทรัพย์มาก', 'Active', 'PE',
+    'WCI', 'นักลงทุน', 'WCI-2026-001', 'นายสมชาย ทรัพย์มาก', 'Active', 'PE',
     '15/03/2026', '15/03/2026', '15/03/2027',
     1000000, 0.075, 1000000, 'THB',
     '—', 'PP073', 'ระบบประปา ต.โคก', 'เงินกู้ระยะสั้น 12 เดือน',
   ];
   const noteRow = [
     `หมวดที่รับ: ${DEBT_CATEGORIES.join(' / ')}`,
+    'พิมพ์ "โอนสิทธิ์" หรือ "นักลงทุน" · ว่าง = เดาจากหมวด',
     'ห้ามซ้ำกับสัญญาที่มีอยู่แล้ว',
     'ชื่อเต็มผู้ให้กู้/บริษัท',
     'ค่าว่าง = Active',
@@ -238,6 +263,7 @@ function parseDebtImportFile(file, onDone, onErr) {
         const ftMatch = FACILITY_TYPES.find(t => t.toUpperCase() === ftRaw) || '';
         return {
           debtCategory: String(r.debtCategory || '').trim() || 'อื่นๆ',
+          debtGroup:    parseDebtGroupCell(r.debtGroup),
           contractNo:   String(r.contractNo || '').trim(),
           borrowerName: String(r.borrowerName || '').trim(),
           status:       (String(r.status || '').trim() === 'Close') ? 'Close' : 'Active',
@@ -267,7 +293,7 @@ function parseDebtImportFile(file, onDone, onErr) {
 // ── New / Edit debt form ─────────────────────────────────────────────────────
 function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
   const blank = {
-    debtCategory: 'WCI', contractNo: '', borrowerName: '', status: 'Active',
+    debtCategory: 'WCI', debtGroup: '', contractNo: '', borrowerName: '', status: 'Active',
     facilityType: '',
     receiveDate: new Date().toISOString().slice(0, 10),
     startDate:   new Date().toISOString().slice(0, 10),
@@ -288,6 +314,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
   const handleSave = () => {
     if (!draft.contractNo.trim()) { setErr('กรุณากรอกเลขที่สัญญา'); return; }
     if (!draft.borrowerName.trim()) { setErr('กรุณากรอกชื่อผู้กู้/เจ้าหนี้'); return; }
+    if (!DEBT_GROUP_META[draft.debtGroup]) { setErr('กรุณาเลือก "กลุ่ม" — สินเชื่อโอนสิทธิ์ หรือ นักลงทุน'); return; }
     if (!Number(draft.principalAmount)) { setErr('กรุณากรอกวงเงิน'); return; }
     onSave({
       ...draft,
@@ -333,6 +360,18 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew }) {
         <datalist id="debt-cat-list">
           {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_META[c].label}</option>)}
         </datalist>
+        {/* บังคับเลือก — คนคีย์รู้อยู่แล้วว่าสัญญานี้เป็นกลุ่มไหน อย่าให้ระบบเดา
+            (debtGroupOf ยังมี fallback ตามหมวด แต่เป็นตาข่ายกันสัญญาเก่า/นำเข้า ไม่ใช่ทางหลัก) */}
+        <span style={{ fontSize: 11, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.4 }}>กลุ่ม *</span>
+        <select className="select input" value={draft.debtGroup || ''} onChange={e => set('debtGroup', e.target.value)}
+          title="สัญญานี้เป็นสินเชื่อโอนสิทธิ์ หรือ เงินนักลงทุน — หมวดเดียวกัน (เช่น WCI) เป็นได้ทั้ง 2 อย่าง"
+          style={{ height: 32, minWidth: 190, fontWeight: 600,
+                   color: draft.debtGroup ? DEBT_GROUP_META[draft.debtGroup].color : 'var(--ink-400)',
+                   borderColor: draft.debtGroup ? DEBT_GROUP_META[draft.debtGroup].color : undefined }}>
+          <option value="">— เลือกกลุ่ม —</option>
+          <option value="assign">{DEBT_GROUP_META.assign.label}</option>
+          <option value="invest">{DEBT_GROUP_META.invest.label}</option>
+        </select>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>สถานะ</span>
         <select className="select input" value={draft.status} onChange={e => set('status', e.target.value)} style={{ height: 32 }}>
@@ -606,6 +645,7 @@ function DebtPage({ data, setData, toast }) {
   const colDisplayVal = (r, key) => {
     switch (key) {
       case 'debtCategory': return r.debtCategory || '—';
+      case 'debtGroup':    return debtGroupLabel(r);
       case 'status':       return r.status === 'Active' ? 'Active' : (r.status || 'Close');
       case 'currency':     return r.currency || 'THB';
       case 'bankName':     return r.bankName || '—';
@@ -733,6 +773,7 @@ function DebtPage({ data, setData, toast }) {
             rows={sorted}
             columns={[
               { key: 'debtCategory',    label: 'หมวด' },
+              { key: 'debtGroup',       label: 'กลุ่ม', fmt: (_v, r) => debtGroupLabel(r) },
               { key: 'contractNo',      label: 'เลขที่สัญญา' },
               { key: 'facilityType',    label: 'ประเภทวงเงิน' },
               { key: 'borrowerName',    label: 'ผู้กู้ / เจ้าหนี้' },
@@ -792,22 +833,20 @@ function DebtPage({ data, setData, toast }) {
       </div>
 
       {/* ── Summary by group (BANK / NON-BANK) — ย่อ=ยอดรวม · กดกางดูรายหมวด ── */}
-      {/* NON-BANK = "ทุกหมวดที่ไม่ใช่ธนาคาร" ดึงจากหมวดจริงในข้อมูล (รวมหมวดนอก list เช่น WCI-Project) กันยอดหาย */}
+      {/* NON-BANK = "ทุกสัญญาที่ไม่ใช่หมวดธนาคาร" (รวมหมวดนอก list เช่น WCI-Project) กันยอดหาย
+          กลุ่มย่อยแบ่งด้วย debtGroupOf(row) รายสัญญา — หมวดเดียว (เช่น WCI) อยู่ได้ทั้ง 2 กลุ่ม */}
       {(() => {
-        const allCats    = [...new Set(rawRows.map(r => String(r.debtCategory || '').trim()).filter(Boolean))];
-        const bankCats   = allCats.filter(isDebtBankCat);
-        const otherCats  = allCats.filter(c => !isDebtBankCat(c));
-        const assignCats = otherCats.filter(isAssignmentDebtCat);    // สินเชื่อโอนสิทธิ์
-        const investCats = otherCats.filter(c => !isAssignmentDebtCat(c)); // นักลงทุน
+        const bankRows   = rawRows.filter(r => isDebtBankCat(String(r.debtCategory || '').trim()));
+        const otherRows  = rawRows.filter(r => !isDebtBankCat(String(r.debtCategory || '').trim()));
+        const assignRows = otherRows.filter(r => debtGroupOf(r) === 'assign');
+        const investRows = otherRows.filter(r => debtGroupOf(r) === 'invest');
         return (
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <DebtGroupCard label="BANK · ธนาคาร" color="#475569"
-              cats={bankCats.length ? bankCats : DEBT_BANK_CATS} rawRows={rawRows} />
-            <DebtGroupCard label="NON-BANK · นอกธนาคาร" color="#7c3aed"
-              cats={otherCats} rawRows={rawRows}
+            <DebtGroupCard label="BANK · ธนาคาร" color="#475569" rows={bankRows} />
+            <DebtGroupCard label="NON-BANK · นอกธนาคาร" color="#7c3aed" rows={otherRows}
               subGroups={[
-                { label: 'สินเชื่อโอนสิทธิ์', color: '#15803d', cats: assignCats },
-                { label: 'นักลงทุน',          color: '#7c3aed', cats: investCats },
+                { label: DEBT_GROUP_META.assign.label, color: DEBT_GROUP_META.assign.color, rows: assignRows },
+                { label: DEBT_GROUP_META.invest.label, color: DEBT_GROUP_META.invest.color, rows: investRows },
               ]} />
           </div>
         );
@@ -880,7 +919,7 @@ function DebtPage({ data, setData, toast }) {
         }}>
           <span style={{ color: 'var(--brand-700)', fontWeight: 600, fontSize: 11 }}>🔽 กรองอยู่:</span>
           {Object.entries(colFilters).filter(([, v]) => v && v.size > 0).map(([key, vals]) => {
-            const labelMap = { debtCategory:'หมวด', contractNo:'เลขที่สัญญา', borrowerName:'ผู้กู้', status:'สถานะ', receiveDate:'วันที่รับเงิน', maturityDate:'ครบกำหนด', bankName:'ธนาคาร', currency:'สกุลเงิน' };
+            const labelMap = { debtCategory:'หมวด', debtGroup:'กลุ่ม', contractNo:'เลขที่สัญญา', borrowerName:'ผู้กู้', status:'สถานะ', receiveDate:'วันที่รับเงิน', maturityDate:'ครบกำหนด', bankName:'ธนาคาร', currency:'สกุลเงิน' };
             const preview = [...vals].slice(0, 2).join(', ') + (vals.size > 2 ? ` +${vals.size - 2}` : '');
             return (
               <span key={key} style={{
@@ -919,10 +958,13 @@ function DebtPage({ data, setData, toast }) {
       {rawRows.length > 0 && (
         <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'min(560px, calc(100vh - 380px))' }}>
-            <table className="tbl tbl-compact" style={{ minWidth: 1380, tableLayout: 'fixed', width: '100%' }}>
+            {/* minWidth ต้อง ≥ ผลรวม width ของคอลัมน์ตายตัว (~1414) + ที่เหลือให้ "ผู้กู้" ที่ยืดได้
+                ไม่งั้น tableLayout:fixed บีบคอลัมน์ผู้กู้จนชื่อแตกเป็นแนวตั้ง */}
+            <table className="tbl tbl-compact" style={{ minWidth: 1560, tableLayout: 'fixed', width: '100%' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
                 <tr>
                   <FilterableColHeader label="หมวด" sortKey="debtCategory" colKey="debtCategory" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={108} align="center" />
+                  <FilterableColHeader label="กลุ่ม" sortKey="debtGroup" colKey="debtGroup" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} getSortValue={debtGroupLabel} width={128} align="center" />
                   <FilterableColHeader label="เลขที่สัญญา" sortKey="contractNo" colKey="contractNo" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={140} align="center" />
                   <FilterableColHeader label="ผู้กู้ / เจ้าหนี้" sortKey="borrowerName" colKey="borrowerName" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} align="center" />
                   <FilterableColHeader label="สถานะ" sortKey="status" colKey="status" sort={sort} sortToggle={toggle} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rawRows} getValue={colDisplayVal} width={80} align="center" />
@@ -939,13 +981,14 @@ function DebtPage({ data, setData, toast }) {
               <tbody>
                 {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={12} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: 36 }}>
+                    <td colSpan={13} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: 36 }}>
                       ไม่พบข้อมูลที่ตรงกับเงื่อนไข
                     </td>
                   </tr>
                 )}
                 {sorted.map(r => {
                   const meta     = metaFor(r.debtCategory);
+                  const gMeta    = DEBT_GROUP_META[debtGroupOf(r)];
                   const isActive = r.status === 'Active';
                   const balance  = debtDisplayBalance(r);
                   const principal= r._grossPrincipal || 0;
@@ -960,6 +1003,14 @@ function DebtPage({ data, setData, toast }) {
                           style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.color}33` }}>
                           {r.debtCategory || '—'}
                         </Badge>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {/* ไม่ได้ตั้งกลุ่มเอง = เดาจากหมวด → แสดงจาง ๆ + จุดนำหน้า ให้รู้ว่ายังไม่ได้ยืนยัน */}
+                        <span title={r.debtGroup ? 'ตั้งไว้รายสัญญา' : 'อัตโนมัติตามหมวด — เปิดแก้ไขเพื่อระบุเอง'}
+                          style={{ fontSize: 11, fontWeight: 600, color: gMeta.color,
+                                   opacity: r.debtGroup ? 1 : 0.5, whiteSpace: 'nowrap' }}>
+                          {r.debtGroup ? '' : '• '}{gMeta.label}
+                        </span>
                       </td>
                       <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5, color: 'var(--ink-700)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.contractNo || ''}>
                         {r.facilityType && <span style={{ marginRight: 4 }}><FacilityChip type={r.facilityType} /></span>}
@@ -1036,6 +1087,7 @@ function DebtPage({ data, setData, toast }) {
       {/* ── Detail Popup ─────────────────────────────────────────────────── */}
       {view && (() => {
         const m       = metaFor(view.debtCategory);
+        const gm      = DEBT_GROUP_META[debtGroupOf(view)];
         const isActive= view.status === 'Active';
         const isUSD   = view.currency === 'USD';
         const bal     = debtDisplayBalance(view);
@@ -1092,6 +1144,12 @@ function DebtPage({ data, setData, toast }) {
                 <Badge kind="b-blue" dot={false}
                   style={{ background: m.bg, color: m.color, border: `1px solid ${m.color}55`, fontSize: 11.5 }}>
                   {view.debtCategory || '—'}
+                </Badge>
+                <Badge kind="b-blue" dot={false}
+                  title={view.debtGroup ? 'ตั้งไว้รายสัญญา' : 'อัตโนมัติตามหมวด — ยังไม่ได้ระบุเอง'}
+                  style={{ background: '#fff', color: gm.color, border: `1px solid ${gm.color}55`,
+                           fontSize: 11.5, opacity: view.debtGroup ? 1 : 0.6 }}>
+                  {view.debtGroup ? '' : '• '}{gm.label}
                 </Badge>
                 <Badge kind={isActive ? 'b-blue' : 'b-gray'} dot={false}>
                   {isActive ? 'Active' : view.status || 'Close'}
