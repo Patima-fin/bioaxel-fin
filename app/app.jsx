@@ -204,11 +204,13 @@ function App() {
     localStorage.setItem('bio-session', JSON.stringify(session));
     setCurrentUser(session);
     setIsLoggedIn(true);
+    try { WTPData.logEvent && WTPData.logEvent('login', { actor: session, summary: 'เข้าสู่ระบบ' }); } catch (_) {}
     // ทุกคนที่ login เข้ามาต้องเจอหน้า Home ก่อนเสมอ (ไม่ว่า hash เดิมจะค้างหน้าไหน)
     try { window.location.hash = '#home'; } catch (_) {}
     setRoute('home');
   };
   const handleLogout = () => {
+    try { WTPData.logEvent && WTPData.logEvent('logout', { actor: currentUser, summary: 'ออกจากระบบ' }); } catch (_) {}
     try { if (WTPData.authSignOut) WTPData.authSignOut(); } catch (_) {}   // Phase 4: เคลียร์ Supabase session ด้วย
     localStorage.removeItem('bio-session');
     setIsLoggedIn(false);

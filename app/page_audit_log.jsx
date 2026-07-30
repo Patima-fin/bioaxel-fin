@@ -12,12 +12,80 @@ const { useState: alState, useEffect: alEffect, useMemo: alMemo } = React;
 const AL_ACTION_META = {
   applyDiff:         { label: 'แก้ไขข้อมูล',  color: 'b-amber' },
   replaceAll:        { label: 'Sync',         color: 'b-blue'  },
+  writeTable:        { label: 'นำเข้าตาราง',  color: 'b-green' },
   budgetImportMonth: { label: 'นำเข้า Budget', color: 'b-green' },
   plImportMonth:     { label: 'นำเข้า P&L',   color: 'b-green' },
+  login:             { label: 'เข้าสู่ระบบ',  color: 'b-blue'  },
+  logout:            { label: 'ออกจากระบบ',   color: 'b-gray'  },
+  export:            { label: 'Export',       color: 'b-blue'  },
+  restore:           { label: 'กู้คืนข้อมูล', color: 'b-amber' },
   // legacy fallbacks (เผื่อชีตเก่า/แหล่งอื่นใช้คำเหล่านี้)
   add:    { label: 'เพิ่ม', color: 'b-green' },
   update: { label: 'แก้ไข', color: 'b-amber' },
   delete: { label: 'ลบ',   color: 'b-red'   },
+};
+
+// detail (jsonb) อาจมาเป็น object หรือ string — คืน object หรือ null
+function _alDetail(d) {
+  if (!d) return null;
+  if (typeof d === 'string') { try { return JSON.parse(d); } catch (_) { return null; } }
+  return (typeof d === 'object') ? d : null;
+}
+
+// แปลชื่อ field (technical) → ไทย · field ที่ไม่รู้จักคืนค่าเดิม (ยังอ่านได้)
+const AL_FIELD_LABEL = {
+  // ทั่วไป
+  amount: 'จำนวนเงิน', balance: 'ยอดคงเหลือ', status: 'สถานะ', note: 'หมายเหตุ', remark: 'หมายเหตุ',
+  date: 'วันที่', name: 'ชื่อ', currency: 'สกุลเงิน', category: 'หมวด', type: 'ประเภท',
+  // ลูกหนี้ / ใบแจ้งหนี้
+  ivNo: 'เลขที่ใบแจ้งหนี้', invoiceNo: 'เลขที่ใบแจ้งหนี้', customerName: 'ลูกค้า', invoiceDate: 'วันที่ใบแจ้งหนี้',
+  dueDate: 'วันครบกำหนด', expectedReceiveDate: 'วันคาดรับเงิน', netExpected: 'ยอดคาดรับสุทธิ',
+  debtOverride: 'ปรับยอดหนี้ (แก้มือ)', received: 'ยอดรับแล้ว', followUps: 'บันทึกการติดตาม',
+  // หนี้ / สินเชื่อ
+  contractNo: 'เลขที่สัญญา', borrowerName: 'ผู้กู้/เจ้าหนี้', debtCategory: 'หมวดหนี้', debtGroup: 'กลุ่มหนี้',
+  bankName: 'ธนาคาร', principalAmount: 'วงเงิน/เงินต้น', interestRate: 'อัตราดอกเบี้ย',
+  receiveDate: 'วันรับเงิน', startDate: 'วันเริ่มสัญญา', maturityDate: 'วันครบกำหนด',
+  facilityType: 'ประเภทวงเงิน', projectCode: 'รหัสโครงการ', projectName: 'ชื่อโครงการ',
+  closedDate: 'วันปิดสัญญา', closedReason: 'เหตุผลปิดสัญญา',
+  // ตารางดอกเบี้ย
+  month: 'เดือน', principal: 'เงินต้น', rate: 'อัตรา', days: 'จำนวนวัน', interest: 'ดอกเบี้ย',
+  interestOverride: 'ดอกเบี้ย (แก้มือ)', paymentDate: 'วันจ่าย', payments: 'รายการจ่ายดอกเบี้ย',
+  // forecast / cashflow (คีย์ตัวใหญ่)
+  AMOUNT: 'จำนวนเงิน', DATE: 'วันที่บันทึก', PAYMENT_DATE: 'วันจ่าย/รับ', EXPENSE_TYPE: 'ประเภท',
+  STATUS: 'สถานะ', CATEGORY: 'หมวด', Bank_AC: 'บัญชีธนาคาร', NOTE: 'หมายเหตุ', REF_DOC: 'เอกสารอ้างอิง',
+  ACTUAL_AMOUNT: 'ยอดจริง', ACTUAL_DATE: 'วันที่จริง',
+  // ธนาคาร
+  accountNo: 'เลขบัญชี', accountName: 'ชื่อบัญชี', available: 'ยอดใช้ได้', hold: 'ยอดกันไว้ (HOLD)',
+};
+const alField = (f) => AL_FIELD_LABEL[f] || f;
+
+// ── ชื่อ "ตาราง" ให้ตรงกับชื่อเมนูที่แสดง ──────────────────────────────────
+// map: entity (คีย์ตารางข้อมูล) → page key ของเมนู แล้วดึงชื่อจริงจาก WTP_PAGE_LABEL
+// (แหล่งความจริงเดียวกับ sidebar/สิทธิ์) → เปลี่ยนชื่อเมนูใน PAGE_GROUPS แล้วที่นี่เปลี่ยนตามเอง
+const AL_ENTITY_PAGE = {
+  projects: 'projects', invoices: 'invoices', forecastEntries: 'data_forecast',
+  bankAccounts: 'data_bank', pvVouchers: 'data_pv', payables: 'data_payable',
+  debtLedger: 'debt_ledger', debtEvents: 'debt_ledger', debtMaster: 'debt',
+  receipts: 'receipts', checks: 'checks', bankEntries: 'bank_diary', bankTransfers: 'bank_diary',
+  cashflowSnapshots: 'daily_balance', followUpsLog: 'iv_report', users: 'users',
+  bankReconLines: 'bank_recon', bankReconState: 'bank_recon', bankReconBook: 'bank_recon', bankReconMatch: 'bank_recon',
+  stsServiceFee: 'sts_calc', stsPendingCalc: 'sts_workflow', stsCalcResult: 'sts_workflow',
+};
+// entity ที่ไม่มีหน้าเมนูตรง ๆ → ชื่อไทยอ่านง่าย (สุดท้ายค่อย fallback เป็นคีย์ดิบ)
+const AL_ENTITY_FALLBACK = { manualOverrides: 'ค่าปรับแต่ง/แก้มือ (Overrides)', presence: 'สถานะออนไลน์' };
+function alEntityLabel(entity) {
+  if (!entity) return '—';
+  const pageMap = (typeof window !== 'undefined' && window.WTP_PAGE_LABEL) || {};
+  const pk = AL_ENTITY_PAGE[entity];
+  if (pk && pageMap[pk]) return pageMap[pk];         // ← ชื่อเมนูจริง (auto-follow)
+  return AL_ENTITY_FALLBACK[entity] || entity;
+}
+// ค่าที่โชว์: ตัวเลขล้วน → ใส่ตัวคั่นหลักพัน · ว่าง → "(ว่าง)"
+const alVal = (v) => {
+  if (v == null || v === '') return '(ว่าง)';
+  const s = String(v);
+  if (/^-?\d{4,}(\.\d+)?$/.test(s)) { const n = Number(s); if (!isNaN(n)) return n.toLocaleString('en-US'); }
+  return s;
 };
 const AL_ACTION_LABEL = (a) => (AL_ACTION_META[a] && AL_ACTION_META[a].label) || a || '—';
 
@@ -32,6 +100,7 @@ function _norm(r) {
     return '';
   };
   return {
+    id:           get('id', 'ID', 'Id'),
     timestamp:    get('timestamp', 'Timestamp', 'TIMESTAMP', 'time', 'When', 'datetime', 'Date'),
     user:         get('user', 'User', 'USER', 'username', 'Username'),
     displayName:  get('displayName', 'displayname', 'DisplayName', 'name', 'Name'),
@@ -40,6 +109,7 @@ function _norm(r) {
     action:       get('action', 'Action', 'ACTION', 'op', 'Op'),
     rowsAffected: get('rowsAffected', 'rows', 'Rows', 'count', 'Count', 'RowsAffected'),
     summary:      get('summary', 'Summary', 'SUMMARY', 'description', 'Description', 'note', 'Note'),
+    detail:       _alDetail(r.detail != null ? r.detail : r.Detail),
     _raw:         r,
   };
 }
@@ -53,6 +123,10 @@ function AuditLogPage({ data, toast }) {
   const [entityFilter, setEntityFilter] = alState('all');
   const [limit, setLimit] = alState(200);   // tail length
   const [sort, setSort]   = alState({ key: 'timestamp', dir: 'desc' });
+  const [expanded, setExpanded] = alState(() => new Set());   // id ของแถวที่กางดูการเปลี่ยนแปลง
+  const toggleExpand = (id) => setExpanded(s => {
+    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
 
   // ค่าใช้สำหรับ sort ต่อคอลัมน์ (date→ms, number→num, อื่นๆ→ตัวพิมพ์เล็ก)
   const sortVal = (r, key) => {
@@ -104,6 +178,7 @@ function AuditLogPage({ data, toast }) {
         (r.user || '').toLowerCase().includes(q) ||
         (r.displayName || '').toLowerCase().includes(q) ||
         (r.entity || '').toLowerCase().includes(q) ||
+        alEntityLabel(r.entity).toLowerCase().includes(q) ||
         (r.summary || '').toLowerCase().includes(q));
     }
     xs = xs.slice().sort((a, b) => {
@@ -186,9 +261,21 @@ function AuditLogPage({ data, toast }) {
                 { key: 'displayName',  label: 'ผู้ใช้' },
                 { key: 'role',         label: 'role' },
                 { key: 'action',       label: 'การกระทำ' },
-                { key: 'entity',       label: 'ตาราง' },
+                { key: 'entity',       label: 'ตาราง', fmt: (v) => alEntityLabel(v) },
                 { key: 'rowsAffected', label: 'จำนวนแถว', type: 'number' },
                 { key: 'summary',      label: 'รายละเอียด' },
+                { key: 'detail',       label: 'ค่าเดิม → ค่าใหม่', fmt: (d) => {
+                    if (!d || !Array.isArray(d.changes)) return '';
+                    return d.changes.map(c => {
+                      if (c.op === 'add') {
+                        const av = (c.fields || []).map(f => `${alField(f.f)}: ${alVal(f.to)}`).join('; ');
+                        return `[เพิ่ม] ${c.label || c.id}${av ? ' — ' + av : ''}`;
+                      }
+                      if (c.op === 'delete') return `[ลบ] ${c.label || c.id}`;
+                      const fs = (c.fields || []).map(f => `${alField(f.f)}: ${alVal(f.from)} → ${alVal(f.to)}`).join('; ');
+                      return `[แก้] ${c.label || c.id} — ${fs}`;
+                    }).join('  |  ');
+                  } },
               ]}
               filename="audit_log"
               sheetName="Audit Log"
@@ -223,7 +310,7 @@ function AuditLogPage({ data, toast }) {
         </div>
         <select className="input" value={entityFilter} onChange={e => setEntityFilter(e.target.value)} style={{ width: 'auto', minWidth: 140 }}>
           <option value="all">ทุกตาราง</option>
-          {entityOptions.map(e => <option key={e} value={e}>{e}</option>)}
+          {entityOptions.map(e => <option key={e} value={e}>{alEntityLabel(e)}</option>)}
         </select>
         <input className="input"
           placeholder="ค้นหา user / entity / summary…"
@@ -296,13 +383,20 @@ function AuditLogPage({ data, toast }) {
                 )}
                 {filtered.map((r, i) => {
                   const a = AL_ACTION_META[r.action] || { label: r.action || '—', color: 'b-gray' };
-                  // ระบุให้ชัดว่า "แก้รายการไหน": ใช้ summary จากชีต (มักมี key/แถว);
-                  // ถ้าไม่มี ก็ประกอบจาก action + ตาราง + จำนวนแถว
-                  const detailText = r.summary
+                  let detailText = r.summary
                     || `${a.label} ${r.entity || ''}${r.rowsAffected ? ` · ${r.rowsAffected} แถว` : ''}`.trim()
                     || '—';
+                  // ตัด prefix "entity:" ที่ซ้ำกับคอลัมน์ "ตาราง" (คอลัมน์นั้นโชว์ชื่อเมนูแล้ว)
+                  if (r.entity && detailText.indexOf(r.entity + ':') === 0) detailText = detailText.slice(r.entity.length + 1).trim();
+                  const changes = (r.detail && Array.isArray(r.detail.changes)) ? r.detail.changes : null;
+                  const counts = r.detail && r.detail.counts;
+                  const nChanged = counts ? (counts.add || 0) + (counts.update || 0) + (counts.delete || 0) : null;
+                  const rowKey = r.id != null && r.id !== '' ? String(r.id) : `i${i}`;
+                  const isOpen = expanded.has(rowKey);
+                  const hasDetail = changes && changes.length > 0;
                   return (
-                    <tr key={i} style={{ verticalAlign: 'top' }}>
+                    <React.Fragment key={rowKey}>
+                    <tr style={{ verticalAlign: 'top' }}>
                       <td style={{ fontSize: 11, fontFamily: 'ui-monospace', color: 'var(--ink-600)', whiteSpace: 'nowrap' }}>
                         {fmtTimestamp(r.timestamp)}
                       </td>
@@ -318,22 +412,83 @@ function AuditLogPage({ data, toast }) {
                       <td>
                         <Badge kind={a.color} dot={false}>{a.label}</Badge>
                       </td>
-                      <td style={{ fontFamily: 'ui-monospace', fontSize: 11.5, color: 'var(--brand-700)' }}>
-                        {r.entity || '—'}
+                      <td style={{ fontSize: 12, fontWeight: 500, color: 'var(--brand-700)' }} title={r.entity || ''}>
+                        {alEntityLabel(r.entity)}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                        {r.rowsAffected != null ? r.rowsAffected : '—'}
+                        {nChanged != null ? nChanged : (r.rowsAffected != null && r.rowsAffected !== '' ? r.rowsAffected : '—')}
                       </td>
                       <td style={{ fontSize: 11.5, color: 'var(--ink-600)', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.45 }}
                           title={detailText}>
-                        {r.action === 'update' && r.entity && (
-                          <span style={{ fontFamily: 'ui-monospace', fontSize: 10.5, color: 'var(--brand-700)', background: 'var(--brand-50)', borderRadius: 4, padding: '1px 5px', marginRight: 5 }}>
-                            {r.entity}
-                          </span>
-                        )}
                         {detailText}
+                        {hasDetail && (
+                          <button className="btn btn-ghost" onClick={() => toggleExpand(rowKey)}
+                            style={{ marginLeft: 8, padding: '1px 8px', fontSize: 11, borderRadius: 6, whiteSpace: 'nowrap' }}>
+                            {isOpen ? '▲ ซ่อน' : `▼ ดูค่าเดิม→ค่าใหม่ (${changes.length})`}
+                          </button>
+                        )}
+                        {r.detail && r.detail.truncated && (
+                          <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--ink-400)' }}>· แสดงบางส่วน</span>
+                        )}
                       </td>
                     </tr>
+                    {isOpen && hasDetail && (
+                      <tr>
+                        <td colSpan={7} style={{ background: 'var(--brand-50, #f4f8f5)', padding: '8px 14px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {changes.map((c, ci) => {
+                              const flds = c.fields || [];
+                              return (
+                              <div key={ci} style={{ fontSize: 11.5, borderLeft: '3px solid var(--ink-200, #d5dbe3)', paddingLeft: 10 }}>
+                                {c.op === 'delete' && (
+                                  <div style={{ color: 'var(--bad, #c0392b)', fontWeight: 600 }}>－ ลบรายการ{c.label ? `: ${c.label}` : ''}</div>
+                                )}
+                                {c.op === 'add' && (
+                                  <div style={{ lineHeight: 1.6 }}>
+                                    <span style={{ color: 'var(--good, #1f8a4c)', fontWeight: 600 }}>＋ เพิ่มรายการ{c.label ? `: ${c.label}` : ''}</span>
+                                    {flds.length > 0 && (
+                                      <span style={{ fontFamily: 'ui-monospace', fontSize: 11, color: 'var(--ink-600)' }}>
+                                        {'  ·  '}
+                                        {flds.map((f, fi) => (
+                                          <span key={fi} style={{ marginRight: 12, whiteSpace: 'nowrap' }}>
+                                            <span style={{ color: 'var(--ink-500)' }}>{alField(f.f)}</span>{': '}
+                                            <span style={{ fontWeight: 600, color: 'var(--ink-700)' }}>{alVal(f.to)}</span>
+                                          </span>
+                                        ))}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {c.op === 'update' && flds.length === 1 && (
+                                  <div style={{ fontFamily: 'ui-monospace', fontSize: 11.5, lineHeight: 1.5 }}>
+                                    <span style={{ fontWeight: 600, color: 'var(--ink-700)' }}>✎ {c.label || c.id}</span>
+                                    <span style={{ color: 'var(--ink-300)' }}>{'  ·  '}</span>
+                                    <span style={{ color: 'var(--ink-500)' }}>{alField(flds[0].f)}</span>{': '}
+                                    <span style={{ color: 'var(--bad, #c0392b)', textDecoration: 'line-through' }}>{alVal(flds[0].from)}</span>
+                                    {' → '}
+                                    <span style={{ color: 'var(--good, #1f8a4c)', fontWeight: 600 }}>{alVal(flds[0].to)}</span>
+                                  </div>
+                                )}
+                                {c.op === 'update' && flds.length !== 1 && (
+                                  <div>
+                                    <div style={{ fontWeight: 600, color: 'var(--ink-700)', marginBottom: 2 }}>✎ {c.label || c.id}</div>
+                                    {flds.map((f, fi) => (
+                                      <div key={fi} style={{ fontFamily: 'ui-monospace', fontSize: 11, lineHeight: 1.6 }}>
+                                        <span style={{ color: 'var(--ink-500)' }}>{alField(f.f)}</span>{' : '}
+                                        <span style={{ color: 'var(--bad, #c0392b)', textDecoration: 'line-through' }}>{alVal(f.from)}</span>
+                                        {' → '}
+                                        <span style={{ color: 'var(--good, #1f8a4c)', fontWeight: 600 }}>{alVal(f.to)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );})}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

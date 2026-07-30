@@ -299,7 +299,7 @@
         d.deleteIds = [];
       }
       if (!d.upserts.length && !d.deleteIds.length) return;
-      jobs.push({ e: e, ours: ours, oursJSON: oursJSON, diff: d });
+      jobs.push({ e: e, ours: ours, oursJSON: oursJSON, diff: d, base: baseRows });
     });
     if (!jobs.length) return Promise.resolve();
 
@@ -324,20 +324,106 @@
     }).then(function () { inSyncDiff = false; });
   }
 
-  /* ── audit: เขียน best-effort (ไม่บล็อก, error เงียบ) ─────────────────── */
+  /* ── audit: เขียน best-effort (ไม่บล็อก, error เงียบ) ─────────────────────
+   *   ★ บันทึก "ค่าเดิม→ค่าใหม่" ราย field ลงคอลัมน์ detail (jsonb) เพื่อให้ตรวจย้อนหลังได้จริง
+   *     (client เขียน = ยังไม่ tamper-proof; การทำ trigger ฝั่ง Postgres เป็นงาน Phase 4/IT) */
+  var AUDIT_SKIP_FIELDS = { updatedAt:1, updatedBy:1, editedAt:1, editedBy:1, createdAt:1, createdBy:1, at:1, by:1, _ts:1, syncedAt:1 };
+  var AUDIT_CAP_ROWS = 25, AUDIT_CAP_FIELDS = 15, AUDIT_VAL_MAX = 80;
+
+  function _auditShort(v) {
+    if (v == null) return '';
+    if (typeof v === 'object') { try { v = JSON.stringify(v); } catch (_) { return '[obj]'; } }
+    var s = String(v);
+    return s.length > AUDIT_VAL_MAX ? s.slice(0, AUDIT_VAL_MAX - 1) + '…' : s;
+  }
+  // ป้ายอ่านง่ายของแถว (ชื่อสัญญา/เลข IV/ชื่อ ฯลฯ) แทน id ดิบ
+  function _auditLabelOf(row) {
+    if (!row) return '';
+    var keys = ['contractNo','ivNo','invoiceNo','borrowerName','name','projectName','bankName',
+                'accountName','accountNo','code','debtNo','vchNo','apNo','no','title','username'];
+    for (var i = 0; i < keys.length; i++) {
+      if (row[keys[i]] != null && row[keys[i]] !== '') return _auditShort(row[keys[i]]);
+    }
+    return row.id != null ? String(row.id) : '';
+  }
+  // diff ราย field (เฉพาะ scalar/ค่าที่ต่างจริง) ระหว่างแถวเดิมกับแถวใหม่
+  function _auditRowChanges(oldRow, newRow) {
+    var chg = [], seen = {};
+    var scan = function (o) { if (o) Object.keys(o).forEach(function (k) { seen[k] = 1; }); };
+    scan(oldRow); scan(newRow);
+    Object.keys(seen).forEach(function (k) {
+      if (chg.length >= AUDIT_CAP_FIELDS) return;
+      if (k === 'id' || k.charAt(0) === '_' || AUDIT_SKIP_FIELDS[k]) return;
+      var a = oldRow ? oldRow[k] : undefined, b = newRow ? newRow[k] : undefined;
+      var aj = (typeof a === 'object' && a !== null) ? JSON.stringify(a) : a;
+      var bj = (typeof b === 'object' && b !== null) ? JSON.stringify(b) : b;
+      if (aj === bj) return;
+      if (String(aj == null ? '' : aj) === String(bj == null ? '' : bj)) return; // 100 vs "100" = ไม่ถือว่าเปลี่ยน
+      chg.push({ f: k, from: _auditShort(a), to: _auditShort(b) });
+    });
+    return chg;
+  }
+
   function logAudit(jobs) {
     try {
       var meta = _currentMeta();
       var rows = jobs.map(function (j) {
+        var baseById = {};
+        (j.base || []).forEach(function (r) { if (r && r.id != null) baseById[String(r.id)] = r; });
+        var changes = [], nAdd = 0, nUpd = 0;
+        (j.diff.upserts || []).forEach(function (r) {
+          var b = baseById[String(r.id)];
+          if (!b) {
+            nAdd++;
+            if (changes.length < AUDIT_CAP_ROWS) changes.push({ op:'add', id:String(r.id), label:_auditLabelOf(r), fields:_auditRowChanges({}, r) });
+          } else {
+            var fc = _auditRowChanges(b, r);
+            if (fc.length) {
+              nUpd++;
+              if (changes.length < AUDIT_CAP_ROWS) changes.push({ op:'update', id:String(r.id), label:_auditLabelOf(r) || _auditLabelOf(b), fields:fc });
+            }
+          }
+        });
+        var nDel = (j.diff.deleteIds || []).length;
+        (j.diff.deleteIds || []).forEach(function (id) {
+          if (changes.length < AUDIT_CAP_ROWS) changes.push({ op:'delete', id:String(id), label:_auditLabelOf(baseById[String(id)]) });
+        });
+        var parts = [];
+        if (nAdd) parts.push('เพิ่ม ' + nAdd);
+        if (nUpd) parts.push('แก้ ' + nUpd);
+        if (nDel) parts.push('ลบ ' + nDel);
         return {
           username: meta.user, display_name: meta.displayName, role: meta.role,
           action: 'applyDiff', entity: j.e,
-          summary: j.e + ': ' + j.diff.upserts.length + ' upsert, ' + j.diff.deleteIds.length + ' delete',
+          summary: j.e + ': ' + (parts.join(', ') || 'เปลี่ยนแปลง'),
+          detail: { changes: changes, counts: { add: nAdd, update: nUpd, delete: nDel },
+                    truncated: (nAdd + nUpd + nDel) > AUDIT_CAP_ROWS },
         };
       });
       if (rows.length) sb.from('audit_log').insert(rows).then(function () {}, function () {});
     } catch (_) {}
   }
+
+  /* ── logEvent: บันทึกเหตุการณ์ที่ไม่ใช่การแก้ตาราง (login/logout/export ฯลฯ) ──
+   *   เรียกจาก UI: WTPData.logEvent('login', {actor, summary, entity, detail})
+   *   actor = {user|username, displayName, role} (ถ้าไม่ส่ง = อ่านจาก session ปัจจุบัน) */
+  WTPData.logEvent = function (action, opts) {
+    try {
+      opts = opts || {};
+      var meta = _currentMeta();
+      var a = opts.actor || {};
+      var row = {
+        username: a.user || a.username || meta.user,
+        display_name: a.displayName || a.display_name || meta.displayName,
+        role: a.role || meta.role,
+        action: String(action || 'event'),
+        entity: opts.entity || '',
+        summary: opts.summary || '',
+        detail: opts.detail || null,
+      };
+      return sb.from('audit_log').insert([row]).then(function () {}, function () {});
+    } catch (_) { return Promise.resolve(); }
+  };
 
   /* ── wrap WTPData.save (auto-push debounced) ───────────────────────── */
   var origSave = WTPData.save;
@@ -533,8 +619,9 @@
           if (res.error) throw res.error;
           var objs = (res.data || []).map(function (r) {
             return {
-              timestamp: r.ts, user: r.username, displayName: r.display_name,
+              id: r.id, timestamp: r.ts, user: r.username, displayName: r.display_name,
               role: r.role, action: r.action, entity: r.entity, summary: r.summary,
+              detail: r.detail != null ? r.detail : null,
             };
           });
           return predicate ? objs.filter(predicate) : objs;

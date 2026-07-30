@@ -187,6 +187,16 @@ function exportRowsToExcel(rows, columns, opts = {}) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   XLSX.writeFile(wb, filename);
+  // audit: บันทึกว่าใคร export อะไร (best-effort, ไม่บล็อก)
+  try {
+    if (window.WTPData && WTPData.logEvent) {
+      WTPData.logEvent('export', {
+        entity: opts.sheetName || opts.filename || '',
+        summary: 'Export ' + (opts.title || opts.sheetName || opts.filename || 'ข้อมูล') + ' · ' + (rows || []).length + ' แถว → ' + filename,
+        detail: { rows: (rows || []).length, columns: cols.map(function (c) { return c.label || c.key; }) },
+      });
+    }
+  } catch (_) {}
 }
 
 // ─── Excel-like column filter (dropdown of unique values) ─────────────────
