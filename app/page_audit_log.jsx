@@ -396,7 +396,9 @@ function AuditLogPage({ data, toast }) {
                   const hasDetail = changes && changes.length > 0;
                   return (
                     <React.Fragment key={rowKey}>
-                    <tr style={{ verticalAlign: 'top' }}>
+                    <tr style={{ verticalAlign: 'top', cursor: hasDetail ? 'pointer' : 'default' }}
+                        onClick={hasDetail ? () => toggleExpand(rowKey) : undefined}
+                        title={hasDetail ? 'คลิกเพื่อดู/ซ่อนการเปลี่ยนแปลง' : undefined}>
                       <td style={{ fontSize: 11, fontFamily: 'ui-monospace', color: 'var(--ink-600)', whiteSpace: 'nowrap' }}>
                         {fmtTimestamp(r.timestamp)}
                       </td>
@@ -422,7 +424,7 @@ function AuditLogPage({ data, toast }) {
                           title={detailText}>
                         {detailText}
                         {hasDetail && (
-                          <button className="btn btn-ghost" onClick={() => toggleExpand(rowKey)}
+                          <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); toggleExpand(rowKey); }}
                             style={{ marginLeft: 8, padding: '1px 8px', fontSize: 11, borderRadius: 6, whiteSpace: 'nowrap' }}>
                             {isOpen ? '▲ ซ่อน' : `▼ ดูค่าเดิม→ค่าใหม่ (${changes.length})`}
                           </button>

@@ -1114,3 +1114,6 @@ Newest entries are at the bottom. Architecture/conventions/gotchas stay in `CLAU
 - เตยขอ: ชื่อในคอลัมน์ "ตาราง" ให้ตรงกับ**ชื่อเมนูที่แสดง** และถ้าเปลี่ยนชื่อเมนูในอนาคตให้เปลี่ยนตามเอง (ไม่ hardcode ซ้ำ).
 - **`app/page_audit_log.jsx`** (`?v=20260731c`): เพิ่ม map **`AL_ENTITY_PAGE`** (entity → page key ของเมนู) + `alEntityLabel(entity)` → ดึงชื่อจริงจาก **`window.WTP_PAGE_LABEL`** (มาจาก `PAGE_GROUPS` ใน `app.jsx` = แหล่งเดียวกับ sidebar/สิทธิ์) ตอน render → **เปลี่ยนชื่อเมนูใน `PAGE_GROUPS` แล้วคอลัมน์นี้เปลี่ยนตามอัตโนมัติ**. fallback: entity ไม่มีหน้าเมนู (`manualOverrides`/`presence`) → ชื่อไทยสั้น ๆ · ไม่รู้จักเลย → คีย์ดิบ (ยังอ่านได้). ใช้ที่: คอลัมน์ตาราง, dropdown กรองตาราง, ค้นหา (พิมพ์ "ลูกหนี้" เจอ `invoices`), Export column, ตัด prefix `entity:` ที่ซ้ำออกจาก summary. (เช่น `invoices`→"ลูกหนี้คงค้าง", `forecastEntries`→"ประมาณการรายจ่าย", `debtLedger`→"Debt Ledger · ดอกเบี้ย", `cashflowSnapshots`→"บันทึกยอดธนาคาร").
 - verify: Babel OK · unit — 12 entity + unknown resolve ถูกทุกตัว (unknown→คีย์ดิบ) ✓.
+
+### 2026-07-31 (4) — Audit: คลิกทั้งแถวเพื่อกาง/ย่อ
+- `app/page_audit_log.jsx` (`?v=20260731d`): แถวที่มี detail คลิกที่ไหนก็กาง/ย่อได้ (cursor:pointer + onClick บน `<tr>`) ไม่ต้องเล็งปุ่ม · ปุ่มยังอยู่เป็นตัวบ่งชี้ + `stopPropagation` กัน toggle ซ้ำ · แถวที่ไม่มี detail คลิกไม่ทำงาน.
