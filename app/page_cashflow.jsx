@@ -273,15 +273,48 @@ function ivIsProject(iv) {
 //   คีย์:  {ovPrefix}.ivPlan.<ivNo>.net   = ยอดสุทธิที่ freeze
 //          {ovPrefix}.ivPlan.<ivNo>.wk    = สัปดาห์คาดรับ (0..4) ที่ freeze
 //          {ovPrefix}.ivPlan.__lockedAt   = วันที่ล็อก (YYYYMMDD เป็นตัวเลข)
-const IVPLAN_SEG = 'ivPlan';
+//   ★ namespace v2 (2026-08-05) — คีย์ราย IV เปลี่ยนจาก "เลขที่ IV" → "id ของแถว" (ดู ivLockKey)
+//     อ่าน v2 ก่อน · ไม่มีค่อย fallback ไป 'ivPlan' เดิม (เดือนเก่าที่ล็อกไว้ก่อนเปลี่ยน)
+//     แยก namespace เพื่อไม่ให้คีย์เก่าที่ลบไม่ลง (เกราะ mass-delete ของ pushDiff อาจปัดคำสั่งลบทิ้ง)
+//     ปนกับคีย์ใหม่แล้วนับซ้ำ
+const IVPLAN_SEG = 'ivPlan2';
+const IVPLAN_SEG_LEGACY = 'ivPlan';
 const IVPLAN_LOCKED_AT = '__lockedAt';
 // ivNo อาจมีอักขระแปลก — sanitize ให้ปลอดภัย (ใช้ '.' เป็นตัวคั่นใน key)
 function sanitizeIvKey(ivNo) {
   return String(ivNo || '').trim().replace(/[^A-Za-z0-9_-]/g, '_');
 }
+// ★ คีย์ล็อกแผนราย IV = `id` ของแถวเป็นหลัก (unique เสมอ) — fallback เลขที่ IV เมื่อไม่มี id
+//   ⚠️ ห้ามใช้ "เลขที่ IV" เป็นคีย์: ของจริงมีใบที่เลขซ้ำกันได้ (คนละงาน/คนละงวด ออกเลขเดียวกัน)
+//      → entries[<เลขซ้ำ>.net] ทับกัน เหลือใบเดียว ⇒ ยอดแผนหายไปครึ่งหนึ่งแบบเงียบ ๆ
+//      (โดนจริง 2026-08-05: 69006 + 69007 ใช้ IV2607220001 ทั้งคู่ → แผน 11.1M เหลือ 5.5M)
+function ivLockKey(iv) {
+  if (!iv) return '';
+  return sanitizeIvKey(iv.id || iv.ivNo || iv.IV_NO || iv.invoiceNo);
+}
+// map สำหรับหา IV จากคีย์ที่เก็บใน lock — ใส่ทั้งคีย์ใหม่ (id) และคีย์เดิม (เลขที่ IV)
+//   เพื่อให้ lock เก่าที่จับด้วยเลขที่ IV ยังหาใบเจอ (คีย์ id เขียนทับทีหลัง = ชนะ)
+function buildIvLockLookup(invoices) {
+  const m = {};
+  (invoices || []).forEach(iv => {
+    const legacy = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
+    if (legacy) m[legacy] = iv;
+  });
+  (invoices || []).forEach(iv => {
+    const k = ivLockKey(iv);
+    if (k) m[k] = iv;
+  });
+  return m;
+}
 // อ่าน baseline ที่ล็อกของเดือน → { locked, lockedAt, items: [{ safe, net, wk }] }
+//   v2 มาก่อนเสมอ · ไม่มีค่อยอ่าน namespace เดิม (เดือนเก่า) — ไม่ผสมกัน
 function readIvPlanLock(ovPrefix) {
-  const prefix = `${ovPrefix}.${IVPLAN_SEG}.`;
+  const cur = readIvPlanLockSeg(ovPrefix, IVPLAN_SEG);
+  if (cur.locked) return cur;
+  return readIvPlanLockSeg(ovPrefix, IVPLAN_SEG_LEGACY);
+}
+function readIvPlanLockSeg(ovPrefix, seg) {
+  const prefix = `${ovPrefix}.${seg}.`;
   const all = (typeof WTPOverride !== 'undefined') ? WTPOverride._load() : {};
   const byIv = {};
   let lockedAt = null;
@@ -295,7 +328,7 @@ function readIvPlanLock(ovPrefix) {
     else if (mWk)  { (byIv[mWk[1]]  = byIv[mWk[1]]  || {}).wk  = Number(all[k]) || 0; }
   });
   const items = Object.keys(byIv).map(safe => ({ safe, net: byIv[safe].net || 0, wk: byIv[safe].wk || 0 }));
-  return { locked: lockedAt != null, lockedAt, items };
+  return { locked: lockedAt != null, lockedAt, items, seg };
 }
 // รวม baseline ที่ freeze เป็น bucket รายสัปดาห์ (ป้อนแทน forecast สด)
 function ivPlanBucketsFromLock(items, weekCount) {
@@ -1118,9 +1151,9 @@ function CashFlowDashboard({ data, setData, toast }) {
   const ivInflowByWeek = cfMemo(() => {
     const liveForecast = weeks.map(() => 0);
     const actual       = weeks.map(() => 0);
-    const bySafe       = {};   // sanitized ivNo → live IV (ไว้เช็คสถานะรับเงิน)
+    // คีย์ล็อก → live IV (ไว้เช็คสถานะรับเงิน) — รองรับทั้งคีย์ id (ใหม่) และเลขที่ IV (lock เก่า)
+    const bySafe       = buildIvLockLookup(invoices);
     invoices.forEach(iv => {
-      const s = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo); if (s) bySafe[s] = iv;
       if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P) — ตัด O ออก
       const net = ivNetExpected(iv, financeByCode);
       // Live forecast (fallback เมื่อเดือนยังไม่ถูกล็อก) — IV ที่ยังไม่รับเงิน + คาดรับเดือนนี้
@@ -1250,26 +1283,41 @@ function CashFlowDashboard({ data, setData, toast }) {
     const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
     const entries = {};
     let count = 0;
+    const skipped = [];   // ใบที่ตกจากแผน (พร้อมเหตุผล) — รายงานให้ผู้ใช้รู้ ไม่ให้หายเงียบ
+    const usedKeys = new Set();
     invoices.forEach(iv => {
       if (!iv.expectedReceive || !inMonth(iv.expectedReceive, year, month)) return;
       if (!ivIsProject(iv)) return;  // เฉพาะประเภทงานโครงการ (P) — ตัด O ออกจากการล็อกแผน
+      const ivLabel = iv.ivNo || iv.IV_NO || iv.invoiceNo || iv.jobNo || '(ไม่มีเลขที่)';
       // ตัด IV ที่ "รับเงินจริงไปแล้วก่อนเดือนนี้" — เป็นเงินของเดือนก่อน ไม่ใช่แผนเดือนนี้
       //   (ใบที่รับเงินภายในเดือนนี้ยังคงไว้ — เคยเป็นแผน + เกิดจริงในเดือนเดียวกัน)
       const ad = ivActualReceiveDate(iv);
       if (ad && toISODate(ad) < monthStart) return;
       const net = ivNetExpected(iv, financeByCode);
-      if (!(net >= 1)) return;                 // net ≈ 0 (หนี้กลบหมด) — ไม่มีอะไรให้รับ ข้าม
-      const safe = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
-      if (!safe) return;
+      if (!(net >= 1)) { skipped.push(`${ivLabel} (สุทธิ ≤ 0)`); return; }
+      // ★ คีย์ = id ของแถว (unique) ไม่ใช่เลขที่ IV — เลขที่ IV ซ้ำกันได้ ดู ivLockKey()
+      let safe = ivLockKey(iv);
+      if (!safe) { skipped.push(`${ivLabel} (ไม่มี id/เลขที่)`); return; }
+      // กันชนซ้ำอีกชั้น (เผื่อแถวเก่าไม่มี id แล้วเลขที่ IV ซ้ำ) — ต่อท้าย _2, _3 …
+      if (usedKeys.has(safe)) {
+        let n = 2;
+        while (usedKeys.has(`${safe}_${n}`)) n++;
+        safe = `${safe}_${n}`;
+      }
       const w = findWeekIdx(iv.expectedReceive, weeks);
-      if (w < 0) return;
+      if (w < 0) { skipped.push(`${ivLabel} (วันคาดรับไม่ตกในสัปดาห์ใด)`); return; }
+      usedKeys.add(safe);
       entries[`${prefix}${safe}.net`] = net;
       entries[`${prefix}${safe}.wk`]  = w;
       count++;
     });
     // เคลียร์คีย์เก่าของเดือนนี้ที่ไม่อยู่ในชุดใหม่ (IV ที่ถูกลบ/เปลี่ยนเลขที่ไปแล้ว)
+    //   + คีย์ namespace เดิม (ivPlan) ของเดือนนี้ทั้งหมด — ล็อกใหม่แล้วของเก่าไม่ใช้อีก
+    //   (ถ้าเกราะ mass-delete ปัดคำสั่งลบทิ้ง ก็ยังปลอดภัย เพราะ readIvPlanLock อ่าน v2 ก่อน)
+    const legacyPrefix = `${ovPrefix}.${IVPLAN_SEG_LEGACY}.`;
     const all = WTPOverride._load();
     Object.keys(all).forEach(k => {
+      if (k.startsWith(legacyPrefix)) { entries[k] = null; return; }
       if (!k.startsWith(prefix)) return;
       if (k === `${prefix}${IVPLAN_LOCKED_AT}`) return;   // marker ตั้งใหม่ด้านล่าง
       if (!(k in entries)) entries[k] = null;             // null = ลบ
@@ -1277,10 +1325,12 @@ function CashFlowDashboard({ data, setData, toast }) {
     entries[`${prefix}${IVPLAN_LOCKED_AT}`] = todayYmdInt();
     WTPOverride.setMany(entries);
     if (typeof toast === 'function') {
-      toast(auto
+      const warn = skipped.length ? ` · ⚠️ ข้าม ${skipped.length} ใบ: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? ' …' : ''}` : '';
+      toast((auto
         ? `📌 ล็อกแผนรับเงิน IV เดือนนี้ไว้แล้ว (อัตโนมัติ) · ${count} ใบ`
-        : `🔒 ล็อกแผนรับเงิน IV ใหม่แล้ว · ${count} ใบ`);
+        : `🔒 ล็อกแผนรับเงิน IV ใหม่แล้ว · ${count} ใบ`) + warn);
     }
+    if (skipped.length) console.warn('[cashflow] ล็อกแผน IV — ใบที่ถูกข้าม:', skipped);
   };
 
   // ปุ่ม "ล็อกแผน/ล็อกใหม่" — ถ้าล็อกอยู่แล้วถามยืนยันก่อนทับ
@@ -1301,10 +1351,14 @@ function CashFlowDashboard({ data, setData, toast }) {
     if (cfIsReadOnly()) return;
     if (!Array.isArray(data.manualOverrides)) return;        // รอ cloud overrides โหลด
     if (!Array.isArray(invoices) || invoices.length === 0) return;  // รอ invoices โหลด
-    if (ivPlanLock.locked) { autoLockRef.current = ovPrefix; return; }  // ล็อกอยู่แล้ว
+    // ล็อกอยู่แล้วใน namespace ปัจจุบัน (v2) → ไม่ต้องทำอะไร
+    //   แต่ถ้ายังเป็น namespace เดิม (คีย์ = เลขที่ IV) ให้ "ล็อกใหม่" ครั้งเดียวเพื่อย้ายมาคีย์ id
+    //   — เดือนที่มีเลขที่ IV ซ้ำกันจะได้ยอดครบทันที ไม่ต้องรอผู้ใช้กดเอง (gate ด้วย isCurrentMonth
+    //     แล้ว → ไม่แตะ baseline ของเดือนที่ปิดไปแล้ว)
+    if (ivPlanLock.locked && ivPlanLock.seg === IVPLAN_SEG) { autoLockRef.current = ovPrefix; return; }
     autoLockRef.current = ovPrefix;
     doLockIvPlan({ auto: true });
-  }, [ovPrefix, year, month, ivPlanLock.locked, data.manualOverrides, invoices.length]);
+  }, [ovPrefix, year, month, ivPlanLock.locked, ivPlanLock.seg, data.manualOverrides, invoices.length]);
 
   // ── Month totals ──────────────────────────────────────────────────────
   const sumArr = arr => arr.reduce((s, v) => s + (v || 0), 0);
@@ -3124,14 +3178,8 @@ function BalanceCard({ tone, label, value, hint, icon, editMode, ovKey, big, sty
 function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeByCode, weeks, year, month, monthNames, onClose }) {
   const [tab, setTab] = React.useState('all');
 
-  const bySafe = React.useMemo(() => {
-    const m = {};
-    (invoices || []).forEach(iv => {
-      const s = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
-      if (s) m[s] = iv;
-    });
-    return m;
-  }, [invoices]);
+  // คีย์ล็อก → IV (รองรับทั้งคีย์ id ใหม่ และเลขที่ IV ของ lock เก่า) — ดู buildIvLockLookup()
+  const bySafe = React.useMemo(() => buildIvLockLookup(invoices), [invoices]);
 
   const { planItems, planSafes } = React.useMemo(() => {
     const items = [], safes = new Set();
@@ -3148,8 +3196,9 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
         if (!ivIsPaid(iv) && iv.expectedReceive && inMonth(iv.expectedReceive, year, month)) {
           const net = ivNetExpected(iv, financeByCode);
           if (net >= 1) {
-            const safe = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
+            const safe = ivLockKey(iv);
             safes.add(safe);
+            safes.add(sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo));   // คีย์เดิม (lock เก่า)
             items.push({ iv, planNet: net, safe });
           }
         }
@@ -3166,8 +3215,9 @@ function IvPlanDrillModal({ invoices, ivPlanLock, ivForecast, ivActual, financeB
       const ad = ivActualReceiveDate(iv);
       if (ad && inMonth(ad, year, month)) {
         const net = ivNetExpected(iv, financeByCode);
-        const safe = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);
-        items.push({ iv, actualNet: net, actualDate: ad, safe, inPlan: planSafes.has(safe) });
+        const safe = ivLockKey(iv);
+        const legacy = sanitizeIvKey(iv.ivNo || iv.IV_NO || iv.invoiceNo);   // คีย์เดิม (lock เก่า)
+        items.push({ iv, actualNet: net, actualDate: ad, safe, inPlan: planSafes.has(safe) || (!!legacy && planSafes.has(legacy)) });
       }
     });
     items.sort((a, b) => (b.actualDate || '').localeCompare(a.actualDate || ''));
