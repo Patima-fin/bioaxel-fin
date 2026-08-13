@@ -207,7 +207,7 @@ function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransf
     .forEach(f => {
       if (f.refDoc) countedAP.add(String(f.refDoc).trim());
       // group = ชื่อผู้ขาย (ตัด " (เลขที่ AP)" ท้าย desc) เพื่อจับกลุ่มหลายใบของผู้ขายเดียวกันในวันเดียว
-      const vendorName = (f.desc || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || (f.desc || '');
+      const vendorName = (f.desc || '').replace(/\s*\[[^\]]*\]\s*$/, '').replace(/\s*\([^)]*\)\s*$/, '').trim() || (f.desc || '');
       items.push({
         date: f.date, signed: f.amount, kind: 'forecast',
         title: f.desc, sub: (f.isActual ? '✓ ' + (f.amount >= 0 ? 'รับจริงแล้ว' : 'จ่ายจริงแล้ว') + (f.refDoc ? ' • ' + f.refDoc : '') : (f.refDoc || '')),
@@ -732,6 +732,7 @@ function bdVendorCanon(name) {
   var m = s.match(/(?:บริษัท|บมจ\.?|บจก\.?)\s*[\s\S]*?\s*จำกัด(?:\s*\(\s*มหาชน\s*\))?/);
   if (m) return m[0].replace(/\s+/g, ' ').trim();
   s = s.replace(/^(?:จ่าย|ชำระเงิน|ชำระ|รับเงิน|รับ)\s+/, '');
+  s = s.replace(/\s*\[[^\]]*\]\s*$/, '');   // ป้ายท้ายรายการ เช่น "[ตั้งหนี้ลอย]" — ไม่ใช่ส่วนของชื่อเจ้าหนี้
   s = s.replace(/\s*\([^)]*\)\s*$/, '');
   s = s.replace(/\s*[•|]\s+\S[\s\S]*$/, '');
   return s.trim();

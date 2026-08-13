@@ -4,9 +4,13 @@
 const { useState: dxState, useMemo: dxMemo, useEffect: dxEffect } = React;
 
 // username ของผู้ล็อกอินอยู่ ณ ขณะนี้ — ใช้ stamp "updatedBy" ตอนนำเข้า/แก้ไขข้อมูล
+// ★ BIO เก็บ session ที่คีย์ 'bio-session' (fork นี้ใช้ bio-*) — เดิมอ่าน 'wtp-session'
+//   ที่ติดมาจาก Water POG จึงได้ค่าว่างเสมอ (updatedBy/ผู้บันทึกไม่เคยถูกบันทึก)
 function dxCurrentUsername() {
-  try { return (JSON.parse(localStorage.getItem('wtp-session') || 'null') || {}).username || ''; }
-  catch (_) { return ''; }
+  try {
+    const s = JSON.parse(localStorage.getItem('bio-session') || localStorage.getItem('wtp-session') || 'null');
+    return (s && s.username) || '';
+  } catch (_) { return ''; }
 }
 function dxFmtDateTimeTH(iso) {
   if (!iso) return '';
@@ -2756,6 +2760,179 @@ function PayableImportPreview({ preview, selectedMissing, setSelectedMissing }) 
   );
 }
 
+/* ═══ ตั้งหนี้ลอย (Floating AP) ═══════════════════════════════════════════════
+ * ปัญหา: Bank Daily ดึงยอดจ่ายจาก "แผนจ่าย" (forecastEntries) ที่ผูกกับ AP ที่บัญชี
+ *        ตั้งหนี้เข้าระบบแล้วเท่านั้น — แต่การเงินรู้ล่วงหน้าก่อนเอกสารจะเดินมาถึง
+ *        ⇒ ประมาณการเงินสดต่ำกว่าความจริง
+ * วิธีแก้: กด 1 ครั้ง = สร้าง 2 แถวที่ผูกกันด้วยเลขที่ FLOAT-xxxx
+ *   (1) payables       — ให้เห็นในหน้าเจ้าหนี้คงค้าง (ติดป้าย 🏷 ตั้งหนี้ลอย)
+ *   (2) forecastEntries (EXPENSE_TYPE='AP', REF_DOC=FLOAT-xxxx, AMOUNT ติดลบ)
+ *       ← ตัวนี้เท่านั้นที่ทำให้ยอดไปโผล่ Bank Daily · สร้างแค่ (1) ยอดไม่ไปไหน
+ * ⚠️ เป็นของชั่วคราว — พอบัญชีตั้งหนี้จริง ต้องลบใบลอยทิ้ง และการลบใบลอย
+ *    "ต้องลบแผนจ่ายที่ผูกกันไปด้วยเสมอ" (ดู cascadeFloatPlans) ไม่งั้นยอดค้างที่ Bank Daily
+ */
+const FLOAT_AP_PREFIX = 'FLOAT-';
+const FLOAT_AP_TAG    = '[ตั้งหนี้ลอย]';
+const FLOAT_AP_REMARK = 'ตั้งหนี้ลอย (รอตั้งหนี้จริงจากบัญชี)';
+function isFloatingAp(row) {
+  return String((row && row.vchno) || '').trim().toUpperCase().startsWith(FLOAT_AP_PREFIX);
+}
+// เลขที่เอกสาร = FLOAT- + รหัสจากเวลาที่กด (base36) — กันซ้ำกับเลขที่ที่มีอยู่แล้ว
+function makeFloatApNo(existingRows) {
+  const used = new Set((existingRows || []).map(r => String(r.vchno || '').trim().toUpperCase()));
+  const base = FLOAT_AP_PREFIX + Date.now().toString(36).toUpperCase();
+  let no = base, i = 1;
+  while (used.has(no)) no = base + '-' + (i++);
+  return no;
+}
+// ป้ายกำกับบนตาราง — แยกใบลอยออกจากใบจริงด้วยตาเปล่า
+function FloatApTag({ dup }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+      <span title="เพิ่มเองรอตั้งหนี้จริง (โชว์ยอดที่ Bank Daily แล้ว)"
+        style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, lineHeight: 1.6, whiteSpace: 'nowrap',
+                 color: 'oklch(48% 0.16 75)', background: 'color-mix(in oklch, oklch(70% 0.16 75) 20%, transparent)',
+                 border: '1px solid color-mix(in oklch, oklch(65% 0.16 75) 45%, transparent)', borderRadius: 5, padding: '0 6px' }}>
+        🏷 ตั้งหนี้ลอย
+      </span>
+      {dup && (
+        <span title="มีใบจริง (เจ้าหนี้+ยอดเดียวกัน) อยู่ในรายการแล้ว — ตรวจสอบแล้วลบใบลอยทิ้งได้"
+          style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, lineHeight: 1.6, whiteSpace: 'nowrap',
+                   color: 'var(--bad)', background: 'color-mix(in oklch, var(--bad) 12%, transparent)',
+                   border: '1px solid color-mix(in oklch, var(--bad) 40%, transparent)', borderRadius: 5, padding: '0 6px' }}>
+          ⚠ อาจซ้ำใบจริง
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* ── ป๊อปอัปกรอกตั้งหนี้ลอย — 2 คอลัมน์, 4 ช่องบังคับ (เจ้าหนี้/ยอด/บัญชี/วันคาดจ่าย) ── */
+function FloatingApModal({ open, data, defaultPayDate, onClose, onSubmit }) {
+  const [name, setName]     = dxState('');
+  const [amount, setAmount] = dxState('');
+  const [bankAc, setBankAc] = dxState('');
+  const [payDate, setPay]   = dxState(defaultPayDate || '');
+  const [due, setDue]       = dxState('');
+  const [dpt, setDpt]       = dxState('');
+  const [remark, setRemark] = dxState('');
+  dxEffect(() => {
+    if (!open) return;
+    setName(''); setAmount(''); setBankAc(''); setPay(defaultPayDate || ''); setDue(''); setDpt(''); setRemark('');
+  }, [open, defaultPayDate]);
+
+  // บัญชีที่ยังใช้งาน (ตัด closed/dormant) — เกณฑ์เดียวกับหน้า "ประมาณการรายจ่าย"
+  const banks = dxMemo(() => (data.bankAccounts || [])
+    .filter(b => { const t = String(b.accountType || b.account_type || '').toLowerCase(); return t !== 'closed' && t !== 'dormant'; })
+    .map(b => {
+      const ac   = b.Bank_AC || b.bankAc || b.bank_ac || b.accountNo || b.account_no || '';
+      const nm   = b.BANK_NAME || b.bankName || b.bank_name || '';
+      return { value: ac, label: ac ? `${nm} · ${ac}` : (nm || '— ไม่ทราบบัญชี —') };
+    })
+    .filter(o => o.value), [data.bankAccounts]);
+
+  // ชื่อเจ้าหนี้ = รวมจากเจ้าหนี้คงค้าง (cust_name) + ใบสำคัญจ่าย (Payee) · ตัดซ้ำ · เรียงไทย
+  const creditorList = dxMemo(() => {
+    const s = new Set();
+    (data.payables || []).forEach(r => { const v = String(r.cust_name || '').trim(); if (v) s.add(v); });
+    (data.pvVouchers || []).forEach(r => { const v = String(r.Payee || '').trim(); if (v) s.add(v); });
+    return [...s].sort((a, b) => a.localeCompare(b, 'th'));
+  }, [data.payables, data.pvVouchers]);
+
+  // แผนก = รหัสจากเจ้าหนี้คงค้าง (รหัส · ชื่อแผนก) + Ref_Code จากใบสำคัญจ่าย
+  const dptList = dxMemo(() => {
+    const m = new Map();
+    (data.payables || []).forEach(r => {
+      const c = String(r.dpt_code || '').trim(); if (!c) return;
+      if (!m.has(c) || (!m.get(c) && r.dpt_name)) m.set(c, String(r.dpt_name || '').trim());
+    });
+    (data.pvVouchers || []).forEach(r => { const c = String(r.Ref_Code || '').trim(); if (c && !m.has(c)) m.set(c, ''); });
+    return [...m.entries()].map(([code, nm]) => ({ code, label: nm ? `${code} · ${nm}` : code }))
+      .sort((a, b) => a.code.localeCompare(b.code, 'th'));
+  }, [data.payables, data.pvVouchers]);
+
+  if (!open) return null;
+
+  const amt   = parseNum(amount);
+  const ready = !!name.trim() && amt > 0 && !!bankAc && !!payDate;
+  const lbl   = { fontSize: 12, color: 'var(--ink-600)', fontWeight: 600 };
+  const inp   = { height: 34, width: '100%', borderRadius: 7, border: '1px solid var(--ink-150)', padding: '0 10px', fontSize: 13, fontFamily: 'inherit', background: 'var(--panel)', color: 'var(--ink-800)' };
+  const req   = <span style={{ color: 'var(--bad)', marginLeft: 3 }}>*</span>;
+
+  return (
+    <Modal open={open} title="＋ ตั้งหนี้ลอย (AP รอตั้งหนี้)" maxWidth={720} onClose={onClose}
+      footer={<>
+        <span style={{ marginRight: 'auto', fontSize: 12, color: ready ? 'var(--brand-700)' : 'var(--ink-400)', fontWeight: 600 }}>
+          {amt > 0
+            ? <>ยอดที่จะไป Bank Daily: <strong style={{ fontFamily: 'ui-monospace' }}>{fmtNum(amt, 2)}</strong> บาท{!bankAc && <span style={{ color: 'var(--bad)' }}> · เลือกบัญชีก่อน</span>}</>
+            : 'กรอกยอดเงินเพื่อดูยอดที่จะไป Bank Daily'}
+        </span>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={!ready}
+          onClick={() => onSubmit({ name, amount, bankAc, payDate, due, dpt, remark })}>
+          <Icon name="check" size={13} /> เพิ่ม + ส่งไป Bank Daily
+        </button>
+      </>}>
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ink-700)', background: 'color-mix(in oklch, oklch(70% 0.16 75) 12%, transparent)',
+                    border: '1px solid color-mix(in oklch, oklch(65% 0.16 75) 35%, transparent)', borderRadius: 8, padding: '9px 12px', marginBottom: 14 }}>
+        ใช้ตอน <strong>รู้แล้วว่าต้องจ่าย แต่บัญชียังตั้งหนี้ไม่ถึงการเงิน</strong> — ระบบจะสร้างรายการเจ้าหนี้ (ป้าย 🏷 ตั้งหนี้ลอย)
+        พร้อมแผนจ่ายที่ทำให้ยอดไปโผล่ที่ <strong>Bank Daily</strong> ตามวันที่และบัญชีที่เลือก ·
+        <strong style={{ color: 'var(--bad)' }}> ตอนของจริงมาค่อยลบตัวลอยออก</strong> (ลบแล้วแผนจ่ายจะถูกลบตามให้อัตโนมัติ)
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 16px' }}>
+        <div className="field" style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>ชื่อเจ้าหนี้{req}</label>
+          <input list="float-ap-creditors" value={name} onChange={e => setName(e.target.value)} autoFocus
+            placeholder="พิมพ์ค้นหา หรือพิมพ์ชื่อใหม่ที่ยังไม่มีในระบบ" style={inp} />
+          <datalist id="float-ap-creditors">{creditorList.map(n => <option key={n} value={n} />)}</datalist>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>จากเจ้าหนี้คงค้าง + ใบสำคัญจ่าย ({creditorList.length} ชื่อ) · พิมพ์ชื่อใหม่ได้</div>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>ยอดเงิน (สุทธิ){req}</label>
+          <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00"
+            style={{ ...inp, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace', color: amt > 0 ? 'var(--bad)' : 'var(--ink-800)' }} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>ยอดสุทธิที่จะจ่ายจริง (netpayment)</div>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>บัญชีที่จะจ่าย{req}</label>
+          <select value={bankAc} onChange={e => setBankAc(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
+            <option value="">— เลือกบัญชี —</option>
+            {banks.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+          </select>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{banks.length ? `${banks.length} บัญชีที่ใช้งานอยู่` : 'ยังไม่มีบัญชีในระบบ — เพิ่มที่หน้า "บัญชีธนาคาร" ก่อน'}</div>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>วันที่คาดจ่าย{req}</label>
+          <input type="date" value={payDate} onChange={e => setPay(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>ยอดจะไปโผล่ที่ Bank Daily วันนี้</div>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>วันครบกำหนด</label>
+          <input type="date" value={due} onChange={e => setDue(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>เว้นว่าง = ใช้วันที่คาดจ่าย</div>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>แผนก</label>
+          <input list="float-ap-depts" value={dpt} onChange={e => setDpt(e.target.value)} placeholder="เช่น FIN / ACC" style={inp} />
+          <datalist id="float-ap-depts">{dptList.map(d => <option key={d.code} value={d.code}>{d.label}</option>)}</datalist>
+        </div>
+
+        <div className="field">
+          <label style={lbl}>หมายเหตุ</label>
+          <input type="text" value={remark} onChange={e => setRemark(e.target.value)} placeholder={FLOAT_AP_REMARK} style={inp} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>เว้นว่าง = ใช้ข้อความเริ่มต้น</div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function DataPayablePage({ data, setData, toast }) {
   const [edit, setEdit]             = dxState(null);
   const [query, setQuery]           = dxState('');
@@ -2787,7 +2964,10 @@ function DataPayablePage({ data, setData, toast }) {
   const [rptFrom, setRptFrom]         = dxState('');      // ISO ช่วงวันที่
   const [rptTo, setRptTo]             = dxState('');
   const matrixRef = React.useRef(null);                  // capture เป็นรูป
+  const [showFloat, setShowFloat]     = dxState(false);  // ป๊อปอัป "ตั้งหนี้ลอย"
   const canEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
+  // ตั้งหนี้ลอย = ADMIN เท่านั้น (สิทธิ์ระดับเดียวกับ "ลบข้อมูล" = manager)
+  const isAdmin = window.WTPAuth ? window.WTPAuth.can('canDelete') : true;
 
   // อัปโหลดไฟล์ → .xml ใช้ parseExpressXML (EXPRESS), อื่นๆ ใช้ XLSX.js → TSV
   const handleFileUpload = (file) => {
@@ -2867,6 +3047,25 @@ function DataPayablePage({ data, setData, toast }) {
     rows.filter(r => { const v = String(r.vchno || '').trim(); return v && paidVchnoSet.has(v); })
   , [rows, paidVchnoSet]);
 
+  // ── ตั้งหนี้ลอยที่ยังค้างอยู่ (ของชั่วคราว — ต้องลบเมื่อใบจริงเข้าระบบ) ────────
+  //    dup = มีใบจริง (ไม่ใช่ FLOAT) ชื่อเจ้าหนี้ + ยอดสุทธิเดียวกันอยู่แล้ว ⇒ น่าจะซ้ำ
+  const floatInfo = dxMemo(() => {
+    const floats = rows.filter(isFloatingAp);
+    if (!floats.length) return { rows: [], total: 0, dupIds: new Set() };
+    const realKeys = new Set();
+    rows.forEach(r => {
+      if (isFloatingAp(r)) return;
+      const nm = payableCreditorName(r), amt = Math.round(parseNum(r.netpayment) * 100);
+      if (amt) realKeys.add(nm + '|' + amt);
+    });
+    const dupIds = new Set();
+    floats.forEach(r => {
+      const k = payableCreditorName(r) + '|' + Math.round(parseNum(r.netpayment) * 100);
+      if (realKeys.has(k)) dupIds.add(r.id);
+    });
+    return { rows: floats, total: floats.reduce((s, r) => s + parseNum(r.netpayment), 0), dupIds };
+  }, [rows]);
+
   // ล้างรายการที่จ่ายแล้วออกจากชีต — ลบจริงผ่าน sync (replaceAll + baseIds ลบเฉพาะ id ที่ตัดออก)
   const cleanPaidNow = () => {
     if (!paidRows.length) return;
@@ -2880,6 +3079,7 @@ function DataPayablePage({ data, setData, toast }) {
   const getDocType = (vchno) => {
     if (!vchno) return 'other';
     const v = String(vchno).toUpperCase();
+    if (v.startsWith(FLOAT_AP_PREFIX)) return 'FLOAT';   // ตั้งหนี้ลอย = ถังของตัวเอง (= ตัวกรอง "แสดงเฉพาะตั้งหนี้ลอย")
     if (v.startsWith('APO')) return 'APO';
     if (v.startsWith('APS')) return 'APS';
     if (v.startsWith('APV')) return 'APV';
@@ -2980,6 +3180,50 @@ function DataPayablePage({ data, setData, toast }) {
     IS_ACCRUED: null, NOTE: null, ACTUAL_AMOUNT: null, ACTUAL_DATE: null,
     REF_DOC: ap.vchno || null, BOOKED_AT: null, CFS_ACTIVITY: null,
   });
+
+  // ── ตั้งหนี้ลอย: กด 1 ครั้ง → สร้าง 2 แถวผูกกันด้วยเลขที่ FLOAT-xxxx ──────────
+  //    (1) payables (เห็นในหน้านี้)  (2) forecastEntries AP (ยอดไปโผล่ Bank Daily)
+  //    ⚠️ สร้างแค่ (1) ยอดจะไม่ไปไหน — REF_DOC ของ (2) ต้องเป็นเลขที่เดียวกันเสมอ
+  //       เพราะระบบใช้ค่านี้เช็ค "วางแผนจ่ายแล้ว" (กันวางซ้ำ + ป้าย ✓ วางแผนแล้ว)
+  const addFloatingAp = (form) => {
+    const name = String(form.name || '').trim();
+    if (!name)         { toast('กรอกชื่อเจ้าหนี้'); return; }
+    const amt = parseNum(form.amount);
+    if (!(amt > 0))    { toast('กรอกยอดเงินให้ถูกต้อง'); return; }
+    if (!form.bankAc)  { toast('เลือกบัญชีธนาคารที่จะจ่าย'); return; }
+    if (!form.payDate) { toast('เลือกวันที่คาดจ่าย'); return; }
+
+    const today  = isoOfDate(new Date());
+    const no     = makeFloatApNo(data.payables);
+    const due    = form.due || form.payDate;                       // เว้นว่าง = ใช้วันที่คาดจ่าย
+    const remark = String(form.remark || '').trim() || FLOAT_AP_REMARK;
+    const dptCode = String(form.dpt || '').trim();
+
+    const apRow = dxStampMeta({
+      id: WTPData.newId(),
+      vchno: no, vchdate: today, due2: due,
+      cust_name: name, netpayment: amt, Amount: amt,
+      dpt_code: dptCode, remark,
+    });
+    // รูปแบบ field ตรงกับ _newApRow (แผนจ่าย AP ปกติ) — Bank Daily/หน้าอื่นจึงอ่านได้เหมือนกัน
+    const feRow = {
+      id: WTPData.newId(), DATE: today, PAYMENT_DATE: form.payDate, EXPENSE_TYPE: 'AP',
+      DESCRIPTION: `จ่าย ${name} (${no}) ${FLOAT_AP_TAG}`,
+      JOB_NO: null, PROJECT_NAME: null, AMOUNT: String(-Math.abs(amt)),   // ติดลบ = เงินไหลออก
+      Bank_AC: form.bankAc, STATUS: 'PLANNED', CATEGORY: null,
+      IS_ACCRUED: null, NOTE: remark, ACTUAL_AMOUNT: null, ACTUAL_DATE: null,
+      REF_DOC: no, BOOKED_AT: null, CFS_ACTIVITY: null,                   // ★ กุญแจเชื่อม 2 รายการ
+    };
+
+    setData(d => ({
+      ...d,
+      payables: [apRow, ...(d.payables || [])],                     // แทรกบนสุด — เห็นทันทีว่าเพิ่งเพิ่ม
+      forecastEntries: [...(d.forecastEntries || []), feRow],
+    }));
+    if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
+    toast(`เพิ่มตั้งหนี้ลอยแล้ว · ${no} · ยอดไปโชว์ที่ Bank Daily`);
+    setShowFloat(false);
+  };
 
   // ใบเดียว — แบ่งจ่ายหลายงวด: reconcile forecast AP ของใบนี้ตาม lines (เพิ่ม/แก้/ลบ)
   const commitInstallments = (ap, lines) => {
@@ -3382,7 +3626,10 @@ function DataPayablePage({ data, setData, toast }) {
                     </td>
                   )}
                   <td style={{ whiteSpace: 'nowrap', color: 'var(--ink-500)', width: 84 }}>{fmtDate(r.vchdate) || '—'}</td>
-                  <td style={{ fontFamily: 'ui-monospace', color: 'var(--brand-700)', fontWeight: 600, width: 130 }}>{r.vchno || '—'}</td>
+                  <td style={{ fontFamily: 'ui-monospace', color: 'var(--brand-700)', fontWeight: 600, width: 130 }}>
+                    <div>{r.vchno || '—'}</div>
+                    {isFloatingAp(r) && <FloatApTag dup={floatInfo.dupIds.has(r.id)} />}
+                  </td>
                   <td style={{ color: 'var(--ink-700)' }}>{r.cust_name || '—'}</td>
                   <td style={{ whiteSpace: 'nowrap', width: 96, color: am.color }}>
                     {due ? `${String(due.getDate()).padStart(2,'0')}/${String(due.getMonth()+1).padStart(2,'0')}/${due.getFullYear()}` : '—'}
@@ -3484,22 +3731,59 @@ function DataPayablePage({ data, setData, toast }) {
     toast('บันทึกข้อมูลแล้ว');
   };
 
+  // ── ลบ AP → ต้องลบ "แผนจ่ายที่ผูกกัน" ของใบลอยไปด้วยเสมอ ────────────────────
+  //    ไม่งั้นยอดค้างอยู่ที่ Bank Daily ทั้งที่ลบรายการไปแล้ว (ผู้ใช้ต้องไปตามลบเองอีกที่)
+  //    เกณฑ์ผูก: forecastEntries.REF_DOC === payables.vchno (เฉพาะเลขที่ FLOAT-…)
+  //    งวดที่ "จ่ายจริงแล้ว" (ACTUAL) เก็บไว้ — เป็นเงินที่ออกจริง ไม่ใช่แค่แผน
+  const floatPlanImpact = (idSet) => {
+    const refs = new Set((data.payables || [])
+      .filter(r => idSet.has(r.id) && isFloatingAp(r))
+      .map(r => String(r.vchno || '').trim()).filter(Boolean));
+    if (!refs.size) return { refs, cut: 0, kept: 0 };
+    let cut = 0, kept = 0;
+    (data.forecastEntries || []).forEach(f => {
+      if (String(f.EXPENSE_TYPE || '').toUpperCase() !== 'AP') return;
+      if (!refs.has(String(f.REF_DOC || '').trim())) return;
+      if (_feIsActual(f)) kept++; else cut++;
+    });
+    return { refs, cut, kept };
+  };
+  // ไม่มีใบลอยในชุดที่ลบ → คืน array เดิมทั้งดุ้น (อย่าแตะ/สร้างใหม่ กัน diff หลอกไปหา sync)
+  const dropFloatPlans = (d, refs) => (refs.size
+    ? (d.forecastEntries || []).filter(f => !(String(f.EXPENSE_TYPE || '').toUpperCase() === 'AP'
+        && refs.has(String(f.REF_DOC || '').trim()) && !_feIsActual(f)))
+    : d.forecastEntries);
+  const floatPlanNote = (imp) => (imp.cut ? ` · ลบแผนจ่ายที่ผูกกัน ${imp.cut} รายการ (ยอดหายจาก Bank Daily)` : '')
+    + (imp.kept ? ` · เก็บงวดที่จ่ายจริงแล้ว ${imp.kept} รายการไว้` : '');
+
   const remove = (id) => {
-    setData(d => ({ ...d, payables: (d.payables || []).filter(x => x.id !== id) }));
+    const idSet = new Set([id]);
+    const imp = floatPlanImpact(idSet);
+    setData(d => ({
+      ...d,
+      payables: (d.payables || []).filter(x => x.id !== id),
+      forecastEntries: dropFloatPlans(d, imp.refs),
+    }));
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     setEdit(null);
-    toast('ลบรายการแล้ว');
+    toast('ลบรายการแล้ว' + floatPlanNote(imp));
   };
 
   // ลบหลายรายการที่ติ๊กเลือก (มุมมองจัดกลุ่ม) — ลบจริงผ่าน sync
   const removeMany = (ids) => {
     const set = new Set((ids || []).filter(Boolean));
     if (!set.size) { toast('รายการที่เลือกไม่มี id — ลบไม่ได้'); return; }
-    if (!window.confirm(`ลบ ${set.size} รายการที่เลือกถาวรจากเจ้าหนี้คงค้าง?`)) return;
-    setData(d => ({ ...d, payables: (d.payables || []).filter(x => !set.has(x.id)) }));
+    const imp = floatPlanImpact(set);
+    if (!window.confirm(`ลบ ${set.size} รายการที่เลือกถาวรจากเจ้าหนี้คงค้าง?`
+      + (imp.cut ? `\n\n(รวมตั้งหนี้ลอย — จะลบแผนจ่ายที่ผูกกัน ${imp.cut} รายการ ยอดจะหายจาก Bank Daily ด้วย)` : ''))) return;
+    setData(d => ({
+      ...d,
+      payables: (d.payables || []).filter(x => !set.has(x.id)),
+      forecastEntries: dropFloatPlans(d, imp.refs),
+    }));
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     setSelectedAp(new Set());
-    toast(`ลบ ${set.size} รายการแล้ว`);
+    toast(`ลบ ${set.size} รายการแล้ว` + floatPlanNote(imp));
   };
 
   const resetImport = () => {
@@ -3570,6 +3854,7 @@ function DataPayablePage({ data, setData, toast }) {
     existing.forEach(r => {
       const v = String(r.vchno || '').trim();
       if (!v || importedVchno.has(v)) return;
+      if (isFloatingAp(r)) return;   // ตั้งหนี้ลอย = เพิ่มเอง ไม่เคยอยู่ในไฟล์ EXPRESS → ไม่ใช่ "หาย" (เคลียร์ที่แบนเนอร์ 🏷 แทน)
       if (paidSet.has(v)) paidCut.push({ row: r, key: v, primary: v });
       else missing.push({ row: r, key: v, primary: v });
     });
@@ -3604,7 +3889,11 @@ function DataPayablePage({ data, setData, toast }) {
       p.paidCut.forEach(m => { if (m.row?.id) removeIds.add(m.row.id); });
       selectedMissing.forEach(id => removeIds.add(id));
       if (removeIds.size) next = next.filter(r => !removeIds.has(r.id));
-      return { ...d, payables: next };
+      // ตั้งหนี้ลอยที่ถูกลบในรอบนี้ → ลบแผนจ่ายที่ผูกกันด้วย (กันยอดค้างที่ Bank Daily)
+      const floatRefs = new Set((d.payables || [])
+        .filter(r => removeIds.has(r.id) && isFloatingAp(r))
+        .map(r => String(r.vchno || '').trim()).filter(Boolean));
+      return { ...d, payables: next, forecastEntries: dropFloatPlans(d, floatRefs) };
     });
     const parts = [`เพิ่ม ${p.added.length}`, `แก้ ${p.changed.length}`];
     if (p.paidCut.length) parts.push(`ตัดจ่ายแล้ว ${p.paidCut.length}`);
@@ -3661,6 +3950,13 @@ function DataPayablePage({ data, setData, toast }) {
           <button className="btn btn-ghost" onClick={() => setShowImport(true)}>
             <Icon name="upload" size={14} /> นำเข้าไฟล์ (XML / Excel)
           </button>
+          {/* ตั้งหนี้ลอย — ADMIN เท่านั้น (สิทธิ์เดียวกับลบข้อมูล) */}
+          {isAdmin && (
+            <button className="btn btn-primary" onClick={() => setShowFloat(true)}
+              title="เพิ่ม AP ที่ประมาณการไว้แต่ยังตั้งหนี้ไม่ถึงการเงิน — ยอดจะไปโชว์ที่ Bank Daily (เฉพาะ ADMIN)">
+              <Icon name="plus" size={14} /> ตั้งหนี้ลอย
+            </button>
+          )}
         </div>
       </div>
 
@@ -3685,6 +3981,30 @@ function DataPayablePage({ data, setData, toast }) {
         </div>
       )}
 
+      {/* 🏷 Banner — ตั้งหนี้ลอยที่ยังค้าง (ของชั่วคราว ต้องลบเมื่อใบจริงเข้าระบบ) */}
+      {floatInfo.rows.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          margin: '0 0 14px', padding: '11px 16px', borderRadius: 10,
+          background: 'color-mix(in oklch, oklch(70% 0.16 75) 10%, var(--surface))',
+          border: '1px solid color-mix(in oklch, oklch(65% 0.16 75) 35%, transparent)',
+          borderLeft: '4px solid oklch(65% 0.16 75)',
+        }}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>🏷</span>
+          <div style={{ flex: 1, minWidth: 220, fontSize: 13, lineHeight: 1.55, color: 'var(--ink-800)' }}>
+            <strong>ตั้งหนี้ลอยค้างอยู่ {floatInfo.rows.length} รายการ · รวม {fmtNum(floatInfo.total, 2)} บาท</strong> —
+            ยอดโชว์ที่ Bank Daily แล้ว · พอบัญชีตั้งหนี้จริงเข้าระบบ ให้ลบใบลอยทิ้ง (แผนจ่ายจะถูกลบตามให้)
+            {floatInfo.dupIds.size > 0 && (
+              <span style={{ color: 'var(--bad)', fontWeight: 700 }}> · ⚠ {floatInfo.dupIds.size} รายการอาจซ้ำกับใบจริงแล้ว</span>
+            )}
+          </div>
+          <button className="btn btn-ghost" style={{ flex: '0 0 auto' }}
+            onClick={() => { setDocFilter('FLOAT'); setViewMode('list'); }}>
+            <Icon name="filter" size={14} /> ดูเฉพาะตั้งหนี้ลอย
+          </button>
+        </div>
+      )}
+
       {/* KPI — 4 cards (grid-4, same size as all other data pages, no delta to keep height equal) */}
       <div className="grid grid-4 anim-stagger" style={{ marginBottom: 16 }}>
         <KpiTile label="จำนวนรายการ" value={filtered.length} unit=" รายการ" digits={0} accent="var(--brand-500)" icon="invoice" animate={false} />
@@ -3698,7 +4018,9 @@ function DataPayablePage({ data, setData, toast }) {
         <div className="tabnav" style={{ flex: '0 0 auto' }}>
           <button className={docFilter === 'all' ? 'active' : ''} onClick={() => setDocFilter('all')}>ทั้งหมด ({rows.length})</button>
           {docTypes.map(t => (
-            <button key={t} className={docFilter === t ? 'active' : ''} onClick={() => setDocFilter(t)}>{t} ({dtCount[t]})</button>
+            <button key={t} className={docFilter === t ? 'active' : ''} onClick={() => setDocFilter(t)}>
+              {t === 'FLOAT' ? '🏷 ตั้งหนี้ลอย' : t} ({dtCount[t]})
+            </button>
           ))}
           {dtCount.other > 0 && (
             <button className={docFilter === 'other' ? 'active' : ''} onClick={() => setDocFilter('other')}>อื่นๆ ({dtCount.other})</button>
@@ -3836,7 +4158,10 @@ function DataPayablePage({ data, setData, toast }) {
                 return (
                   <tr key={row.id} onClick={() => setEdit(row)} style={{ cursor: 'pointer' }}>
                     <td style={{ ...vt, whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{fmtDate(row.vchdate) || row.vchdate || '—'}</td>
-                    <td style={vt}><span style={{ fontWeight: 600, color: 'var(--brand-700)', fontFamily: 'ui-monospace' }}>{row.vchno || '—'}</span></td>
+                    <td style={vt}>
+                      <div style={{ fontWeight: 600, color: 'var(--brand-700)', fontFamily: 'ui-monospace' }}>{row.vchno || '—'}</div>
+                      {isFloatingAp(row) && <FloatApTag dup={floatInfo.dupIds.has(row.id)} />}
+                    </td>
                     <td style={vt}>{row.cust_name || <span className="muted">—</span>}</td>
                     <td style={vt}>{row.dpt_code ? <Badge kind="b-blue" dot={false}>{row.dpt_code}</Badge> : <span className="muted">—</span>}</td>
                     <td style={{ ...vt, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
@@ -4002,6 +4327,22 @@ function DataPayablePage({ data, setData, toast }) {
           </table>
         </div>
       </div>
+      )}
+
+      {/* ตั้งหนี้ลอย — วันที่คาดจ่ายตั้งต้น = วันของข้อมูลล่าสุด แต่ไม่ย้อนหลังกว่าวันนี้
+          (data.meta.asOf ของ BIO เป็นค่า seed ค้าง — ถ้าตั้งวันย้อนหลัง Bank Daily จะกรองทิ้งเงียบๆ) */}
+      {showFloat && (
+        <FloatingApModal
+          open={showFloat}
+          data={data}
+          defaultPayDate={(() => {
+            const today = isoOfDate(new Date());
+            const asOf  = String((data.meta && data.meta.asOf) || '');
+            return /^\d{4}-\d{2}-\d{2}$/.test(asOf) && asOf > today ? asOf : today;
+          })()}
+          onClose={() => setShowFloat(false)}
+          onSubmit={addFloatingAp}
+        />
       )}
 
       {/* Plan-payment modal */}
