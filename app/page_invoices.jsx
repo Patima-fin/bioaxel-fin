@@ -55,6 +55,64 @@ function ivHasDebtOverride(iv) {
 // expose globally so page_daily/page_warroom_p1 can reuse without duplication
 Object.assign(window, { resolveAssignee, resolveDebt, ivHasAssigneeOverride, ivHasDebtOverride });
 
+// ── ivJoinRow / ivBuildRows — ใบแจ้งหนี้ + โครงการ + ภาระหนี้ → แถวที่มี netExpected ──
+// ★ นี่คือ "จุดเดียว" ที่คำนวณ netExpected (balance × 106/107 − ภาระหนี้)
+//   หน้าลูกหนี้คงค้าง (ตารางนี้) และพาเนล "📥 คาดรับเงินเข้า" ในหน้า Bank Daily
+//   (page_bank_diary.jsx → BDArPanel) เรียกตัวเดียวกัน → ยอดตรงกันทุกบาทเสมอ
+//   ⚠️ ห้ามคัดลอกสูตรไปคำนวณซ้ำที่อื่น (จะเพี้ยนทันทีที่ normalizeJobNo/resolveDebt เปลี่ยน)
+const IV_VALID_STATUS = new Set(['pending_inspection', 'tracking', 'issue', 'paid']);
+// map รหัสสถานะแบบเก่า/ทางเลือก → สถานะ canonical 4 ตัว
+const IV_STATUS_ALIAS = { pending: 'tracking', '': 'pending_inspection' };
+function ivJoinRow(iv, projectByCode, financeByCode) {
+  // ── normalize jobNo: ตัด productType suffix ออก ───────────────────────────
+  const norm = normalizeJobNo(iv.jobNo);
+  const cleanJobNo    = norm.jobNo;
+  const inferredPType = norm.productType;
+
+  const p = (projectByCode || {})[cleanJobNo] || (projectByCode || {})[iv.contractRef] || {};
+  const f = (financeByCode || {})[cleanJobNo] || (financeByCode || {})[iv.contractRef] || {};
+  const balance  = Number(iv.balance) || 0;
+  const debt     = resolveDebt(iv, f);
+  const assignee = resolveAssignee(iv, f);
+  const debtIsOverride     = ivHasDebtOverride(iv);
+  const assigneeIsOverride = ivHasAssigneeOverride(iv);
+  const rawStatus = (iv.status || '').toString().trim();
+  const aliased   = IV_STATUS_ALIAS[rawStatus] != null ? IV_STATUS_ALIAS[rawStatus] : rawStatus;
+  const status    = IV_VALID_STATUS.has(aliased) ? aliased : 'pending_inspection';
+  // invType: 'P' = ใบแจ้งหนี้โครงการ (default), 'O' = ใบแจ้งหนี้อื่นๆ
+  const rawIvType = (iv.invType || iv.invtype || 'P').toString().trim().toUpperCase();
+  const invType   = rawIvType === 'O' ? 'O' : 'P';
+  // customer: cloud sheet ใช้ customerName + customerCode (รองรับชื่อเก่าด้วย)
+  const customerName = (iv.customerName || iv.customer || iv.Customer || iv.cust_name || '').toString().trim();
+  const customerCode = (iv.customerCode || iv.cust_code || '').toString().trim();
+  return {
+    ...iv,
+    jobNo:       cleanJobNo,
+    productType: iv.productType || inferredPType || '',
+    status,
+    invType,
+    balance,
+    customer: customerName,
+    customerName,
+    customerCode,
+    projectName: p['พื้นที่'] || p.name || iv.projectName || '—',
+    assignee,
+    assigneeIsOverride,
+    debt,
+    debtIsOverride,
+    // คาดรับสุทธิ = balance หลังหัก WHT 1% (balance × 106/107) − ภาระหนี้
+    // ใช้สูตรเดียวกับ popup detail (InvoiceDetailModal) เพื่อให้ตรงกันทั้งระบบ
+    netExpected: balance * 106 / 107 - debt,
+  };
+}
+function ivBuildRows(data) {
+  const d  = data || {};
+  const lk = (window.WTPData && typeof WTPData.buildLookups === 'function')
+    ? WTPData.buildLookups(d) : { projectByCode: {}, financeByCode: {} };
+  return (d.invoices || []).map(iv => ivJoinRow(iv, lk.projectByCode, lk.financeByCode));
+}
+Object.assign(window, { ivJoinRow, ivBuildRows });
+
 // ── helper: ค่าที่ใช้แสดงใน filter dropdown สำหรับแต่ละ column ──────────────
 function ivColDisplayVal(colKey, iv) {
   switch (colKey) {
@@ -354,52 +412,11 @@ function InvoicesPage({ data, setData, toast }) {
   //  regardless ของหน้าที่ user เปิดอยู่ — Warroom/Daily ก็เห็น backfill)
 
   // Joined rows: invoice + project name + finance (assignee, debt)
-  const VALID_STATUS = new Set(['pending_inspection', 'tracking', 'issue', 'paid']);
-  // map รหัสสถานะแบบเก่า/ทางเลือก → สถานะ canonical 4 ตัว
-  const STATUS_ALIAS = { pending: 'tracking', '': 'pending_inspection' };
-  const rows = ivMemo(() => data.invoices.map(iv => {
-    // ── normalize jobNo: ตัด productType suffix ออก ───────────────────────────
-    const norm = normalizeJobNo(iv.jobNo);
-    const cleanJobNo    = norm.jobNo;
-    const inferredPType = norm.productType;
-
-    const p = projectByCode[cleanJobNo] || projectByCode[iv.contractRef] || {};
-    const f = financeByCode[cleanJobNo] || financeByCode[iv.contractRef] || {};
-    const balance  = Number(iv.balance) || 0;
-    const debt     = resolveDebt(iv, f);
-    const assignee = resolveAssignee(iv, f);
-    const debtIsOverride     = ivHasDebtOverride(iv);
-    const assigneeIsOverride = ivHasAssigneeOverride(iv);
-    const rawStatus = (iv.status || '').toString().trim();
-    const aliased   = STATUS_ALIAS[rawStatus] != null ? STATUS_ALIAS[rawStatus] : rawStatus;
-    const status    = VALID_STATUS.has(aliased) ? aliased : 'pending_inspection';
-    // invType: 'P' = ใบแจ้งหนี้โครงการ (default), 'O' = ใบแจ้งหนี้อื่นๆ
-    const rawIvType = (iv.invType || iv.invtype || 'P').toString().trim().toUpperCase();
-    const invType   = rawIvType === 'O' ? 'O' : 'P';
-    // customer: cloud sheet ใช้ customerName + customerCode (รองรับชื่อเก่าด้วย)
-    const customerName = (iv.customerName || iv.customer || iv.Customer || iv.cust_name || '').toString().trim();
-    const customerCode = (iv.customerCode || iv.cust_code || '').toString().trim();
-    const customer = customerName;
-    return {
-      ...iv,
-      jobNo:       cleanJobNo,
-      productType: iv.productType || inferredPType || '',
-      status,
-      invType,
-      balance,
-      customer,
-      customerName,
-      customerCode,
-      projectName: p['พื้นที่'] || p.name || iv.projectName || '—',
-      assignee,
-      assigneeIsOverride,
-      debt,
-      debtIsOverride,
-      // คาดรับสุทธิ = balance หลังหัก WHT 1% (balance × 106/107) − ภาระหนี้
-      // ใช้สูตรเดียวกับ popup detail (line ~1306) เพื่อให้ตรงกันทั้งระบบ
-      netExpected: balance * 106 / 107 - debt,
-    };
-  }), [data.invoices, projectByCode, financeByCode]);
+  //   ★ ผ่าน ivJoinRow (module-level) — สูตร netExpected อยู่ที่เดียว หน้า Bank Daily ยืมไปใช้
+  const rows = ivMemo(
+    () => data.invoices.map(iv => ivJoinRow(iv, projectByCode, financeByCode)),
+    [data.invoices, projectByCode, financeByCode]
+  );
 
   // match function: ค้นหาทุก column ที่อ่านได้
   const matchQuery = (iv, q) => {

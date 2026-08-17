@@ -141,8 +141,51 @@ function bdNormForecast(e) {
     id: e.id, date, payDate: bdToISO(e.PAYMENT_DATE), planAmount, actualAmount: actualAmt, amount,
     desc: e.DESCRIPTION || 'ประมาณการ', bankAc: e.Bank_AC || '', status: e.STATUS || 'PLANNED',
     isActual, refDoc: e.REF_DOC || '', expType: e.EXPENSE_TYPE || '', category: e.CATEGORY != null ? String(e.CATEGORY) : '',
+    ivId: e.IV_ID != null ? String(e.IV_ID) : '',   // แผนรับเงิน AR → id ของแถวใบแจ้งหนี้ (คีย์จับคู่จริง)
     type: amount >= 0 ? 'in' : 'out', raw: e,
   };
+}
+
+/* ── AR (คาดรับเงินเข้า) — แผนรับเงินของใบแจ้งหนี้ ────────────────────────
+ * แผน 1 ใบ = forecastEntries 1 แถว: EXPENSE_TYPE='AR' · AMOUNT "บวก" (เงินเข้า)
+ *   REF_DOC = เลขที่ IV (ไว้อ่าน/อ้างอิงในการ์ดและพาเนลประมาณการ)
+ *   ⚠️ แต่ "เลขที่ IV ไม่ unique" (prod มีคนละงานออกเลขเดียวกัน) → คีย์จับคู่จริง
+ *   คือ IV_ID = id ของแถวใบแจ้งหนี้; REF_DOC ใช้เป็น fallback เฉพาะแถวเก่า/คีย์มือ
+ *   ที่ไม่มี IV_ID เท่านั้น (ไม่งั้นใบที่เลขซ้ำกันจะถูกมองว่า "วางแผนแล้ว" ทั้งคู่)
+ */
+const BD_AR_TYPE = 'AR';
+function bdIsArForecast(f) { return String((f && f.expType) || '').toUpperCase() === BD_AR_TYPE; }
+/* index: id ของ IV → แผน , เลขที่ IV → แผน (เฉพาะแผนที่ไม่มี IV_ID) */
+function bdArPlanIndex(forecasts) {
+  const byId = {}, byNo = {};
+  (forecasts || []).forEach(f => {
+    if (!bdIsArForecast(f)) return;
+    const ivId = String(f.ivId || '').trim();
+    if (ivId) { if (!byId[ivId]) byId[ivId] = f; return; }
+    const no = String(f.refDoc || '').trim();
+    if (no && !byNo[no]) byNo[no] = f;
+  });
+  return { byId, byNo };
+}
+function bdArPlanOf(idx, iv) {
+  if (!idx || !iv) return null;
+  const byId = idx.byId[String(iv.id || '').trim()];
+  if (byId) return byId;
+  const no = String(iv.ivNo || '').trim();
+  return (no && idx.byNo[no]) || null;
+}
+/* แผน AR นี้เป็นของใบแจ้งหนี้ที่รับเงินครบแล้วหรือยัง (คีย์ = id ก่อน, เลขที่ IV เป็น fallback) */
+function bdArIsPaidKey(paidKeys, f) {
+  const ivId = String((f && f.ivId) || '').trim();
+  if (ivId) return paidKeys.has(ivId);
+  const no = String((f && f.refDoc) || '').trim();
+  return !!no && paidKeys.has(no);
+}
+/* ลำดับความ "ใกล้ได้เงิน" — ใช้เรียงคอลัมน์สถานะ */
+const BD_AR_STATUS_ORDER = { tracking: 0, pending_inspection: 1, issue: 2, paid: 3 };
+function bdArStatusMeta(code) {
+  const meta = (window.WTPData && WTPData.IV_STATUS_META && WTPData.IV_STATUS_META[code]) || null;
+  return meta || { label: code || '—', short: code || '—', badge: 'b-gray' };
 }
 
 /* Normalize pvVouchers (DATA PV · Payment Voucher) — รายการจ่ายจริงจากบัญชี
@@ -179,7 +222,7 @@ function bdNormAP(p) {
 
 /* Build the per-account view (เช็คค้างจ่าย + forecast ที่ผูกบัญชี) — base = ยอดเงินจริง (ไม่หัก HOLD)
  * สัญญาณ "เงินไม่พอ" ใช้กรอบ 7 วัน (near-term) เทียบยอดเงินจริง */
-function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransfers, matchedPVs, today, next7, paidApSet, transferInfoByRef) {
+function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransfers, matchedPVs, today, next7, paidApSet, transferInfoByRef, paidArKeys) {
   // ใช้วันที่ของยอดที่บันทึก (acct.asOf = DATE) เป็นจุดเริ่ม — รวมกรณีอนาคต (เช่นบันทึก "ยอดยกไปพรุ่งนี้")
   //   ไม่ cap ที่ today อีกต่อไป → พอบันทึกยอดพรุ่งนี้ รายการของวันนี้ (จ่าย/สะท้อนในยอดแล้ว) จะหลุดออกเอง ไม่หักซ้ำ
   const asOfRef = acct.asOf || today;
@@ -201,9 +244,13 @@ function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransf
   //   กันแผนเก่าค้าง + กันนับซ้ำกับยอดเงินที่จ่าย PV ไปแล้ว (PV จ่ายไปแล้ว = อยู่ในยอด BALANCE)
   //   กติกาเดียวกับหน้า Cash Flow (buildPaidVchnoSet/isApPaid: payable.vchno == pvVouchers.AP_No = จ่ายแล้ว)
   const countedAP = new Set(); // เลขที่ AP ที่นับผ่าน forecast แล้ว — กัน PV ของ AP เดียวกันนับซ้ำ
+  // แผนรับเงิน AR ของใบแจ้งหนี้ที่ "รับเงินครบแล้ว" → ตัดทิ้งเหมือน AP ที่จ่ายผ่าน PV แล้ว
+  //   (เงินเข้าบัญชีจริงไปแล้ว = อยู่ใน BALANCE ที่ sync มา — ปล่อยแผนค้างไว้ = ยอดคาดการณ์บวมเกิน)
+  //   เฉพาะแถวที่ยังเป็นแผนล้วน; ถ้าเป็น ACTUAL (บันทึกรับจริงแล้ว) ให้คงไว้ตามเดิม
   matchedForecasts
     .filter(f => f.date && f.date >= asOfRef
-              && !(paidApSet && f.refDoc && paidApSet.has(String(f.refDoc).trim())))
+              && !(paidApSet && f.refDoc && paidApSet.has(String(f.refDoc).trim()))
+              && !(paidArKeys && bdIsArForecast(f) && !f.isActual && bdArIsPaidKey(paidArKeys, f)))
     .forEach(f => {
       if (f.refDoc) countedAP.add(String(f.refDoc).trim());
       // group = ชื่อผู้ขาย (ตัด " (เลขที่ AP)" ท้าย desc) เพื่อจับกลุ่มหลายใบของผู้ขายเดียวกันในวันเดียว
@@ -1789,6 +1836,305 @@ function BDApPanel({ apList, plannedRefs, plannedDateByRef, bankAccounts, defaul
   );
 }
 
+/* ── AR Panel — 📥 คาดรับเงินเข้า · ใบแจ้งหนี้คงค้าง ──────────────────────
+ * หน้า Bank Daily เดิมเห็นแต่เงินไหลออก (เจ้าหนี้/เช็ค/ประมาณการจ่าย) — พาเนลนี้เอา
+ * ใบแจ้งหนี้ที่ยังเก็บเงินไม่ได้มาให้การเงินระบุเองว่าเงินก้อนไหนเข้าบัญชีไหน วันไหน
+ * แล้วเขียนเป็นรายการประมาณการ "รับ" (forecastEntries · EXPENSE_TYPE='AR' · ยอดบวก)
+ * → ยอดไปโผล่ในการ์ดบัญชี/ตารางกระแสเงินสดรายวันทันที
+ *
+ * ⚠️ ยอดที่ใช้ = netExpected จาก ivBuildRows() (หน้าลูกหนี้คงค้างเรียกตัวเดียวกัน)
+ *    = balance × 106/107 − ภาระหนี้ของโครงการ — ห้ามคำนวณสูตรซ้ำที่นี่
+ * ⚠️ AMOUNT ต้องเป็น "ค่าบวก" (เงินเข้า) — ตรงข้ามกับ AP ที่เป็นค่าลบ
+ */
+const BD_AR_COLW_KEY = 'bio-bd-ar-colw-v1';
+const BD_AR_COLS = [
+  { key: 'ivNo',    label: 'เลขที่ IV',        w: 128, align: 'left',   sortable: true },
+  { key: 'jobNo',   label: 'รหัสโครงการ',       w: 104, align: 'center', sortable: true },
+  { key: 'project', label: 'โครงการ',           w: 230, align: 'left',   sortable: false },
+  { key: 'net',     label: 'ยอดสุทธิคงเหลือ',   w: 132, align: 'right',  sortable: true },
+  { key: 'status',  label: 'สถานะ / คาดรับ',    w: 250, align: 'left',   sortable: true },
+  { key: 'plan',    label: 'แผนรับ',            w: 128, align: 'right',  sortable: false },
+];
+function bdArLoadWidths() {
+  const base = {};
+  BD_AR_COLS.forEach(c => { base[c.key] = c.w; });
+  try {
+    const saved = JSON.parse(localStorage.getItem(BD_AR_COLW_KEY) || '{}');
+    Object.keys(saved).forEach(k => { if (base[k] != null && Number(saved[k]) > 0) base[k] = Number(saved[k]); });
+  } catch (_) {}
+  return base;
+}
+
+function BDArPanel({ arList, bankAccounts, today, onBulkPlan, onBulkReschedule, onBulkUnplan, canEdit }) {
+  const [collapsed, setCollapsed]       = React.useState(true);   // ย่อไว้ก่อน — กดหัวการ์ดเพื่อกาง
+  const [query, setQuery]               = React.useState('');
+  const [planFilter, setPlanFilter]     = React.useState('all');  // all | unplanned | planned
+  const [statusFilter, setStatusFilter] = React.useState('all');
+  const [sortKey, setSortKey]           = React.useState('net');
+  const [sortDir, setSortDir]           = React.useState('desc');
+  const [showAll, setShowAll]           = React.useState(false);
+  const [selected, setSelected]         = React.useState(() => new Set());
+  const [bulkDate, setBulkDate]         = React.useState(today);
+  const [bulkBank, setBulkBank]         = React.useState('');     // ต้องเลือกเอง — ไม่มี default (กันวางผิดบัญชี)
+  const [widths, setWidths]             = React.useState(bdArLoadWidths);
+  const [resizing, setResizing]         = React.useState(null);
+  const LIMIT = 25;
+
+  /* ลากขอบหัวคอลัมน์ปรับความกว้าง + จำไว้ใน localStorage */
+  React.useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e) => {
+      const dx = e.clientX - resizing.x0;
+      setWidths(w => ({ ...w, [resizing.key]: Math.max(70, resizing.w0 + dx) }));
+    };
+    const onUp = () => setResizing(null);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [resizing]);
+  React.useEffect(() => {
+    try { localStorage.setItem(BD_AR_COLW_KEY, JSON.stringify(widths)); } catch (_) {}
+  }, [widths]);
+
+  const toggleSort = (k) => {
+    if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir(k === 'net' ? 'desc' : 'asc'); }
+  };
+  const arrow = (k) => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  /* สถานะที่ "มีจริง" + จำนวน — ใช้เป็นตัวเลือกใน dropdown */
+  const statusOpts = React.useMemo(() => {
+    const m = {};
+    arList.forEach(r => { m[r.status] = (m[r.status] || 0) + 1; });
+    return Object.keys(m)
+      .sort((a, b) => (BD_AR_STATUS_ORDER[a] != null ? BD_AR_STATUS_ORDER[a] : 9) - (BD_AR_STATUS_ORDER[b] != null ? BD_AR_STATUS_ORDER[b] : 9))
+      .map(code => ({ code, count: m[code], label: bdArStatusMeta(code).label }));
+  }, [arList]);
+
+  const rows = React.useMemo(() => {
+    let r = arList;
+    if (planFilter === 'planned')   r = r.filter(x => !!x.plan);
+    if (planFilter === 'unplanned') r = r.filter(x => !x.plan);
+    if (statusFilter !== 'all')     r = r.filter(x => x.status === statusFilter);
+    const q = query.trim().toLowerCase();
+    if (q) r = r.filter(x => [x.ivNo, x.jobNo, x.projectName].some(v => String(v || '').toLowerCase().includes(q)));
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return r.slice().sort((a, b) => {
+      if (sortKey === 'net') return (a.net - b.net) * dir;
+      if (sortKey === 'status') {
+        // เรียงตามความใกล้ได้เงิน: ติดตาม → รอใบตรวจรับ → ติดปัญหา → รับแล้ว, แล้วค่อยวันคาดรับ
+        const oa = BD_AR_STATUS_ORDER[a.status] != null ? BD_AR_STATUS_ORDER[a.status] : 9;
+        const ob = BD_AR_STATUS_ORDER[b.status] != null ? BD_AR_STATUS_ORDER[b.status] : 9;
+        if (oa !== ob) return (oa - ob) * dir;
+        const da = a.expectedReceive || '9999-12-31', db = b.expectedReceive || '9999-12-31';
+        return da < db ? -dir : da > db ? dir : 0;
+      }
+      const av = String(a[sortKey] || ''), bv = String(b[sortKey] || '');
+      return av.localeCompare(bv, 'th', { numeric: true }) * dir;
+    });
+  }, [arList, planFilter, statusFilter, query, sortKey, sortDir]);
+
+  const totalAll    = arList.reduce((s, r) => s + r.net, 0);
+  const plannedAll  = arList.filter(r => r.plan).length;
+  const totalShown  = rows.reduce((s, r) => s + r.net, 0);
+  const visible     = showAll ? rows : rows.slice(0, LIMIT);
+  const visibleIds  = visible.map(r => r.id);
+  const allChecked  = visibleIds.length > 0 && visibleIds.every(id => selected.has(id));
+  const toggleOne   = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll   = () => setSelected(prev => {
+    const n = new Set(prev);
+    if (allChecked) visibleIds.forEach(id => n.delete(id));
+    else            visibleIds.forEach(id => n.add(id));
+    return n;
+  });
+
+  const selectedRows = arList.filter(r => selected.has(r.id));
+  const selPlanned   = selectedRows.filter(r => r.plan);
+  const selNew       = selectedRows.filter(r => !r.plan);
+  const selSum       = selectedRows.reduce((s, r) => s + r.net, 0);
+  const needBank     = selNew.length > 0;                  // ใบใหม่ต้องรู้ว่าเงินเข้าบัญชีไหน
+  const canApply     = selectedRows.length > 0 && (!needBank || !!bulkBank);
+
+  const doBulk = () => {
+    if (!canApply) return;
+    // ติ๊กปนกันได้ — ใบใหม่สร้างแผน / ใบที่วางแล้วเลื่อนวัน ในคลิกเดียว
+    if (selNew.length)     onBulkPlan(selNew, { payDate: bulkDate || today, bankAc: bulkBank });
+    if (selPlanned.length) onBulkReschedule(selPlanned, { payDate: bulkDate || today });
+    setSelected(new Set());
+  };
+  const doUnplan = () => {
+    if (!selPlanned.length) return;
+    onBulkUnplan(selPlanned);
+    setSelected(new Set());
+  };
+
+  const mainLabel = (selNew.length && selPlanned.length)
+    ? 'วางประมาณการรับ (' + selNew.length + ') · เลื่อนวัน (' + selPlanned.length + ')'
+    : selPlanned.length ? 'เลื่อนวันคาดรับ (' + selPlanned.length + ')'
+    : 'วางประมาณการรับ (' + selNew.length + ')';
+
+  const colCount = (canEdit ? 1 : 0) + BD_AR_COLS.length;
+  const minWidth = BD_AR_COLS.reduce((s, c) => s + (widths[c.key] || c.w), 0) + (canEdit ? 34 : 0);
+
+  const th = (c) => (
+    <th key={c.key}
+      style={{ position:'relative', width:widths[c.key], minWidth:widths[c.key], maxWidth:widths[c.key],
+               textAlign:c.align, whiteSpace:'nowrap', userSelect:'none' }}>
+      <span onClick={c.sortable ? () => toggleSort(c.key) : undefined}
+        style={{ cursor: c.sortable ? 'pointer' : 'default', color: sortKey === c.key ? '#15803d' : undefined }}
+        title={c.sortable ? 'กดเพื่อเรียงลำดับ' : undefined}>
+        {c.label}{c.sortable ? arrow(c.key) : ''}
+      </span>
+      <span onMouseDown={e => { e.preventDefault(); setResizing({ key:c.key, x0:e.clientX, w0:widths[c.key] || c.w }); }}
+        title="ลากเพื่อปรับความกว้าง"
+        style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize' }} />
+    </th>
+  );
+
+  return (
+    <div className="card" style={{ padding:0, overflow:'hidden', marginBottom:20 }}>
+      {/* Header — กดเพื่อย่อ/กาง */}
+      <div onClick={() => setCollapsed(c => !c)}
+        style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 16px', background:'linear-gradient(135deg,#f0fdf4,#dcfce7)', borderBottom: collapsed ? 'none' : '1px solid #bbf7d0', cursor:'pointer', gap:8 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
+          <span style={{ fontSize:12, color:'#15803d', transform: collapsed ? 'none' : 'rotate(90deg)', transition:'transform .15s' }}>▶</span>
+          <div>
+            <div style={{ fontWeight:700, fontSize:14, color:'#166534' }}>💰 คาดรับเงินเข้า · ใบแจ้งหนี้คงค้าง</div>
+            <div style={{ fontSize:12, color:'#15803d', marginTop:2 }}>
+              {arList.length} ใบ · รวมสุทธิ <b>{fmtMoney(totalAll)}</b>
+              {plannedAll > 0 && <> · วางแผนแล้ว {plannedAll}</>}
+            </div>
+          </div>
+        </div>
+        <span style={{ fontSize:11, fontWeight:600, color:'#166534', whiteSpace:'nowrap' }}>{collapsed ? 'กดเพื่อดู ▾' : 'ย่อ ▴'}</span>
+      </div>
+
+      {!collapsed && (<>
+      {/* Search + แผน + สถานะ */}
+      <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:8, padding:'8px 16px', borderBottom:'1px solid #e7f6ec', background:'#f8fdfa' }}>
+        <input value={query} onChange={e => { setQuery(e.target.value); setShowAll(false); }} placeholder="ค้นหา เลขที่ IV / รหัสโครงการ / ชื่อโครงการ"
+          style={{ padding:'6px 11px', border:'1.5px solid #bbf7d0', borderRadius:8, fontSize:12, fontFamily:'inherit', outline:'none', minWidth:230 }} />
+        {[{ k:'all', l:'ทั้งหมด' }, { k:'unplanned', l:'ยังไม่วางแผน' }, { k:'planned', l:'วางแผนแล้ว' }].map(s => (
+          <button key={s.k} onClick={() => { setPlanFilter(s.k); setShowAll(false); }}
+            style={{ padding:'4px 12px', borderRadius:14, fontSize:11, fontWeight:600, cursor:'pointer', fontFamily:'inherit',
+                     border:'1px solid ' + (planFilter===s.k ? '#16a34a' : '#bbf7d0'),
+                     background: planFilter===s.k ? '#16a34a' : '#fff',
+                     color: planFilter===s.k ? '#fff' : '#15803d' }}>
+            {s.l}
+          </button>
+        ))}
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setShowAll(false); }}
+          style={{ padding:'5px 8px', border:'1.5px solid #bbf7d0', borderRadius:8, fontSize:11, fontFamily:'inherit', background:'#fff', outline:'none' }}>
+          <option value="all">สถานะ: ทั้งหมด ({arList.length})</option>
+          {statusOpts.map(o => <option key={o.code} value={o.code}>{o.label} ({o.count})</option>)}
+        </select>
+        <span style={{ fontSize:11, color:'#a0aec0', marginLeft:'auto' }}>
+          {rows.length} รายการ · รวมสุทธิ {fmtMoney(totalShown)}
+        </span>
+      </div>
+
+      {/* Bulk action bar */}
+      {canEdit && selectedRows.length > 0 && (
+        <div style={{ display:'flex', flexWrap:'wrap', alignItems:'center', gap:8, padding:'10px 16px', background:'#f0fdf4', borderBottom:'1px solid #bbf7d0' }}>
+          <span style={{ fontSize:12, fontWeight:700, color:'#166534' }}>
+            เลือก {selectedRows.length} ใบ · {fmtMoney(selSum)}
+            {selNew.length > 0 && selPlanned.length > 0 && (
+              <span style={{ fontWeight:400, color:'#15803d' }}> (ใหม่ {selNew.length} · วางแผนแล้ว {selPlanned.length})</span>
+            )}
+          </span>
+          {selNew.length > 0 && (<>
+            <span style={{ fontSize:11, color:'#166534' }}>เข้าบัญชี</span>
+            <select value={bulkBank} onChange={e => setBulkBank(e.target.value)}
+              style={{ padding:'4px 8px', border:'1.5px solid ' + (bulkBank ? '#86efac' : '#fca5a5'), borderRadius:6, fontSize:11, fontFamily:'inherit', background:'#fff', outline:'none' }}>
+              <option value="">— เลือกบัญชี —</option>
+              {bankAccounts.map((a, i) => <option key={i} value={a.accountNo}>{a.bankName} — {a.accountNo}</option>)}
+            </select>
+          </>)}
+          <span style={{ fontSize:11, color:'#166534' }}>วันคาดรับ</span>
+          <input type="date" value={bulkDate} onChange={e => setBulkDate(e.target.value)}
+            style={{ padding:'4px 8px', border:'1.5px solid #86efac', borderRadius:6, fontSize:11, fontFamily:'inherit', outline:'none' }} />
+          <button onClick={doBulk} disabled={!canApply}
+            title={!canApply && needBank ? 'เลือกบัญชีก่อน' : ''}
+            style={{ background: canApply ? '#16a34a' : '#cbd5e1', color:'#fff', border:'none', borderRadius:7, padding:'6px 14px', fontSize:12, fontWeight:700, cursor: canApply ? 'pointer' : 'not-allowed', fontFamily:'inherit' }}>
+            {mainLabel}
+          </button>
+          {selPlanned.length > 0 && (
+            <button onClick={doUnplan}
+              style={{ background:'#fff', color:'#b91c1c', border:'1.5px solid #fecaca', borderRadius:7, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>
+              ยกเลิกแผน ({selPlanned.length})
+            </button>
+          )}
+          <button onClick={() => setSelected(new Set())} style={{ background:'none', border:'none', color:'#166534', fontSize:11, cursor:'pointer', fontFamily:'inherit', textDecoration:'underline' }}>ล้างที่เลือก</button>
+        </div>
+      )}
+
+      <div style={{ overflowX:'auto' }}>
+        <table className="tbl" style={{ minWidth, fontSize:12, tableLayout:'fixed' }}>
+          <thead>
+            <tr>
+              {canEdit && <th style={{ width:34, textAlign:'center' }}><input type="checkbox" checked={allChecked} onChange={toggleAll} title="เลือกทั้งหมดที่เห็น" /></th>}
+              {BD_AR_COLS.map(th)}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? (
+              <tr><td colSpan={colCount} style={{ textAlign:'center', color:'#a0aec0', padding:'16px 0' }}>ไม่มีรายการ</td></tr>
+            ) : visible.map(r => {
+              const checked = selected.has(r.id);
+              const meta    = bdArStatusMeta(r.status);
+              const note    = r.lastLog && r.lastLog.note ? String(r.lastLog.note) : '';
+              return (
+                <tr key={r.id} style={{ background: checked ? '#eff6ff' : r.plan ? '#f0fff4' : 'transparent' }}>
+                  {canEdit && (
+                    <td style={{ textAlign:'center' }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleOne(r.id)} />
+                    </td>
+                  )}
+                  <td style={{ fontFamily:'ui-monospace', fontSize:11, color:'#334155', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.ivNo || ''}>{r.ivNo || '—'}</td>
+                  <td style={{ textAlign:'center', fontFamily:'ui-monospace', fontSize:11, fontWeight:700, color:'#15803d', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.jobNo || ''}>{r.jobNo || '—'}</td>
+                  <td style={{ fontSize:11, color:'#475569', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.projectName || ''}>{r.projectName || '—'}</td>
+                  <td style={{ textAlign:'right', fontVariantNumeric:'tabular-nums', fontWeight:700, color:'#15803d', whiteSpace:'nowrap' }}>{fmtMoney(r.net)}</td>
+                  <td style={{ overflow:'hidden' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0 }}>
+                      <Badge kind={meta.badge}>{meta.short || meta.label}</Badge>
+                      {r.expectedReceive && <span style={{ fontSize:11, color:'#64748b', whiteSpace:'nowrap' }}>คาดรับ {fmtDate(r.expectedReceive)}</span>}
+                    </div>
+                    {note && (
+                      <div style={{ fontSize:10.5, color:'#94a3b8', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                        title={(r.lastLog.date ? fmtDate(r.lastLog.date) + ' · ' : '') + note}>
+                        💬 {note.length > 60 ? note.slice(0, 60) + '…' : note}
+                        {r.lastLog.date && <span style={{ marginLeft:5 }}>({fmtDate(r.lastLog.date)})</span>}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ textAlign:'right', whiteSpace:'nowrap' }}>
+                    {r.plan ? (
+                      <span style={{ display:'inline-flex', flexDirection:'column', alignItems:'flex-end', lineHeight:1.25 }}>
+                        <span style={{ background:'#c6f6d5', color:'#276749', fontSize:11, fontWeight:600, borderRadius:12, padding:'2px 9px' }}>✓ วางแล้ว</span>
+                        {(r.plan.payDate || r.plan.date) && (
+                          <span style={{ fontSize:10.5, color:'#15803d', fontWeight:600, marginTop:2 }}>📅 {fmtDate(r.plan.payDate || r.plan.date)}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize:11, color:'#a0aec0' }}>ยังไม่วางแผน</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > LIMIT && (
+        <button onClick={() => setShowAll(s => !s)} style={{ width:'100%', background:'#f0fdf4', border:'none', borderTop:'1px solid #bbf7d0', padding:'8px 14px', fontSize:11, fontWeight:600, color:'#15803d', cursor:'pointer', fontFamily:'inherit' }}>
+          {showAll ? '▴ ย่อ' : `▾ ดูทั้งหมด (${rows.length} รายการ)`}
+        </button>
+      )}
+      </>)}
+    </div>
+  );
+}
+
 /* ── Main Page ───────────────────────────────────────────────────────── */
 const BankDiaryPage = ({ data: propData, setData, toast }) => {
   const raw = propData || WTPData.load();
@@ -1836,13 +2182,47 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
   const forecasts = React.useMemo(() => rawForecast.map(bdNormForecast), [rawForecast]);
   // AP (เจ้าหนี้คงค้าง) + เซ็ตเลขที่ที่วางแผนจ่ายแล้ว (มี forecast อ้างถึง REF_DOC) กันวางซ้ำ
   const apList     = React.useMemo(() => rawPayables.map(bdNormAP), [rawPayables]);
-  const plannedRefs = React.useMemo(() => new Set(forecasts.filter(f => f.refDoc).map(f => f.refDoc)), [forecasts]);
+  // ★ ตัดแผนรับเงิน AR ออก — REF_DOC ของ AR = เลขที่ IV ไม่ใช่เลขที่ AP (กันติดป้าย "วางแผนแล้ว" ผิดใบ)
+  const plannedRefs = React.useMemo(() => new Set(forecasts.filter(f => f.refDoc && !bdIsArForecast(f)).map(f => f.refDoc)), [forecasts]);
   // map เลขที่ AP (REF_DOC) → วันที่วางแผนจ่าย (PAYMENT_DATE ของ forecast ที่ผูกไว้)
   const plannedDateByRef = React.useMemo(() => {
     const m = {};
-    forecasts.forEach(f => { if (f.refDoc) { const d = f.payDate || f.date; if (d && !m[f.refDoc]) m[f.refDoc] = d; } });
+    forecasts.forEach(f => { if (f.refDoc && !bdIsArForecast(f)) { const d = f.payDate || f.date; if (d && !m[f.refDoc]) m[f.refDoc] = d; } });
     return m;
   }, [forecasts]);
+
+  /* ── AR: ใบแจ้งหนี้คงค้าง (คาดรับเงินเข้า) ──────────────────────────────
+   * ยอด = netExpected จาก ivBuildRows() — ตัวเดียวกับหน้าลูกหนี้คงค้าง (ห้ามคำนวณเอง)
+   * กรอง: ยังไม่รับชำระ (status ≠ paid) + ยอดสุทธิคงเหลือ > 0 */
+  const arPlanIdx = React.useMemo(() => bdArPlanIndex(forecasts), [forecasts]);
+  const arList = React.useMemo(() => {
+    if (typeof window.ivBuildRows !== 'function') return [];
+    return window.ivBuildRows(raw)
+      .filter(iv => iv.status !== 'paid' && Number(iv.netExpected) > 0)
+      .map(iv => {
+        const logs = Array.isArray(iv.followUps) ? iv.followUps.filter(f => f && (f.date || f.note)) : [];
+        return {
+          id: iv.id, ivNo: iv.ivNo || '', jobNo: iv.jobNo || '', projectName: iv.projectName || '',
+          net: Number(iv.netExpected) || 0, status: iv.status, expectedReceive: iv.expectedReceive || '',
+          lastLog: logs.length ? logs[logs.length - 1] : null,
+          plan: bdArPlanOf(arPlanIdx, iv),
+        };
+      });
+  }, [raw.invoices, raw.projects, raw.debtLedger, arPlanIdx]);
+  /* คีย์ของใบแจ้งหนี้ที่ "รับเงินครบแล้ว" — ใช้ตัดแผน AR ที่ค้างอยู่ออกจากการ์ดบัญชี
+   *   ใส่ id เสมอ + ใส่เลขที่ IV เฉพาะที่ไม่ชนกับใบที่ยังค้าง (เลขที่ IV ไม่ unique) */
+  const paidArKeys = React.useMemo(() => {
+    const paid = new Set(), openNos = new Set();
+    const isPaid = (iv) => String(iv.status || '').toLowerCase() === 'paid';
+    (raw.invoices || []).forEach(iv => { if (!isPaid(iv) && iv.ivNo) openNos.add(String(iv.ivNo).trim()); });
+    (raw.invoices || []).forEach(iv => {
+      if (!isPaid(iv)) return;
+      if (iv.id) paid.add(String(iv.id));
+      const no = String(iv.ivNo || '').trim();
+      if (no && !openNos.has(no)) paid.add(no);
+    });
+    return paid;
+  }, [raw.invoices]);
   // แนบ remark ให้ forecast (จาก AP ผ่าน refDoc → fallback NOTE ของ forecast เอง) เพื่อโชว์ในรายการ/กลุ่ม
   const apRemarkByRef = React.useMemo(() => {
     const m = {};
@@ -1929,8 +2309,8 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
 
   /* Per-account views (เช็ค + forecast + การโอน + สัญญาณเงินไม่พอ 7 วัน) */
   const accountViews = React.useMemo(
-    () => accounts.map(a => bdBuildAccountView(a, checksByAccount[a.accountNo] || [], forecastByAccount[a.accountNo] || [], transfersByAccount[a.accountNo] || [], pvByAccount[a.accountNo] || [], today, next7, paidApSet, transferInfoByRef)),
-    [accounts, checksByAccount, forecastByAccount, transfersByAccount, pvByAccount, today, next7, paidApSet, transferInfoByRef]
+    () => accounts.map(a => bdBuildAccountView(a, checksByAccount[a.accountNo] || [], forecastByAccount[a.accountNo] || [], transfersByAccount[a.accountNo] || [], pvByAccount[a.accountNo] || [], today, next7, paidApSet, transferInfoByRef, paidArKeys)),
+    [accounts, checksByAccount, forecastByAccount, transfersByAccount, pvByAccount, today, next7, paidApSet, transferInfoByRef, paidArKeys]
   );
 
   /* ── Totals across all accounts ── */
@@ -2118,6 +2498,71 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
     if (toast) toast('ยกเลิกแผนจ่าย ' + aps.length + ' รายการแล้ว');
   };
 
+  /* ── AR: วางประมาณการรับเงินหลายใบพร้อมกัน → สร้าง forecast "รับ" (AMOUNT บวก) ──
+   * REF_DOC = เลขที่ IV (อ่านง่าย/อ้างอิง) · IV_ID = id ของแถวใบแจ้งหนี้ = คีย์จับคู่จริง */
+  const handleBulkPlanAR = (rows, opts) => {
+    if (!setData || !rows.length) return;
+    const payDate = (opts && opts.payDate) || today;
+    const bankAc  = (opts && opts.bankAc) || '';
+    const ts = Date.now();
+    const newRows = rows.map((r, i) => ({
+      id: 'ar-' + ts + '-' + i, DATE: today, PAYMENT_DATE: payDate, EXPENSE_TYPE: 'AR',
+      DESCRIPTION: 'รับ ' + (r.projectName && r.projectName !== '—' ? r.projectName : (r.jobNo || 'ใบแจ้งหนี้')) + (r.ivNo ? ' (' + r.ivNo + ')' : ''),
+      JOB_NO: r.jobNo || null, PROJECT_NAME: (r.projectName && r.projectName !== '—') ? r.projectName : null,
+      AMOUNT: String(Math.abs(r.net)),            // ★ ค่าบวก = เงินเข้า (AP เป็นค่าลบ)
+      Bank_AC: bankAc || null, STATUS: 'PLANNED',
+      CATEGORY: null, IS_ACCRUED: null, NOTE: null,
+      ACTUAL_AMOUNT: null, ACTUAL_DATE: null, REF_DOC: r.ivNo || null, BOOKED_AT: null, CFS_ACTIVITY: null,
+      IV_ID: r.id || null,
+    }));
+    setData(prev => ({ ...prev, forecastEntries: [...(prev.forecastEntries || []), ...newRows] }));
+    if (toast) toast('วางประมาณการรับ ' + rows.length + ' ใบ → ' + fmtDate(payDate));
+  };
+
+  /* AR: เลื่อนวันคาดรับ (แก้เฉพาะ PAYMENT_DATE ของแผนที่ผูกไว้ · ไม่แตะบัญชี/ยอด)
+   * อัปเดตในที่ด้วย id ของ forecast (คง id เดิม) + ข้ามงวดที่รับเงินจริงแล้ว */
+  const handleBulkRescheduleAR = (rows, opts) => {
+    if (!setData || !rows.length) return;
+    const payDate = (opts && opts.payDate) || today;
+    const ids = new Set(rows.map(r => r.plan && r.plan.id).filter(Boolean));
+    if (!ids.size) return;
+    setData(prev => ({
+      ...prev,
+      forecastEntries: (prev.forecastEntries || []).map(f => {
+        if (!ids.has(f.id)) return f;
+        const isActual = (f.ACTUAL_AMOUNT != null && f.ACTUAL_AMOUNT !== '') || f.STATUS === 'ACTUAL';
+        if (isActual) return f;                    // รับเงินจริงแล้ว — ไม่เลื่อน
+        return { ...f, PAYMENT_DATE: payDate };
+      }),
+    }));
+    if (toast) toast('เลื่อนวันคาดรับ ' + rows.length + ' ใบ → ' + fmtDate(payDate));
+  };
+
+  /* AR: ยกเลิกแผนรับ → ลบ forecast ที่ผูกไว้ (เก็บงวดที่รับเงินจริงแล้วเสมอ) */
+  const handleBulkUnplanAR = (rows) => {
+    if (!setData || !rows.length) return;
+    const ids = new Set(rows.map(r => r.plan && r.plan.id).filter(Boolean));
+    if (!ids.size) return;
+    if (!window.confirm('ยกเลิกแผนรับเงิน ' + rows.length + ' ใบ?\n(ลบรายการประมาณการรับที่ยังไม่รับเงินจริง)')) return;
+    const dropIds = [];
+    setData(prev => ({
+      ...prev,
+      forecastEntries: (prev.forecastEntries || []).filter(f => {
+        if (!ids.has(f.id)) return true;
+        const isActual = (f.ACTUAL_AMOUNT != null && f.ACTUAL_AMOUNT !== '') || f.STATUS === 'ACTUAL';
+        if (!isActual) dropIds.push(f.id);
+        return isActual;                           // รับจริงแล้ว = เก็บ ; เป็นแผนล้วน = ลบ
+      }),
+    }));
+    // เกราะกัน mass-delete ใน pushDiff ปัด deleteIds ทิ้งเงียบ ๆ เมื่อลบเกิน max(8, 50% ของตาราง)
+    //   → ลบเยอะตามเจตนาผู้ใช้ต้องยิง forceDeleteRows ตาม ไม่งั้นแถวค้าง server แล้วเด้งกลับ
+    const total = (raw.forecastEntries || []).length;
+    if (dropIds.length > Math.max(8, total * 0.5) && WTPData.forceDeleteRows) {
+      WTPData.forceDeleteRows('forecastEntries', dropIds);
+    }
+    if (toast) toast('ยกเลิกแผนรับเงิน ' + rows.length + ' ใบแล้ว');
+  };
+
   /* เลือกประเภท (cf_category) ที่ AP → เขียนกลับ payables (push ขึ้น Sheet) */
   const handleSetApCategory = (ap, code) => {
     if (!setData) return;
@@ -2275,6 +2720,19 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
         onEdit={(obj) => setEditTransfer(obj)}
         canEdit={canEdit}
       />
+
+      {/* AR — ใบแจ้งหนี้คงค้าง: วางแผนว่าเงินจะเข้าบัญชีไหน วันไหน */}
+      {arList.length > 0 && (
+        <BDArPanel
+          arList={arList}
+          bankAccounts={accounts}
+          today={today}
+          onBulkPlan={handleBulkPlanAR}
+          onBulkReschedule={handleBulkRescheduleAR}
+          onBulkUnplan={handleBulkUnplanAR}
+          canEdit={canEdit}
+        />
+      )}
 
       {/* AP — เจ้าหนี้คงค้างให้เลือกจ่าย */}
       {apList.length > 0 && (
