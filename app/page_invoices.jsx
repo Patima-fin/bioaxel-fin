@@ -318,6 +318,11 @@ function InvoicesPage({ data, setData, toast }) {
   const [openCol, setOpenCol]       = ivState(null); // colKey ของ dropdown ที่เปิดอยู่
   const [fullscreen, setFullscreen] = ivState(false); // ขยายตารางเต็มจอ
   const [showDiag, setShowDiag]     = ivState(false); // diagnostic panel
+  const [bulkMode, setBulkMode]     = ivState(false); // โหมดติ๊กเลือกหลายใบ (เพื่อลบ)
+  const [selected, setSelected]     = ivState(() => new Set()); // id ใบที่ติ๊กไว้
+
+  const canEditPage   = window.WTPAuth ? window.WTPAuth.can('canEdit')   : true;
+  const canDeletePage = window.WTPAuth ? window.WTPAuth.can('canDelete') : true;
 
   const { projectByCode, financeByCode } = ivMemo(() => WTPData.buildLookups(data), [data.projects, data.debtLedger]);
 
@@ -521,17 +526,61 @@ function InvoicesPage({ data, setData, toast }) {
       }
     }
   };
-  const remove = (id) => {
-    if (!confirm('ยืนยันการลบใบแจ้งหนี้นี้?')) return;
-    setData(d => ({ ...d, invoices: d.invoices.filter(iv => iv.id !== id) }));
-    setDetail(null);
-    toast('ลบใบแจ้งหนี้แล้ว');
+  // ── ลบใบแจ้งหนี้ (รองรับหลายใบ) ────────────────────────────────────────────
+  // ⚠️ data_supabase.pushDiff มีเกราะกัน mass-delete: ถ้า diff สั่งลบ > max(8, 50%)
+  //    ของทั้งตาราง มันจะ "ปัด deleteIds ทิ้งเงียบ ๆ" → แถวค้างบน server แล้วเด้งกลับ
+  //    มาตอน sync รอบถัดไป. ลบเยอะจริงตามเจตนาผู้ใช้ → ต้องยิง forceDeleteRows ช่วย.
+  const removeInvoices = (ids, opts) => {
+    const idList = (Array.isArray(ids) ? ids : [ids]).filter(x => x != null && x !== '');
+    if (!idList.length) return;
+    const idSet = new Set(idList.map(String));
+    const victims = (data.invoices || []).filter(iv => idSet.has(String(iv.id)));
+    const paidCount = victims.filter(iv => iv.status === 'paid').length;
+    if (!(opts && opts.skipConfirm)) {
+      const lines = [
+        idList.length === 1 ? 'ยืนยันการลบใบแจ้งหนี้นี้?' : `ยืนยันการลบใบแจ้งหนี้ ${idList.length} ใบ?`,
+      ];
+      if (paidCount) lines.push(`\n⚠️ มีใบที่ "รับเงินแล้ว" ${paidCount} ใบ — ใบเสร็จรับเงิน (receipts) ที่ผูกไว้จะยังอยู่ ยอดรับเงินในรายงานจึงไม่เปลี่ยน`);
+      lines.push('\nลบแล้วกู้คืนไม่ได้');
+      if (!confirm(lines.join('\n'))) return;
+    }
+    let updatedData;
+    setData(d => {
+      updatedData = { ...d, invoices: (d.invoices || []).filter(iv => !idSet.has(String(iv.id))) };
+      return updatedData;
+    });
+    setDetail(prev => (prev && idSet.has(String(prev.id))) ? null : prev);
+    setSelected(prev => {
+      const next = new Set(prev);
+      idSet.forEach(x => next.delete(x));
+      idList.forEach(x => next.delete(x));
+      return next;
+    });
+    if (updatedData) {
+      try { WTPData.save(updatedData); } catch (_) {}
+      if (WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updatedData), 0);
+    }
+    // เกราะ mass-delete จะกินคำสั่งลบชุดใหญ่ → ยิงลบตรงซ้ำอีกที (idempotent)
+    const total = (data.invoices || []).length;
+    if (WTPData.forceDeleteRows && total >= 10 && idList.length > Math.max(8, total * 0.5)) {
+      setTimeout(() => { try { WTPData.forceDeleteRows('invoices', idList); } catch (_) {} }, 60);
+    }
+    toast(idList.length === 1 ? 'ลบใบแจ้งหนี้แล้ว' : `ลบใบแจ้งหนี้แล้ว ${idList.length} ใบ`);
   };
+  const remove = (id) => removeInvoices([id]);
+
+  const toggleSelectOne = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const newInvoice = () => setDetail({
     id: null,
-    ivNo: '', jobNo: data.projects[0]?.code || '', period: 1,
-    invoiceDate: data.meta.asOf, balance: 0,
+    // jobNo ว่างไว้ให้เลือกเอง (เดิม default = โครงการแรกในลิสต์ → ผูกผิดโครงการง่าย)
+    // invoiceDate = วันนี้จริง ไม่ใช่ data.meta.asOf (ค่า seed ค้างใน prod)
+    ivNo: '', jobNo: '', period: 1,
+    invoiceDate: new Date().toISOString().slice(0, 10), balance: 0,
     status: 'pending_inspection', expectedReceive: '',
     contactName: '', contactPhone: '',
     invType: 'P',
@@ -600,8 +649,21 @@ function InvoicesPage({ data, setData, toast }) {
             title="ใบแจ้งหนี้คงค้าง (IV Outstanding)"
           />
           <PrintButton />
-          {(window.WTPAuth ? window.WTPAuth.can('canEdit') : true) && (
-            <button className="btn btn-ghost" onClick={() => setShowImport(true)}><Icon name="upload" size={14} /> วาง RAW_IV_OUTSTANDING</button>
+          {canEditPage && (
+            <button className="btn btn-primary" onClick={() => setShowImport(true)}
+              title="เพิ่มใบแจ้งหนี้ — อัปโหลด/ลากไฟล์ RAW_IV_OUTSTANDING หรือกรอกเองทีละใบ">
+              <Icon name="plus" size={14} /> เพิ่มใบแจ้งหนี้
+            </button>
+          )}
+          {canDeletePage && (
+            <button className="btn btn-ghost"
+              onClick={() => { setBulkMode(m => !m); setSelected(new Set()); }}
+              title={bulkMode ? 'ออกจากโหมดเลือก' : 'ติ๊กเลือกหลายใบเพื่อลบ (เช่น ใบที่ยกเลิก/เลิกใช้แล้ว)'}
+              style={bulkMode
+                ? { background: 'var(--bad)', color: '#fff', border: '1px solid var(--bad)' }
+                : { background: '#fff5f5', color: '#c53030', border: '1px solid #fc8181' }}>
+              <Icon name="trash" size={14} /> {bulkMode ? 'ออกจากโหมดเลือก' : 'เลือกลบ'}
+            </button>
           )}
           <button className="btn btn-ghost" onClick={() => setShowDiag(true)}
             title="ตรวจสอบการเชื่อมโยงข้อมูล project/debt → IV">
@@ -633,6 +695,19 @@ function InvoicesPage({ data, setData, toast }) {
               ทั้งหมด {rows.length} ใบ · ค้างชำระ {counts.outstanding} · ติดปัญหา {counts.issue}
             </span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {canDeletePage && (
+            <button onClick={() => { setBulkMode(m => !m); setSelected(new Set()); }}
+              title={bulkMode ? 'ออกจากโหมดเลือก' : 'ติ๊กเลือกหลายใบเพื่อลบ'}
+              style={{
+                borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                background: bulkMode ? 'var(--bad)' : '#fff5f5',
+                color: bulkMode ? '#fff' : '#c53030',
+                border: `1px solid ${bulkMode ? 'var(--bad)' : '#fc8181'}`,
+              }}>
+              🗑 {bulkMode ? 'ออกจากโหมดเลือก' : 'เลือกลบ'}
+            </button>
+          )}
           <button onClick={() => setFullscreen(false)}
             style={{ background: '#1e4fbd', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 4 }}>
@@ -640,6 +715,7 @@ function InvoicesPage({ data, setData, toast }) {
             </svg>
             ออกจากเต็มจอ
           </button>
+          </div>
         </div>
       )}
 
@@ -810,12 +886,45 @@ function InvoicesPage({ data, setData, toast }) {
         </div>
       )}
 
+      {bulkMode && canDeletePage && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '6px 12px', marginBottom: 8, fontSize: 12,
+          background: '#fff5f5', border: '1px solid #fc8181', borderRadius: 8, color: '#c53030',
+        }}>
+          <strong>🗑 โหมดเลือกลบ</strong>
+          <span style={{ color: 'var(--ink-600)' }}>
+            คลิกที่แถวเพื่อติ๊ก/ยกเลิก · ติ๊กหัวตารางเพื่อเลือกทั้งหมดที่กรองอยู่ ({sorted.length} ใบ) · แล้วกด "ลบที่เลือก" ด้านล่าง
+          </span>
+          <button onClick={() => { setBulkMode(false); setSelected(new Set()); }}
+            style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid #fc8181', color: '#c53030', borderRadius: 6, padding: '2px 10px', cursor: 'pointer', fontSize: 11.5 }}>
+            ออกจากโหมด
+          </button>
+        </div>
+      )}
+
       <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: fullscreen ? 'calc(100vh - 140px)' : 'min(480px, calc(100vh - 400px))' }}>
         <table className="tbl tbl-compact" style={{ tableLayout: 'fixed', width: '100%', minWidth: fullscreen ? 0 : 940 }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
             <tr>
-              <IvColHeader label="Job No."         sortKey="jobNo"           colKey="jobNo"           sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  82 : 76}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
+              {bulkMode && canDeletePage && (
+                <th style={{ width: 34, textAlign: 'center', padding: '6px 4px' }}>
+                  <input type="checkbox"
+                    checked={sorted.length > 0 && sorted.every(r => selected.has(r.id))}
+                    ref={el => { if (el) {
+                      const some = sorted.some(r => selected.has(r.id));
+                      const all  = sorted.length > 0 && sorted.every(r => selected.has(r.id));
+                      el.indeterminate = some && !all;
+                    } }}
+                    onChange={() => {
+                      const all = sorted.length > 0 && sorted.every(r => selected.has(r.id));
+                      setSelected(all ? new Set() : new Set(sorted.map(r => r.id)));
+                    }}
+                    title="เลือกทั้งหมดที่แสดงอยู่" style={{ cursor: 'pointer' }} />
+                </th>
+              )}
+              <IvColHeader label="Job No."         sortKey="jobNo"           colKey="jobNo"         sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  82 : 76}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="เลข IV"          sortKey="ivNo"            colKey="ivNo"            sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  98 : 92}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="วันที่ IV"        sortKey="invoiceDate"     colKey="invoiceDate"     sort={sort} sortToggle={toggle} align="center" width={fullscreen ?  92 : 84}  colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
               <IvColHeader label="ชื่อโครงการ"      sortKey="projectName"     colKey="projectName"     sort={sort} sortToggle={toggle} align="center"             colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={rows} />
@@ -830,7 +939,15 @@ function InvoicesPage({ data, setData, toast }) {
           <tbody>
             {sorted.length === 0 && <tr><td colSpan={11} className="muted" style={{ padding: 36, textAlign: 'center' }}>ไม่พบใบแจ้งหนี้</td></tr>}
             {sorted.map(iv => (
-              <tr key={iv.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(iv)}>
+              <tr key={iv.id}
+                style={{ cursor: 'pointer', background: (bulkMode && selected.has(iv.id)) ? 'color-mix(in oklch, var(--bad) 9%, transparent)' : undefined }}
+                onClick={() => bulkMode ? toggleSelectOne(iv.id) : setDetail(iv)}>
+                {bulkMode && canDeletePage && (
+                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', padding: '6px 4px' }}>
+                    <input type="checkbox" checked={selected.has(iv.id)}
+                      onChange={() => toggleSelectOne(iv.id)} style={{ cursor: 'pointer' }} />
+                  </td>
+                )}
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <span style={{ fontFamily: 'ui-monospace', fontWeight: 700, color: 'var(--brand-700)', fontSize: 12.5 }}>{iv.jobNo}</span>
                 </td>
@@ -926,7 +1043,7 @@ function InvoicesPage({ data, setData, toast }) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4}>รวม ({sorted.length} ใบ)</td>
+              <td colSpan={(bulkMode && canDeletePage) ? 5 : 4}>รวม ({sorted.length} ใบ)</td>
               <td className="num strong">{fmtNum(sorted.reduce((s,r)=>s+(Number(r.balance)||0), 0), 0)}</td>
               <td></td>
               <td className="num" style={{ color: 'var(--bad)' }}>-{fmtNum(sorted.reduce((s,r)=>s+(Number(r.debt)||0), 0), 0)}</td>
@@ -938,10 +1055,35 @@ function InvoicesPage({ data, setData, toast }) {
         </div>
       </div>
 
+      {/* ── แถบลบหลายใบ (ลอยล่างจอ) — โผล่เมื่อติ๊กอย่างน้อย 1 ใบ ─────────────── */}
+      {bulkMode && canDeletePage && selected.size > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--ink-900, #10243f)', color: '#fff', borderRadius: 12,
+          padding: '10px 14px 10px 20px', boxShadow: '0 12px 32px rgba(15,36,77,0.28)',
+          display: 'flex', alignItems: 'center', gap: 14, zIndex: 950,
+          minWidth: 340, maxWidth: 'min(620px, calc(100vw - 32px))',
+        }}>
+          <div style={{ flex: 1, fontSize: 13 }}>
+            เลือกไว้ <strong>{selected.size}</strong> ใบ
+            <span style={{ opacity: .7, marginLeft: 8, fontSize: 11.5 }}>
+              รวม {fmtNum(rows.filter(r => selected.has(r.id)).reduce((s, r) => s + (Number(r.balance) || 0), 0), 0)} ฿
+            </span>
+          </div>
+          <button className="btn btn-ghost" onClick={() => setSelected(new Set())}
+            style={{ color: '#fff', background: 'transparent', border: '1px solid rgba(255,255,255,0.25)' }}>ยกเลิก</button>
+          <button className="btn" onClick={() => removeInvoices([...selected])}
+            style={{ background: 'var(--bad)', color: '#fff', border: '1px solid var(--bad)' }}>
+            <Icon name="trash" size={14} /> ลบที่เลือก ({selected.size})
+          </button>
+        </div>
+      )}
+
       <InvoiceDetailModal
         iv={detail}
         onClose={() => setDetail(null)}
         onSave={save}
+        onDelete={canDeletePage ? remove : null}
         bankAccounts={data.bankAccounts}
         projects={data.projects}
         financeByCode={financeByCode}
@@ -965,22 +1107,40 @@ function InvoicesPage({ data, setData, toast }) {
         open={showImport}
         onClose={() => setShowImport(false)}
         existing={data.invoices}
-        onImport={({ newRows, patchRows }) => {
+        canDelete={canDeletePage}
+        onManualAdd={() => { setShowImport(false); newInvoice(); }}
+        onImport={({ newRows, patchRows, deleteIds }) => {
+          const delIds = (deleteIds || []).filter(x => x != null);
+          const delSet = new Set(delIds.map(String));
+          if (delIds.length && !confirm(`จะลบใบแจ้งหนี้ ${delIds.length} ใบที่ไม่มีในไฟล์ออกจากระบบ — ลบแล้วกู้คืนไม่ได้ ยืนยันไหม?`)) return;
+          let updatedData;
           setData(d => {
             let invoices = d.invoices;
             if (patchRows.length > 0) {
               const patchById = Object.fromEntries(patchRows.map(p => [p.id, p]));
               invoices = invoices.map(iv => patchById[iv.id] ? { ...iv, ...patchById[iv.id] } : iv);
             }
+            if (delSet.size > 0) invoices = invoices.filter(iv => !delSet.has(String(iv.id)));
             if (newRows.length > 0) {
               invoices = [...newRows.map(r => ({ ...r, id: WTPData.newId() })), ...invoices];
             }
-            return { ...d, invoices };
+            updatedData = { ...d, invoices };
+            return updatedData;
           });
+          if (updatedData) {
+            try { WTPData.save(updatedData); } catch (_) {}
+            if (WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updatedData), 0);
+          }
+          // เกราะ mass-delete (ดู removeInvoices) — ลบชุดใหญ่ต้องยิงตรงช่วย
+          const total = (data.invoices || []).length;
+          if (WTPData.forceDeleteRows && delIds.length && total >= 10 && delIds.length > Math.max(8, total * 0.5)) {
+            setTimeout(() => { try { WTPData.forceDeleteRows('invoices', delIds); } catch (_) {} }, 60);
+          }
           setShowImport(false);
           const msgs = [];
-          if (newRows.length) msgs.push(`นำเข้าใบใหม่ ${newRows.length} ใบ`);
-          if (patchRows.length) msgs.push(`อัปเดตข้อมูล ${patchRows.length} ใบ`);
+          if (newRows.length)   msgs.push(`เพิ่มใบใหม่ ${newRows.length} ใบ`);
+          if (patchRows.length) msgs.push(`อัปเดต ${patchRows.length} ใบ`);
+          if (delIds.length)    msgs.push(`ลบ ${delIds.length} ใบ`);
           toast(msgs.join(' · ') || 'ไม่มีการเปลี่ยนแปลง');
         }}
       />
@@ -1396,7 +1556,7 @@ function IvAmountInput({ value, onChange }) {
 // ────────────────────────────────────────────────────────────────────────────
 // Detail modal: landscape split — read-only system data (left) + tracking (right)
 // ────────────────────────────────────────────────────────────────────────────
-function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, financeByCode, projectByCode }) {
+function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, projects, financeByCode, projectByCode }) {
   const [draft, setDraft]                 = ivState(iv);
   const [newLog, setNewLog]               = ivState({ date: new Date().toISOString().slice(0, 10), note: '' });
   const [saveError, setSaveError]         = ivState('');
@@ -1452,6 +1612,10 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
   const removeLog = (idx) => setDraft(d => ({ ...d, followUps: d.followUps.filter((_, i) => i !== idx) }));
 
   const handleSave = () => {
+    if (isNew && !String(draft.ivNo || '').trim()) {
+      setSaveError('กรุณากรอก "เลขที่ IV"');
+      return;
+    }
     if (isPaid && (!ar || !ar.amount)) {
       setSaveError('กรุณากรอก "จำนวนเงินที่ได้รับจริง" เนื่องจากสถานะเป็น "รับชำระแล้ว"');
       return;
@@ -1517,7 +1681,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
   return (
     <Modal
       open={!!iv}
-      title={isNew ? 'IV ใหม่' : (
+      title={isNew ? '＋ เพิ่มใบแจ้งหนี้ทีละใบ' : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <Badge kind={s.badge}>{s.label}</Badge>
           <span style={{ fontFamily: 'ui-monospace', fontWeight: 700, color: 'var(--brand-700)', fontSize: 13 }}>{draft.jobNo || '—'}</span>
@@ -1534,6 +1698,13 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
       maxWidth={920}
       onClose={onClose}
       footer={<>
+        {!isNew && onDelete && (
+          <button className="btn btn-ghost" onClick={() => onDelete(draft.id)}
+            title="ลบใบแจ้งหนี้นี้ออกจากระบบ (เช่น ยกเลิก/ออกใบใหม่แทน)"
+            style={{ marginRight: 'auto', color: 'var(--bad)', border: '1px solid color-mix(in oklch, var(--bad) 40%, transparent)' }}>
+            <Icon name="trash" size={14} /> ลบใบนี้
+          </button>
+        )}
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
         <button className="btn btn-primary" onClick={handleSave}><Icon name="check" size={14} /> บันทึก</button>
       </>}
@@ -1550,6 +1721,10 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
       {isNew ? (
         /* ── NEW INVOICE: compact single-column editable ─────────────────── */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11.5, color: 'var(--ink-500)', background: 'var(--ink-50,#f7f8fa)', border: '1px solid var(--ink-100,#e6eaf0)', borderRadius: 7, padding: '6px 10px' }}>
+            กรอกอย่างน้อย <strong>เลขที่ IV</strong> + <strong>Balance</strong> · เลือก Job no เพื่อดึงชื่อโครงการ/ภาระหนี้/ผู้รับโอนสิทธิ์ให้อัตโนมัติ
+            (ลูกหนี้อื่นๆ ที่ไม่ใช่โครงการ → เลือกประเภท "O" แล้วพิมพ์ชื่อรายการเอง)
+          </div>
           <div className="field"><label>Job no</label>
             <select className="select input" value={draft.jobNo || ''} onChange={(e) => set('jobNo', e.target.value)}>
               <option value="">— เลือก —</option>
@@ -1583,6 +1758,14 @@ function InvoiceDetailModal({ iv, onClose, onSave, bankAccounts, projects, finan
           <div className="field"><label>ชื่อผู้ติดต่อ</label><input className="input" value={draft.contactName || ''} onChange={(e) => set('contactName', e.target.value)} placeholder="เช่น คุณสมหญิง" /></div>
           <div className="field"><label>เบอร์โทร</label><input className="input" value={draft.contactPhone || ''} onChange={(e) => set('contactPhone', e.target.value)} placeholder="0XX-XXX-XXXX" /></div>
           <div className="field"><label>วันที่คาดว่าจะได้รับเงิน</label><input className="input" type="date" value={draft.expectedReceive || ''} onChange={(e) => set('expectedReceive', e.target.value)} /></div>
+          <div className="field" style={{ gridColumn: 'span 2' }}><label>ชื่อโครงการ / รายการ</label>
+            <input className="input" value={draft.projectName || ''} onChange={(e) => set('projectName', e.target.value)}
+              placeholder={project ? (project['พื้นที่'] || project.name || '') : 'ว่างไว้ได้ถ้าเลือก Job no แล้ว'} />
+          </div>
+          <div className="field"><label>ลูกค้า / เจ้าของงาน</label><input className="input" value={draft.customer || ''} onChange={(e) => set('customer', e.target.value)} placeholder="เช่น อบต.บ้านนา" /></div>
+          <div className="field" style={{ gridColumn: '1 / -1' }}><label>หมายเหตุ</label>
+            <input className="input" value={draft.remark || ''} onChange={(e) => set('remark', e.target.value)} placeholder="เช่น ระบบผลิตน้ำประปา-งวดที่ 2 (60%)" />
+          </div>
         </div>
       ) : (
         /* ── EXISTING INVOICE: flex layout — each field sized to content ─────── */
@@ -2113,9 +2296,109 @@ function DiagStat({ label, value, color }) {
   );
 }
 
-function ImportRawIvModal({ open, onClose, existing, onImport }) {
+/* ─── เครื่องมือเทียบไฟล์นำเข้า ↔ ใบในระบบ ────────────────────────────────────
+ * ⚠️ ของเดิมจับ "อัปเดต" ได้แค่ 2 กรณี: ยอด Balance เปลี่ยน หรือฟิลด์เดิม "ว่าง"
+ *    แล้วไฟล์มีค่า → แก้ชื่อโครงการ/ลูกค้า/วันที่ IV/หมายเหตุในไฟล์แล้วระบบเงียบ
+ *    (ขึ้นว่า "ไม่เปลี่ยน"). ตอนนี้เทียบ "ทุกฟิลด์ที่ไฟล์กรอกมา" ทีละตัว.
+ * ⚠️ คีย์จับคู่ = Job No. (normalize) + เลขที่ IV — ห้ามใช้เลขที่ IV เดี่ยว ๆ
+ *    เพราะ "เลขที่ IV ไม่ unique" (ของจริงมีคนละงานออกเลขซ้ำกัน) → map แบบเดิม
+ *    (ivNo → ใบเดียว) ทำให้ใบที่ 2 ทับใบแรก แล้วอัปเดตผิดใบ/ตกหล่นเงียบ ๆ
+ */
+const IV_IMPORT_DIFF_FIELDS = [
+  { key: 'balance',     label: 'ยอดค้างชำระ', kind: 'money' },
+  { key: 'invoiceDate', label: 'วันที่ IV',    kind: 'date'  },
+  { key: 'jobNo',       label: 'Job No.',      kind: 'job'   },
+  { key: 'productType', label: 'สินค้า' },
+  { key: 'projectName', label: 'ชื่อโครงการ' },
+  { key: 'contractRef', label: 'เลขที่สัญญา' },
+  { key: 'customer',    label: 'ลูกค้า' },
+  { key: 'remark',      label: 'หมายเหตุ' },
+  { key: 'period',      label: 'งวด',         kind: 'num'   },
+  { key: 'invType',     label: 'ประเภทใบ' },
+];
+
+const ivNormText = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+const ivMatchKey = (row) => {
+  const jn = normalizeJobNo(row && row.jobNo).jobNo || '';
+  return jn.toUpperCase() + '|' + ivNormText(row && row.ivNo).toUpperCase();
+};
+// ค่าต่างกันจริงไหม (เทียบตามชนิดข้อมูล — ไม่ใช่ string เปรียบเทียบดิบ)
+function ivFieldDiffers(field, from, to) {
+  if (field.kind === 'money' || field.kind === 'num') {
+    return Math.round((Number(from) || 0) * 100) !== Math.round((Number(to) || 0) * 100);
+  }
+  if (field.kind === 'date') {
+    return String(from || '').slice(0, 10) !== String(to || '').slice(0, 10);
+  }
+  if (field.kind === 'job') {   // INS049-PL กับ INS049 (+productType PL) = ใบเดียวกัน
+    return (normalizeJobNo(from).jobNo || '').toUpperCase() !== (normalizeJobNo(to).jobNo || '').toUpperCase();
+  }
+  return ivNormText(from) !== ivNormText(to);
+}
+
+// fileRows (จาก parseRawIv) + existing (data.invoices) → แผนนำเข้า
+//   new_      = ใบที่ไม่มีในระบบ
+//   updated   = [{ existing, row, changes:[{key,label,kind,from,to}] }]
+//   unchanged = ใบที่ตรงกับไฟล์เป๊ะ
+//   ambiguous = ไฟล์มีเลข IV ที่ระบบมีซ้ำหลายใบ + jobNo ไม่ตรงสักใบ → ไม่เดา ให้คนตัดสิน
+//   missing   = ใบในระบบที่ไม่มีในไฟล์ (อาจเลิกใช้แล้ว → เลือกลบได้)
+function buildIvImportPlan(fileRows, existing) {
+  const byPair = new Map();
+  const byIv   = new Map();
+  (existing || []).forEach(iv => {
+    const pk = ivMatchKey(iv);
+    if (!byPair.has(pk)) byPair.set(pk, iv);
+    const ik = ivNormText(iv.ivNo).toUpperCase();
+    if (!ik) return;
+    if (!byIv.has(ik)) byIv.set(ik, []);
+    byIv.get(ik).push(iv);
+  });
+  const touched   = new Set();          // id ที่ไฟล์ "เอ่ยถึง" แล้ว (ไม่นับเป็น missing)
+  const new_ = [], updated = [], unchanged = [], ambiguous = [];
+  (fileRows || []).forEach(r => {
+    const ik = ivNormText(r.ivNo).toUpperCase();
+    let ex = byPair.get(ivMatchKey(r));
+    if (!ex) {
+      const cands = byIv.get(ik) || [];
+      if (cands.length === 1) ex = cands[0];
+      else if (cands.length > 1) {
+        cands.forEach(c => touched.add(c.id));
+        ambiguous.push({ row: r, candidates: cands });
+        return;
+      }
+    }
+    if (!ex) { new_.push(r); return; }
+    touched.add(ex.id);
+    const present = new Set(r._present || IV_IMPORT_DIFF_FIELDS.map(f => f.key));
+    const changes = [];
+    IV_IMPORT_DIFF_FIELDS.forEach(f => {
+      if (!present.has(f.key)) return;                    // ไฟล์ไม่ได้กรอก → ไม่แตะ
+      if (!ivFieldDiffers(f, ex[f.key], r[f.key])) return;
+      changes.push({ key: f.key, label: f.label, kind: f.kind, from: ex[f.key], to: r[f.key] });
+    });
+    if (changes.length) updated.push({ existing: ex, row: r, changes });
+    else unchanged.push(ex);
+  });
+  const missing = (existing || []).filter(iv => !touched.has(iv.id));
+  return { new_, updated, unchanged, ambiguous, missing };
+}
+
+// แสดงค่าให้อ่านง่ายตามชนิด (ใช้ในตารางเทียบ ก่อน→หลัง)
+function ivFmtDiffVal(kind, v) {
+  if (v == null || v === '') return '—';
+  if (kind === 'money') return fmtNum(Number(v) || 0, 0);
+  if (kind === 'date')  return fmtDate(v) || String(v);
+  if (kind === 'num')   return String(Number(v) === 0 ? 'งวดเดียว' : v);
+  return String(v);
+}
+
+function ImportRawIvModal({ open, onClose, existing, onImport, onManualAdd, canDelete }) {
   const [raw, setRaw] = ivState('');
-  const [parsed, setParsed] = ivState({ all: [], existing: [], updated: [], new_: [] });
+  const [parsed, setParsed] = ivState({ all: [], new_: [], updated: [], unchanged: [], ambiguous: [], missing: [] });
+  const [selNew, setSelNew] = ivState(() => new Set());   // index ของใบใหม่ที่จะนำเข้า
+  const [selUpd, setSelUpd] = ivState(() => new Set());   // id ใบเก่าที่จะอัปเดต
+  const [selDel, setSelDel] = ivState(() => new Set());   // id ใบที่ไม่มีในไฟล์ → เลือกลบ
+  const [openSec, setOpenSec] = ivState({ new_: true, updated: true, missing: false });
   const [fileInfo, setFileInfo] = ivState(null); // { name, sheets, picked }
   const [fileErr, setFileErr]   = ivState('');
   const [helpOpen, setHelpOpen] = ivState(false);
@@ -2184,44 +2467,31 @@ function ImportRawIvModal({ open, onClose, existing, onImport }) {
 
   React.useEffect(() => {
     const rawStr = String(raw == null ? '' : raw);  // raw อาจเป็น null/number จาก XLSX edge case
-    if (!rawStr.trim()) { setParsed({ all: [], existing: [], updated: [], new_: [] }); return; }
-    const all = parseRawIv(rawStr);
-    const existingByIv = Object.fromEntries(existing.map(iv => [iv.ivNo, iv]));
-    const new_ = [];
-    const existingList = [];
-    const updated = [];
-    all.forEach(r => {
-      const ex = existingByIv[r.ivNo];
-      if (!ex) {
-        new_.push(r);
-      } else {
-        const balanceChanged = (ex.balance || 0) !== (r.balance || 0);
-        const needsMetaUpdate = (!ex.projectName && r.projectName) || (!ex.productType && r.productType)
-          || (!ex.remark && r.remark) || (!ex.customer && r.customer);
-        if (balanceChanged || needsMetaUpdate) {
-          updated.push({
-            ...ex,
-            balance: r.balance,
-            projectName: r.projectName || ex.projectName || '',
-            productType: r.productType || ex.productType || '',
-            contractRef: r.contractRef || ex.contractRef || '',
-            remark: r.remark || ex.remark || '',
-            customer: r.customer || ex.customer || '',
-            _oldBalance: ex.balance,
-            _metaUpdated: needsMetaUpdate && !balanceChanged,
-          });
-        } else {
-          existingList.push(ex);
-        }
-      }
-    });
-    setParsed({ all, existing: existingList, updated, new_ });
+    if (!rawStr.trim()) {
+      setParsed({ all: [], new_: [], updated: [], unchanged: [], ambiguous: [], missing: [] });
+      setSelNew(new Set()); setSelUpd(new Set()); setSelDel(new Set());
+      return;
+    }
+    const all  = parseRawIv(rawStr);
+    const plan = buildIvImportPlan(all, existing || []);
+    setParsed({ all, ...plan });
+    // ค่าตั้งต้น: ใบใหม่ = ติ๊กหมด · อัปเดต = ติ๊กหมด "ยกเว้นใบที่รับเงินแล้ว"
+    // (ใบ paid = ปิดจ็อบแล้ว ไฟล์ระบบบัญชีมักยังค้างยอดเดิม → ทับแล้วยอดเพี้ยน)
+    setSelNew(new Set(plan.new_.map((_, i) => i)));
+    setSelUpd(new Set(plan.updated.filter(u => u.existing.status !== 'paid').map(u => u.existing.id)));
+    setSelDel(new Set());   // ลบ = ต้องติ๊กเองเสมอ
+    // dep = [raw] เท่านั้น — `existing` (data.invoices) เปลี่ยน reference ทุกครั้งที่ sync
+    // ใส่ใน dep แล้ว selection ที่ผู้ใช้ติ๊กไว้จะถูกรีเซ็ตกลางคัน
   }, [raw]);
 
   if (!open) return null;
 
+  const selUpdList = parsed.updated.filter(u => selUpd.has(u.existing.id));
+  const selNewList = parsed.new_.filter((_, i) => selNew.has(i));
+  const totalOps   = selNewList.length + selUpdList.length + selDel.size;
+
   const importNow = () => {
-    const newRows = parsed.new_.map(r => ({
+    const newRows = selNewList.map(r => ({
       ivNo: r.ivNo, jobNo: r.jobNo, invoiceDate: r.invoiceDate,
       balance: r.balance, period: r.period === 0 ? 0 : (r.period || 1),
       productType: r.productType || '',
@@ -2233,26 +2503,60 @@ function ImportRawIvModal({ open, onClose, existing, onImport }) {
       contactName: '', contactPhone: '',
       followUps: [], actualReceive: null,
     }));
-    const patchRows = parsed.updated.map(r => ({
-      id: r.id,
-      balance: r.balance,
-      projectName: r.projectName || '',
-      productType: r.productType || '',
-      contractRef: r.contractRef || '',
-      invType:     r.invType || 'P',
-      remark: r.remark || '',
-      customer: r.customer || '',
-    }));
-    onImport({ newRows, patchRows });
+    // patch = "เฉพาะฟิลด์ที่ต่างจริง" (ไม่ทับทั้งแถว) → ข้อมูลที่คนกรอกเองในระบบ
+    // (ผู้ติดต่อ/วันคาดรับ/สถานะ/ประวัติติดตาม) ไม่ถูกไฟล์ล้าง
+    const patchRows = selUpdList.map(u => {
+      const p = { id: u.existing.id };
+      u.changes.forEach(c => { p[c.key] = u.row[c.key]; });
+      return p;
+    });
+    onImport({ newRows, patchRows, deleteIds: [...selDel] });
     setRaw('');
+  };
+
+  const toggleIn = (setFn) => (key) => setFn(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const toggleNew = toggleIn(setSelNew);
+  const toggleUpd = toggleIn(setSelUpd);
+  const toggleDel = toggleIn(setSelDel);
+
+  // หัวข้อ section แบบพับได้ + ติ๊กเลือกทั้งหมด
+  const SecHead = ({ id, title, count, color, bg, bd, hint, allKeys, sel, setSel }) => {
+    const isOpen = !!openSec[id];
+    const all = allKeys.length > 0 && allKeys.every(k => sel.has(k));
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
+        background: bg, border: `1px solid ${bd}`, borderRadius: 7, marginBottom: 6, marginTop: 10,
+      }}>
+        {allKeys.length > 0 && (
+          <input type="checkbox" checked={all}
+            ref={el => { if (el) { const some = allKeys.some(k => sel.has(k)); el.indeterminate = some && !all; } }}
+            onChange={() => setSel(all ? new Set() : new Set(allKeys))}
+            style={{ cursor: 'pointer' }} title="เลือก/ไม่เลือกทั้งหมดในกลุ่มนี้" />
+        )}
+        <button type="button" onClick={() => setOpenSec(o => ({ ...o, [id]: !o[id] }))}
+          style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, color, fontWeight: 700, fontSize: 12.5 }}>
+          {isOpen ? '▾' : '▸'} {title} <span style={{ opacity: .75 }}>({count})</span>
+          {hint && <span style={{ fontWeight: 400, color: 'var(--ink-500)', fontSize: 11, marginLeft: 6 }}>{hint}</span>}
+        </button>
+        {allKeys.length > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>เลือก {allKeys.filter(k => sel.has(k)).length}/{allKeys.length}</span>
+        )}
+      </div>
+    );
   };
 
   return (
     <Modal
       open={open}
+      maxWidth={900}
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span>นำเข้าใบแจ้งหนี้คงค้างจากระบบ</span>
+          <span>เพิ่มใบแจ้งหนี้</span>
           <button type="button" onClick={() => setHelpOpen(o => !o)}
             title={helpOpen ? 'ซ่อนคำอธิบาย' : 'ดูคำอธิบาย / คอลัมน์ที่รองรับ'}
             aria-label="help"
@@ -2270,11 +2574,12 @@ function ImportRawIvModal({ open, onClose, existing, onImport }) {
       onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
-        <button className="btn btn-primary" disabled={parsed.new_.length === 0 && parsed.updated.length === 0} onClick={importNow}>
+        <button className="btn btn-primary" disabled={totalOps === 0} onClick={importNow}>
           <Icon name="upload" size={14} /> นำเข้า
-          {parsed.new_.length > 0 && ` ${parsed.new_.length} ใบใหม่`}
-          {parsed.new_.length > 0 && parsed.updated.length > 0 && ' ·'}
-          {parsed.updated.length > 0 && ` อัปเดต ${parsed.updated.length} ใบ`}
+          {selNewList.length > 0 && ` ${selNewList.length} ใบใหม่`}
+          {selNewList.length > 0 && selUpdList.length > 0 && ' ·'}
+          {selUpdList.length > 0 && ` อัปเดต ${selUpdList.length} ใบ`}
+          {selDel.size > 0 && ` · ลบ ${selDel.size} ใบ`}
         </button>
       </>}
     >
@@ -2288,7 +2593,30 @@ function ImportRawIvModal({ open, onClose, existing, onImport }) {
             <strong>proj_dpt</strong> (หรือ refcode), <strong>invno</strong>, <strong>invdate</strong>, <strong>Balance</strong>, <strong>remark</strong>, <strong>Customer</strong>, <strong>invtype</strong>
           </div>
           <div>📆 งวด (period) จะดึงจาก <strong>remark</strong> อัตโนมัติ เช่น "งวดที่ 2" → period = 2</div>
-          <div>🔁 ระบบจะเปรียบเทียบกับใบในตาราง — เฉพาะใบที่ <strong>ไม่ซ้ำ</strong> จะถูกนำเข้า</div>
+          <div>🔁 ระบบเทียบกับใบในตารางด้วย <strong>Job No. + เลขที่ IV</strong> → แยกเป็น "ใบใหม่ / ต้องอัปเดต / ไม่เปลี่ยน" ให้ติ๊กเลือกก่อนนำเข้า</div>
+          <div>✏️ อัปเดต = เขียนทับ <strong>เฉพาะช่องที่ต่างจริง</strong> — ผู้ติดต่อ · วันคาดรับเงิน · สถานะ · ประวัติติดตาม ที่คีย์ในระบบไม่ถูกล้าง</div>
+        </div>
+      )}
+
+      {/* ── ทางลัด: ไม่มีไฟล์ → กรอกเองใบเดียว ──────────────────────────── */}
+      {onManualAdd && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+          padding: '8px 12px', marginBottom: 10, borderRadius: 8,
+          background: 'var(--ink-50, #f7f8fa)', border: '1px solid var(--ink-100, #e6eaf0)',
+        }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-600)' }}>
+            📄 มีใบเดียว / ไม่มีไฟล์?
+          </span>
+          <button type="button" onClick={onManualAdd}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '4px 11px', borderRadius: 14, cursor: 'pointer',
+              background: '#fff', color: 'var(--brand-700)',
+              border: '1.5px solid var(--brand-400, #6f9ded)', fontWeight: 600, fontSize: 11.5,
+            }}>
+            <Icon name="plus" size={12} /> เพิ่มเองทีละใบ
+          </button>
         </div>
       )}
 
@@ -2408,43 +2736,167 @@ refcode\tinvno\tinvdate\tBalance\tremark\tCustomer
       {/* Preview */}
       {String(raw == null ? '' : raw).trim() && (
         <div style={{ marginTop: 14 }}>
-          <div className="grid grid-3" style={{ marginBottom: 10 }}>
+          <div className="grid grid-4" style={{ marginBottom: 4 }}>
             <div style={{ padding: 10, borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ใบใหม่ (จะนำเข้า)</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ใบใหม่</div>
               <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--good)' }}>{parsed.new_.length}</div>
             </div>
             <div style={{ padding: 10, borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a' }}>
-              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ใบเก่า — อัปเดต</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>มีอัปเดต</div>
               <div style={{ fontSize: 22, fontWeight: 700, color: 'oklch(60% 0.16 75)' }}>{parsed.updated.length}</div>
-              <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>
-                {parsed.updated.filter(r => !r._metaUpdated).length > 0 && `${parsed.updated.filter(r => !r._metaUpdated).length} มูลค่า`}
-                {parsed.updated.filter(r => r._metaUpdated).length > 0 && ` ${parsed.updated.filter(r => r._metaUpdated).length} ข้อมูลโครงการ`}
-              </div>
             </div>
             <div style={{ padding: 10, borderRadius: 8, background: '#f1f5f9', border: '1px solid var(--line)' }}>
-              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ใบเก่า — ไม่เปลี่ยน</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-700)' }}>{parsed.existing.length}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ไม่เปลี่ยน</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-700)' }}>{parsed.unchanged.length}</div>
+            </div>
+            <div style={{ padding: 10, borderRadius: 8, background: '#fff5f5', border: '1px solid #fed7d7' }}>
+              <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>ไม่มีในไฟล์</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--bad)' }}>{parsed.missing.length}</div>
             </div>
           </div>
 
-          {parsed.new_.length > 0 && (
-            <div className="card" style={{ padding: 0, overflow: 'auto', maxHeight: 240 }}>
-              <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--line)', fontSize: 12, fontWeight: 600, background: '#f8fafc' }}>ใบที่จะนำเข้า</div>
-              <table className="tbl" style={{ fontSize: 12 }}>
-                <thead><tr><th>Job no</th><th>IV no</th><th>Date</th><th style={{ textAlign: 'right' }}>Balance</th><th style={{ textAlign: 'center' }}>งวด</th></tr></thead>
-                <tbody>
-                  {parsed.new_.map((r, i) => (
-                    <tr key={i}>
-                      <td style={{ fontFamily: 'ui-monospace' }}>{r.jobNo}</td>
-                      <td style={{ fontFamily: 'ui-monospace' }}>{r.ivNo}</td>
-                      <td>{fmtDate(r.invoiceDate)}</td>
-                      <td className="num">{fmtNum(r.balance, 0)}</td>
-                      <td style={{ textAlign: 'center' }}>{r.period === 0 ? 'งวดเดียว' : (r.period || 1)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* ── ใบซ้ำเลข IV — ระบบไม่เดาให้ ────────────────────────────── */}
+          {parsed.ambiguous.length > 0 && (
+            <div style={{
+              marginTop: 10, padding: '8px 12px', fontSize: 12, lineHeight: 1.6,
+              background: '#fffaf0', border: '1px solid #f6ad55', borderLeft: '3px solid #dd6b20',
+              borderRadius: 7, color: 'var(--ink-700)',
+            }}>
+              <strong>⚠️ ข้าม {parsed.ambiguous.length} แถว — เลขที่ IV ซ้ำในระบบ</strong>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-600)' }}>
+                {parsed.ambiguous.slice(0, 4).map(a => a.row.ivNo).join(', ')}
+                {parsed.ambiguous.length > 4 && ` …อีก ${parsed.ambiguous.length - 4}`}
+                {' '}— ระบบมีใบเลขนี้หลายใบและ Job No. ในไฟล์ไม่ตรงสักใบ จึงไม่เดาว่าจะอัปเดตใบไหน
+                (เติมคอลัมน์ jobno/proj_dpt ในไฟล์ให้ตรง หรือแก้ทีละใบในตาราง)
+              </div>
             </div>
+          )}
+
+          {/* ── ใบใหม่ ───────────────────────────────────────────────── */}
+          {parsed.new_.length > 0 && (
+            <>
+              <SecHead id="new_" title="ใบใหม่ — จะเพิ่มเข้าระบบ" count={parsed.new_.length}
+                color="#276749" bg="#f0fdf4" bd="#bbf7d0"
+                allKeys={parsed.new_.map((_, i) => i)} sel={selNew} setSel={setSelNew} />
+              {openSec.new_ && (
+                <div className="card" style={{ padding: 0, overflow: 'auto', maxHeight: 240 }}>
+                  <table className="tbl" style={{ fontSize: 12 }}>
+                    <thead><tr>
+                      <th style={{ width: 32 }}></th><th>Job no</th><th>IV no</th><th>วันที่</th>
+                      <th style={{ textAlign: 'right' }}>Balance</th><th style={{ textAlign: 'center' }}>งวด</th>
+                    </tr></thead>
+                    <tbody>
+                      {parsed.new_.map((r, i) => (
+                        <tr key={i} onClick={() => toggleNew(i)} style={{ cursor: 'pointer', opacity: selNew.has(i) ? 1 : 0.45 }}>
+                          <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={selNew.has(i)} onChange={() => toggleNew(i)} style={{ cursor: 'pointer' }} />
+                          </td>
+                          <td style={{ fontFamily: 'ui-monospace' }}>{r.jobNo || '—'}</td>
+                          <td style={{ fontFamily: 'ui-monospace' }}>{r.ivNo}</td>
+                          <td>{fmtDate(r.invoiceDate)}</td>
+                          <td className="num">{fmtNum(r.balance, 0)}</td>
+                          <td style={{ textAlign: 'center' }}>{r.period === 0 ? 'งวดเดียว' : (r.period || 1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── ใบเก่าที่มีอัปเดต — เทียบ ก่อน → หลัง รายช่อง ──────────── */}
+          {parsed.updated.length > 0 && (
+            <>
+              <SecHead id="updated" title="มีอัปเดต — จะเขียนทับเฉพาะช่องที่ต่าง" count={parsed.updated.length}
+                color="#b45309" bg="#fffbeb" bd="#fde68a"
+                hint={parsed.updated.some(u => u.existing.status === 'paid') ? '· ใบที่รับเงินแล้วไม่ติ๊กให้อัตโนมัติ' : ''}
+                allKeys={parsed.updated.map(u => u.existing.id)} sel={selUpd} setSel={setSelUpd} />
+              {openSec.updated && (
+                <div className="card" style={{ padding: 0, overflow: 'auto', maxHeight: 300 }}>
+                  <table className="tbl" style={{ fontSize: 12 }}>
+                    <thead><tr>
+                      <th style={{ width: 32 }}></th><th style={{ width: 90 }}>Job no</th><th style={{ width: 110 }}>IV no</th>
+                      <th>สิ่งที่เปลี่ยน (เดิม → ใหม่)</th>
+                    </tr></thead>
+                    <tbody>
+                      {parsed.updated.map(u => {
+                        const on = selUpd.has(u.existing.id);
+                        const isPaid = u.existing.status === 'paid';
+                        return (
+                          <tr key={u.existing.id} onClick={() => toggleUpd(u.existing.id)}
+                            style={{ cursor: 'pointer', opacity: on ? 1 : 0.5 }}>
+                            <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" checked={on} onChange={() => toggleUpd(u.existing.id)} style={{ cursor: 'pointer' }} />
+                            </td>
+                            <td style={{ fontFamily: 'ui-monospace' }}>{u.existing.jobNo || '—'}</td>
+                            <td style={{ fontFamily: 'ui-monospace' }}>
+                              {u.existing.ivNo}
+                              {isPaid && <div style={{ fontSize: 10, color: 'var(--good)', fontWeight: 700 }}>✓ รับเงินแล้ว</div>}
+                            </td>
+                            <td>
+                              {u.changes.map(c => (
+                                <div key={c.key} style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', lineHeight: 1.55 }}>
+                                  <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-500)', minWidth: 74 }}>{c.label}</span>
+                                  <span style={{ color: 'var(--ink-400)', textDecoration: 'line-through', fontSize: 11.5 }}>{ivFmtDiffVal(c.kind, c.from)}</span>
+                                  <span style={{ color: 'var(--ink-300)' }}>→</span>
+                                  <span style={{ fontWeight: 700, color: c.kind === 'money' ? 'var(--brand-700)' : 'var(--ink-800)', fontSize: 11.5 }}>{ivFmtDiffVal(c.kind, c.to)}</span>
+                                </div>
+                              ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── ใบในระบบที่ไม่มีในไฟล์ — เลือกลบได้ (ต้องติ๊กเอง) ─────────── */}
+          {parsed.missing.length > 0 && (
+            <>
+              <SecHead id="missing" title="ไม่มีในไฟล์นี้" count={parsed.missing.length}
+                color={canDelete ? '#c53030' : 'var(--ink-600)'} bg="#fff5f5" bd="#fed7d7"
+                hint={canDelete ? '· ติ๊กเฉพาะใบที่เลิกใช้แล้วเพื่อลบทิ้ง' : '· (ต้องเป็นผู้จัดการจึงลบได้)'}
+                allKeys={canDelete ? parsed.missing.map(iv => iv.id) : []} sel={selDel} setSel={setSelDel} />
+              {openSec.missing && (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--ink-500)', padding: '0 2px 6px', lineHeight: 1.6 }}>
+                    ⚠️ ถ้าไฟล์นี้เป็นข้อมูล<strong>บางส่วน</strong> (เช่น export เฉพาะบางเดือน) ใบพวกนี้ไม่ได้แปลว่าเลิกใช้ — ปล่อยว่างไว้ ไม่ต้องติ๊ก
+                  </div>
+                  <div className="card" style={{ padding: 0, overflow: 'auto', maxHeight: 240 }}>
+                    <table className="tbl" style={{ fontSize: 12 }}>
+                      <thead><tr>
+                        <th style={{ width: 32 }}></th><th>Job no</th><th>IV no</th><th>ชื่อโครงการ</th>
+                        <th style={{ textAlign: 'right' }}>ยอดค้าง</th><th style={{ textAlign: 'center' }}>สถานะ</th>
+                      </tr></thead>
+                      <tbody>
+                        {parsed.missing.map(iv => {
+                          const meta = WTPData.IV_STATUS_META[iv.status] || { label: iv.status || '—', badge: 'b-gray' };
+                          const on = selDel.has(iv.id);
+                          return (
+                            <tr key={iv.id} onClick={() => canDelete && toggleDel(iv.id)}
+                              style={{ cursor: canDelete ? 'pointer' : 'default', background: on ? 'color-mix(in oklch, var(--bad) 9%, transparent)' : undefined }}>
+                              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                <input type="checkbox" checked={on} disabled={!canDelete}
+                                  onChange={() => toggleDel(iv.id)} style={{ cursor: canDelete ? 'pointer' : 'not-allowed' }} />
+                              </td>
+                              <td style={{ fontFamily: 'ui-monospace' }}>{iv.jobNo || '—'}</td>
+                              <td style={{ fontFamily: 'ui-monospace' }}>{iv.ivNo}</td>
+                              <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{iv.projectName || '—'}</td>
+                              <td className="num">{fmtNum(iv.balance, 0)}</td>
+                              <td style={{ textAlign: 'center' }}><Badge kind={meta.badge}>{meta.label}</Badge></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
           )}
         </div>
       )}
@@ -2517,7 +2969,6 @@ function parseRawIv(text) {
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(delim);
     const remark  = (cols[idx('remark')] || cols[idx('vch_remark')] || '').trim();
-    const rawPeriod = parseNum(cols[idx('period')]);
 
     // ลำดับ priority: jobno column → parse จาก proj_dpt
     let jobNo       = (cols[idx('jobno')] || cols[idx('job no')] || '').trim();
@@ -2533,31 +2984,67 @@ function parseRawIv(text) {
       if (!contractRef) contractRef = parsed.contractRef;
     }
 
-    const rawIvType = (cols[idx('invtype')] || cols[idx('inv_type')] || cols[idx('inv type')] || '').toString().trim().toUpperCase();
-    const row = {
-      jobNo,
-      productType,
-      projectName,
-      contractRef,
-      ivNo:        (cols[idx('invno')] || cols[idx('iv no')] || cols[idx('iv_no')] || '').trim(),
-      invoiceDate: normalizeDate((cols[idx('invdate')] || cols[idx('inv date')] || cols[idx('date')] || '').trim()),
-      balance:     parseNum(cols[idx('balance')]),
+    const row = finalizeIvImportRow({
+      jobNo, productType, projectName, contractRef,
+      ivNoCell:     cols[idx('invno')] || cols[idx('iv no')] || cols[idx('iv_no')] || '',
+      invDateCell:  cols[idx('invdate')] || cols[idx('inv date')] || cols[idx('date')] || '',
+      balanceCell:  idx('balance') >= 0 ? cols[idx('balance')] : '',
       remark,
-      customer:    (cols[idx('customer')] || '').trim(),
-      overDue:     parseNum(cols[idx('over_due')]),
-      period:      rawPeriod || extractPeriodFromRemark(remark),
-      invType:     rawIvType === 'O' ? 'O' : 'P',
-    };
+      customerCell: cols[idx('customer')] || '',
+      overDueCell:  cols[idx('over_due')] || '',
+      periodCell:   idx('period') >= 0 ? cols[idx('period')] : '',
+      invTypeCell:  cols[idx('invtype')] || cols[idx('inv_type')] || cols[idx('inv type')] || '',
+    });
     if (row.ivNo) out.push(row);
   }
   return out;
+}
+
+// ── finalizeIvImportRow: ค่าดิบต่อคอลัมน์ → row มาตรฐาน + ธง `_present` ───────
+// ⚠️ `_present` = "คอลัมน์ไหนที่ไฟล์กรอกค่ามาจริง" — ตอนเทียบว่าใบเก่า "มีอัปเดตไหม"
+//    จะดูเฉพาะฟิลด์ใน _present เท่านั้น. ไฟล์ไม่มีคอลัมน์นั้น / เว้นว่าง = "ไม่แตะของเดิม"
+//    ไม่ใช่ "สั่งล้างค่าเป็น 0/ว่าง" (ไม่งั้นไฟล์ที่ไม่มีคอลัมน์ Balance จะล้างยอดทั้งตาราง).
+function finalizeIvImportRow(v) {
+  const remark      = (v.remark == null ? '' : String(v.remark)).trim();
+  const hasCell     = (c) => c != null && String(c).trim() !== '';
+  const invoiceDate = normalizeDate((v.invDateCell == null ? '' : String(v.invDateCell)).trim());
+  const ivType      = (v.invTypeCell == null ? '' : String(v.invTypeCell)).trim().toUpperCase();
+  const hasPeriod   = hasCell(v.periodCell);
+  const row = {
+    jobNo:       v.jobNo || '',
+    productType: v.productType || '',
+    projectName: v.projectName || '',
+    contractRef: v.contractRef || '',
+    ivNo:        (v.ivNoCell == null ? '' : String(v.ivNoCell)).trim(),
+    invoiceDate,
+    balance:     parseNum(v.balanceCell),
+    remark,
+    customer:    (v.customerCell == null ? '' : String(v.customerCell)).trim(),
+    overDue:     parseNum(v.overDueCell),
+    period:      hasPeriod ? parseNum(v.periodCell) : extractPeriodFromRemark(remark),
+    invType:     ivType === 'O' ? 'O' : 'P',
+  };
+  const present = [];
+  if (hasCell(v.balanceCell))               present.push('balance');
+  if (invoiceDate)                          present.push('invoiceDate');
+  if (row.jobNo)                            present.push('jobNo');
+  if (row.productType)                      present.push('productType');
+  if (row.projectName)                      present.push('projectName');
+  if (row.contractRef)                      present.push('contractRef');
+  if (row.customer)                         present.push('customer');
+  if (remark)                               present.push('remark');
+  // งวด: เชื่อเฉพาะเมื่อมีคอลัมน์ period หรือ remark เขียนงวดไว้ชัด
+  // (remark ทั่วไปที่ไม่มีคำว่า "งวด" → extractPeriodFromRemark คืน 1 เสมอ = เดา ไม่ใช่ข้อมูล)
+  if (hasPeriod || /งวดที่\s*\d+|งวดเดียว/.test(remark)) present.push('period');
+  if (ivType === 'O' || ivType === 'P')     present.push('invType');
+  row._present = present;
+  return row;
 }
 function normalizeIvRow(r) {
   const get = (...keys) => { for (const k of keys) { const lk = k.toLowerCase(); for (const rk of Object.keys(r)) { if (rk.toLowerCase() === lk) return r[rk]; } } return null; };
   const ivNo = (get('invno', 'iv no', 'iv_no') || '').toString().trim();
   if (!ivNo) return null;
   const remark = (get('remark', 'vch_remark') || '').toString().trim();
-  const rawPeriod = parseNum(get('period'));
   // jobNo: priority = jobNo column → parse จาก proj_dpt
   let jobNo       = (get('jobno', 'job no') || '').toString().trim();
   let productType = (get('producttype', 'product_type') || '').toString().trim();
@@ -2571,21 +3058,17 @@ function normalizeIvRow(r) {
     if (!projectName) projectName = parsed.projectName;
     if (!contractRef) contractRef = parsed.contractRef;
   }
-  const rawIvType = (get('invtype', 'inv_type', 'inv type') || '').toString().trim().toUpperCase();
-  return {
-    jobNo,
-    productType,
-    projectName,
-    contractRef,
-    ivNo,
-    invoiceDate: normalizeDate((get('invdate', 'inv date', 'date') || '').toString().trim()),
-    balance:     parseNum(get('balance')),
+  return finalizeIvImportRow({
+    jobNo, productType, projectName, contractRef,
+    ivNoCell:     ivNo,
+    invDateCell:  get('invdate', 'inv date', 'date'),
+    balanceCell:  get('balance'),
     remark,
-    customer:    (get('customer') || '').toString().trim(),
-    overDue:     parseNum(get('over_due')),
-    period:      rawPeriod || extractPeriodFromRemark(remark),
-    invType:     rawIvType === 'O' ? 'O' : 'P',
-  };
+    customerCell: get('customer'),
+    overDueCell:  get('over_due'),
+    periodCell:   get('period'),
+    invTypeCell:  get('invtype', 'inv_type', 'inv type'),
+  });
 }
 // ดึงเลขงวดจาก remark เช่น "งวดที่ 2 (60%)" → 2
 function extractPeriodFromRemark(remark) {
