@@ -56,6 +56,20 @@ function getMonthWeeksMonday(year, month) {
     buckets.push({ from: day, to: end, partial: end - day < 6 });
     day += 7;
   }
+  // ── บังคับ 1 เดือน ≤ 5 สัปดาห์ (W1–W5) ────────────────────────────────
+  //   เดือนที่ขึ้นต้นปลายสัปดาห์ (เช่น ส.ค. 2026 เริ่มวันเสาร์) จะแตกเป็น 6 ช่อง
+  //   โดยช่องท้ายเป็นเศษ 1–3 วัน → การ์ด/ตารางตกบรรทัด สรุปเดือนหลุดคนละแถว
+  //   → ยุบเศษท้ายเข้าช่องก่อนหน้า (ส.ค. 2026: W5 = 24-31 แทน W5 24-30 + W6 31)
+  //   ครอบวันที่ 1 ถึงสิ้นเดือนครบเสมอ · W1 สั้นได้ (1–6 วัน) · W5 ยาวได้ถึง 9 วัน
+  //   ⚠️ index สัปดาห์ (0..4) ถูกเก็บไว้ในล็อกแผนรับเงิน IV (`.wk`) → ดู IVPLAN_SEG /
+  //      ivPlanBucketsFromLock ที่รองรับ index เก่าที่ชี้เลย W5 (ยุบลงช่องสุดท้าย)
+  const MAX_WEEKS = 5;
+  while (buckets.length > MAX_WEEKS) {
+    const tail = buckets.pop();
+    const prev = buckets[buckets.length - 1];
+    prev.to = tail.to;
+    prev.partial = (prev.to - prev.from) < 6;
+  }
   buckets.forEach((b, i) => {
     b.idx = i;
     b.label = 'W' + (i + 1);
@@ -277,8 +291,14 @@ function ivIsProject(iv) {
 //     อ่าน v2 ก่อน · ไม่มีค่อย fallback ไป 'ivPlan' เดิม (เดือนเก่าที่ล็อกไว้ก่อนเปลี่ยน)
 //     แยก namespace เพื่อไม่ให้คีย์เก่าที่ลบไม่ลง (เกราะ mass-delete ของ pushDiff อาจปัดคำสั่งลบทิ้ง)
 //     ปนกับคีย์ใหม่แล้วนับซ้ำ
-const IVPLAN_SEG = 'ivPlan2';
-const IVPLAN_SEG_LEGACY = 'ivPlan';
+//   ★ namespace v3 (2026-08-17) — กติกาแบ่งสัปดาห์เปลี่ยน: 1 เดือน ≤ 5 สัปดาห์
+//     (เศษท้ายเดือนถูกยุบเข้า W5 — ดู MAX_WEEKS ใน getMonthWeeksMonday) ⇒ index `.wk`
+//     ที่ freeze ไว้ใต้กติกาเดิมอาจชี้ช่องที่ไม่มีแล้ว (เช่น wk=5 ของ ส.ค. 2026 = วันที่ 31)
+//     → บัมพ์ namespace เพื่อให้ "เดือนปัจจุบัน" ถูกจับ baseline ใหม่อัตโนมัติตอนเปิดหน้า
+//     (auto-capture ทำเฉพาะเดือนปัจจุบัน) · เดือนเก่าอ่าน namespace เดิมต่อได้ และ index
+//     ที่เลยช่วงถูกยุบลงสัปดาห์สุดท้ายให้ตรงกับกติกาใหม่ (ivPlanBucketsFromLock)
+const IVPLAN_SEG = 'ivPlan3';
+const IVPLAN_SEG_OLDER = ['ivPlan2', 'ivPlan'];   // namespace เก่า (ใหม่→เก่า) — อ่าน fallback + ลบตอนล็อกใหม่
 const IVPLAN_LOCKED_AT = '__lockedAt';
 // ivNo อาจมีอักขระแปลก — sanitize ให้ปลอดภัย (ใช้ '.' เป็นตัวคั่นใน key)
 function sanitizeIvKey(ivNo) {
@@ -311,7 +331,12 @@ function buildIvLockLookup(invoices) {
 function readIvPlanLock(ovPrefix) {
   const cur = readIvPlanLockSeg(ovPrefix, IVPLAN_SEG);
   if (cur.locked) return cur;
-  return readIvPlanLockSeg(ovPrefix, IVPLAN_SEG_LEGACY);
+  // ไล่ namespace เก่าจากใหม่→เก่า (v2 แล้วค่อย v1) — เดือนที่ล็อกไว้ก่อนเปลี่ยนกติกายังอ่านได้
+  for (const seg of IVPLAN_SEG_OLDER) {
+    const old = readIvPlanLockSeg(ovPrefix, seg);
+    if (old.locked) return old;
+  }
+  return cur;   // ไม่เคยล็อกเลย → คืนผลของ namespace ปัจจุบัน (locked=false)
 }
 function readIvPlanLockSeg(ovPrefix, seg) {
   const prefix = `${ovPrefix}.${seg}.`;
@@ -330,11 +355,22 @@ function readIvPlanLockSeg(ovPrefix, seg) {
   const items = Object.keys(byIv).map(safe => ({ safe, net: byIv[safe].net || 0, wk: byIv[safe].wk || 0 }));
   return { locked: lockedAt != null, lockedAt, items, seg };
 }
+// index สัปดาห์ที่ freeze ไว้ → ช่องของกติกาปัจจุบัน (≤ 5 สัปดาห์)
+//   ⚠️ ล็อกที่จับไว้ก่อน 2026-08-17 อาจมี wk=5 (เดือนที่เคยแตกเป็น 6 ช่อง) → ช่องนั้นถูกยุบ
+//   เข้าสัปดาห์สุดท้ายแล้ว จึงต้องยุบ index ตามกัน ไม่ใช่ทิ้ง (ทิ้ง = ยอดแผนหายเงียบ ๆ)
+function ivPlanWeekIdx(wk, weekCount) {
+  const n = Number(wk);
+  if (!(n >= 0) || !weekCount) return -1;
+  return Math.min(n, weekCount - 1);
+}
 // รวม baseline ที่ freeze เป็น bucket รายสัปดาห์ (ป้อนแทน forecast สด)
 function ivPlanBucketsFromLock(items, weekCount) {
   const arr = [];
   for (let i = 0; i < weekCount; i++) arr.push(0);
-  (items || []).forEach(it => { if (it.wk >= 0 && it.wk < weekCount) arr[it.wk] += (it.net || 0); });
+  (items || []).forEach(it => {
+    const w = ivPlanWeekIdx(it.wk, weekCount);
+    if (w >= 0) arr[w] += (it.net || 0);
+  });
   return arr;
 }
 // YYYYMMDD (int) → 'DD/MM/YYYY' (ค.ศ.) สำหรับแสดงผล badge
@@ -1181,7 +1217,8 @@ function CashFlowDashboard({ data, setData, toast }) {
       ivPlanLock.items.forEach(it => {
         const iv = bySafe[it.safe];
         if (iv && ivIsPaid(iv)) return;   // รับแล้ว → ไม่นับในยอดคาดที่เหลือ
-        if (it.wk >= 0 && it.wk < weeks.length) forecastRemaining[it.wk] += (it.net || 0);
+        const w = ivPlanWeekIdx(it.wk, weeks.length);   // ★ ต้องยุบ index แบบเดียวกับ ivPlanBucketsFromLock
+        if (w >= 0) forecastRemaining[w] += (it.net || 0);
       });
     } else {
       forecastRemaining = liveForecast.slice();   // ยังไม่ล็อก → liveForecast ตัด paid อยู่แล้ว
@@ -1314,10 +1351,10 @@ function CashFlowDashboard({ data, setData, toast }) {
     // เคลียร์คีย์เก่าของเดือนนี้ที่ไม่อยู่ในชุดใหม่ (IV ที่ถูกลบ/เปลี่ยนเลขที่ไปแล้ว)
     //   + คีย์ namespace เดิม (ivPlan) ของเดือนนี้ทั้งหมด — ล็อกใหม่แล้วของเก่าไม่ใช้อีก
     //   (ถ้าเกราะ mass-delete ปัดคำสั่งลบทิ้ง ก็ยังปลอดภัย เพราะ readIvPlanLock อ่าน v2 ก่อน)
-    const legacyPrefix = `${ovPrefix}.${IVPLAN_SEG_LEGACY}.`;
+    const legacyPrefixes = IVPLAN_SEG_OLDER.map(seg => `${ovPrefix}.${seg}.`);
     const all = WTPOverride._load();
     Object.keys(all).forEach(k => {
-      if (k.startsWith(legacyPrefix)) { entries[k] = null; return; }
+      if (legacyPrefixes.some(p => k.startsWith(p))) { entries[k] = null; return; }
       if (!k.startsWith(prefix)) return;
       if (k === `${prefix}${IVPLAN_LOCKED_AT}`) return;   // marker ตั้งใหม่ด้านล่าง
       if (!(k in entries)) entries[k] = null;             // null = ลบ
