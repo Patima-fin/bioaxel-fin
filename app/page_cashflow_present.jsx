@@ -333,6 +333,54 @@
     return (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + yr) : '');
   }
 
+  /* ---------- กระทบยอด STM ↔ งบสรุป: หา "สาเหตุ" ของส่วนต่าง ----------
+   *  สาเหตุอันดับ 1 ที่เจอจริง = ไฟล์ 2 ฝั่งครอบเดือนไม่เท่ากัน — งบสรุปเพิ่มคอลัมน์
+   *  เดือนใหม่แล้ว แต่ชีตรายการยังไม่ได้ต่อรายการเดือนนั้น (หรือกลับกัน) → ส่วนต่าง
+   *  = ยอดสุทธิของเดือนที่ขาดพอดี (เคสจริง 17/08/2026: งบสรุปถึง ก.ค. · STM ถึง มิ.ย.
+   *  → ต่าง 1,147,149 = คอลัมน์ ก.ค. เป๊ะ ๆ). จึงหักเดือนที่ขาด/เกินออกก่อน แล้วที่เหลือ
+   *  (rest) ค่อยโทษการจัดกิจกรรม/หมวด → ป้ายเตือนจะบอกวิธีแก้ตรงจุด ไม่ใช่แค่ 2 ตัวเลข.
+   */
+  function cfpMonthNumOfLabel(lb) {
+    const s = String(lb || '');
+    for (let m = 1; m <= 12; m++) if (CFP_MONTHS_FULL[m] && s.indexOf(CFP_MONTHS_FULL[m]) >= 0) return m;
+    for (let m = 1; m <= 12; m++) if (CFP_MONTHS[m] && s.indexOf(CFP_MONTHS[m]) >= 0) return m;
+    return 0;
+  }
+  function cfpMonthRange(months) {
+    if (!months || !months.length) return '';
+    const a = CFP_MONTHS[months[0]] || months[0], b = CFP_MONTHS[months[months.length - 1]] || months[months.length - 1];
+    return months.length === 1 ? String(a) : (a + '–' + b);
+  }
+  // ช่วงจากป้ายเดือนของงบสรุป — ปีเหมือนกันทั้งคู่ → ตัดปีตัวหน้าออก ("ม.ค. 69–ก.ค. 69" → "ม.ค.–ก.ค. 69")
+  function cfpLabelRange(labels) {
+    if (!labels || !labels.length) return '';
+    if (labels.length === 1) return labels[0];
+    const a = labels[0], b = labels[labels.length - 1];
+    const ya = (a.match(/\d{2,4}\s*$/) || [''])[0].trim(), yb = (b.match(/\d{2,4}\s*$/) || [''])[0].trim();
+    return ((ya && ya === yb) ? a.replace(/\s*\d{2,4}\s*$/, '') : a) + '–' + b;
+  }
+  function cfpNetGap(model) {
+    const s = model.summary; if (!s || s.net == null) return null;
+    const gap = s.net - model.net;
+    if (Math.abs(gap) < 1) return { ok: true, gap: 0 };
+    // แถวสุทธิในงบ → vals รายเดือน (ใช้หายอดของเดือนที่ STM ยังไม่มี)
+    const grand = (s.rows || []).filter(r => /เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(r.label))[0];
+    const stmHas = {}; (model.months || []).forEach(m => { stmHas[m] = true; });
+    const sumHas = {}; const miss = [];
+    (s.monthLabels || []).forEach((lb, i) => {
+      const m = cfpMonthNumOfLabel(lb); if (!m) return;
+      sumHas[m] = true;
+      if (!stmHas[m]) miss.push({ m, label: cfpCeText(lb) || CFP_MONTHS[m], val: (grand && grand.vals) ? (grand.vals[i] || 0) : 0 });
+    });
+    // เดือนที่มีในรายการแต่งบสรุปยังไม่มีคอลัมน์ (กรณีกลับกัน)
+    const extra = Object.keys(sumHas).length
+      ? (model.monthly || []).filter(x => !sumHas[x.m]).map(x => ({ m: x.m, label: CFP_MONTHS[x.m] || String(x.m), val: x.net }))
+      : [];
+    const missSum = miss.reduce((a, x) => a + x.val, 0), extraSum = extra.reduce((a, x) => a + x.val, 0);
+    const explained = missSum - extraSum;            // ส่วนต่างที่อธิบายได้ด้วยเดือนที่ไม่ตรงกัน
+    return { ok: false, gap, miss, extra, missSum, extraSum, explained, rest: gap - explained };
+  }
+
   /* ---------- build model ---------- */
   function cfpBuildModel(stm, summary) {
     const txns = stm.txns || [];
@@ -570,6 +618,38 @@
         <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 4px', color: color || C.ink, letterSpacing: '-.5px' }}>{value}</div>
         {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
+      </div>
+    );
+  }
+  /* ป้ายกระทบยอด STM ↔ งบสรุป (ใต้การ์ด KPI) — ตรง = บรรทัดเดียว, ต่าง = บอกสาเหตุ + วิธีแก้
+   *  บรรทัดแนะนำวิธีแก้เป็น no-print/no-present (ไม่รกตอนพรีเซนต์/ปรินต์ให้ผู้บริหาร) */
+  function CfpReconBadge({ model }) {
+    const g = cfpNetGap(model);
+    if (!g) return null;
+    const wrap = ok => ({ fontSize: 12, color: ok ? C.pos : '#b8860b', marginBottom: 16, padding: '9px 14px', background: ok ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block', maxWidth: '100%', lineHeight: 1.55 });
+    if (g.ok) return <div style={wrap(true)}>✓ STM ตรงกับงบสรุป — สุทธิ {cfpFmtB(model.net)}</div>;
+    const missTxt = g.miss.map(x => x.label).join(', '), extraTxt = g.extra.map(x => x.label).join(', ');
+    const full = Math.abs(g.rest) < 1;                        // เดือนที่ไม่ตรงกันอธิบายส่วนต่างได้ทั้งก้อน
+    const stmRange = cfpMonthRange(model.months), sumRange = cfpLabelRange(model.monthLabels || []);
+    let head, fix;
+    if (g.miss.length && full) {
+      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — งบสรุปมีเดือน ' + missTxt + ' แต่ชีตรายการ (STM) ยังไม่มี';
+      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' ในชีตรายการ (เช่น “รวมทุกบัญชี”) แล้วอัปโหลดไฟล์ใหม่ — หรือถ้าเดือนนั้นยังไม่ปิดงบ ให้ตัดคอลัมน์เดือนนั้นออกจากงบสรุป';
+    } else if (g.miss.length) {
+      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือน ' + missTxt + ' มีในงบสรุปแต่ยังไม่มีในรายการ (อธิบายได้ ' + cfpFmtB(g.explained) + ' · เหลือต่าง ' + cfpFmtB(g.rest) + ')';
+      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' แล้วอัปโหลดใหม่ · ส่วนที่เหลือ ' + cfpFmtB(g.rest) + ' มักมาจากการจัดกิจกรรม/หมวดไม่ตรง — เทียบทีละบรรทัดที่แท็บ 📑 งบกระแสเงินสด → ⚙ จัดหมวด';
+    } else if (g.extra.length) {
+      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — ชีตรายการมีเดือน ' + extraTxt + ' แต่งบสรุปยังไม่มีคอลัมน์เดือนนั้น';
+      fix = 'แก้: อัปเดตชีตงบสรุปให้ครบถึงเดือน ' + extraTxt + ' แล้วอัปโหลดใหม่' + (full ? '' : ' · เหลือต่าง ' + cfpFmtB(g.rest) + ' ให้ดูการจัดหมวดที่แท็บ 📑 → ⚙ จัดหมวด');
+    } else {
+      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือนครอบเท่ากันทั้ง 2 ฝั่ง แต่ยอดสุทธิไม่ตรง';
+      fix = 'แก้: ส่วนต่างมาจากการจัดกิจกรรม/หมวด — เทียบทีละบรรทัดที่แท็บ 📑 งบกระแสเงินสด → ⚙ จัดหมวด (บรรทัดที่ขึ้น ⚠ ต่าง)';
+    }
+    return (
+      <div style={wrap(false)}>
+        <div>{head}</div>
+        <div style={{ fontWeight: 500, opacity: .85, marginTop: 2 }}>STM {cfpFmtB(model.net)}{stmRange ? ' (' + stmRange + ')' : ''} · งบสรุป {cfpFmtB(model.summary.net)}{sumRange ? ' (' + sumRange + ')' : ''}</div>
+        {fix && <div className="no-print no-present" style={{ fontSize: 11, fontWeight: 500, color: '#a8620a', marginTop: 4 }}>{fix}</div>}
       </div>
     );
   }
@@ -1257,9 +1337,7 @@
               <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} sub={watchSub('inv')} />
               <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} sub={watchSub('fin')} />
             </div>
-            {model.summary && model.summary.net != null && (
-              <div style={{ fontSize: 12, color: Math.abs(model.summary.net - model.net) < 1 ? C.pos : '#b8860b', marginBottom: 16, padding: '8px 14px', background: Math.abs(model.summary.net - model.net) < 1 ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block' }}>{Math.abs(model.summary.net - model.net) < 1 ? '✓ STM ตรงกับงบสรุป — สุทธิ ' + cfpFmtB(model.net) : '⚠ STM ' + cfpFmtB(model.net) + ' · งบสรุป ' + cfpFmtB(model.summary.net)}</div>
-            )}
+            <CfpReconBadge model={model} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(370px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
               <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
               <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
