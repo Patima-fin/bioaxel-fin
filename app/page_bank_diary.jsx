@@ -2320,21 +2320,26 @@ function bdGroupTransfers(list) {
 /* โทนสีของใบสรุป — อิงแบรนด์ BIOAXEL (เขียว `--brand-*`) ให้เอกสารที่แคปส่งผู้บริหาร
  * ดูเป็น "ใบสรุปของบริษัท" ไม่ใช่ตารางเปล่า ๆ · แก้สีที่นี่ที่เดียวทั้งใบ */
 const BD_SUM_SKIN = {
-  headGrad:  'linear-gradient(120deg,#1a592f 0%,#2e8b4a 100%)',
+  headGrad:  'linear-gradient(120deg,#1a592f 0%,#2e8b4a 62%,#3f9c5c 100%)',
   brand:     '#2e8b4a',
   brandDeep: '#1a592f',
-  // แถวกลางปล่อยพื้นขาว — สีเหลือแค่ "รางซ้าย" กับตัวเลข (มินิมอล)
-  inTint:    '',        inRail:  '#7cc48f', inText:  '#1f7a45',   // คาดรับเงินเข้า
-  outTint:   '',        outRail: '#e5b78a', outText: '#b4453a',   // ค่าใช้จ่าย
-  catTint:   '',
-  tfTint:    '',        tfRail:  '#cbd5e1',                        // โอนระหว่างบัญชี
-  netTint:   '#f2f9f4', netRail: '#2e8b4a',                        // คงเหลือสุทธิ (แถวสรุป — คงพื้นอ่อนไว้)
-  baseTint:  '#f7fbf8', baseRail: '#c3e2cd',                       // ยอดยกมา
-  totalTint: '',        totalLine: '#e6ebf3',                      // คอลัมน์รวม = เส้นคั่นอย่างเดียว
+  theadTint: '#eef5f0',                                            // แถบหัวตาราง (ธนาคาร)
+  baseTint:  '#e9f6ee', baseRail: '#2e8b4a',                       // เงินคงเหลือใช้ได้
+  inTint:    '',        inRail:  '#2e8b4a', inText:  '#1f7a45',    // คาดรับเงินเข้า (พื้นขาว)
+  outTint:   '#fff7ef', outRail: '#2e8b4a', outText: '#c0392f',    // ค่าใช้จ่าย
+  catTint:   '#fffaf4', catRail: '#2e8b4a',                        // หมวด 1-4
+  tfTint:    '',        tfRail:  '#94a3b8',                        // โอนระหว่างบัญชี (พื้นขาว)
+  netTint:   '#e9f6ee', netRail: '#1a592f',                        // คงเหลือสุทธิ
+  totalTint: '#f2f8f4', totalLine: '#dde9e2',                      // คอลัมน์รวม
   pickBg:    '#eff6ff',                                            // ช่องที่กดดูเฉพาะบัญชี
   guide:     '#eef2f7',
   ink:       '#334155',
 };
+
+/* "SCB 1362684863" → "SCB ···4863" — ใช้กับป้ายคู่โอน (เลขบัญชีเต็มยาวจนตกบรรทัด) */
+function bdShortParty(s) {
+  return String(s || '').replace(/\d{5,}/g, (m) => '···' + m.slice(-4)).replace(/\s+/g, ' ').trim();
+}
 
 /* โลโก้ธนาคารขนาดปรับได้ — ใช้ไฟล์ชุดเดียวกับหน้า Home (`LOGO BANK/*.png` ผ่าน
  * `hpBankBrand`) ไม่ผูกกับคลาส `.hp-bank-logo` ที่ล็อกขนาด 34px
@@ -2622,7 +2627,9 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       <td style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 800 : 700,
                          background: BD_SUM_SKIN.totalTint, borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
                          color: cfg.total < 0 ? '#b4453a' : (cfg.totalColor || '#334155') })}>
-        {cfg.mode === 'plus' ? showNum(cfg.total, 'plus') : fmtMoney(Math.abs(cfg.total))}
+        <span style={{ borderBottom: cfg.dash ? '1px dashed #e6c8b4' : 'none', paddingBottom: cfg.dash ? 1 : 0 }}>
+          {cfg.mode === 'plus' ? showNum(cfg.total, 'plus') : fmtMoney(Math.abs(cfg.total))}
+        </span>
       </td>
     </tr>
   );
@@ -2696,14 +2703,14 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   /* 1) ยอดยกมา — ยอดที่บันทึกไว้ ไม่มีรายการเบื้องหลัง จึงไม่มีลูกศร (แต่มี tooltip บอกเหตุผล) */
   body.push(mainRow({
     key: 'base', label: 'เงินคงเหลือใช้ได้', valOf: r => r.base, total: T.base,
-    tint: SK.baseTint, rail: SK.baseRail, dashColor: '#dbe7e0', labelColor: '#16324a', cellColor: '#16324a',
+    tint: SK.baseTint, rail: SK.baseRail, dashColor: '#bcd9c8', labelColor: '#16324a', cellColor: '#16324a',
     hint: 'ยอดเงินที่บันทึกไว้ล่าสุดของแต่ละบัญชี — เป็นตัวตั้ง ไม่ได้มาจากรายการย่อย จึงกางดูไม่ได้',
   }));
 
   /* 2) คาดรับเงินเข้า → ผู้จ่าย/ลูกค้า → เอกสารรายใบ */
   body.push(mainRow({
     key: 'in', label: 'คาดรับเงินเข้า', valOf: r => r.innReal, total: T.inn,
-    mode: 'plus', tint: SK.inTint, rail: SK.inRail, cellColor: SK.inText, dashColor: '#d7e9de',
+    mode: 'plus', tint: SK.inTint, rail: SK.inRail, cellColor: SK.inText, dashColor: '#bcd9c8',
     expandable: T.inn > 0.005,
   }));
   if ('in' in expand) pushCreditorGroups(body, 'in', pickIn(expand['in']), expand['in'], 1, false, SK.inRail);
@@ -2712,7 +2719,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
    *    ยอดรายหมวดคิดจาก "ลิสต์เดียวกับแถวหลัก" → รวม 4 หมวด = ยอดแถวหลักเสมอ */
   body.push(mainRow({
     key: 'out', label: 'ค่าใช้จ่ายถึงกำหนดชำระ', valOf: r => r.outReal, total: T.out,
-    tint: SK.outTint, rail: SK.outRail, cellColor: SK.outText, dashColor: '#ecd9cd',
+    tint: SK.outTint, rail: SK.outRail, cellColor: SK.outText, dashColor: '#e6c8b4',
     expandable: T.out > 0.005,
   }));
   if ('out' in expand) {
@@ -2732,14 +2739,14 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       const isOpen = (catKey in expandCat);
       const cScope = expandCat[catKey] || scope;
       body.push(detailRow({
-        key: catKey, level: 1, rail: BD_CAT_COLOR[c], tint: SK.catTint,
+        key: catKey, level: 1, rail: SK.catRail, tint: SK.catTint,
         name: BD_CAT_NAME[c], nameColor: SK.ink, totalColor: SK.outText,
-        count: a.entries.length + ' รายการ', byAcct: a.byAcct, total: a.total,
+        count: a.entries.length + ' รายการ', byAcct: a.byAcct, total: a.total, dash: true,
         open: isOpen, scope: expandCat[catKey] || null,
         onToggle: () => toggleCat(catKey, null),
         onCell: (no) => toggleCat(catKey, no),
       }));
-      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true, BD_CAT_COLOR[c]);
+      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true, SK.catRail);
     });
   }
 
@@ -2755,7 +2762,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   }));
   if ('tf' in expand) {
     bdGroupTransfers(pickTf(expand['tf'])).forEach((g, i) => {
-      const name = (g.from && g.to) ? (g.from + ' → ' + g.to) : (g.to ? 'โอนเงินไป ' + g.to : 'รับโอนจาก ' + g.from);
+      const name = (g.from && g.to) ? (bdShortParty(g.from) + ' → ' + bdShortParty(g.to))
+                 : (g.to ? 'โอนเงินไป ' + bdShortParty(g.to) : 'รับโอนจาก ' + bdShortParty(g.from));
       body.push(detailRow({
         key: 'tf#' + i, level: 1, rail: SK.tfRail, tag: bdShortDate(g.date), name: name || 'โอนระหว่างบัญชี',
         byAcct: g.byAcct, total: g.total, mode: 'plus',
@@ -2766,7 +2774,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   /* 5) เงินคงเหลือสุทธิ = ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก */
   body.push(mainRow({
     key: 'net', label: 'เงินคงเหลือสุทธิ', valOf: r => r.net, total: T.net,
-    expandable: true, tint: SK.netTint, rail: SK.netRail, line: '#dce9e2', dashColor: '#cfe0d6',
+    expandable: true, tint: SK.netTint, rail: SK.netRail, line: '#cfe3d7', dashColor: '#bcd9c8',
     labelColor: '#14532d', cellColor: T.net < 0 ? '#b4453a' : '#14532d',
     hint: 'กดเพื่อดูวิธีคิด: ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก',
   }));
@@ -2933,7 +2941,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
             <col style={{ width: sp(150) }} />
           </colgroup>
           <thead>
-            <tr style={{ background: '#fff', borderBottom: '1px solid ' + BD_SUM_SKIN.brand }}>
+            <tr style={{ background: BD_SUM_SKIN.theadTint, borderBottom: '1px solid ' + BD_SUM_SKIN.brand }}>
               <th style={{ textAlign: 'left', padding: pad('10px 12px'), fontSize: fz(11), fontWeight: 700,
                            color: '#7c8a99', letterSpacing: 0.4 }}>ธนาคาร</th>
               {rows.map(r => {
@@ -2953,8 +2961,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
                 );
               })}
               <th style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(12), fontWeight: 800,
-                           color: BD_SUM_SKIN.brandDeep, borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
-                           verticalAlign: 'bottom' }}>รวม</th>
+                           color: BD_SUM_SKIN.brandDeep, background: '#e7f1ea',
+                           borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine, verticalAlign: 'bottom' }}>รวม</th>
             </tr>
           </thead>
           <tbody>{body}</tbody>
@@ -2963,8 +2971,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
 
       {/* ── ท้ายใบ (จุดตัดรูป) ── */}
       <div data-capture-end="1" style={{ padding: pad('10px 14px'),
-                                         borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : '#e2ece6'),
-                                         background: T.net < 0 ? '#fdf8f7' : '#fbfdfc',
+                                         borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : '#cfe3d7'),
+                                         background: T.net < 0 ? '#fdf8f7' : '#f2f9f4',
                                          display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
                                          fontSize: fz(11.5), color: '#4b5f52' }}>
         <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodTx} · ณ {fmtDate(today)}</span>
