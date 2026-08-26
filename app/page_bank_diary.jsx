@@ -779,9 +779,13 @@ function bdVendorCanon(name) {
   var m = s.match(/(?:บริษัท|บมจ\.?|บจก\.?)\s*[\s\S]*?\s*จำกัด(?:\s*\(\s*มหาชน\s*\))?/);
   if (m) return m[0].replace(/\s+/g, ' ').trim();
   s = s.replace(/^(?:จ่าย|ชำระเงิน|ชำระ|รับเงิน|รับ)\s+/, '');
-  s = s.replace(/\s*\[[^\]]*\]\s*$/, '');   // ป้ายท้ายรายการ เช่น "[ตั้งหนี้ลอย]" — ไม่ใช่ส่วนของชื่อเจ้าหนี้
-  s = s.replace(/\s*\([^)]*\)\s*$/, '');
+  // ★ วนตัดวงเล็บ/ป้ายท้ายจน "ไม่เหลือ" — ของจริงห้อยกันหลายก้อน
+  //   เช่น "นางนิตยา ผลพรต (FLOAT-MT7275QT) [ตั้งหนี้ลอย]" (ตัดก้อนเดียว = ชื่อยังรุงรัง → กลายเป็นเจ้าหนี้คนละราย)
+  let prev;
+  do { prev = s; s = s.replace(/\s*[\(\[][^\)\]]*[\)\]]\s*$/, '').trim(); } while (s && s !== prev);
   s = s.replace(/\s*[•|]\s+\S[\s\S]*$/, '');
+  // ★ รหัสเอกสารห้อยท้ายแบบไม่มีวงเล็บ เช่น "ร้านวัสดุทั่วไป FLOAT-MT729J5E"
+  s = s.replace(/\s+(?:FLOAT|APS|AP|PV|IV|CHQ|WS|XL)[-–]?[A-Za-z0-9]{2,}(?:[-\/][A-Za-z0-9]+)*\s*$/i, '');
   return s.trim();
 }
 
@@ -2136,6 +2140,705 @@ function BDArPanel({ arList, bankAccounts, today, onBulkPlan, onBulkReschedule, 
 }
 
 /* ── Main Page ───────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+ * ใบสรุปรอบจ่าย (ประมาณการรายรับ-รายจ่าย) — BDMainSummary
+ *   ตารางเดียว: คอลัมน์ = บัญชีที่เลือก + คอลัมน์รวม · แถว = ยอดยกมา / คาดรับ /
+ *   ค่าใช้จ่ายตามหมวด / โอนระหว่างบัญชี / คงเหลือสุทธิ · กางลึกได้ 3 ชั้น
+ *   (หมวด → เจ้าหนี้ → เอกสารรายใบ) และเซฟเป็นรูปส่งผู้บริหารได้ทันที
+ *   ⚠️ ทุกยอดมาจาก view.items ของ bdBuildAccountView (ตัวเดียวกับการ์ดบัญชี)
+ *      — ห้ามคำนวณเองซ้ำ ไม่งั้นยอดบน/ล่างไม่ตรงกัน
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/* หมวดค่าใช้จ่าย 1-4 — ชุดเดียวกับหน้า Weekly Cashflow (ห้ามคิดชุดใหม่) */
+const BD_CAT_ORDER = [1, 2, 3, 4];
+const BD_CAT_NAME  = { 1: 'ดำเนินงาน', 2: 'โครงการ', 3: 'การเงิน', 4: 'เบ็ดเตล็ด' };
+const BD_CAT_HINT  = {
+  1: 'ค่าใช้จ่ายดำเนินงานรายสัปดาห์',
+  2: 'ค่าใช้จ่ายเกี่ยวกับโครงการและงานติดตั้ง',
+  3: 'ต้นทุนทางการเงินและดอกเบี้ย',
+  4: 'ค่าใช้จ่ายเบ็ดเตล็ดและเงินเดือน',
+};
+const BD_CAT_COLOR = { 1: '#0369a1', 2: '#7c3aed', 3: '#b45309', 4: '#0f766e' };
+
+/* คีย์ override ของหน้านี้ (sync ทั้งทีมผ่าน data.manualOverrides)
+ *   bd.act.<docKey>  = ย้ายเฉพาะเอกสารใบนั้น (เจาะจงสุด ชนะทุกอย่าง)
+ *   bd.actv.<vendor> = ย้ายทุกใบของเจ้าหนี้รายนั้น (ทั้งที่มีและที่จะเข้ามาใหม่)
+ * ⚠️ ห้ามไปแก้ CATEGORY/cf_category ของ forecast/AP — การจัดหมวดที่หน้านี้
+ *    ต้องไม่ทำให้ยอดหน้า Cash Flow / ประมาณการ ขยับ */
+const BD_ACT_KEY  = (docKey) => 'bd.act.'  + docKey;
+const BD_ACTV_KEY = (vendor) => 'bd.actv.' + vendor;
+
+/* docKey ต่อเอกสาร 1 ใบ — ต้องคงที่ข้ามการ sync (ห้ามใช้ index/ลำดับ) */
+function bdDocKey(it) {
+  if (!it) return '';
+  if (it.kind === 'pv') {
+    const no = String(it.ref || (it.raw && it.raw.pvNo) || '').trim();
+    return no ? 'pv:' + no : '';
+  }
+  if (it.kind === 'check') {
+    const d = bdDigits((it.raw && it.raw.checkNo) || '');
+    return d ? 'chq:' + d : '';
+  }
+  if (it.kind === 'forecast') {
+    const f = it.raw || {};
+    if (f.id) return 'fc:' + f.id;
+    const ref = String(f.refDoc || it.refDoc || '').trim();
+    return ref ? 'ap:' + ref : '';
+  }
+  return '';
+}
+
+/* อ่านค่า override หมวด (คืน 0 = ไม่ได้ตั้งไว้) */
+function bdOvCat(key) {
+  if (!key || typeof WTPOverride === 'undefined') return 0;
+  const n = parseInt(WTPOverride.resolve(key, 0), 10);
+  return (n >= 1 && n <= 4) ? n : 0;
+}
+
+/* แถวดิบของ PV (รองรับทั้งใบเดี่ยวและกลุ่มหลาย AP ใน PV ใบเดียว) */
+function bdPvRaw(it) {
+  const r = (it && it.raw) || {};
+  if (r._pvGroup) { const first = (r.items || [])[0] || {}; return first.raw || first; }
+  return r.raw || r;
+}
+
+/* จัดหมวดรายการ 1 บรรทัด — ลำดับตัดสิน (ห้ามสลับ):
+ *   1. override รายใบ  bd.act.<docKey>
+ *   2. override รายเจ้าหนี้  bd.actv.<vendor>
+ *   3. ตัวจัดหมวดหลักของระบบ (categorizeForecastEntry / resolvePvCategory) — ได้ 2/3/4 = ชี้ชัด
+ *   4. ได้ 1 หรือไม่มีตัวจัดหมวด (เช็คจ่ายล่วงหน้าตกมาที่นี่ทุกใบ):
+ *      4.1 ตาราง "เจ้าหนี้ → หมวด" ของ Cash Flow (ลีซ อิท/ลีสซิ่ง = หมวด 3)
+ *      4.2 คำสำคัญกลุ่มการเงิน  4.3 ไม่เข้าเงื่อนไข → หมวด 1
+ * ⚠️ ข้ามข้อ 4 เมื่อไร ค่างวดลีสซิ่งที่จ่ายด้วยเช็คจะตกหมวด "ดำเนินงาน" ทุกใบ */
+function bdRowCat(it, apByNo) {
+  if (!it) return 1;
+  const dk = bdDocKey(it);
+  const ovDoc = dk ? bdOvCat(BD_ACT_KEY(dk)) : 0;
+  if (ovDoc) return ovDoc;
+  const vend = it.creditor || bdVendorCanon(it.title || '');
+  const ovVen = vend ? bdOvCat(BD_ACTV_KEY(vend)) : 0;
+  if (ovVen) return ovVen;
+
+  let sys = 0;
+  try {
+    if (it.kind === 'forecast' && typeof categorizeForecastEntry === 'function') {
+      const f  = it.raw || {};
+      sys = categorizeForecastEntry(f.raw || f);
+    } else if (it.kind === 'pv' && typeof resolvePvCategory === 'function') {
+      const pv    = bdPvRaw(it);
+      const r     = (it.raw) || {};
+      const apNo  = String(r.apNo || (r._pvGroup && (r.items || []).map(x => x.apNo).find(Boolean)) || '').trim();
+      const ap    = (apByNo && apNo && apByNo[apNo]) || null;
+      sys = resolvePvCategory(pv, ap);
+    }
+  } catch (_) { sys = 0; }
+  if (sys >= 2 && sys <= 4) return sys;
+
+  if (typeof cfVendorCat === 'function') {
+    const vc = cfVendorCat(vend || it.title || '');
+    if (vc >= 1 && vc <= 4) return vc;
+  }
+  const text = [vend, it.title, it.sub, it.remark].filter(Boolean).join(' ');
+  if (/ลีสซิ่ง|ลิสซิ่ง|เช่าซื้อ|เงินกู้|เงินต้น|ดอกเบี้ย|ค่าธรรมเนียม|leasing|loan|interest/i.test(text)) return 3;
+  return 1;
+}
+
+/* re-render ทุกครั้งที่มีการเขียน override — ต้องใส่ค่านี้เข้า deps ของ useMemo
+ * ที่คำนวณยอดรายหมวด ไม่งั้น "ย้ายหมวดแล้วยอดไม่ขยับ" */
+function bdUseOverrideTick() {
+  const [n, setN] = React.useState(0);
+  React.useEffect(() => {
+    const h = () => setN(x => x + 1);
+    window.addEventListener('wtp-override-change', h);
+    return () => window.removeEventListener('wtp-override-change', h);
+  }, []);
+  return n;
+}
+
+/* '2026-08-28' → '28 ส.ค.' */
+function bdShortDate(iso) {
+  const d = (typeof parseDateFlexible === 'function') ? parseDateFlexible(iso) : null;
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleDateString('th-TH-u-ca-gregory', { day: 'numeric', month: 'short' });
+}
+
+/* บัญชีที่เลือกเป็นคอลัมน์ (จำในเครื่อง — ไม่ต้อง sync) */
+const BD_SUM_PICK_KEY = 'bio-bd-sum-cols-v1';
+function bdSumLoadPick() {
+  try { const v = JSON.parse(localStorage.getItem(BD_SUM_PICK_KEY) || 'null'); return Array.isArray(v) ? v : []; }
+  catch (_) { return []; }
+}
+function bdSumSavePick(list) {
+  try { localStorage.setItem(BD_SUM_PICK_KEY, JSON.stringify(list || [])); } catch (_) {}
+}
+
+/* จัดกลุ่มรายการตาม "ชื่อเจ้าหนี้/ผู้จ่ายที่ normalize แล้ว" — หลายใบของรายเดียวกัน
+ * ยุบเป็นบรรทัดเดียว แต่ยังกระจายยอดตรงคอลัมน์ธนาคารของแต่ละใบ */
+function bdGroupByCreditor(list) {
+  const m = new Map();
+  (list || []).forEach(e => {
+    const it   = e.it;
+    const name = it.creditor || bdVendorCanon(it.title || '') || it.title || '—';
+    let g = m.get(name);
+    if (!g) g = m.set(name, { key: name, name, date: '', kinds: [], byAcct: {}, total: 0, entries: [] }).get(name);
+    const amt = Math.abs(it.signed);
+    g.entries.push(e);
+    g.byAcct[e.acctNo] = (g.byAcct[e.acctNo] || 0) + amt;
+    g.total += amt;
+    if (g.kinds.indexOf(it.kind) < 0) g.kinds.push(it.kind);
+    if (it.date && (!g.date || it.date < g.date)) g.date = it.date;   // วันของกลุ่ม = ใบที่ครบกำหนดเร็วสุด
+  });
+  return [...m.values()].sort((a, b) => b.total - a.total);
+}
+
+/* จัดกลุ่มขาโอนเป็น "รายการโอน" เดียว (2 ขาของ transferRef เดียวกัน) */
+function bdGroupTransfers(list) {
+  const m = new Map();
+  (list || []).forEach(e => {
+    const it  = e.it;
+    const key = it.ref || (it.date + '|' + it.title);
+    let g = m.get(key);
+    if (!g) g = m.set(key, { key, date: it.date, from: '', to: '', byAcct: {}, total: 0, entries: [] }).get(key);
+    g.entries.push(e);
+    g.byAcct[e.acctNo] = (g.byAcct[e.acctNo] || 0) + it.signed;       // เก็บเครื่องหมาย: เข้า + / ออก −
+    g.total += it.signed;
+    if (it.signed > 0) g.from = String(it.title || '').replace(/^รับโอนจาก\s*/, '');
+    else               g.to   = String(it.title || '').replace(/^โอนเงินไป\s*/, '');
+    if (it.date && (!g.date || it.date < g.date)) g.date = it.date;
+  });
+  return [...m.values()].sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1);
+}
+
+function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }) {
+  const ovTick = bdUseOverrideTick();                     // ★ ต้องอยู่ใน deps ของ rows ไม่งั้นย้ายหมวดแล้วยอดไม่ขยับ
+  const [pick, setPick]           = React.useState(bdSumLoadPick);
+  const [pickOpen, setPickOpen]   = React.useState(false);
+  const [expand, setExpand]       = React.useState({});   // { rowKey: acctNo|null }  แถวหลัก
+  const [expandCat, setExpandCat] = React.useState({});   // { cat:    acctNo|null }  หมวด
+  const [openRow, setOpenRow]     = React.useState({});   // { rowKey: acctNo|null }  เจ้าหนี้
+  const [catMode, setCatMode]     = React.useState(false);
+  const [saving, setSaving]       = React.useState(false);
+  const cardRef = React.useRef(null);
+
+  /* กดซ้ำที่เดิม = ปิดเฉพาะอันนั้น · อันอื่นเปิดค้างได้พร้อมกัน (เก็บเป็นแผนที่ทั้ง 3 ชั้น) */
+  const toggleMap  = (setter) => (key, scope) => setter(cur => {
+    const nx = { ...cur }, v = scope || null;
+    if ((key in nx) && nx[key] === v) delete nx[key]; else nx[key] = v;
+    return nx;
+  });
+  const toggleRow  = toggleMap(setExpand);
+  const toggleCat  = toggleMap(setExpandCat);
+  const toggleCred = toggleMap(setOpenRow);
+
+  const allNos = (views || []).map(v => v.acct.accountNo);
+  const pickedSet = React.useMemo(() => {
+    const valid = (pick || []).filter(n => allNos.indexOf(n) >= 0);
+    return new Set(valid.length ? valid : allNos);
+  }, [pick, allNos.join('|')]);
+  const togglePick = (no) => {
+    const cur = new Set(pickedSet);
+    if (cur.has(no)) { if (cur.size <= 1) return; cur.delete(no); } else cur.add(no);
+    const next = allNos.filter(n => cur.has(n));
+    setPick(next.length === allNos.length ? [] : next);
+    bdSumSavePick(next.length === allNos.length ? [] : next);
+  };
+
+  /* AP index (เลขที่ AP → แถวดิบ) — ให้ PV จัดหมวดได้ตรงกับหน้า Cash Flow */
+  const apByNo = React.useMemo(() => {
+    const m = {};
+    (apList || []).forEach(a => { const k = String(a.vchno || '').trim(); if (k) m[k] = a.raw || a; });
+    return m;
+  }, [apList]);
+
+  /* ── ยอดต่อบัญชี ─────────────────────────────────────────────────────────
+   * ⚠️ โอนระหว่างบัญชีไม่ใช่รายรับ/รายจ่าย — ต้องแยกออกจาก innReal/outReal เสมอ
+   *    ไม่งั้น "คาดรับ"/"ค่าใช้จ่าย" พองขึ้นทั้งที่เงินแค่ย้ายกระเป๋า */
+  const rows = React.useMemo(() => (views || [])
+    .filter(v => pickedSet.has(v.acct.accountNo))
+    .map(v => {
+      const its      = (v.items || []).filter(i => (i.date || '') <= periodEnd);
+      const tfIn     = its.filter(i => i.kind === 'transfer' && i.signed > 0).reduce((s, i) => s + i.signed, 0);
+      const tfOut    = its.filter(i => i.kind === 'transfer' && i.signed < 0).reduce((s, i) => s - i.signed, 0);
+      const innReal  = its.filter(i => i.kind !== 'transfer' && i.signed > 0).reduce((s, i) => s + i.signed, 0);
+      const outItems = its.filter(i => i.kind !== 'transfer' && i.signed < 0);
+      const outReal  = outItems.reduce((s, i) => s - i.signed, 0);
+      const byCat    = { 1: 0, 2: 0, 3: 0, 4: 0 };
+      outItems.forEach(i => { byCat[bdRowCat(i, apByNo)] += -i.signed; });
+      return {
+        acctNo: v.acct.accountNo, acct: v.acct, base: v.base, its,
+        tfIn, tfOut, innReal, outReal, byCat,
+        net: v.base + innReal + tfIn - outReal - tfOut,
+      };
+    }), [views, pickedSet, periodEnd, apByNo, ovTick]);
+
+  const T = React.useMemo(() => {
+    const t = { base: 0, inn: 0, out: 0, tfIn: 0, tfOut: 0, net: 0, cat: { 1: 0, 2: 0, 3: 0, 4: 0 } };
+    rows.forEach(r => {
+      t.base += r.base; t.inn += r.innReal; t.out += r.outReal;
+      t.tfIn += r.tfIn; t.tfOut += r.tfOut; t.net += r.net;
+      BD_CAT_ORDER.forEach(c => { t.cat[c] += r.byCat[c] || 0; });
+    });
+    return t;
+  }, [rows]);
+
+  /* รายการทั้งหมดแบบแบน (ผูกเลขบัญชีไว้กับทุกแถว) */
+  const flat = React.useMemo(() => {
+    const arr = [];
+    rows.forEach(r => r.its.forEach(it => arr.push({ acctNo: r.acctNo, it })));
+    return arr;
+  }, [rows]);
+  const pickIn  = (scope) => flat.filter(e => e.it.kind !== 'transfer' && e.it.signed > 0 && (!scope || e.acctNo === scope));
+  const pickOut = (scope) => flat.filter(e => e.it.kind !== 'transfer' && e.it.signed < 0 && (!scope || e.acctNo === scope));
+  const pickTf  = (scope) => flat.filter(e => e.it.kind === 'transfer' && (!scope || e.acctNo === scope));
+
+  /* ── สเกลอัตโนมัติตามจำนวนคอลัมน์ (2 บัญชีไม่โหวง · 7 บัญชีไม่ล้น) ── */
+  const k   = Math.max(0.88, Math.min(1.24, 1.30 - rows.length * 0.06));
+  const fz  = (px) => Math.round(px * k * 10) / 10;
+  const sp  = (px) => Math.round(px * k);
+  const pad = (css) => String(css).replace(/(\d+(?:\.\d+)?)px/g, (m, d) => sp(parseFloat(d)) + 'px');
+
+  const showNum = (v, mode) => {
+    if (!v || Math.abs(v) < 0.005) return '—';
+    return (v < 0 ? '−' : (mode === 'plus' ? '+' : '')) + fmtMoney(Math.abs(v));
+  };
+  const numTd = (extra) => Object.assign({
+    padding: pad('7px 10px'), textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap', fontSize: fz(12.5),
+  }, extra || {});
+
+  if (!rows.length) return null;   // ไม่มีบัญชีที่เลือก = ไม่ต้องแสดงใบสรุป
+
+  /* ── ย้ายหมวดเอง (override) ────────────────────────────────────────────
+   * 'd:<cat>' = ใบนี้ · 'v:<cat>' = ทุกใบของเจ้าหนี้ · 'clear' = ล้างที่ตั้งเอง
+   * ⚠️ ย้าย "ทุกใบของเจ้าหนี้" ต้องล้าง bd.act.<docKey> ของใบในกลุ่มด้วย
+   *    ไม่งั้นค่ารายใบทับค่ารายเจ้าหนี้ → ดูเหมือนกดไม่ติด */
+  const applyMove = (val, docKeys, vendor) => {
+    if (!val || typeof WTPOverride === 'undefined') return;
+    const ent = {};
+    (docKeys || []).forEach(dk => { if (dk) ent[BD_ACT_KEY(dk)] = null; });
+    if (val === 'clear') {
+      if (vendor) ent[BD_ACTV_KEY(vendor)] = null;
+    } else {
+      const parts = String(val).split(':');
+      const cat   = parseInt(parts[1], 10);
+      if (!(cat >= 1 && cat <= 4)) return;
+      if (parts[0] === 'd') (docKeys || []).forEach(dk => { if (dk) ent[BD_ACT_KEY(dk)] = cat; });
+      else if (parts[0] === 'v' && vendor) ent[BD_ACTV_KEY(vendor)] = cat;
+      else return;
+    }
+    if (!Object.keys(ent).length) return;
+    WTPOverride.setMany(ent);      // 1 setData ต่อการกด 1 ครั้ง (ยิงทีละคีย์ = sync หลายรอบ)
+  };
+
+  /* ป้ายบอกที่มาของหมวด — เห็นตลอดแม้ปิดโหมดจัดหมวด */
+  const ovBadge = (docKeys, vendor) => {
+    const d = (docKeys && docKeys.length === 1) ? bdOvCat(BD_ACT_KEY(docKeys[0])) : 0;
+    const v = vendor ? bdOvCat(BD_ACTV_KEY(vendor)) : 0;
+    if (!d && !v) return null;
+    const own = !!d;
+    return (
+      <span key="ovb" style={{ flex: '0 0 auto', fontSize: fz(9.5), fontWeight: 700, color: own ? '#7c3aed' : '#0f766e',
+                               border: '1px solid ' + (own ? '#ddd6fe' : '#ccfbf1'), background: own ? '#f5f3ff' : '#f0fdfa',
+                               borderRadius: 4, padding: '0 4px' }}>{own ? 'ตั้งเอง' : 'ตั้งตามเจ้าหนี้'}</span>
+    );
+  };
+
+  /* ดรอปดาวน์ย้ายหมวด — ซ่อนไว้ตลอด โผล่เมื่อกด "⇄ จัดหมวด"
+   * width ตายตัว: <select> ยืดตาม option ที่ยาวสุด จะกินที่จนตกบรรทัด */
+  const catSelect = (opts, docKeys, vendor) => {
+    if (!catMode || !canEdit) return null;
+    return (
+      <select key="sel" data-no-capture="1" value="" onClick={(e) => e.stopPropagation()}
+        onChange={(e) => { const v = e.target.value; e.target.value = ''; applyMove(v, docKeys, vendor); }}
+        style={{ flex: '0 0 auto', width: 104, maxWidth: 104, fontSize: fz(10.5), padding: '1px 2px',
+                 border: '1px solid #cbd5e1', borderRadius: 5, background: '#fff', color: '#475569', fontFamily: 'inherit' }}>
+        <option value="">ย้ายหมวด…</option>
+        {opts.doc && (
+          <optgroup label="ใบนี้">
+            {BD_CAT_ORDER.map(c => <option key={'d' + c} value={'d:' + c}>{c}. {BD_CAT_NAME[c]}</option>)}
+          </optgroup>
+        )}
+        {opts.vendor && vendor && (
+          <optgroup label="ทุกใบของเจ้าหนี้">
+            {BD_CAT_ORDER.map(c => <option key={'v' + c} value={'v:' + c}>{c}. {BD_CAT_NAME[c]}</option>)}
+          </optgroup>
+        )}
+        <option value="clear">ล้างที่ตั้งเอง</option>
+      </select>
+    );
+  };
+
+  /* ── ตัวสร้างแถว ───────────────────────────────────────────────────────── */
+  const mainRow = (cfg) => {
+    const open  = (cfg.key in expand);
+    const scope = expand[cfg.key] || null;
+    const caret = cfg.expandable ? (open ? '▼ ' : '▶ ') : '';
+    return (
+      <tr key={cfg.key} style={{ borderTop: '1px solid #e2e8f0', background: cfg.bg || 'transparent' }}>
+        <td style={{ padding: pad('9px 12px'), maxWidth: 0, overflow: 'hidden' }}>
+          <span onClick={cfg.expandable ? () => toggleRow(cfg.key, null) : undefined}
+            title={cfg.hint || (cfg.expandable ? 'กดเพื่อดูรายละเอียดรวมทุกบัญชี' : undefined)}
+            style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
+                     whiteSpace: 'nowrap', fontSize: fz(13), fontWeight: 700, color: cfg.labelColor || '#1e293b',
+                     cursor: cfg.expandable ? 'pointer' : 'default' }}>
+            <span style={{ color: '#94a3b8', fontSize: fz(10) }}>{caret}</span>{cfg.label}
+          </span>
+        </td>
+        {rows.map(r => {
+          const v   = cfg.valOf(r);
+          const hot = cfg.expandable && Math.abs(v) > 0.005;
+          return (
+            <td key={r.acctNo}
+              onClick={hot ? () => toggleRow(cfg.key, r.acctNo) : undefined}
+              title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
+              style={numTd({ fontWeight: 600, color: v < 0 ? '#c53030' : (cfg.cellColor || '#1e293b'),
+                             cursor: hot ? 'pointer' : 'default',
+                             background: (open && scope === r.acctNo) ? '#eef6ff' : 'transparent' })}>
+              {showNum(v, cfg.mode)}
+            </td>
+          );
+        })}
+        <td style={numTd({ fontWeight: 800, background: '#f8fafc',
+                           color: cfg.total < 0 ? '#c53030' : (cfg.cellColor || '#0f172a') })}>
+          {showNum(cfg.total, cfg.mode)}
+        </td>
+      </tr>
+    );
+  };
+
+  const detailRow = (cfg) => (
+    <tr key={cfg.key} style={{ background: cfg.bg || (cfg.level === 1 ? '#f8fafc' : '#fff'), borderTop: '1px solid #f1f5f9' }}>
+      <td style={{ padding: pad('5px 12px'), paddingLeft: sp(14 + cfg.level * 15), maxWidth: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), minWidth: 0, whiteSpace: 'nowrap' }}>
+          <span onClick={cfg.onToggle} style={{ flex: '0 0 auto', width: sp(10), color: '#94a3b8', fontSize: fz(9.5),
+                                                cursor: cfg.onToggle ? 'pointer' : 'default' }}>
+            {cfg.onToggle ? (cfg.open ? '▼' : '▶') : ''}
+          </span>
+          {cfg.tag ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#94a3b8' }}>{cfg.tag}</span> : null}
+          <span onClick={cfg.onToggle} title={cfg.name}
+            style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                     fontSize: fz(cfg.level === 1 ? 12.5 : 12), fontWeight: cfg.level === 1 ? 700 : 500,
+                     color: cfg.nameColor || (cfg.level === 1 ? '#334155' : '#475569'),
+                     cursor: cfg.onToggle ? 'pointer' : 'default' }}>
+            {cfg.name}
+          </span>
+          {cfg.count ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#94a3b8' }}>{cfg.count}</span> : null}
+          {cfg.date  ? <span style={{ flex: '0 0 auto', fontSize: fz(10.5), color: '#94a3b8' }}>{cfg.date}</span> : null}
+          {cfg.badge || null}
+          {cfg.control || null}
+        </div>
+      </td>
+      {rows.map(r => {
+        const v   = cfg.byAcct[r.acctNo];
+        const hot = cfg.onCell && v;
+        return (
+          <td key={r.acctNo}
+            onClick={hot ? () => cfg.onCell(r.acctNo) : undefined}
+            title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
+            style={numTd({ fontSize: fz(12), color: v < 0 ? '#c53030' : '#475569',
+                           cursor: hot ? 'pointer' : 'default',
+                           background: (cfg.open && cfg.scope === r.acctNo) ? '#eef6ff' : 'transparent' })}>
+            {v ? (cfg.mode === 'plus' ? showNum(v, 'plus') : fmtMoney(Math.abs(v))) : ''}
+          </td>
+        );
+      })}
+      <td style={numTd({ fontSize: fz(12), fontWeight: 700, background: '#f8fafc',
+                         color: cfg.total < 0 ? '#c53030' : '#334155' })}>
+        {cfg.mode === 'plus' ? showNum(cfg.total, 'plus') : fmtMoney(Math.abs(cfg.total))}
+      </td>
+    </tr>
+  );
+
+  /* รวมยอดของรายการที่เหลือ (ใช้กับแถว "…อีก N รายการ" — ไม่ตัดข้อมูลเงียบ ๆ) */
+  const restOf = (list) => {
+    const byAcct = {}; let total = 0;
+    list.forEach(e => { const a = Math.abs(e.it.signed); byAcct[e.acctNo] = (byAcct[e.acctNo] || 0) + a; total += a; });
+    return { byAcct, total };
+  };
+
+  /* กลุ่มเจ้าหนี้ (ชั้นถัดจากหมวด) + รายใบ (ชั้นลึกสุด) */
+  /* allowCat=false สำหรับฝั่ง "คาดรับเงินเข้า" — หมวด 1-4 เป็นของค่าใช้จ่ายเท่านั้น
+   *   (โชว์ดรอปดาวน์/ป้ายหมวดที่แถวเงินเข้า = รกและสื่อผิด) */
+  const pushCreditorGroups = (body, prefix, list, scope, level, allowCat) => {
+    const groups = bdGroupByCreditor(list);
+    const CAP = 20;
+    groups.slice(0, CAP).forEach(g => {
+      const rowKey  = prefix + '|' + g.key;
+      const isOpen  = (rowKey in openRow);
+      const gScope  = openRow[rowKey] || scope;
+      const docKeys = g.entries.map(e => bdDocKey(e.it)).filter(Boolean);
+      const tag     = g.kinds.length === 1 ? bdItemTag(g.kinds[0]).t : '';
+      body.push(detailRow({
+        key: rowKey, level, name: g.name, tag,
+        count: g.entries.length > 1 ? g.entries.length + ' ใบ' : '',
+        date: bdShortDate(g.date), byAcct: g.byAcct, total: g.total,
+        open: isOpen, scope: openRow[rowKey] || null,
+        onToggle: () => toggleCred(rowKey, null),
+        onCell: (no) => toggleCred(rowKey, no),
+        badge: allowCat ? ovBadge(docKeys, g.key) : null,
+        control: allowCat ? catSelect({ doc: g.entries.length === 1, vendor: true }, docKeys, g.key) : null,
+      }));
+      if (!isOpen) return;
+      const docs = g.entries.filter(e => !gScope || e.acctNo === gScope)
+                            .slice().sort((a, b) => (a.it.date || '') < (b.it.date || '') ? -1 : 1);
+      const DCAP = 25;
+      docs.slice(0, DCAP).forEach((e, i) => {
+        const it = e.it, dk = bdDocKey(it), byAcct = {};
+        byAcct[e.acctNo] = Math.abs(it.signed);
+        body.push(detailRow({
+          key: rowKey + '#' + i, level: level + 1,
+          tag: bdShortDate(it.date),
+          name: (it.sub || it.title || '—') + (it.remark ? ' · ' + it.remark : ''),
+          byAcct, total: Math.abs(it.signed),
+          badge: allowCat ? ovBadge([dk], '') : null,
+          control: allowCat ? catSelect({ doc: !!dk, vendor: false }, [dk], g.key) : null,
+        }));
+      });
+      if (docs.length > DCAP) {
+        const rest = restOf(docs.slice(DCAP));
+        body.push(detailRow({ key: rowKey + '#more', level: level + 1, name: '…อีก ' + (docs.length - DCAP) + ' ใบ',
+                              byAcct: rest.byAcct, total: rest.total, nameColor: '#94a3b8' }));
+      }
+    });
+    if (groups.length > CAP) {
+      const rest = groups.slice(CAP);
+      const byAcct = {}; let total = 0;
+      rest.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
+      body.push(detailRow({ key: prefix + '|more', level, name: '…อีก ' + rest.length + ' ราย',
+                            byAcct, total, nameColor: '#94a3b8' }));
+    }
+  };
+
+  /* ── ประกอบแถวทั้งใบ ─────────────────────────────────────────────────── */
+  const body = [];
+  const bA  = (fn) => { const m = {}; rows.forEach(r => { const v = fn(r); if (v) m[r.acctNo] = v; }); return m; };
+  const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
+
+  /* 1) ยอดยกมา — ยอดที่บันทึกไว้ ไม่มีรายการเบื้องหลัง จึงไม่มีลูกศร (แต่มี tooltip บอกเหตุผล) */
+  body.push(mainRow({
+    key: 'base', label: 'เงินคงเหลือใช้ได้', valOf: r => r.base, total: T.base,
+    hint: 'ยอดเงินที่บันทึกไว้ล่าสุดของแต่ละบัญชี — เป็นตัวตั้ง ไม่ได้มาจากรายการย่อย จึงกางดูไม่ได้',
+  }));
+
+  /* 2) คาดรับเงินเข้า → เจ้าหนี้/ลูกค้า → เอกสารรายใบ */
+  body.push(mainRow({
+    key: 'in', label: 'คาดรับเงินเข้า', valOf: r => r.innReal, total: T.inn,
+    mode: 'plus', cellColor: '#276749', expandable: T.inn > 0.005,
+  }));
+  if ('in' in expand) pushCreditorGroups(body, 'in', pickIn(expand['in']), expand['in'], 1, false);
+
+  /* 3) ค่าใช้จ่ายถึงกำหนดชำระ → หมวด → เจ้าหนี้ → เอกสารรายใบ
+   *    ยอดรายหมวดคิดจาก "ลิสต์เดียวกับแถวหลัก" → รวม 4 หมวด = ยอดแถวหลักเสมอ */
+  body.push(mainRow({
+    key: 'out', label: 'ค่าใช้จ่ายถึงกำหนดชำระ', valOf: r => r.outReal, total: T.out,
+    cellColor: '#c53030', expandable: T.out > 0.005,
+  }));
+  if ('out' in expand) {
+    const scope = expand['out'];
+    const agg   = {};
+    pickOut(scope).forEach(e => {
+      const c = bdRowCat(e.it, apByNo);
+      const a = (agg[c] = agg[c] || { byAcct: {}, total: 0, entries: [] });
+      const v = Math.abs(e.it.signed);
+      a.entries.push(e); a.total += v;
+      a.byAcct[e.acctNo] = (a.byAcct[e.acctNo] || 0) + v;
+    });
+    BD_CAT_ORDER.forEach(c => {
+      const a = agg[c];
+      if (!a) return;                                   // หมวดที่ไม่มีรายการในช่วงนี้ = ไม่ต้องแสดง
+      const catKey = 'cat' + c;
+      const isOpen = (catKey in expandCat);
+      const cScope = expandCat[catKey] || scope;
+      body.push(detailRow({
+        key: catKey, level: 1, name: BD_CAT_NAME[c], nameColor: BD_CAT_COLOR[c],
+        count: a.entries.length + ' รายการ', byAcct: a.byAcct, total: a.total,
+        open: isOpen, scope: expandCat[catKey] || null,
+        onToggle: () => toggleCat(catKey, null),
+        onCell: (no) => toggleCat(catKey, no),
+      }));
+      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true);
+    });
+  }
+
+  /* 4) โอนระหว่างบัญชี — คอลัมน์รวมต้องเป็น 0 (แสดง —) เพราะเงินแค่ย้ายกระเป๋า */
+  const tfGroupsAll = bdGroupTransfers(pickTf(null));
+  body.push(mainRow({
+    key: 'tf', label: '↔ โอนระหว่างบัญชี' + (tfGroupsAll.length ? '  ' + tfGroupsAll.length + ' รายการ' : ''),
+    valOf: r => r.tfIn - r.tfOut, total: T.tfIn - T.tfOut, mode: 'plus',
+    expandable: tfGroupsAll.length > 0,
+    hint: 'การโอนระหว่างบัญชีของบริษัทเอง — ไม่ใช่รายรับ/รายจ่าย จึงแยกออกจาก 2 แถวบน',
+  }));
+  if ('tf' in expand) {
+    bdGroupTransfers(pickTf(expand['tf'])).forEach((g, i) => {
+      const name = (g.from && g.to) ? (g.from + ' → ' + g.to) : (g.to ? 'โอนเงินไป ' + g.to : 'รับโอนจาก ' + g.from);
+      body.push(detailRow({
+        key: 'tf#' + i, level: 1, tag: bdShortDate(g.date), name: name || 'โอนระหว่างบัญชี',
+        byAcct: g.byAcct, total: g.total, mode: 'plus',
+      }));
+    });
+  }
+
+  /* 5) เงินคงเหลือสุทธิ = ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก */
+  body.push(mainRow({
+    key: 'net', label: 'เงินคงเหลือสุทธิ', valOf: r => r.net, total: T.net,
+    expandable: true, bg: '#f8fafc', cellColor: T.net < 0 ? '#c53030' : '#0f172a',
+    hint: 'กดเพื่อดูวิธีคิด: ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก',
+  }));
+  if ('net' in expand) {
+    [
+      ['ยอดยกมา (เงินคงเหลือใช้ได้)', (r) => r.base],
+      ['+ คาดรับเงินเข้า',            (r) => r.innReal],
+      ['+ รับโอนเข้า',                (r) => r.tfIn],
+      ['− ค่าใช้จ่ายถึงกำหนดชำระ',    (r) => -r.outReal],
+      ['− โอนออก',                    (r) => -r.tfOut],
+    ].forEach(([label, fn], i) => {
+      body.push(detailRow({ key: 'net#' + i, level: 1, name: label, byAcct: bA(fn), total: sum(fn), mode: 'plus' }));
+    });
+  }
+
+  /* ── บันทึกเป็นรูป PNG (ตัดปุ่ม/ดรอปดาวน์ออก · จบที่บรรทัดสรุปท้ายตาราง) ── */
+  const handleSaveImage = async () => {
+    if (typeof window.html2canvas !== 'function') { alert('ตัวช่วยบันทึกรูปยังโหลดไม่เสร็จ — ลองใหม่อีกครั้ง'); return; }
+    const node = cardRef.current; if (!node) return;
+    setSaving(true);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const SCALE = 2;
+      const full = await window.html2canvas(node, {
+        backgroundColor: '#ffffff', scale: SCALE, useCORS: true, logging: false,
+        ignoreElements: (el) => el.getAttribute && el.getAttribute('data-no-capture') === '1',
+      });
+      // ตัดให้จบที่บรรทัดสรุปท้ายใบ + ปิดท้ายด้วยเส้นสี (กันดูเหมือนรูปขาด)
+      //   ⚠️ ความสูงที่วัดจาก DOM อาจ "เกิน" ความสูงของ canvas เพราะ html2canvas ข้าม
+      //      ปุ่ม/แถบ data-no-capture ไป (ภาพเตี้ยกว่าของจริง) → ถ้าเกิน ให้ใช้เต็มภาพแทน
+      const endEl = node.querySelector('[data-capture-end="1"]');
+      const measured = endEl
+        ? Math.round((endEl.getBoundingClientRect().bottom - node.getBoundingClientRect().top) * SCALE) : 0;
+      const usable = (measured > 0 && measured < full.height - 2) ? measured : full.height;
+      const accent   = T.net < 0 ? '#e53e3e' : '#276749';
+      const footerBg = T.net < 0 ? '#fff5f5' : '#f0fdf4';
+      const padPx = Math.round(5 * SCALE), line = Math.round(3 * SCALE);
+      const out = document.createElement('canvas');
+      out.width = full.width; out.height = usable + padPx + line;
+      const ctx = out.getContext('2d');
+      ctx.drawImage(full, 0, 0, full.width, usable, 0, 0, full.width, usable);
+      ctx.fillStyle = footerBg; ctx.fillRect(0, usable, full.width, padPx + line);
+      ctx.fillStyle = accent;   ctx.fillRect(0, usable + padPx, full.width, line);
+      const a = document.createElement('a');
+      a.download = 'สรุปรอบจ่าย-' + String(today).replace(/-/g, '') + '.png';
+      a.href = out.toDataURL('image/png');
+      a.click();
+    } catch (err) {
+      console.error('save summary image failed', err);
+      alert('บันทึกรูปไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+    } finally { setSaving(false); }
+  };
+
+  const btn = (active) => ({
+    padding: '4px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+    border: '1px solid ' + (active ? '#2e8b4a' : '#dbe2ea'), background: active ? '#2e8b4a' : '#fff',
+    color: active ? '#fff' : '#475569', whiteSpace: 'nowrap',
+  });
+  const tblMinW = sp(250) + rows.length * sp(122) + sp(140);
+
+  return (
+    <div className="card" ref={cardRef} style={{ padding: 0, overflow: 'hidden', marginBottom: 16, border: '1px solid #e6eaf0' }}>
+      {/* หัวการ์ด */}
+      <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--line)',
+                    background: 'linear-gradient(135deg,#f8fbff 0%,#f1f5f9 100%)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a' }}>
+            ใบสรุปรอบจ่าย <span style={{ fontWeight: 600, fontSize: 12, color: '#64748b' }}>· ประมาณการรายรับ-รายจ่าย</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+            ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · {rows.length} บัญชี
+            <span data-no-capture="1"> · กดชื่อแถวเพื่อดูรวมทุกบัญชี · กดตัวเลขเพื่อดูเฉพาะบัญชีนั้น</span>
+          </div>
+        </div>
+        <div data-no-capture="1" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {canEdit && (
+            <button onClick={() => setCatMode(m => !m)} style={btn(catMode)} title="เปิด/ปิดดรอปดาวน์ย้ายหมวดในตาราง">
+              ⇄ จัดหมวด
+            </button>
+          )}
+          <button onClick={() => setPickOpen(o => !o)} style={btn(pickOpen)} title="เลือกบัญชีที่จะเป็นคอลัมน์">
+            🏦 เลือกบัญชี ({rows.length}/{allNos.length})
+          </button>
+          <button onClick={handleSaveImage} disabled={saving} style={btn(false)} title="บันทึกใบสรุปนี้เป็นรูป (PNG)">
+            {saving ? '⏳ กำลังบันทึก…' : '📷 บันทึกรูป'}
+          </button>
+        </div>
+      </div>
+
+      {/* เลือกบัญชีเป็นคอลัมน์ */}
+      {pickOpen && (
+        <div data-no-capture="1" style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', background: '#fbfdff',
+                                          display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {(views || []).map(v => {
+            const no = v.acct.accountNo, on = pickedSet.has(no), br = bdBrand(v.acct.bankName);
+            return (
+              <button key={no} onClick={() => togglePick(no)}
+                style={{ padding: '4px 10px', borderRadius: 20, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                         border: '1.5px solid ' + (on ? br.color : '#e2e8f0'), background: on ? br.color : '#fff',
+                         color: on ? '#fff' : '#94a3b8' }}>
+                {on ? '✓ ' : ''}{br.label} {bdLast4(no)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* คำอธิบายโหมดจัดหมวด */}
+      {catMode && canEdit && (
+        <div data-no-capture="1" style={{ padding: '7px 14px', borderBottom: '1px solid var(--line)', background: '#fffbeb',
+                                          fontSize: 11.5, color: '#92400e' }}>
+          กางแถว “ค่าใช้จ่ายถึงกำหนดชำระ” → เลือกหมวดใหม่ที่แถวเจ้าหนี้ (ทุกใบของเจ้าหนี้) หรือแถวเอกสาร (เฉพาะใบนี้) ·
+          ยอดขยับทันทีและแชร์ทั้งทีม · <b>ไม่กระทบ</b>ยอดหน้าประมาณการ/Cash Flow
+        </div>
+      )}
+
+      {/* ตารางหลัก */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', minWidth: tblMinW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <colgroup>
+            <col />
+            {rows.map(r => <col key={r.acctNo} style={{ width: sp(122) }} />)}
+            <col style={{ width: sp(140) }} />
+          </colgroup>
+          <thead>
+            <tr style={{ background: '#f1f5f9' }}>
+              <th style={{ textAlign: 'left', padding: pad('8px 12px'), fontSize: fz(11.5), fontWeight: 700, color: '#475569' }}>ธนาคาร</th>
+              {rows.map(r => {
+                const br = bdBrand(r.acct.bankName);
+                return (
+                  <th key={r.acctNo} title={r.acct.accountNo}
+                    style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(11.5), fontWeight: 800,
+                             color: br.color, whiteSpace: 'nowrap' }}>
+                    {br.label} <span style={{ fontFamily: 'ui-monospace', color: '#64748b', fontWeight: 600 }}>{bdLast4(r.acct.accountNo)}</span>
+                  </th>
+                );
+              })}
+              <th style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(11.5), fontWeight: 800, color: '#0f172a', background: '#e2e8f0' }}>รวม</th>
+            </tr>
+          </thead>
+          <tbody>{body}</tbody>
+        </table>
+      </div>
+
+      {/* ท้ายใบ — จุดตัดรูป */}
+      <div data-capture-end="1" style={{ padding: pad('9px 14px'), borderTop: '1px solid ' + (T.net < 0 ? '#fecaca' : '#bbf7d0'),
+                                         background: T.net < 0 ? '#fff5f5' : '#f0fdf4', display: 'flex', justifyContent: 'space-between',
+                                         gap: 10, flexWrap: 'wrap', fontSize: fz(11.5), color: '#475569' }}>
+        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · ณ {fmtDate(today)}</span>
+        <span style={{ fontWeight: 800, color: T.net < 0 ? '#c53030' : '#276749' }}>
+          เงินคงเหลือสุทธิรวม {fmtMoney(T.net)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const BankDiaryPage = ({ data: propData, setData, toast }) => {
   const raw = propData || WTPData.load();
   const { bankAccounts: rawAccounts = [], bankEntries = [], bankTransfers = [], checks: rawChecks = [], forecastEntries: rawForecast = [], payables: rawPayables = [], pvVouchers: rawPvVouchers = [] } = raw;
@@ -2674,6 +3377,18 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
           <span style={{ fontSize:11, color:'#94a3b8' }}>(ถึง {fmtDate(periodEnd)})</span>
         )}
       </div>
+
+      {/* ใบสรุปรอบจ่าย — ตารางเดียวรวมทุกบัญชี (กางดูได้ 3 ชั้น · เซฟเป็นรูปส่งผู้บริหารได้) */}
+      {accountViews.length > 0 && (
+        <BDMainSummary
+          views={accountViews}
+          apList={apList}
+          today={today}
+          periodEnd={periodEnd}
+          periodLabel={periodLabel}
+          canEdit={canEdit}
+        />
+      )}
 
       {/* No accounts fallback */}
       {accounts.length === 0 && (
