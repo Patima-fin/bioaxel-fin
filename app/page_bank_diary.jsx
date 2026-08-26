@@ -2296,7 +2296,12 @@ function bdGroupByCreditor(list) {
     if (g.kinds.indexOf(it.kind) < 0) g.kinds.push(it.kind);
     if (it.date && (!g.date || it.date < g.date)) g.date = it.date;   // วันของกลุ่ม = ใบที่ครบกำหนดเร็วสุด
   });
-  return [...m.values()].sort((a, b) => b.total - a.total);
+  // เรียงตาม "วันครบกำหนด" ก่อนเสมอ (ใบไหนถึงคิวจ่าย/รับก่อน อยู่บน) · วันเดียวกันค่อยเรียงยอดมาก→น้อย
+  return [...m.values()].sort((a, b) => {
+    const da = a.date || '9999-12-31', db = b.date || '9999-12-31';
+    if (da !== db) return da < db ? -1 : 1;
+    return b.total - a.total;
+  });
 }
 
 /* จัดกลุ่มขาโอนเป็น "รายการโอน" เดียว (2 ขาของ transferRef เดียวกัน) */
@@ -2645,9 +2650,15 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
    * allowCat=false สำหรับฝั่ง "คาดรับเงินเข้า" — หมวด 1-4 เป็นของค่าใช้จ่ายเท่านั้น
    *   (โชว์ดรอปดาวน์/ป้ายหมวดที่แถวเงินเข้า = รกและสื่อผิด) */
   const pushCreditorGroups = (body, prefix, list, scope, level, allowCat, rail) => {
-    const groups = bdGroupByCreditor(list);
+    const all = bdGroupByCreditor(list);          // เรียงตามวันครบกำหนดมาแล้ว
     const CAP = 20;
-    groups.slice(0, CAP).forEach(g => {
+    // เกิน CAP → เก็บ "รายใหญ่สุด" ไว้ (ไม่ตัดรายใหญ่ทิ้งเพราะบังเอิญครบกำหนดทีหลัง)
+    //   แต่ยัง "แสดงเรียงตามวัน" เหมือนเดิม · ที่เหลือยุบเป็นแถวเดียวพร้อมยอดรวม
+    const keepKeys  = all.length <= CAP ? null
+      : new Set(all.slice().sort((a, b) => b.total - a.total).slice(0, CAP).map(g => g.key));
+    const groups    = keepKeys ? all.filter(g => keepKeys.has(g.key)) : all;
+    const restGroup = keepKeys ? all.filter(g => !keepKeys.has(g.key)) : [];
+    groups.forEach(g => {
       const rowKey  = prefix + '|' + g.key;
       const isOpen  = (rowKey in openRow);
       const gScope  = openRow[rowKey] || scope;
@@ -2685,11 +2696,10 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
                               byAcct: rest.byAcct, total: rest.total, nameColor: '#94a3b8' }));
       }
     });
-    if (groups.length > CAP) {
-      const rest = groups.slice(CAP);
+    if (restGroup.length) {
       const byAcct = {}; let total = 0;
-      rest.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
-      body.push(detailRow({ key: prefix + '|more', level, rail, name: '…อีก ' + rest.length + ' ราย',
+      restGroup.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
+      body.push(detailRow({ key: prefix + '|more', level, rail, name: '…อีก ' + restGroup.length + ' ราย',
                             byAcct, total, nameColor: '#94a3b8' }));
     }
   };
