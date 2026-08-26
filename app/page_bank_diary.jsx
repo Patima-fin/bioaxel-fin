@@ -1052,11 +1052,19 @@ function BankAccountCard({ view, today, periodEnd, periodLabel, onQuickTransfer,
     if (typeof window.html2canvas !== 'function') { alert('ตัวช่วยบันทึกรูปยังโหลดไม่เสร็จ — ลองใหม่อีกครั้ง'); return; }
     const node = cardRef.current; if (!node) return;
     setSaving(true);
+    // ⚠️ จอแคบ = ตารางเลื่อนแนวนอนอยู่ → แคปตรง ๆ จะได้ภาพที่ "คอลัมน์รวมโดนตัด"
+    //    กางการ์ดให้เท่าความกว้างจริงของตารางก่อนแคป แล้วค่อยคืนค่าเดิม
+    const wrapEl = node.querySelector('[data-hscroll="1"]');
+    const tblEl  = node.querySelector('table');
+    const prevW  = node.style.width, prevOv = wrapEl ? wrapEl.style.overflowX : '';
+    const fullW  = (tblEl && wrapEl && tblEl.scrollWidth > wrapEl.clientWidth + 1) ? tblEl.scrollWidth + 2 : 0;
+    if (fullW) { node.style.width = fullW + 'px'; wrapEl.style.overflowX = 'visible'; }
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const SCALE = 2;
       const full = await window.html2canvas(node, {
         backgroundColor: '#ffffff', scale: SCALE, useCORS: true, logging: false,
+        windowWidth: Math.max(document.documentElement.clientWidth, fullW + 40),
         ignoreElements: (el) => el.getAttribute && el.getAttribute('data-no-capture') === '1',
       });
       // ตัดให้รูป "จบที่บรรทัดยอดเงินคงเหลือสุทธิ" + ปิดท้ายด้วยช่องว่าง+เส้นสี (กันดูเหมือนรูปขาด)
@@ -2309,6 +2317,52 @@ function bdGroupTransfers(list) {
   return [...m.values()].sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1);
 }
 
+/* โทนสีของใบสรุป — อิงแบรนด์ BIOAXEL (เขียว `--brand-*`) ให้เอกสารที่แคปส่งผู้บริหาร
+ * ดูเป็น "ใบสรุปของบริษัท" ไม่ใช่ตารางเปล่า ๆ · แก้สีที่นี่ที่เดียวทั้งใบ */
+const BD_SUM_SKIN = {
+  headGrad:  'linear-gradient(135deg,#154524 0%,#21703a 42%,#2e8b4a 78%,#47a566 100%)',
+  brand:     '#2e8b4a',
+  brandDeep: '#1a592f',
+  inTint:    '#f2fbf5', inRail:  '#2e8b4a', inText:  '#1f7a45',   // คาดรับเงินเข้า
+  outTint:   '#fff8f1', outRail: '#e08a3c', outText: '#c53030',   // ค่าใช้จ่าย
+  catTint:   '#fffbf5',
+  tfTint:    '#f6f8fc', tfRail:  '#94a3b8',                        // โอนระหว่างบัญชี
+  netTint:   '#e8f6ed', netRail: '#21703a',                        // คงเหลือสุทธิ
+  baseTint:  '#eef7f1', baseRail: '#47a566',                       // ยอดยกมา
+  totalTint: '#f4f9f6', totalLine: '#dbeae1',                      // คอลัมน์รวม
+  pickBg:    '#e6f2ff',                                            // ช่องที่กดดูเฉพาะบัญชี
+  guide:     '#e9eef5',
+};
+
+/* โลโก้ธนาคารขนาดปรับได้ — ใช้ไฟล์ชุดเดียวกับหน้า Home (`LOGO BANK/*.png` ผ่าน
+ * `hpBankBrand`) ไม่ผูกกับคลาส `.hp-bank-logo` ที่ล็อกขนาด 34px
+ * fallback = อักษรย่อบนพื้นสีแบรนด์ (ธนาคารที่ยังไม่มีไฟล์โลโก้) */
+function BDBankLogo({ name, size }) {
+  const [err, setErr] = React.useState(false);
+  const s     = size || 26;
+  const brand = (typeof hpBankBrand === 'function') ? hpBankBrand(name) : null;
+  const box   = {
+    width: s, height: s, borderRadius: Math.round(s * 0.28), flex: '0 0 auto', overflow: 'hidden',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(16,24,40,0.20)',
+  };
+  if (brand && brand.file && !err) {
+    const dir = (typeof HP_BANK_LOGO_DIR === 'string') ? HP_BANK_LOGO_DIR : 'LOGO BANK/';
+    return (
+      <div style={box}>
+        <img src={encodeURI(dir + brand.file)} alt={name} onError={() => setErr(true)}
+             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      </div>
+    );
+  }
+  const bd = bdBrand(name);
+  return (
+    <div style={{ ...box, background: (brand && brand.color) || bd.color, color: '#fff',
+                  fontSize: Math.round(s * 0.34), fontWeight: 800 }}>
+      {String(bd.label || '').slice(0, 4)}
+    </div>
+  );
+}
+
 function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }) {
   const ovTick = bdUseOverrideTick();                     // ★ ต้องอยู่ใน deps ของ rows ไม่งั้นย้ายหมวดแล้วยอดไม่ขยับ
   const [pick, setPick]           = React.useState(bdSumLoadPick);
@@ -2469,63 +2523,85 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   };
 
   /* ── ตัวสร้างแถว ───────────────────────────────────────────────────────── */
+  /* ── ตัวสร้างแถว ─────────────────────────────────────────────────────────
+   * แถวหลัก = แถบสีประจำส่วน (ยกมา/รับ/จ่าย/โอน/สุทธิ) + รางสีซ้ายสุด
+   * ตัวเลขขีดเส้นประใต้ตัวเลข (เหมือนใบสรุปที่ปรินต์) · คอลัมน์รวมมีพื้นอ่อนคั่นเสมอ */
   const mainRow = (cfg) => {
     const open  = (cfg.key in expand);
     const scope = expand[cfg.key] || null;
-    const caret = cfg.expandable ? (open ? '▼ ' : '▶ ') : '';
+    const caret = cfg.expandable ? (open ? '▼' : '▶') : '';
+    const dash  = (v, color) => (
+      <span style={{ borderBottom: '1px dashed ' + (color || '#c9d6e2'), paddingBottom: 1 }}>{v}</span>
+    );
     return (
-      <tr key={cfg.key} style={{ borderTop: '1px solid #e2e8f0', background: cfg.bg || 'transparent' }}>
-        <td style={{ padding: pad('9px 12px'), maxWidth: 0, overflow: 'hidden' }}>
+      <tr key={cfg.key} style={{ background: cfg.tint || '#fff', borderTop: '1px solid ' + (cfg.line || '#e2e8f0') }}>
+        <td style={{ padding: pad('10px 12px'), maxWidth: 0, overflow: 'hidden',
+                     borderLeft: '3px solid ' + (cfg.rail || 'transparent') }}>
           <span onClick={cfg.expandable ? () => toggleRow(cfg.key, null) : undefined}
             title={cfg.hint || (cfg.expandable ? 'กดเพื่อดูรายละเอียดรวมทุกบัญชี' : undefined)}
             style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
-                     whiteSpace: 'nowrap', fontSize: fz(13), fontWeight: 700, color: cfg.labelColor || '#1e293b',
+                     whiteSpace: 'nowrap', fontSize: fz(13.5), fontWeight: 800, color: cfg.labelColor || '#16324a',
                      cursor: cfg.expandable ? 'pointer' : 'default' }}>
-            <span style={{ color: '#94a3b8', fontSize: fz(10) }}>{caret}</span>{cfg.label}
+            <span style={{ color: cfg.rail || '#94a3b8', fontSize: fz(9.5), marginRight: caret ? sp(5) : 0 }}>{caret}</span>
+            {cfg.label}
+            {cfg.note ? <span style={{ fontWeight: 500, fontSize: fz(10.5), color: '#94a3b8', marginLeft: sp(8) }}>{cfg.note}</span> : null}
           </span>
         </td>
         {rows.map(r => {
           const v   = cfg.valOf(r);
           const hot = cfg.expandable && Math.abs(v) > 0.005;
+          const col = v < 0 ? '#c53030' : (cfg.cellColor || '#16324a');
           return (
             <td key={r.acctNo}
               onClick={hot ? () => toggleRow(cfg.key, r.acctNo) : undefined}
               title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
-              style={numTd({ fontWeight: 600, color: v < 0 ? '#c53030' : (cfg.cellColor || '#1e293b'),
-                             cursor: hot ? 'pointer' : 'default',
-                             background: (open && scope === r.acctNo) ? '#eef6ff' : 'transparent' })}>
-              {showNum(v, cfg.mode)}
+              style={numTd({ fontWeight: 700, color: col, cursor: hot ? 'pointer' : 'default',
+                             background: (open && scope === r.acctNo) ? BD_SUM_SKIN.pickBg : 'transparent' })}>
+              {Math.abs(v) > 0.005 ? dash(showNum(v, cfg.mode), cfg.dashColor) : '—'}
             </td>
           );
         })}
-        <td style={numTd({ fontWeight: 800, background: '#f8fafc',
+        <td style={numTd({ fontWeight: 800, fontSize: fz(13), background: BD_SUM_SKIN.totalTint,
+                           borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
                            color: cfg.total < 0 ? '#c53030' : (cfg.cellColor || '#0f172a') })}>
-          {showNum(cfg.total, cfg.mode)}
+          {Math.abs(cfg.total) > 0.005 ? dash(showNum(cfg.total, cfg.mode), cfg.dashColor) : '—'}
         </td>
       </tr>
     );
   };
 
+  /* แถวรายละเอียด — รางแนวตั้งซ้อนตามชั้น (ชั้นแรกเป็นสีของส่วน/หมวด) ให้เห็นว่าใครอยู่ใต้ใคร */
   const detailRow = (cfg) => (
-    <tr key={cfg.key} style={{ background: cfg.bg || (cfg.level === 1 ? '#f8fafc' : '#fff'), borderTop: '1px solid #f1f5f9' }}>
-      <td style={{ padding: pad('5px 12px'), paddingLeft: sp(14 + cfg.level * 15), maxWidth: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: sp(6), minWidth: 0, whiteSpace: 'nowrap' }}>
-          <span onClick={cfg.onToggle} style={{ flex: '0 0 auto', width: sp(10), color: '#94a3b8', fontSize: fz(9.5),
-                                                cursor: cfg.onToggle ? 'pointer' : 'default' }}>
-            {cfg.onToggle ? (cfg.open ? '▼' : '▶') : ''}
-          </span>
-          {cfg.tag ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#94a3b8' }}>{cfg.tag}</span> : null}
-          <span onClick={cfg.onToggle} title={cfg.name}
-            style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-                     fontSize: fz(cfg.level === 1 ? 12.5 : 12), fontWeight: cfg.level === 1 ? 700 : 500,
-                     color: cfg.nameColor || (cfg.level === 1 ? '#334155' : '#475569'),
-                     cursor: cfg.onToggle ? 'pointer' : 'default' }}>
-            {cfg.name}
-          </span>
-          {cfg.count ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#94a3b8' }}>{cfg.count}</span> : null}
-          {cfg.date  ? <span style={{ flex: '0 0 auto', fontSize: fz(10.5), color: '#94a3b8' }}>{cfg.date}</span> : null}
-          {cfg.badge || null}
-          {cfg.control || null}
+    <tr key={cfg.key} style={{ background: cfg.tint || '#fff', borderTop: '1px solid #f1f5f9' }}>
+      <td style={{ padding: 0, maxWidth: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
+          {Array.from({ length: cfg.level }).map((_, i) => (
+            <span key={i} style={{ flex: '0 0 auto', width: sp(i === 0 ? 15 : 16),
+                                   borderLeft: '2px solid ' + (i === 0 ? (cfg.rail || '#cbd5e1') : BD_SUM_SKIN.guide) }} />
+          ))}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp(6),
+                        whiteSpace: 'nowrap', padding: pad('6px 10px 6px 7px') }}>
+            <span onClick={cfg.onToggle} style={{ flex: '0 0 auto', width: sp(10), color: cfg.rail || '#94a3b8',
+                                                  fontSize: fz(9), cursor: cfg.onToggle ? 'pointer' : 'default' }}>
+              {cfg.onToggle ? (cfg.open ? '▼' : '▶') : ''}
+            </span>
+            {cfg.tag ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#a8b3c2' }}>{cfg.tag}</span> : null}
+            <span onClick={cfg.onToggle} title={cfg.name}
+              style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                       fontSize: fz(cfg.level === 1 ? 12.5 : 12), fontWeight: cfg.level === 1 ? 800 : 600,
+                       color: cfg.nameColor || (cfg.level === 1 ? '#334155' : '#475569'),
+                       cursor: cfg.onToggle ? 'pointer' : 'default' }}>
+              {cfg.name}
+            </span>
+            {cfg.count ? (
+              <span title={cfg.countTitle || undefined}
+                    style={{ flex: '0 0 auto', fontSize: fz(9.5), fontWeight: 700, color: '#5b7d99',
+                             background: '#e8f0f7', borderRadius: 999, padding: '1px ' + sp(6) + 'px' }}>{cfg.count}</span>
+            ) : null}
+            {cfg.date  ? <span style={{ flex: '0 0 auto', fontSize: fz(10.5), color: '#94a3b8' }}>{cfg.date}</span> : null}
+            {cfg.badge || null}
+            {cfg.control || null}
+          </div>
         </div>
       </td>
       {rows.map(r => {
@@ -2535,15 +2611,16 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
           <td key={r.acctNo}
             onClick={hot ? () => cfg.onCell(r.acctNo) : undefined}
             title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
-            style={numTd({ fontSize: fz(12), color: v < 0 ? '#c53030' : '#475569',
-                           cursor: hot ? 'pointer' : 'default',
-                           background: (cfg.open && cfg.scope === r.acctNo) ? '#eef6ff' : 'transparent' })}>
+            style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 700 : 500,
+                           color: v < 0 ? '#c53030' : '#475569', cursor: hot ? 'pointer' : 'default',
+                           background: (cfg.open && cfg.scope === r.acctNo) ? BD_SUM_SKIN.pickBg : 'transparent' })}>
             {v ? (cfg.mode === 'plus' ? showNum(v, 'plus') : fmtMoney(Math.abs(v))) : ''}
           </td>
         );
       })}
-      <td style={numTd({ fontSize: fz(12), fontWeight: 700, background: '#f8fafc',
-                         color: cfg.total < 0 ? '#c53030' : '#334155' })}>
+      <td style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 800 : 700,
+                         background: BD_SUM_SKIN.totalTint, borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
+                         color: cfg.total < 0 ? '#c53030' : (cfg.totalColor || '#334155') })}>
         {cfg.mode === 'plus' ? showNum(cfg.total, 'plus') : fmtMoney(Math.abs(cfg.total))}
       </td>
     </tr>
@@ -2556,10 +2633,10 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     return { byAcct, total };
   };
 
-  /* กลุ่มเจ้าหนี้ (ชั้นถัดจากหมวด) + รายใบ (ชั้นลึกสุด) */
-  /* allowCat=false สำหรับฝั่ง "คาดรับเงินเข้า" — หมวด 1-4 เป็นของค่าใช้จ่ายเท่านั้น
+  /* กลุ่มเจ้าหนี้ (ชั้นถัดจากหมวด) + รายใบ (ชั้นลึกสุด)
+   * allowCat=false สำหรับฝั่ง "คาดรับเงินเข้า" — หมวด 1-4 เป็นของค่าใช้จ่ายเท่านั้น
    *   (โชว์ดรอปดาวน์/ป้ายหมวดที่แถวเงินเข้า = รกและสื่อผิด) */
-  const pushCreditorGroups = (body, prefix, list, scope, level, allowCat) => {
+  const pushCreditorGroups = (body, prefix, list, scope, level, allowCat, rail) => {
     const groups = bdGroupByCreditor(list);
     const CAP = 20;
     groups.slice(0, CAP).forEach(g => {
@@ -2569,8 +2646,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       const docKeys = g.entries.map(e => bdDocKey(e.it)).filter(Boolean);
       const tag     = g.kinds.length === 1 ? bdItemTag(g.kinds[0]).t : '';
       body.push(detailRow({
-        key: rowKey, level, name: g.name, tag,
-        count: g.entries.length > 1 ? g.entries.length + ' ใบ' : '',
+        key: rowKey, level, rail, name: g.name, tag,
+        count: g.entries.length > 1 ? g.entries.length : '', countTitle: g.entries.length + ' ใบ',
         date: bdShortDate(g.date), byAcct: g.byAcct, total: g.total,
         open: isOpen, scope: openRow[rowKey] || null,
         onToggle: () => toggleCred(rowKey, null),
@@ -2586,7 +2663,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
         const it = e.it, dk = bdDocKey(it), byAcct = {};
         byAcct[e.acctNo] = Math.abs(it.signed);
         body.push(detailRow({
-          key: rowKey + '#' + i, level: level + 1,
+          key: rowKey + '#' + i, level: level + 1, rail,
           tag: bdShortDate(it.date),
           name: (it.sub || it.title || '—') + (it.remark ? ' · ' + it.remark : ''),
           byAcct, total: Math.abs(it.signed),
@@ -2596,7 +2673,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       });
       if (docs.length > DCAP) {
         const rest = restOf(docs.slice(DCAP));
-        body.push(detailRow({ key: rowKey + '#more', level: level + 1, name: '…อีก ' + (docs.length - DCAP) + ' ใบ',
+        body.push(detailRow({ key: rowKey + '#more', level: level + 1, rail, name: '…อีก ' + (docs.length - DCAP) + ' ใบ',
                               byAcct: rest.byAcct, total: rest.total, nameColor: '#94a3b8' }));
       }
     });
@@ -2604,7 +2681,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       const rest = groups.slice(CAP);
       const byAcct = {}; let total = 0;
       rest.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
-      body.push(detailRow({ key: prefix + '|more', level, name: '…อีก ' + rest.length + ' ราย',
+      body.push(detailRow({ key: prefix + '|more', level, rail, name: '…อีก ' + rest.length + ' ราย',
                             byAcct, total, nameColor: '#94a3b8' }));
     }
   };
@@ -2613,25 +2690,29 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   const body = [];
   const bA  = (fn) => { const m = {}; rows.forEach(r => { const v = fn(r); if (v) m[r.acctNo] = v; }); return m; };
   const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
+  const SK  = BD_SUM_SKIN;
 
   /* 1) ยอดยกมา — ยอดที่บันทึกไว้ ไม่มีรายการเบื้องหลัง จึงไม่มีลูกศร (แต่มี tooltip บอกเหตุผล) */
   body.push(mainRow({
     key: 'base', label: 'เงินคงเหลือใช้ได้', valOf: r => r.base, total: T.base,
+    tint: SK.baseTint, rail: SK.baseRail, dashColor: '#b8d9c4', labelColor: '#14532d', cellColor: '#14532d',
     hint: 'ยอดเงินที่บันทึกไว้ล่าสุดของแต่ละบัญชี — เป็นตัวตั้ง ไม่ได้มาจากรายการย่อย จึงกางดูไม่ได้',
   }));
 
-  /* 2) คาดรับเงินเข้า → เจ้าหนี้/ลูกค้า → เอกสารรายใบ */
+  /* 2) คาดรับเงินเข้า → ผู้จ่าย/ลูกค้า → เอกสารรายใบ */
   body.push(mainRow({
     key: 'in', label: 'คาดรับเงินเข้า', valOf: r => r.innReal, total: T.inn,
-    mode: 'plus', cellColor: '#276749', expandable: T.inn > 0.005,
+    mode: 'plus', tint: SK.inTint, rail: SK.inRail, cellColor: SK.inText, dashColor: '#a9d8bd',
+    expandable: T.inn > 0.005,
   }));
-  if ('in' in expand) pushCreditorGroups(body, 'in', pickIn(expand['in']), expand['in'], 1, false);
+  if ('in' in expand) pushCreditorGroups(body, 'in', pickIn(expand['in']), expand['in'], 1, false, SK.inRail);
 
   /* 3) ค่าใช้จ่ายถึงกำหนดชำระ → หมวด → เจ้าหนี้ → เอกสารรายใบ
    *    ยอดรายหมวดคิดจาก "ลิสต์เดียวกับแถวหลัก" → รวม 4 หมวด = ยอดแถวหลักเสมอ */
   body.push(mainRow({
     key: 'out', label: 'ค่าใช้จ่ายถึงกำหนดชำระ', valOf: r => r.outReal, total: T.out,
-    cellColor: '#c53030', expandable: T.out > 0.005,
+    tint: SK.outTint, rail: SK.outRail, cellColor: SK.outText, dashColor: '#eec4a4',
+    expandable: T.out > 0.005,
   }));
   if ('out' in expand) {
     const scope = expand['out'];
@@ -2650,21 +2731,24 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       const isOpen = (catKey in expandCat);
       const cScope = expandCat[catKey] || scope;
       body.push(detailRow({
-        key: catKey, level: 1, name: BD_CAT_NAME[c], nameColor: BD_CAT_COLOR[c],
+        key: catKey, level: 1, rail: BD_CAT_COLOR[c], tint: SK.catTint,
+        name: BD_CAT_NAME[c], nameColor: BD_CAT_COLOR[c], totalColor: SK.outText,
         count: a.entries.length + ' รายการ', byAcct: a.byAcct, total: a.total,
         open: isOpen, scope: expandCat[catKey] || null,
         onToggle: () => toggleCat(catKey, null),
         onCell: (no) => toggleCat(catKey, no),
       }));
-      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true);
+      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true, BD_CAT_COLOR[c]);
     });
   }
 
   /* 4) โอนระหว่างบัญชี — คอลัมน์รวมต้องเป็น 0 (แสดง —) เพราะเงินแค่ย้ายกระเป๋า */
   const tfGroupsAll = bdGroupTransfers(pickTf(null));
   body.push(mainRow({
-    key: 'tf', label: '↔ โอนระหว่างบัญชี' + (tfGroupsAll.length ? '  ' + tfGroupsAll.length + ' รายการ' : ''),
+    key: 'tf', label: '↔ โอนระหว่างบัญชี',
+    note: tfGroupsAll.length ? tfGroupsAll.length + ' รายการ · ย้ายเงินภายใน หักกันเองเป็นศูนย์' : '',
     valOf: r => r.tfIn - r.tfOut, total: T.tfIn - T.tfOut, mode: 'plus',
+    tint: SK.tfTint, rail: SK.tfRail, dashColor: '#cbd5e1',
     expandable: tfGroupsAll.length > 0,
     hint: 'การโอนระหว่างบัญชีของบริษัทเอง — ไม่ใช่รายรับ/รายจ่าย จึงแยกออกจาก 2 แถวบน',
   }));
@@ -2672,7 +2756,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     bdGroupTransfers(pickTf(expand['tf'])).forEach((g, i) => {
       const name = (g.from && g.to) ? (g.from + ' → ' + g.to) : (g.to ? 'โอนเงินไป ' + g.to : 'รับโอนจาก ' + g.from);
       body.push(detailRow({
-        key: 'tf#' + i, level: 1, tag: bdShortDate(g.date), name: name || 'โอนระหว่างบัญชี',
+        key: 'tf#' + i, level: 1, rail: SK.tfRail, tag: bdShortDate(g.date), name: name || 'โอนระหว่างบัญชี',
         byAcct: g.byAcct, total: g.total, mode: 'plus',
       }));
     });
@@ -2681,7 +2765,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   /* 5) เงินคงเหลือสุทธิ = ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก */
   body.push(mainRow({
     key: 'net', label: 'เงินคงเหลือสุทธิ', valOf: r => r.net, total: T.net,
-    expandable: true, bg: '#f8fafc', cellColor: T.net < 0 ? '#c53030' : '#0f172a',
+    expandable: true, tint: SK.netTint, rail: SK.netRail, line: '#c9e4d4', dashColor: '#a9d8bd',
+    labelColor: '#14532d', cellColor: T.net < 0 ? '#c53030' : '#14532d',
     hint: 'กดเพื่อดูวิธีคิด: ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก',
   }));
   if ('net' in expand) {
@@ -2692,7 +2777,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       ['− ค่าใช้จ่ายถึงกำหนดชำระ',    (r) => -r.outReal],
       ['− โอนออก',                    (r) => -r.tfOut],
     ].forEach(([label, fn], i) => {
-      body.push(detailRow({ key: 'net#' + i, level: 1, name: label, byAcct: bA(fn), total: sum(fn), mode: 'plus' }));
+      body.push(detailRow({ key: 'net#' + i, level: 1, rail: SK.netRail, name: label,
+                            byAcct: bA(fn), total: sum(fn), mode: 'plus' }));
     });
   }
 
@@ -2701,11 +2787,19 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     if (typeof window.html2canvas !== 'function') { alert('ตัวช่วยบันทึกรูปยังโหลดไม่เสร็จ — ลองใหม่อีกครั้ง'); return; }
     const node = cardRef.current; if (!node) return;
     setSaving(true);
+    // ⚠️ จอแคบ = ตารางเลื่อนแนวนอนอยู่ → แคปตรง ๆ จะได้ภาพที่ "คอลัมน์รวมโดนตัด"
+    //    กางการ์ดให้เท่าความกว้างจริงของตารางก่อนแคป แล้วค่อยคืนค่าเดิม
+    const wrapEl = node.querySelector('[data-hscroll="1"]');
+    const tblEl  = node.querySelector('table');
+    const prevW  = node.style.width, prevOv = wrapEl ? wrapEl.style.overflowX : '';
+    const fullW  = (tblEl && wrapEl && tblEl.scrollWidth > wrapEl.clientWidth + 1) ? tblEl.scrollWidth + 2 : 0;
+    if (fullW) { node.style.width = fullW + 'px'; wrapEl.style.overflowX = 'visible'; }
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const SCALE = 2;
       const full = await window.html2canvas(node, {
         backgroundColor: '#ffffff', scale: SCALE, useCORS: true, logging: false,
+        windowWidth: Math.max(document.documentElement.clientWidth, fullW + 40),
         ignoreElements: (el) => el.getAttribute && el.getAttribute('data-no-capture') === '1',
       });
       // ตัดให้จบที่บรรทัดสรุปท้ายใบ + ปิดท้ายด้วยเส้นสี (กันดูเหมือนรูปขาด)
@@ -2715,8 +2809,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       const measured = endEl
         ? Math.round((endEl.getBoundingClientRect().bottom - node.getBoundingClientRect().top) * SCALE) : 0;
       const usable = (measured > 0 && measured < full.height - 2) ? measured : full.height;
-      const accent   = T.net < 0 ? '#e53e3e' : '#276749';
-      const footerBg = T.net < 0 ? '#fff5f5' : '#f0fdf4';
+      const accent   = T.net < 0 ? '#e53e3e' : BD_SUM_SKIN.brandDeep;
+      const footerBg = T.net < 0 ? '#fff5f5' : BD_SUM_SKIN.netTint;
       const padPx = Math.round(5 * SCALE), line = Math.round(3 * SCALE);
       const out = document.createElement('canvas');
       out.width = full.width; out.height = usable + padPx + line;
@@ -2731,32 +2825,62 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     } catch (err) {
       console.error('save summary image failed', err);
       alert('บันทึกรูปไม่สำเร็จ: ' + (err && err.message ? err.message : err));
-    } finally { setSaving(false); }
+    } finally {
+      if (fullW) { node.style.width = prevW; if (wrapEl) wrapEl.style.overflowX = prevOv || 'auto'; }
+      setSaving(false);
+    }
   };
 
   const btn = (active) => ({
     padding: '4px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-    border: '1px solid ' + (active ? '#2e8b4a' : '#dbe2ea'), background: active ? '#2e8b4a' : '#fff',
+    border: '1px solid ' + (active ? BD_SUM_SKIN.brand : '#dbe2ea'), background: active ? BD_SUM_SKIN.brand : '#fff',
     color: active ? '#fff' : '#475569', whiteSpace: 'nowrap',
   });
-  const tblMinW = sp(250) + rows.length * sp(122) + sp(140);
+  const tblMinW  = sp(330) + rows.length * sp(132) + sp(150);
+  const periodTx = periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : '';
 
   return (
-    <div className="card" ref={cardRef} style={{ padding: 0, overflow: 'hidden', marginBottom: 16, border: '1px solid #e6eaf0' }}>
-      {/* หัวการ์ด */}
-      <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--line)',
-                    background: 'linear-gradient(135deg,#f8fbff 0%,#f1f5f9 100%)',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a' }}>
-            ใบสรุปรอบจ่าย <span style={{ fontWeight: 600, fontSize: 12, color: '#64748b' }}>· ประมาณการรายรับ-รายจ่าย</span>
+    <div className="card" ref={cardRef} style={{ padding: 0, overflow: 'hidden', marginBottom: 16,
+                                                 border: '1px solid #e3ebe6', boxShadow: '0 8px 22px rgba(21,69,36,0.08)' }}>
+      {/* ── หัวใบสรุป (อยู่ในรูปที่เซฟ) ── */}
+      <div style={{ position: 'relative', overflow: 'hidden', background: BD_SUM_SKIN.headGrad, color: '#fff' }}>
+        <div style={{ position: 'absolute', top: -70, right: -30, width: 220, height: 220, borderRadius: '50%', background: 'rgba(255,255,255,0.07)' }} />
+        <div style={{ position: 'absolute', bottom: -90, right: 150, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+        <div style={{ position: 'relative', padding: '16px 18px', display: 'flex', alignItems: 'center',
+                      justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 12, background: '#fff', flex: '0 0 auto',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 5,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
+              <img src="bioaxel_logo.png" alt="BIOAXEL" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1.6, color: 'rgba(255,255,255,0.72)' }}>BIOAXEL</div>
+              <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.22)' }}>
+                ประมาณการรายรับ-รายจ่าย
+              </div>
+              <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.78)', marginTop: 2 }}>
+                บริษัท ไบโอแอ็กซ์เซลล์ จำกัด · BIOAXEL Co., Ltd.
+              </div>
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-            ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · {rows.length} บัญชี
-            <span data-no-capture="1"> · กดชื่อแถวเพื่อดูรวมทุกบัญชี · กดตัวเลขเพื่อดูเฉพาะบัญชีนั้น</span>
+          <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', letterSpacing: 0.8 }}>รอบจ่าย</div>
+            <div style={{ fontSize: 19, fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.22)' }}>{periodLabel}</div>
+            <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.78)', marginTop: 2 }}>
+              ณ {fmtDateLong(today)}{periodEnd < '9999' ? ' · ถึง ' + fmtDateLong(periodEnd) : ''}
+            </div>
           </div>
         </div>
-        <div data-no-capture="1" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      </div>
+
+      {/* ── แถบเครื่องมือ (ไม่ติดในรูป) ── */}
+      <div data-no-capture="1" style={{ padding: '7px 14px', borderBottom: '1px solid var(--line)', background: '#fafcfb',
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11, color: '#7c8a99' }}>
+          {rows.length} บัญชี · กดชื่อแถวเพื่อดูรวมทุกบัญชี · กดตัวเลขเพื่อดูเฉพาะบัญชีนั้น
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {canEdit && (
             <button onClick={() => setCatMode(m => !m)} style={btn(catMode)} title="เปิด/ปิดดรอปดาวน์ย้ายหมวดในตาราง">
               ⇄ จัดหมวด
@@ -2773,16 +2897,18 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
 
       {/* เลือกบัญชีเป็นคอลัมน์ */}
       {pickOpen && (
-        <div data-no-capture="1" style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', background: '#fbfdff',
+        <div data-no-capture="1" style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', background: '#fbfdfc',
                                           display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {(views || []).map(v => {
             const no = v.acct.accountNo, on = pickedSet.has(no), br = bdBrand(v.acct.bankName);
             return (
               <button key={no} onClick={() => togglePick(no)}
-                style={{ padding: '4px 10px', borderRadius: 20, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px 3px 4px', borderRadius: 20,
+                         fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
                          border: '1.5px solid ' + (on ? br.color : '#e2e8f0'), background: on ? br.color : '#fff',
                          color: on ? '#fff' : '#94a3b8' }}>
-                {on ? '✓ ' : ''}{br.label} {bdLast4(no)}
+                <BDBankLogo name={v.acct.bankName} size={20} />
+                {br.label} {bdLast4(no)}
               </button>
             );
           })}
@@ -2798,40 +2924,51 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
         </div>
       )}
 
-      {/* ตารางหลัก */}
-      <div style={{ overflowX: 'auto' }}>
+      {/* ── ตารางหลัก ── */}
+      <div data-hscroll="1" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', minWidth: tblMinW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
           <colgroup>
-            <col />
-            {rows.map(r => <col key={r.acctNo} style={{ width: sp(122) }} />)}
-            <col style={{ width: sp(140) }} />
+            <col style={{ width: sp(330) }} />
+            {rows.map(r => <col key={r.acctNo} style={{ width: sp(132) }} />)}
+            <col style={{ width: sp(150) }} />
           </colgroup>
           <thead>
-            <tr style={{ background: '#f1f5f9' }}>
-              <th style={{ textAlign: 'left', padding: pad('8px 12px'), fontSize: fz(11.5), fontWeight: 700, color: '#475569' }}>ธนาคาร</th>
+            <tr style={{ background: '#fff', borderBottom: '2px solid ' + BD_SUM_SKIN.brand }}>
+              <th style={{ textAlign: 'left', padding: pad('10px 12px'), fontSize: fz(11), fontWeight: 700,
+                           color: '#7c8a99', letterSpacing: 0.4 }}>ธนาคาร</th>
               {rows.map(r => {
                 const br = bdBrand(r.acct.bankName);
                 return (
-                  <th key={r.acctNo} title={r.acct.accountNo}
-                    style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(11.5), fontWeight: 800,
-                             color: br.color, whiteSpace: 'nowrap' }}>
-                    {br.label} <span style={{ fontFamily: 'ui-monospace', color: '#64748b', fontWeight: 600 }}>{bdLast4(r.acct.accountNo)}</span>
+                  <th key={r.acctNo} title={r.acct.accountNo + (r.acct.accountName ? ' · ' + r.acct.accountName : '')}
+                      style={{ padding: pad('8px 10px'), fontWeight: 700 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: sp(7) }}>
+                      <BDBankLogo name={r.acct.bankName} size={sp(28)} />
+                      <div style={{ textAlign: 'right', lineHeight: 1.25, minWidth: 0 }}>
+                        <div style={{ fontSize: fz(13), fontWeight: 800, color: br.color }}>{br.label}</div>
+                        <div style={{ fontSize: fz(9.5), color: '#a8b3c2', fontFamily: 'ui-monospace' }}>{r.acct.accountNo}</div>
+                        <div style={{ fontSize: fz(9.5), color: '#c3cbd6' }}>{br.label} {bdLast4(r.acct.accountNo)}</div>
+                      </div>
+                    </div>
                   </th>
                 );
               })}
-              <th style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(11.5), fontWeight: 800, color: '#0f172a', background: '#e2e8f0' }}>รวม</th>
+              <th style={{ textAlign: 'right', padding: pad('8px 10px'), fontSize: fz(12), fontWeight: 800,
+                           color: BD_SUM_SKIN.brandDeep, background: BD_SUM_SKIN.totalTint,
+                           borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine, verticalAlign: 'bottom' }}>รวม</th>
             </tr>
           </thead>
           <tbody>{body}</tbody>
         </table>
       </div>
 
-      {/* ท้ายใบ — จุดตัดรูป */}
-      <div data-capture-end="1" style={{ padding: pad('9px 14px'), borderTop: '1px solid ' + (T.net < 0 ? '#fecaca' : '#bbf7d0'),
-                                         background: T.net < 0 ? '#fff5f5' : '#f0fdf4', display: 'flex', justifyContent: 'space-between',
-                                         gap: 10, flexWrap: 'wrap', fontSize: fz(11.5), color: '#475569' }}>
-        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · ณ {fmtDate(today)}</span>
-        <span style={{ fontWeight: 800, color: T.net < 0 ? '#c53030' : '#276749' }}>
+      {/* ── ท้ายใบ (จุดตัดรูป) ── */}
+      <div data-capture-end="1" style={{ padding: pad('10px 14px'),
+                                         borderTop: '1px solid ' + (T.net < 0 ? '#fecaca' : '#c9e4d4'),
+                                         background: T.net < 0 ? '#fff5f5' : BD_SUM_SKIN.netTint,
+                                         display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
+                                         fontSize: fz(11.5), color: '#4b5f52' }}>
+        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodTx} · ณ {fmtDate(today)}</span>
+        <span style={{ fontWeight: 800, fontSize: fz(12.5), color: T.net < 0 ? '#c53030' : BD_SUM_SKIN.brandDeep }}>
           เงินคงเหลือสุทธิรวม {fmtMoney(T.net)}
         </span>
       </div>
