@@ -1790,7 +1790,11 @@ function CashFlowDashboard({ data, setData, toast }) {
   const _outGrid     = s01OutMode === 'apPlan' ? apPlanScopedByWeekCat
                      : s01OutMode === 'pv'     ? pvModeScopedByWeekCat
                      : forecastRemainingByWeekCat;
-  const _outRollover = (s01OutMode === 'apPlan' || s01OutMode === 'pv') ? { 1: 0, 2: 0, 3: 0, 4: 0 } : nextMonthInflow.out;
+  // คอลัมน์ "เดือนถัดไป" (rest ตอนสัปดาห์สุดท้าย) = ประมาณการรายจ่ายเดือนถัดไปเสมอ ทุกโหมด
+  //   (เดิม pv/apPlan บังคับ 0 → พอเป็นสัปดาห์สุดท้ายของเดือน คอลัมน์เดือนถัดไปว่างหมด
+  //    เช่นเงินเดือนเดือนหน้าหายไปทั้งก้อน ทำให้ยอดคงเหลือสุทธิปลายงวดสูงเกินจริง)
+  //   โหมด (pv/apPlan/remaining) มีผลแค่ "การแสดงสัปดาห์ปัจจุบัน" ไม่เกี่ยวกับประมาณการเดือนหน้า
+  const _outRollover = nextMonthInflow.out;
   const planOut  = {
     1: currentRestSplit(_outGrid.map(g => g[1]), _outRollover[1]),
     2: currentRestSplit(_outGrid.map(g => g[2]), _outRollover[2]),
