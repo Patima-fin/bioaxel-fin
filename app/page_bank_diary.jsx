@@ -2166,7 +2166,6 @@ const BD_CAT_HINT  = {
   3: 'ต้นทุนทางการเงินและดอกเบี้ย',
   4: 'ค่าใช้จ่ายเบ็ดเตล็ดและเงินเดือน',
 };
-const BD_CAT_COLOR = { 1: '#0369a1', 2: '#7c3aed', 3: '#b45309', 4: '#0f766e' };
 
 /* คีย์ override ของหน้านี้ (sync ทั้งทีมผ่าน data.manualOverrides)
  *   bd.act.<docKey>  = ย้ายเฉพาะเอกสารใบนั้น (เจาะจงสุด ชนะทุกอย่าง)
@@ -2322,24 +2321,26 @@ function bdGroupTransfers(list) {
   return [...m.values()].sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1);
 }
 
-/* โทนสีของใบสรุป — อิงแบรนด์ BIOAXEL (เขียว `--brand-*`) ให้เอกสารที่แคปส่งผู้บริหาร
- * ดูเป็น "ใบสรุปของบริษัท" ไม่ใช่ตารางเปล่า ๆ · แก้สีที่นี่ที่เดียวทั้งใบ */
+/* โทนสีของใบสรุป — พอร์ตค่าจากใบต้นแบบของ POG (const BD_RP) แล้วเปลี่ยน
+ * "น้ำเงิน" ทุกจุดเป็นเขียวแบรนด์ BIO · แก้สีทั้งใบได้ที่นี่ที่เดียว */
 const BD_SUM_SKIN = {
-  headGrad:  'linear-gradient(120deg,#1a592f 0%,#2e8b4a 62%,#3f9c5c 100%)',
-  brand:     '#2e8b4a',
-  brandDeep: '#1a592f',
-  theadTint: '#eef5f0',                                            // แถบหัวตาราง (ธนาคาร)
-  baseTint:  '#e9f6ee', baseRail: '#2e8b4a',                       // เงินคงเหลือใช้ได้
-  inTint:    '',        inRail:  '#2e8b4a', inText:  '#1f7a45',    // คาดรับเงินเข้า (พื้นขาว)
-  outTint:   '#fff7ef', outRail: '#2e8b4a', outText: '#c0392f',    // ค่าใช้จ่าย
-  catTint:   '#fffaf4', catRail: '#2e8b4a',                        // หมวด 1-4
-  tfTint:    '',        tfRail:  '#94a3b8',                        // โอนระหว่างบัญชี (พื้นขาว)
-  netTint:   '#e9f6ee', netRail: '#1a592f',                        // คงเหลือสุทธิ
-  totalTint: '#f2f8f4', totalLine: '#dde9e2',                      // คอลัมน์รวม
-  pickBg:    '#eff6ff',                                            // ช่องที่กดดูเฉพาะบัญชี
-  guide:     '#eef2f7',
-  ink:       '#334155',
+  navy:     '#1a592f',   // เส้นหลัก/ตัวอักษรหัวตาราง (ต้นแบบ #1e3a8a)
+  head:     '#e7f1ea',   // พื้นหัวตาราง            (ต้นแบบ #e8eefb)
+  totHead:  '#d8e8de',   // พื้นหัวคอลัมน์รวม        (ต้นแบบ #dbe6fa)
+  totCol:   '#eff6f2',   // พื้นคอลัมน์รวม           (ต้นแบบ #eef3fd)
+  mint:     '#e7f5f0',   // แถวเงินคงเหลือใช้ได้      (เขียวมิ้นเหมือนต้นแบบ)
+  cream:    '#fdf3e6',   // แถวค่าใช้จ่าย/หมวด        (โทนอุ่นเหมือนต้นแบบ)
+  netBg:    '#dcecdf',   // แถวเงินคงเหลือสุทธิ       (ต้นแบบ #dfe9fb)
+  tfBg:     '#f2f7f4',   // แถวโอนระหว่างบัญชี        (ต้นแบบ #f4f7fd)
+  subBg:    '#fafdfb',   // แถวรายใบ/รายละเอียด       (ต้นแบบ #fafcff)
+  emptyBg:  '#f5faf7',   // แถว "ไม่มีรายการ"        (ต้นแบบ #f6f9ff)
+  rail:     '#cbe0d3',   // รางซ้ายของรายการย่อย      (ต้นแบบ #ccdaf0)
+  rowLine:  '#eaf2ed',   // เส้นคั่นแถวย่อย           (ต้นแบบ #eef2f9)
+  red:      '#be123c',   // ยอดรายจ่าย/ติดลบ (เหมือนต้นแบบ)
+  green:    '#15803d',
+  headGrad: 'linear-gradient(115deg,#14532d 0%,#21703a 52%,#3f9c5c 100%)',  // ต้นแบบ: น้ำเงิน 115deg
 };
+const BD_COMPANY_NAME = 'บริษัท ไบโอแอ็กซ์เซลล์ จำกัด · BIOAXEL Co., Ltd.';
 
 /* "SCB 1362684863" → "SCB ···4863" — ใช้กับป้ายคู่โอน (เลขบัญชีเต็มยาวจนตกบรรทัด) */
 function bdShortParty(s) {
@@ -2463,14 +2464,12 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   const sp  = (px) => Math.round(px * k);
   const pad = (css) => String(css).replace(/(\d+(?:\.\d+)?)px/g, (m, d) => sp(parseFloat(d)) + 'px');
 
-  const showNum = (v, mode) => {
-    if (!v || Math.abs(v) < 0.005) return '—';
-    return (v < 0 ? '−' : (mode === 'plus' ? '+' : '')) + fmtMoney(Math.abs(v));
+  /* รวมยอดของรายการที่เหลือ (แถว "…อีก N ใบ" — ไม่ตัดข้อมูลเงียบ ๆ) */
+  const restOf = (list) => {
+    const byAcct = {}; let total = 0;
+    list.forEach(e => { const a = Math.abs(e.it.signed); byAcct[e.acctNo] = (byAcct[e.acctNo] || 0) + a; total += a; });
+    return { byAcct, total };
   };
-  const numTd = (extra) => Object.assign({
-    padding: pad('4px 10px'), textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-    whiteSpace: 'nowrap', fontSize: fz(12.5),
-  }, extra || {});
 
   if (!rows.length) return null;   // ไม่มีบัญชีที่เลือก = ไม่ต้องแสดงใบสรุป
 
@@ -2538,276 +2537,306 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   /* ── ตัวสร้างแถว ─────────────────────────────────────────────────────────
    * แถวหลัก = แถบสีประจำส่วน (ยกมา/รับ/จ่าย/โอน/สุทธิ) + รางสีซ้ายสุด
    * ตัวเลขขีดเส้นประใต้ตัวเลข (เหมือนใบสรุปที่ปรินต์) · คอลัมน์รวมมีพื้นอ่อนคั่นเสมอ */
-  const mainRow = (cfg) => {
-    const open  = (cfg.key in expand);
-    const scope = expand[cfg.key] || null;
-    const caret = cfg.expandable ? (open ? '▼' : '▶') : '';
-    const dash  = (v, color) => (
-      <span style={{ borderBottom: '1px dashed ' + (color || '#c9d6e2'), paddingBottom: 1 }}>{v}</span>
-    );
+  /* ── เซลล์ตัวเลข (ยึดตามใบต้นแบบ) ─────────────────────────────────────
+   * 0 → ขีด · ติดลบ = แดง + พื้นแดงอ่อน (เงินไม่พอต้องเห็นทันที)
+   * ตัวเลขที่มีรายการอยู่เบื้องหลัง = กดได้ + มีเส้นประใต้ */
+  const SK = BD_SUM_SKIN;
+  const cell = (v, o) => {
+    const clickable = Math.abs(v) > 0.005 && !o.noExpand;
+    const neg = v < 0;
+    const col = neg ? SK.red : (o.tot ? (o.totColor || o.color || SK.navy) : (o.color || 'var(--ink-800)'));
+    const bg  = neg ? '#fdeaea' : (o.tot ? SK.totCol : (o.rowBg || undefined));
     return (
-      <tr key={cfg.key} style={{ background: cfg.tint || '#fff', borderTop: '1px solid ' + (cfg.line || '#e2e8f0') }}>
-        <td style={{ padding: pad('4px 12px'), maxWidth: 0, overflow: 'hidden',
-                     borderLeft: '3px solid ' + (cfg.rail || 'transparent') }}>
-          <span onClick={cfg.expandable ? () => toggleRow(cfg.key, null) : undefined}
-            title={cfg.hint || (cfg.expandable ? 'กดเพื่อดูรายละเอียดรวมทุกบัญชี' : undefined)}
-            style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
-                     whiteSpace: 'nowrap', fontSize: fz(13), fontWeight: 800, color: cfg.labelColor || '#16324a',
-                     cursor: cfg.expandable ? 'pointer' : 'default' }}>
-            <span style={{ color: cfg.rail || '#94a3b8', fontSize: fz(9.5), marginRight: caret ? sp(5) : 0 }}>{caret}</span>
-            {cfg.label}
-            {cfg.note ? <span style={{ fontWeight: 500, fontSize: fz(10.5), color: '#94a3b8', marginLeft: sp(8) }}>{cfg.note}</span> : null}
+      <td key={o.k} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+        fontWeight: neg ? 800 : (o.tot ? 800 : (o.bold ? 700 : (o.semi ? 600 : 400))), color: col, background: bg,
+        borderTop: o.topRule ? '2px solid ' + SK.navy : undefined,
+        fontSize: fz(13), padding: pad('9px 12px') }}>
+        {Math.abs(v) < 0.005 ? <span style={{ color: 'var(--ink-300)' }}>—</span> : (
+          <span onClick={clickable ? () => toggleRow(o.rowKey, o.acctNo) : undefined}
+            title={clickable ? 'คลิกกางดูรายการที่รวมอยู่ในยอดนี้' : undefined}
+            style={{ cursor: clickable ? 'pointer' : 'default',
+              borderBottom: clickable ? '1px dashed color-mix(in oklch, currentColor 40%, transparent)' : 'none' }}>
+            {neg ? '−' + fmtMoney(Math.abs(v)) : (o.sign || '') + fmtMoney(Math.abs(v))}
           </span>
-        </td>
-        {rows.map(r => {
-          const v   = cfg.valOf(r);
-          const hot = cfg.expandable && Math.abs(v) > 0.005;
-          const col = v < 0 ? '#b4453a' : (cfg.cellColor || '#16324a');
-          return (
-            <td key={r.acctNo}
-              onClick={hot ? () => toggleRow(cfg.key, r.acctNo) : undefined}
-              title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
-              style={numTd({ fontWeight: 700, color: col, cursor: hot ? 'pointer' : 'default',
-                             background: (open && scope === r.acctNo) ? BD_SUM_SKIN.pickBg : 'transparent' })}>
-              {Math.abs(v) > 0.005 ? dash(showNum(v, cfg.mode), cfg.dashColor) : '—'}
-            </td>
-          );
-        })}
-        <td style={numTd({ fontWeight: 800, fontSize: fz(13), background: BD_SUM_SKIN.totalTint,
-                           borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
-                           color: cfg.total < 0 ? '#b4453a' : (cfg.cellColor || '#0f172a') })}>
-          {Math.abs(cfg.total) > 0.005 ? dash(showNum(cfg.total, cfg.mode), cfg.dashColor) : '—'}
-        </td>
-      </tr>
+        )}
+      </td>
     );
   };
 
-  /* แถวรายละเอียด — รางแนวตั้งซ้อนตามชั้น (ชั้นแรกเป็นสีของส่วน/หมวด) ให้เห็นว่าใครอยู่ใต้ใคร */
-  const detailRow = (cfg) => (
-    <tr key={cfg.key} style={{ background: cfg.tint || '#fff', borderTop: '1px solid #f1f5f9' }}>
-      <td style={{ padding: 0, maxWidth: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
-          {Array.from({ length: cfg.level }).map((_, i) => (
-            <span key={i} style={{ flex: '0 0 auto', width: sp(i === 0 ? 15 : 16),
-                                   borderLeft: '2px solid ' + (i === 0 ? (cfg.rail || '#cbd5e1') : BD_SUM_SKIN.guide) }} />
-          ))}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp(6),
-                        whiteSpace: 'nowrap', padding: pad('3px 10px 3px 7px') }}>
-            <span onClick={cfg.onToggle} style={{ flex: '0 0 auto', width: sp(10), color: cfg.rail || '#94a3b8',
-                                                  fontSize: fz(9), cursor: cfg.onToggle ? 'pointer' : 'default' }}>
-              {cfg.onToggle ? (cfg.open ? '▼' : '▶') : ''}
-            </span>
-            {cfg.tag ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#a8b3c2' }}>{cfg.tag}</span> : null}
-            <span onClick={cfg.onToggle} title={cfg.name}
-              style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-                       fontSize: fz(cfg.level === 1 ? 12.5 : 12), fontWeight: cfg.level === 1 ? 800 : 600,
-                       color: cfg.nameColor || (cfg.level === 1 ? '#334155' : '#475569'),
-                       cursor: cfg.onToggle ? 'pointer' : 'default' }}>
-              {cfg.name}
-            </span>
-            {cfg.count ? (
-              <span title={cfg.countTitle || undefined}
-                    style={{ flex: '0 0 auto', fontSize: fz(10), fontWeight: 600, color: '#a8b3c2' }}>{cfg.count}</span>
-            ) : null}
-            {cfg.date  ? <span style={{ flex: '0 0 auto', fontSize: fz(10.5), color: '#94a3b8' }}>{cfg.date}</span> : null}
-            {cfg.badge || null}
-            {cfg.control || null}
-          </div>
-        </div>
-      </td>
-      {rows.map(r => {
-        const v   = cfg.byAcct[r.acctNo];
-        const hot = cfg.onCell && v;
-        return (
-          <td key={r.acctNo}
-            onClick={hot ? () => cfg.onCell(r.acctNo) : undefined}
-            title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
-            style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 700 : 500,
-                           color: v < 0 ? '#b4453a' : '#475569', cursor: hot ? 'pointer' : 'default',
-                           background: (cfg.open && cfg.scope === r.acctNo) ? BD_SUM_SKIN.pickBg : 'transparent' })}>
-            {v ? (cfg.mode === 'plus' ? showNum(v, 'plus') : fmtMoney(Math.abs(v))) : ''}
-          </td>
-        );
-      })}
-      <td style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 800 : 700,
-                         background: BD_SUM_SKIN.totalTint, borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
-                         color: cfg.total < 0 ? '#b4453a' : (cfg.totalColor || '#334155') })}>
-        <span style={{ borderBottom: cfg.dash ? '1px dashed #e6c8b4' : 'none', paddingBottom: cfg.dash ? 1 : 0 }}>
-          {cfg.mode === 'plus' ? showNum(cfg.total, 'plus') : fmtMoney(Math.abs(cfg.total))}
-        </span>
-      </td>
-    </tr>
+  /* แถวว่าง (ช่วงนี้ไม่มีรายการ) */
+  const emptyRow = (key, bg) => (
+    <tr key={key}><td colSpan={rows.length + 2} className="muted"
+      style={{ padding: pad('10px 16px'), background: bg || SK.emptyBg }}>ไม่มีรายการในช่วงนี้</td></tr>
   );
 
-  /* รวมยอดของรายการที่เหลือ (ใช้กับแถว "…อีก N รายการ" — ไม่ตัดข้อมูลเงียบ ๆ) */
-  const restOf = (list) => {
-    const byAcct = {}; let total = 0;
-    list.forEach(e => { const a = Math.abs(e.it.signed); byAcct[e.acctNo] = (byAcct[e.acctNo] || 0) + a; total += a; });
-    return { byAcct, total };
-  };
-
-  /* กลุ่มเจ้าหนี้ (ชั้นถัดจากหมวด) + รายใบ (ชั้นลึกสุด)
-   * allowCat=false สำหรับฝั่ง "คาดรับเงินเข้า" — หมวด 1-4 เป็นของค่าใช้จ่ายเท่านั้น
-   *   (โชว์ดรอปดาวน์/ป้ายหมวดที่แถวเงินเข้า = รกและสื่อผิด) */
-  const pushCreditorGroups = (body, prefix, list, scope, level, allowCat, rail) => {
-    const all = bdGroupByCreditor(list);          // เรียงตามวันครบกำหนดมาแล้ว
+  /* 1 เจ้าหนี้ = 1 บรรทัด (หลายใบยุบรวม ติดเลขจำนวน) · กดชื่อกางดูรายใบ
+   *   เรียงตามวันครบกำหนดก่อนเสมอ (ดู bdGroupByCreditor) */
+  const itemLines = (body, list, padLeft, kp, canMove, scope) => {
+    const groups = bdGroupByCreditor(list);
+    if (!groups.length) { body.push(emptyRow(kp + '-empty', canMove ? SK.cream : SK.emptyBg)); return; }
     const CAP = 20;
-    // เกิน CAP → เก็บ "รายใหญ่สุด" ไว้ (ไม่ตัดรายใหญ่ทิ้งเพราะบังเอิญครบกำหนดทีหลัง)
-    //   แต่ยัง "แสดงเรียงตามวัน" เหมือนเดิม · ที่เหลือยุบเป็นแถวเดียวพร้อมยอดรวม
-    const keepKeys  = all.length <= CAP ? null
-      : new Set(all.slice().sort((a, b) => b.total - a.total).slice(0, CAP).map(g => g.key));
-    const groups    = keepKeys ? all.filter(g => keepKeys.has(g.key)) : all;
-    const restGroup = keepKeys ? all.filter(g => !keepKeys.has(g.key)) : [];
-    groups.forEach(g => {
-      const rowKey  = prefix + '|' + g.key;
-      const isOpen  = (rowKey in openRow);
+    const keepKeys = groups.length <= CAP ? null
+      : new Set(groups.slice().sort((a, b) => b.total - a.total).slice(0, CAP).map(g => g.key));
+    const shown = keepKeys ? groups.filter(g => keepKeys.has(g.key)) : groups;
+    const rest  = keepKeys ? groups.filter(g => !keepKeys.has(g.key)) : [];
+    const cellSty = { textAlign: 'right', padding: pad('5px 12px'), fontVariantNumeric: 'tabular-nums',
+                      whiteSpace: 'nowrap', color: 'var(--ink-700)', borderTop: '1px solid ' + SK.rowLine, fontSize: fz(11.5) };
+
+    shown.forEach((g, k) => {
+      const rowKey  = kp + '|' + g.key;
+      const open3   = (rowKey in openRow);
       const gScope  = openRow[rowKey] || scope;
       const docKeys = g.entries.map(e => bdDocKey(e.it)).filter(Boolean);
-      const tag     = g.kinds.length === 1 ? bdItemTag(g.kinds[0]).t : '';
-      body.push(detailRow({
-        key: rowKey, level, rail, name: g.name, tag,
-        count: g.entries.length > 1 ? g.entries.length : '', countTitle: g.entries.length + ' ใบ',
-        date: bdShortDate(g.date), byAcct: g.byAcct, total: g.total,
-        open: isOpen, scope: openRow[rowKey] || null,
-        onToggle: () => toggleCred(rowKey, null),
-        onCell: (no) => toggleCred(rowKey, no),
-        badge: allowCat ? ovBadge(docKeys, g.key) : null,
-        control: allowCat ? catSelect({ doc: g.entries.length === 1, vendor: true }, docKeys, g.key) : null,
-      }));
-      if (!isOpen) return;
+      const many    = g.entries.length > 1;
+      const tg      = g.kinds.length === 1 ? bdItemTag(g.kinds[0]).t : '';
+      body.push(
+        <tr key={kp + 'g' + k} style={{ background: '#fff', fontSize: fz(11.5) }}>
+          <td onClick={() => toggleCred(rowKey, null)}
+            title={many ? 'กดดูเอกสารทั้ง ' + g.entries.length + ' ใบ' : 'กดดูเลขเอกสาร/รายละเอียด'}
+            style={{ padding: pad('5px 12px'), paddingLeft: padLeft, borderLeft: '2px solid ' + SK.rail,
+              borderTop: '1px solid ' + SK.rowLine, cursor: 'pointer', userSelect: 'none', fontSize: fz(11.5) }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7,
+              maxWidth: canMove && catMode ? 560 : 430, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              <span data-no-capture="1" style={{ flex: 'none', width: 10, fontSize: fz(7), color: open3 ? SK.navy : 'var(--ink-300)' }}>{open3 ? '▼' : '▶'}</span>
+              <span style={{ flex: 'none', fontSize: fz(10), color: '#9aa8bb' }}>{tg}</span>
+              <span title={g.name} style={{ fontWeight: 600, color: 'var(--ink-800)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+              {many && (
+                <span title={g.entries.length + ' ใบ'} style={{ flex: 'none', display: 'inline-grid', placeItems: 'center', minWidth: 16, height: 16,
+                  padding: '0 4px', fontSize: fz(9.5), fontWeight: 700, color: '#fff', background: '#9ab8a6', borderRadius: 8 }}>{g.entries.length}</span>
+              )}
+              <span style={{ flex: 'none', color: 'var(--ink-400)' }}>{bdShortDate(g.date)}</span>
+              {canMove ? ovBadge(docKeys, g.key) : null}
+              {canMove ? catSelect({ doc: !many, vendor: true }, docKeys, g.key) : null}
+            </div>
+          </td>
+          {rows.map(r => (
+            <td key={r.acctNo} style={cellSty}>{g.byAcct[r.acctNo] ? fmtMoney(g.byAcct[r.acctNo]) : ''}</td>
+          ))}
+          <td style={{ ...cellSty, background: SK.totCol }}>{fmtMoney(g.total)}</td>
+        </tr>
+      );
+      if (!open3) return;
       const docs = g.entries.filter(e => !gScope || e.acctNo === gScope)
                             .slice().sort((a, b) => (a.it.date || '') < (b.it.date || '') ? -1 : 1);
       const DCAP = 25;
-      docs.slice(0, DCAP).forEach((e, i) => {
-        const it = e.it, dk = bdDocKey(it), byAcct = {};
-        byAcct[e.acctNo] = Math.abs(it.signed);
-        body.push(detailRow({
-          key: rowKey + '#' + i, level: level + 1, rail,
-          tag: bdShortDate(it.date),
-          name: (it.sub || it.title || '—') + (it.remark ? ' · ' + it.remark : ''),
-          byAcct, total: Math.abs(it.signed),
-          badge: allowCat ? ovBadge([dk], '') : null,
-          control: allowCat ? catSelect({ doc: !!dk, vendor: false }, [dk], g.key) : null,
-        }));
+      docs.slice(0, DCAP).forEach((e, j) => {
+        const it = e.it, dk = bdDocKey(it);
+        const note = [it.sub, it.remark].filter(Boolean).join(' · ');
+        body.push(
+          <tr key={kp + 'g' + k + 'd' + j} style={{ background: SK.subBg, fontSize: fz(11.5) }}>
+            <td style={{ padding: pad('4px 12px'), paddingLeft: padLeft + sp(26), borderLeft: '2px solid ' + SK.rail,
+              color: 'var(--ink-500)', fontSize: fz(11.5) }}>
+              <div title={note} style={{ display: 'flex', alignItems: 'center', gap: 7,
+                maxWidth: canMove && catMode ? 560 : 430, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                <span style={{ flex: 'none' }}>{bdShortDate(it.date)}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{note || (it.title || '—')}</span>
+                {canMove ? ovBadge([dk], '') : null}
+                {canMove && many ? catSelect({ doc: !!dk, vendor: false }, [dk], g.key) : null}
+              </div>
+            </td>
+            {rows.map(r => (
+              <td key={r.acctNo} style={{ ...cellSty, borderTop: 'none', color: 'var(--ink-500)' }}>
+                {r.acctNo === e.acctNo ? fmtMoney(Math.abs(it.signed)) : ''}
+              </td>
+            ))}
+            <td style={{ ...cellSty, borderTop: 'none', background: SK.totCol, color: 'var(--ink-500)' }}>{fmtMoney(Math.abs(it.signed))}</td>
+          </tr>
+        );
       });
       if (docs.length > DCAP) {
-        const rest = restOf(docs.slice(DCAP));
-        body.push(detailRow({ key: rowKey + '#more', level: level + 1, rail, name: '…อีก ' + (docs.length - DCAP) + ' ใบ',
-                              byAcct: rest.byAcct, total: rest.total, nameColor: '#94a3b8' }));
+        const r2 = restOf(docs.slice(DCAP));
+        body.push(
+          <tr key={kp + 'g' + k + 'more'} style={{ background: SK.subBg, fontSize: fz(11.5) }}>
+            <td style={{ padding: pad('4px 12px'), paddingLeft: padLeft + sp(26), borderLeft: '2px solid ' + SK.rail, color: 'var(--ink-400)' }}>
+              …อีก {docs.length - DCAP} ใบ
+            </td>
+            {rows.map(r => <td key={r.acctNo} style={{ ...cellSty, borderTop: 'none' }}>{r2.byAcct[r.acctNo] ? fmtMoney(r2.byAcct[r.acctNo]) : ''}</td>)}
+            <td style={{ ...cellSty, borderTop: 'none', background: SK.totCol }}>{fmtMoney(r2.total)}</td>
+          </tr>
+        );
       }
     });
-    if (restGroup.length) {
+    if (rest.length) {
       const byAcct = {}; let total = 0;
-      restGroup.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
-      body.push(detailRow({ key: prefix + '|more', level, rail, name: '…อีก ' + restGroup.length + ' ราย',
-                            byAcct, total, nameColor: '#94a3b8' }));
+      rest.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
+      body.push(
+        <tr key={kp + '-more'} style={{ background: '#fff', fontSize: fz(11.5) }}>
+          <td style={{ padding: pad('5px 12px'), paddingLeft: padLeft, borderLeft: '2px solid ' + SK.rail,
+            borderTop: '1px solid ' + SK.rowLine, color: 'var(--ink-400)' }}>…อีก {rest.length} ราย</td>
+          {rows.map(r => <td key={r.acctNo} style={cellSty}>{byAcct[r.acctNo] ? fmtMoney(byAcct[r.acctNo]) : ''}</td>)}
+          <td style={{ ...cellSty, background: SK.totCol }}>{fmtMoney(total)}</td>
+        </tr>
+      );
     }
   };
 
-  /* ── ประกอบแถวทั้งใบ ─────────────────────────────────────────────────── */
-  const body = [];
-  const bA  = (fn) => { const m = {}; rows.forEach(r => { const v = fn(r); if (v) m[r.acctNo] = v; }); return m; };
-  const sum = (fn) => rows.reduce((s, r) => s + fn(r), 0);
-  const SK  = BD_SUM_SKIN;
-
-  /* 1) ยอดยกมา — ยอดที่บันทึกไว้ ไม่มีรายการเบื้องหลัง จึงไม่มีลูกศร (แต่มี tooltip บอกเหตุผล) */
-  body.push(mainRow({
-    key: 'base', label: 'เงินคงเหลือใช้ได้', valOf: r => r.base, total: T.base,
-    tint: SK.baseTint, rail: SK.baseRail, dashColor: '#bcd9c8', labelColor: '#16324a', cellColor: '#16324a',
-    hint: 'ยอดเงินที่บันทึกไว้ล่าสุดของแต่ละบัญชี — เป็นตัวตั้ง ไม่ได้มาจากรายการย่อย จึงกางดูไม่ได้',
-  }));
-
-  /* 2) คาดรับเงินเข้า → ผู้จ่าย/ลูกค้า → เอกสารรายใบ */
-  body.push(mainRow({
-    key: 'in', label: 'คาดรับเงินเข้า', valOf: r => r.innReal, total: T.inn,
-    mode: 'plus', tint: SK.inTint, rail: SK.inRail, cellColor: SK.inText, dashColor: '#bcd9c8',
-    expandable: T.inn > 0.005,
-  }));
-  if ('in' in expand) pushCreditorGroups(body, 'in', pickIn(expand['in']), expand['in'], 1, false, SK.inRail);
-
-  /* 3) ค่าใช้จ่ายถึงกำหนดชำระ → หมวด → เจ้าหนี้ → เอกสารรายใบ
-   *    ยอดรายหมวดคิดจาก "ลิสต์เดียวกับแถวหลัก" → รวม 4 หมวด = ยอดแถวหลักเสมอ */
-  body.push(mainRow({
-    key: 'out', label: 'ค่าใช้จ่ายถึงกำหนดชำระ', valOf: r => r.outReal, total: T.out,
-    tint: SK.outTint, rail: SK.outRail, cellColor: SK.outText, dashColor: '#e6c8b4',
-    expandable: T.out > 0.005,
-  }));
-  if ('out' in expand) {
-    const scope = expand['out'];
-    const agg   = {};
-    pickOut(scope).forEach(e => {
+  /* กาง "ค่าใช้จ่ายถึงกำหนดชำระ" → หมวด 1-4 (เฉพาะหมวดที่มีรายการ) → กางต่อดูเจ้าหนี้ได้ */
+  const catLines = (body, scopeAcct) => {
+    const list = pickOut(scopeAcct);
+    const agg = {};
+    list.forEach(e => {
       const c = bdRowCat(e.it, apByNo);
       const a = (agg[c] = agg[c] || { byAcct: {}, total: 0, entries: [] });
       const v = Math.abs(e.it.signed);
       a.entries.push(e); a.total += v;
       a.byAcct[e.acctNo] = (a.byAcct[e.acctNo] || 0) + v;
     });
-    BD_CAT_ORDER.forEach(c => {
+    const present = BD_CAT_ORDER.filter(c => agg[c]);
+    if (!present.length) { body.push(emptyRow('cat-empty', SK.cream)); return; }
+    present.forEach(c => {
       const a = agg[c];
-      if (!a) return;                                   // หมวดที่ไม่มีรายการในช่วงนี้ = ไม่ต้องแสดง
       const catKey = 'cat' + c;
-      const isOpen = (catKey in expandCat);
-      const cScope = expandCat[catKey] || scope;
-      body.push(detailRow({
-        key: catKey, level: 1, rail: SK.catRail, tint: SK.catTint,
-        name: BD_CAT_NAME[c], nameColor: SK.ink, totalColor: SK.outText,
-        count: a.entries.length + ' รายการ', byAcct: a.byAcct, total: a.total, dash: true,
-        open: isOpen, scope: expandCat[catKey] || null,
-        onToggle: () => toggleCat(catKey, null),
-        onCell: (no) => toggleCat(catKey, no),
-      }));
-      if (isOpen) pushCreditorGroups(body, catKey, a.entries.filter(e => !cScope || e.acctNo === cScope), cScope, 2, true, SK.catRail);
+      const open2  = (catKey in expandCat);
+      const cScope = expandCat[catKey] || scopeAcct;
+      const num = (v, k, isTot, no) => {
+        const hot = Math.abs(v) > 0.005;
+        return (
+          <td key={k} style={{ textAlign: 'right', padding: pad('8px 12px'), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+            fontWeight: isTot ? 800 : 600, background: isTot ? SK.totCol : SK.cream,
+            color: isTot ? SK.red : 'var(--ink-700)', fontSize: fz(12.5) }}>
+            {!hot ? <span style={{ color: 'var(--ink-300)' }}>—</span> : (
+              <span onClick={() => toggleCat(catKey, no)} title="คลิกกางดูรายการในหมวดนี้"
+                style={{ cursor: 'pointer', borderBottom: '1px dashed color-mix(in oklch, currentColor 40%, transparent)' }}>
+                {fmtMoney(v)}
+              </span>
+            )}
+          </td>
+        );
+      };
+      body.push(
+        <tr key={catKey} style={{ background: SK.cream }}>
+          <td onClick={() => toggleCat(catKey, scopeAcct)} title={BD_CAT_HINT[c] + ' — กดเพื่อกางดูรายการในหมวดนี้'}
+            style={{ padding: pad('8px 12px 8px 30px'), borderLeft: '3px solid ' + SK.navy, background: SK.cream,
+              cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', fontSize: fz(12.5) }}>
+            <span data-no-capture="1" style={{ display: 'inline-block', width: 13, fontSize: fz(8), verticalAlign: 'middle',
+              color: open2 ? SK.navy : 'var(--ink-300)' }}>{open2 ? '▼' : '▶'}</span>
+            <span style={{ fontWeight: 700, fontSize: fz(12.5), color: 'var(--ink-700)' }}>{BD_CAT_NAME[c]}</span>
+            <span style={{ marginLeft: 8, fontSize: fz(11), color: 'var(--ink-400)' }}>{a.entries.length} รายการ</span>
+          </td>
+          {rows.map((r, k) => num(a.byAcct[r.acctNo] || 0, k, false, r.acctNo))}
+          {num(a.total, 'tot', true, scopeAcct)}
+        </tr>
+      );
+      if (open2) itemLines(body, a.entries.filter(e => !cScope || e.acctNo === cScope), 52, 'c' + c, true, cScope);
     });
-  }
+  };
 
-  /* 4) โอนระหว่างบัญชี — คอลัมน์รวมต้องเป็น 0 (แสดง —) เพราะเงินแค่ย้ายกระเป๋า */
+  /* ยอดรวมในรูปแบบเดียวกับแถวรายบัญชี — pick() ตัวเดียวกันจึงใช้ได้ทั้งช่องบัญชีและช่องรวม */
+  const TOTROW = { base: T.base, innReal: T.inn, outReal: T.out, tfIn: T.tfIn, tfOut: T.tfOut, net: T.net };
+
+  /* แถวหลัก — กดชื่อ = ทุกบัญชี · กดตัวเลข = เฉพาะบัญชีนั้น */
+  const line = (body, label, pick, o) => {
+    const canOpen  = !o.noExpand;
+    const open     = canOpen && (o.rowKey in expand);
+    const openAcct = expand[o.rowKey] || null;
+    body.push(
+      <tr key={o.rowKey} style={{ background: o.rowBg }}>
+        <td onClick={canOpen ? () => toggleRow(o.rowKey, null) : undefined}
+          title={canOpen ? 'กางดูรายการทุกบัญชี'
+                         : 'ยอดที่บันทึกไว้ล่าสุดจากหน้าบันทึกยอดธนาคาร — ไม่ได้เกิดจากการรวมรายการ จึงไม่มีรายการย่อยให้กาง'}
+          style={{ fontWeight: o.bold ? 800 : 400, padding: pad('9px 12px'), paddingLeft: o.indent ? sp(30) : sp(12),
+            fontSize: fz(13), color: o.labelColor || SK.navy, whiteSpace: 'nowrap',
+            cursor: canOpen ? 'pointer' : 'default', userSelect: 'none',
+            background: o.rowBg || undefined, borderTop: o.topRule ? '2px solid ' + SK.navy : undefined }}>
+          <span data-no-capture="1" style={{ display: 'inline-block', width: 13, fontSize: fz(8), verticalAlign: 'middle',
+            color: open ? SK.navy : 'var(--ink-300)' }}>{canOpen ? (open ? '▼' : '▶') : ''}</span>
+          {label}
+          {o.note ? <span style={{ marginLeft: 7, fontWeight: 400, fontSize: fz(11), color: 'var(--ink-400)' }}>{o.note}</span> : null}
+        </td>
+        {rows.map((r, k) => cell(pick(r), { ...o, k, acctNo: r.acctNo }))}
+        {cell(pick(TOTROW), { ...o, k: 'tot', tot: true, bold: true, acctNo: null })}
+      </tr>
+    );
+    if (!open) return;
+    if (o.rowKey === 'out') { catLines(body, openAcct); return; }
+    if (o.rowKey === 'net') {
+      [['ยอดยกมา (เงินคงเหลือใช้ได้)', (r) => r.base],
+       ['+ คาดรับเงินเข้า',            (r) => r.innReal],
+       ['+ รับโอนเข้า',                (r) => r.tfIn],
+       ['− ค่าใช้จ่ายถึงกำหนดชำระ',    (r) => -r.outReal],
+       ['− โอนออก',                    (r) => -r.tfOut],
+      ].forEach(([lb, fn], i) => {
+        const sty = { textAlign: 'right', padding: pad('4px 12px'), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+                      fontSize: fz(11.5), color: 'var(--ink-600)' };
+        body.push(
+          <tr key={'net#' + i} style={{ background: SK.subBg, fontSize: fz(11.5) }}>
+            <td style={{ padding: pad('4px 12px 4px 38px'), color: 'var(--ink-600)', whiteSpace: 'nowrap', fontSize: fz(11.5) }}>{lb}</td>
+            {rows.map(r => { const v = fn(r); return <td key={r.acctNo} style={sty}>{v ? (v < 0 ? '−' : '+') + fmtMoney(Math.abs(v)) : ''}</td>; })}
+            <td style={{ ...sty, background: SK.totCol }}>{(() => { const v = rows.reduce((s, r) => s + fn(r), 0); return v ? (v < 0 ? '−' : '+') + fmtMoney(Math.abs(v)) : '—'; })()}</td>
+          </tr>
+        );
+      });
+      return;
+    }
+    itemLines(body, o.rowKey === 'in' ? pickIn(openAcct) : [], 34, o.rowKey, false, openAcct);
+  };
+
+  /* ── ประกอบแถวทั้งใบ ─────────────────────────────────────────────────── */
+  const body = [];
+  line(body, 'เงินคงเหลือใช้ได้', r => r.base, { rowKey: 'base', bold: true, semi: true, rowBg: SK.mint, noExpand: true });
+  if (T.inn > 0.005) line(body, 'คาดรับเงินเข้า', r => r.innReal, { rowKey: 'in', semi: true, sign: '+', totColor: SK.green });
+  line(body, 'ค่าใช้จ่ายถึงกำหนดชำระ', r => r.outReal, { rowKey: 'out', bold: true, semi: true, rowBg: SK.cream });
+
+  /* โอนระหว่างบัญชี — ย้ายเงินภายใน หักกันเองเป็นศูนย์เสมอ */
   const tfGroupsAll = bdGroupTransfers(pickTf(null));
-  body.push(mainRow({
-    key: 'tf', label: '↔ โอนระหว่างบัญชี',
-    note: tfGroupsAll.length ? tfGroupsAll.length + ' รายการ · ย้ายเงินภายใน หักกันเองเป็นศูนย์' : '',
-    valOf: r => r.tfIn - r.tfOut, total: T.tfIn - T.tfOut, mode: 'plus',
-    tint: SK.tfTint, rail: SK.tfRail, dashColor: '#e2e8f0',
-    expandable: tfGroupsAll.length > 0,
-    hint: 'การโอนระหว่างบัญชีของบริษัทเอง — ไม่ใช่รายรับ/รายจ่าย จึงแยกออกจาก 2 แถวบน',
-  }));
-  if ('tf' in expand) {
-    bdGroupTransfers(pickTf(expand['tf'])).forEach((g, i) => {
-      const name = (g.from && g.to) ? (bdShortParty(g.from) + ' → ' + bdShortParty(g.to))
-                 : (g.to ? 'โอนเงินไป ' + bdShortParty(g.to) : 'รับโอนจาก ' + bdShortParty(g.from));
-      body.push(detailRow({
-        key: 'tf#' + i, level: 1, rail: SK.tfRail, tag: bdShortDate(g.date), name: name || 'โอนระหว่างบัญชี',
-        byAcct: g.byAcct, total: g.total, mode: 'plus',
-      }));
+  if (tfGroupsAll.length) {
+    const openTf = ('tf' in expand);
+    const tfNum = (v, k, isTot) => (
+      <td key={k} style={{ textAlign: 'right', padding: pad('8px 12px'), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap',
+        fontWeight: 600, background: isTot ? SK.totCol : SK.tfBg, fontSize: fz(13),
+        color: v > 0.005 ? SK.green : (v < -0.005 ? SK.red : 'var(--ink-300)') }}>
+        {Math.abs(v) < 0.005 ? '—' : (v > 0 ? '+' : '−') + fmtMoney(Math.abs(v))}
+      </td>
+    );
+    body.push(
+      <tr key="tf" style={{ background: SK.tfBg }}>
+        <td onClick={() => toggleRow('tf', null)} title="กดดูว่าย้ายเงินจากบัญชีไหนไปบัญชีไหน"
+          style={{ padding: pad('8px 12px'), whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
+            background: SK.tfBg, borderTop: '1px solid ' + SK.head, fontSize: fz(13) }}>
+          <span data-no-capture="1" style={{ display: 'inline-block', width: 13, fontSize: fz(8), verticalAlign: 'middle',
+            color: openTf ? SK.navy : 'var(--ink-300)' }}>{openTf ? '▼' : '▶'}</span>
+          <span style={{ fontWeight: 700, fontSize: fz(13), color: SK.navy }}>↔ โอนระหว่างบัญชี</span>
+          <span style={{ marginLeft: 7, fontSize: fz(11), color: 'var(--ink-400)' }}>
+            {tfGroupsAll.length} รายการ · ย้ายเงินภายใน หักกันเองเป็นศูนย์
+          </span>
+        </td>
+        {rows.map((r, k) => tfNum(r.tfIn - r.tfOut, k, false))}
+        {tfNum(T.tfIn - T.tfOut, 'tot', true)}
+      </tr>
+    );
+    if (openTf) bdGroupTransfers(pickTf(expand['tf'])).forEach((g, k) => {
+      body.push(
+        <tr key={'tf' + k} style={{ background: SK.subBg, fontSize: fz(11.5) }}>
+          <td style={{ padding: pad('4px 12px 4px 38px'), color: 'var(--ink-600)', whiteSpace: 'nowrap', fontSize: fz(11.5) }}>
+            <span style={{ fontWeight: 600 }}>{bdShortParty(g.from) || '—'}</span>
+            <span style={{ margin: '0 6px', color: SK.navy, fontWeight: 800 }}>→</span>
+            <span style={{ fontWeight: 600 }}>{bdShortParty(g.to) || '—'}</span>
+            <span style={{ marginLeft: 7, color: 'var(--ink-400)' }}>{bdShortDate(g.date)}</span>
+          </td>
+          {rows.map(r => {
+            const v = g.byAcct[r.acctNo] || 0;
+            return (
+              <td key={r.acctNo} style={{ textAlign: 'right', padding: pad('4px 12px'), fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap', fontSize: fz(11.5), color: v > 0 ? SK.green : (v < 0 ? SK.red : 'var(--ink-200)') }}>
+                {!v ? '' : (v > 0 ? '+' : '−') + fmtMoney(Math.abs(v))}
+              </td>
+            );
+          })}
+          <td style={{ textAlign: 'right', padding: pad('4px 12px'), background: SK.totCol, color: 'var(--ink-300)', fontSize: fz(11.5) }}>—</td>
+        </tr>
+      );
     });
   }
 
-  /* 5) เงินคงเหลือสุทธิ = ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก */
-  body.push(mainRow({
-    key: 'net', label: 'เงินคงเหลือสุทธิ', valOf: r => r.net, total: T.net,
-    expandable: true, tint: SK.netTint, rail: SK.netRail, line: '#cfe3d7', dashColor: '#bcd9c8',
-    labelColor: '#14532d', cellColor: T.net < 0 ? '#b4453a' : '#14532d',
-    hint: 'กดเพื่อดูวิธีคิด: ยอดยกมา + คาดรับ + รับโอน − ค่าใช้จ่าย − โอนออก',
-  }));
-  if ('net' in expand) {
-    [
-      ['ยอดยกมา (เงินคงเหลือใช้ได้)', (r) => r.base],
-      ['+ คาดรับเงินเข้า',            (r) => r.innReal],
-      ['+ รับโอนเข้า',                (r) => r.tfIn],
-      ['− ค่าใช้จ่ายถึงกำหนดชำระ',    (r) => -r.outReal],
-      ['− โอนออก',                    (r) => -r.tfOut],
-    ].forEach(([label, fn], i) => {
-      body.push(detailRow({ key: 'net#' + i, level: 1, rail: SK.netRail, name: label,
-                            byAcct: bA(fn), total: sum(fn), mode: 'plus' }));
-    });
-  }
+  line(body, 'เงินคงเหลือสุทธิ', r => r.net, { rowKey: 'net', bold: true, topRule: true, rowBg: SK.netBg,
+    color: T.net < 0 ? SK.red : SK.navy, totColor: T.net < 0 ? SK.red : SK.navy });
 
-  /* ── บันทึกเป็นรูป PNG (ตัดปุ่ม/ดรอปดาวน์ออก · จบที่บรรทัดสรุปท้ายตาราง) ── */
+  /* ── บันทึกเป็นรูป PNG (ตัดปุ่ม/ดรอปดาวน์ออก · กางตารางให้เต็มก่อนแคป) ── */
   const handleSaveImage = async () => {
     if (typeof window.html2canvas !== 'function') { alert('ตัวช่วยบันทึกรูปยังโหลดไม่เสร็จ — ลองใหม่อีกครั้ง'); return; }
     const node = cardRef.current; if (!node) return;
     setSaving(true);
     // ⚠️ จอแคบ = ตารางเลื่อนแนวนอนอยู่ → แคปตรง ๆ จะได้ภาพที่ "คอลัมน์รวมโดนตัด"
-    //    กางการ์ดให้เท่าความกว้างจริงของตารางก่อนแคป แล้วค่อยคืนค่าเดิม
     const wrapEl = node.querySelector('[data-hscroll="1"]');
     const tblEl  = node.querySelector('table');
     const prevW  = node.style.width, prevOv = wrapEl ? wrapEl.style.overflowX : '';
@@ -2821,22 +2850,19 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
         windowWidth: Math.max(document.documentElement.clientWidth, fullW + 40),
         ignoreElements: (el) => el.getAttribute && el.getAttribute('data-no-capture') === '1',
       });
-      // ตัดให้จบที่บรรทัดสรุปท้ายใบ + ปิดท้ายด้วยเส้นสี (กันดูเหมือนรูปขาด)
-      //   ⚠️ ความสูงที่วัดจาก DOM อาจ "เกิน" ความสูงของ canvas เพราะ html2canvas ข้าม
-      //      ปุ่ม/แถบ data-no-capture ไป (ภาพเตี้ยกว่าของจริง) → ถ้าเกิน ให้ใช้เต็มภาพแทน
       const endEl = node.querySelector('[data-capture-end="1"]');
       const measured = endEl
         ? Math.round((endEl.getBoundingClientRect().bottom - node.getBoundingClientRect().top) * SCALE) : 0;
       const usable = (measured > 0 && measured < full.height - 2) ? measured : full.height;
-      const accent   = T.net < 0 ? '#e53e3e' : BD_SUM_SKIN.brandDeep;
-      const footerBg = T.net < 0 ? '#fff5f5' : BD_SUM_SKIN.netTint;
-      const padPx = Math.round(5 * SCALE), line = Math.round(3 * SCALE);
+      const accent   = T.net < 0 ? '#e53e3e' : SK.navy;
+      const footerBg = T.net < 0 ? '#fff5f5' : SK.netBg;
+      const padPx = Math.round(5 * SCALE), lineH = Math.round(3 * SCALE);
       const out = document.createElement('canvas');
-      out.width = full.width; out.height = usable + padPx + line;
+      out.width = full.width; out.height = usable + padPx + lineH;
       const ctx = out.getContext('2d');
       ctx.drawImage(full, 0, 0, full.width, usable, 0, 0, full.width, usable);
-      ctx.fillStyle = footerBg; ctx.fillRect(0, usable, full.width, padPx + line);
-      ctx.fillStyle = accent;   ctx.fillRect(0, usable + padPx, full.width, line);
+      ctx.fillStyle = footerBg; ctx.fillRect(0, usable, full.width, padPx + lineH);
+      ctx.fillStyle = accent;   ctx.fillRect(0, usable + padPx, full.width, lineH);
       const a = document.createElement('a');
       a.download = 'สรุปรอบจ่าย-' + String(today).replace(/-/g, '') + '.png';
       a.href = out.toDataURL('image/png');
@@ -2850,81 +2876,64 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     }
   };
 
-  const btn = (active) => ({
-    padding: '4px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-    border: '1px solid ' + (active ? BD_SUM_SKIN.brand : '#dbe2ea'), background: active ? BD_SUM_SKIN.brand : '#fff',
-    color: active ? '#fff' : '#475569', whiteSpace: 'nowrap',
+  const hdBtn = (active, dis) => ({
+    background: active ? '#fff' : 'rgba(255,255,255,0.16)', color: active ? SK.navy : '#fff',
+    border: '1px solid rgba(255,255,255,0.35)', borderRadius: 7, padding: pad('4px 11px'),
+    fontSize: fz(12), fontWeight: 600, cursor: dis ? 'default' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
   });
-  const tblMinW  = sp(330) + rows.length * sp(128) + sp(146);
-  const periodTx = periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : '';
 
   return (
-    <div className="card" ref={cardRef} style={{ padding: 0, overflow: 'hidden', marginBottom: 16,
-                                                 border: '1px solid #e3ebe6', boxShadow: '0 8px 22px rgba(21,69,36,0.08)' }}>
-      {/* ── หัวใบสรุป (อยู่ในรูปที่เซฟ) ── */}
-      <div style={{ position: 'relative', overflow: 'hidden', background: BD_SUM_SKIN.headGrad, color: '#fff' }}>
-        <div style={{ position: 'absolute', top: -80, right: -40, width: 230, height: 230, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
-        <div style={{ position: 'relative', padding: '16px 18px', display: 'flex', alignItems: 'center',
-                      justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>
-            <div style={{ width: 46, height: 46, borderRadius: 12, background: '#fff', flex: '0 0 auto',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 5,
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
-              <img src="bioaxel_logo.png" alt="BIOAXEL" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1.6, color: 'rgba(255,255,255,0.72)' }}>BIOAXEL</div>
-              <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.22)' }}>
-                ประมาณการรายรับ-รายจ่าย
-              </div>
-              <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.78)', marginTop: 2 }}>
-                บริษัท ไบโอแอ็กซ์เซลล์ จำกัด · BIOAXEL Co., Ltd.
-              </div>
-            </div>
-          </div>
-          <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-            <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', letterSpacing: 0.8 }}>รอบจ่าย</div>
-            <div style={{ fontSize: 19, fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.22)' }}>{periodLabel}</div>
-            <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.78)', marginTop: 2 }}>
-              ณ {fmtDateLong(today)}{periodEnd < '9999' ? ' · ถึง ' + fmtDateLong(periodEnd) : ''}
-            </div>
-          </div>
+    <div className="card" ref={cardRef} style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
+      {/* หัวรายงาน — แถบเขียวแบรนด์ BIO (ต้นแบบเป็นน้ำเงิน) */}
+      <div style={{ padding: pad('16px 20px 14px'), display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap',
+        background: SK.headGrad, color: '#fff' }}>
+        <div style={{ width: 48, height: 48, borderRadius: 11, background: '#fff', display: 'grid', placeItems: 'center',
+          flex: 'none', overflow: 'hidden', padding: 5, boxShadow: '0 2px 8px rgba(0,0,0,.18)' }}>
+          <img src="bioaxel_logo.png" alt="BIOAXEL" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         </div>
-      </div>
-
-      {/* ── แถบเครื่องมือ (ไม่ติดในรูป) ── */}
-      <div data-no-capture="1" style={{ padding: '7px 14px', borderBottom: '1px solid var(--line)', background: '#fafcfb',
-                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 11, color: '#7c8a99' }}>
-          {rows.length} บัญชี · กดชื่อแถวเพื่อดูรวมทุกบัญชี · กดตัวเลขเพื่อดูเฉพาะบัญชีนั้น
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: fz(11), letterSpacing: '.16em', opacity: .8, fontWeight: 700 }}>BIOAXEL</div>
+          <div style={{ fontSize: fz(23), fontWeight: 800, lineHeight: 1.25, letterSpacing: '-.015em', margin: '1px 0 3px' }}>ประมาณการรายรับ-รายจ่าย</div>
+          <div style={{ fontSize: fz(12.5), opacity: .82 }}>{BD_COMPANY_NAME}</div>
         </div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ marginLeft: 'auto', textAlign: 'right', flex: 'none' }}>
+          <div style={{ fontSize: fz(11.5), opacity: .78 }}>รอบจ่าย</div>
+          <div style={{ fontSize: fz(21), fontWeight: 800, lineHeight: 1.3, margin: '1px 0 2px' }}>{periodLabel}</div>
+          <div style={{ fontSize: fz(11.5), opacity: .78 }}>{fmtDateLong(today)}</div>
+        </div>
+        <div data-no-capture="1" style={{ flexBasis: '100%', display: 'flex', gap: 7, justifyContent: 'flex-end', marginTop: 2, flexWrap: 'wrap' }}>
           {canEdit && (
-            <button onClick={() => setCatMode(m => !m)} style={btn(catMode)} title="เปิด/ปิดดรอปดาวน์ย้ายหมวดในตาราง">
-              ⇄ จัดหมวด
+            <button onClick={() => setCatMode(v => !v)} style={hdBtn(catMode)}
+              title="เปิดเมื่อจะย้ายรายการไปหมวดอื่น — ปกติซ่อนไว้ให้ตารางสะอาด">
+              {catMode ? '✓ กำลังจัดหมวด' : '⇄ จัดหมวด'}
             </button>
           )}
-          <button onClick={() => setPickOpen(o => !o)} style={btn(pickOpen)} title="เลือกบัญชีที่จะเป็นคอลัมน์">
-            🏦 เลือกบัญชี ({rows.length}/{allNos.length})
+          <button onClick={() => setPickOpen(o => !o)} style={hdBtn(pickOpen)} title="เลือกบัญชีที่จะเป็นคอลัมน์">
+            ⚙ เลือกบัญชี ({rows.length}/{allNos.length})
           </button>
-          <button onClick={handleSaveImage} disabled={saving} style={btn(false)} title="บันทึกใบสรุปนี้เป็นรูป (PNG)">
-            {saving ? '⏳ กำลังบันทึก…' : '📷 บันทึกรูป'}
+          <button onClick={handleSaveImage} disabled={saving} style={hdBtn(false, saving)} title="บันทึกใบสรุปนี้เป็นรูป (PNG)">
+            {saving ? 'กำลังบันทึก…' : '📷 บันทึกรูป'}
           </button>
+          {catMode && canEdit && (
+            <div style={{ flexBasis: '100%', textAlign: 'right', fontSize: fz(11), opacity: .85, marginTop: 3 }}>
+              กาง “ค่าใช้จ่ายถึงกำหนดชำระ” → เลือกหมวด → ท้ายแต่ละรายการจะมีช่องให้ย้าย (ย้ายใบเดียว หรือทุกใบของเจ้าหนี้)
+            </div>
+          )}
         </div>
       </div>
 
       {/* เลือกบัญชีเป็นคอลัมน์ */}
       {pickOpen && (
         <div data-no-capture="1" style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', background: '#fbfdfc',
-                                          display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {(views || []).map(v => {
             const no = v.acct.accountNo, on = pickedSet.has(no), br = bdBrand(v.acct.bankName);
             return (
               <button key={no} onClick={() => togglePick(no)}
                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px 3px 4px', borderRadius: 20,
-                         fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-                         border: '1.5px solid ' + (on ? br.color : '#e2e8f0'), background: on ? br.color : '#fff',
-                         color: on ? '#fff' : '#94a3b8' }}>
+                  fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  border: '1.5px solid ' + (on ? br.color : '#e2e8f0'), background: on ? br.color : '#fff',
+                  color: on ? '#fff' : '#94a3b8' }}>
                 <BDBankLogo name={v.acct.bankName} size={20} />
                 {br.label} {bdLast4(no)}
               </button>
@@ -2933,46 +2942,31 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
         </div>
       )}
 
-      {/* คำอธิบายโหมดจัดหมวด */}
-      {catMode && canEdit && (
-        <div data-no-capture="1" style={{ padding: '7px 14px', borderBottom: '1px solid var(--line)', background: '#fffbeb',
-                                          fontSize: 11.5, color: '#92400e' }}>
-          กางแถว “ค่าใช้จ่ายถึงกำหนดชำระ” → เลือกหมวดใหม่ที่แถวเจ้าหนี้ (ทุกใบของเจ้าหนี้) หรือแถวเอกสาร (เฉพาะใบนี้) ·
-          ยอดขยับทันทีและแชร์ทั้งทีม · <b>ไม่กระทบ</b>ยอดหน้าประมาณการ/Cash Flow
-        </div>
-      )}
-
-      {/* ── ตารางหลัก ── */}
+      {/* ── ตารางหลัก (ใช้คลาส .tbl .tbl-compact ของแอปเหมือนใบต้นแบบ) ── */}
       <div data-hscroll="1" style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: tblMinW, borderCollapse: 'collapse', tableLayout: 'fixed', lineHeight: 1.6 }}>
-          <colgroup>
-            <col style={{ width: sp(460) }} />
-            {rows.map(r => <col key={r.acctNo} style={{ width: sp(128) }} />)}
-            <col style={{ width: sp(146) }} />
-          </colgroup>
+        <table className="tbl tbl-compact" style={{ width: '100%', fontSize: fz(12.5), minWidth: sp(250 + rows.length * 130) }}>
           <thead>
-            <tr style={{ background: BD_SUM_SKIN.theadTint, borderBottom: '1px solid ' + BD_SUM_SKIN.brand }}>
-              <th style={{ textAlign: 'left', padding: pad('7px 12px'), fontSize: fz(11), fontWeight: 700,
-                           color: '#7c8a99', letterSpacing: 0.4 }}>ธนาคาร</th>
-              {rows.map(r => {
-                const br = bdBrand(r.acct.bankName);
-                return (
-                  <th key={r.acctNo} title={r.acct.accountNo + (r.acct.accountName ? ' · ' + r.acct.accountName : '')}
-                      style={{ padding: pad('6px 10px'), fontWeight: 700 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: sp(7) }}>
-                      <BDBankLogo name={r.acct.bankName} size={sp(28)} />
-                      <div style={{ textAlign: 'right', lineHeight: 1.25, minWidth: 0 }}>
-                        <div style={{ fontSize: fz(13), fontWeight: 800, color: br.color }}>{br.label}</div>
-                        <div style={{ fontSize: fz(9.5), color: '#a8b3c2', fontFamily: 'ui-monospace' }}>{r.acct.accountNo}</div>
-                        <div style={{ fontSize: fz(9.5), color: '#c3cbd6' }}>{br.label} {bdLast4(r.acct.accountNo)}</div>
+            <tr>
+              <th style={{ minWidth: sp(200), background: SK.head, borderBottom: '2px solid ' + SK.navy,
+                textTransform: 'none', fontSize: fz(13), fontWeight: 800, color: SK.navy, padding: pad('14px 12px') }}>ธนาคาร</th>
+              {rows.map(r => (
+                <th key={r.acctNo} title={r.acct.accountNo}
+                  style={{ textAlign: 'right', minWidth: sp(150), textTransform: 'none',
+                    background: SK.head, borderBottom: '2px solid ' + SK.navy, padding: pad('10px 12px') }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                    <BDBankLogo name={r.acct.bankName} size={sp(27)} />
+                    <div style={{ minWidth: 0, lineHeight: 1.35 }}>
+                      <div style={{ fontWeight: 800, fontSize: fz(13.5), color: SK.navy, whiteSpace: 'nowrap' }}>{r.acct.bankName || '—'}</div>
+                      <div style={{ fontFamily: 'ui-monospace', fontWeight: 600, fontSize: fz(11), color: 'var(--ink-400)' }}>{r.acct.accountNo}</div>
+                      <div style={{ fontFamily: 'ui-monospace', fontWeight: 400, fontSize: fz(10), color: '#9aa8bb' }}>
+                        {(bdBrand(r.acct.bankName).label || '')} {bdLast4(r.acct.accountNo)}
                       </div>
                     </div>
-                  </th>
-                );
-              })}
-              <th style={{ textAlign: 'right', padding: pad('7px 10px'), fontSize: fz(12), fontWeight: 800,
-                           color: BD_SUM_SKIN.brandDeep, background: '#e7f1ea',
-                           borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine, verticalAlign: 'bottom' }}>รวม</th>
+                  </div>
+                </th>
+              ))}
+              <th style={{ textAlign: 'right', minWidth: sp(140), textTransform: 'none', fontSize: fz(13), fontWeight: 800,
+                background: SK.totHead, borderBottom: '2px solid ' + SK.navy, color: SK.navy, padding: pad('14px 12px') }}>รวม</th>
             </tr>
           </thead>
           <tbody>{body}</tbody>
@@ -2980,13 +2974,12 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       </div>
 
       {/* ── ท้ายใบ (จุดตัดรูป) ── */}
-      <div data-capture-end="1" style={{ padding: pad('8px 14px'),
-                                         borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : '#cfe3d7'),
-                                         background: T.net < 0 ? '#fdf8f7' : '#f2f9f4',
-                                         display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
-                                         fontSize: fz(11.5), color: '#4b5f52' }}>
-        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodTx} · ณ {fmtDate(today)}</span>
-        <span style={{ fontWeight: 800, fontSize: fz(12.5), color: T.net < 0 ? '#b4453a' : BD_SUM_SKIN.brandDeep }}>
+      <div data-capture-end="1" style={{ padding: pad('10px 16px'),
+        borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : SK.head),
+        background: T.net < 0 ? '#fdf8f7' : SK.mint, display: 'flex', justifyContent: 'space-between',
+        gap: 10, flexWrap: 'wrap', fontSize: fz(11.5), color: 'var(--ink-600)' }}>
+        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · ณ {fmtDate(today)}</span>
+        <span style={{ fontWeight: 800, fontSize: fz(12.5), color: T.net < 0 ? SK.red : SK.navy }}>
           เงินคงเหลือสุทธิรวม {fmtMoney(T.net)}
         </span>
       </div>
