@@ -1640,12 +1640,13 @@ function ForecastEntriesPage({ data, setData, toast }) {
     const rows = picked.map((c, i) => ({
       id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('fe-cp-' + stamp + '-' + i),
       DATE:         todayISO,
-      PAYMENT_DATE: c.newDate,
+      // ★ ใช้ค่าที่ user แก้ในหน้าต่างก็อป (c.date/c.desc/c.amount) ไม่ใช่ค่าเดิมของแถวต้นทาง
+      PAYMENT_DATE: c.date || c.newDate,
       EXPENSE_TYPE: c.fe.EXPENSE_TYPE || 'Manual',
-      DESCRIPTION:  c.fe.DESCRIPTION || '',
+      DESCRIPTION:  String(c.desc || '').trim() || c.fe.DESCRIPTION || '',
       JOB_NO:       c.fe.JOB_NO || null,
       PROJECT_NAME: c.fe.PROJECT_NAME || null,
-      AMOUNT:       c.fe.AMOUNT,
+      AMOUNT:       c.amount != null ? c.amount : c.fe.AMOUNT,
       Bank_AC:      c.fe.Bank_AC || null,
       STATUS:       'PLANNED',
       CATEGORY:     c.fe.CATEGORY || null,

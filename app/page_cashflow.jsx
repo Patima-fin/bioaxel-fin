@@ -934,22 +934,61 @@ function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, t
     setSel(s);
   }, [cands]);
 
-  const picked = cands.filter(c => sel[c.id]);
-  const nDup   = cands.filter(c => c.dup).length;
+  // ── แก้รายละเอียดก่อนก็อป (วันที่ / ชื่อรายการ / ยอด) ──────────────────
+  //   แก้ที่นี่ = แก้เฉพาะ "แถวใหม่ที่กำลังจะสร้าง" — ของเดือนต้นทางไม่ถูกแตะ
+  //   เก็บแยกใน edits (key = id แถวต้นทาง) · เปลี่ยนเดือนแล้วล้างทิ้ง เริ่มใหม่
+  const [edits, setEdits] = cfState({});
+  cfEffect(() => { setEdits({}); }, [cands]);
+  const setEdit = (id, patch) => setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+  const fmtMag = (v) => {
+    const m = Math.abs(Number(v) || 0);
+    if (!m) return '';
+    return m.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+  //   พิมพ์ได้เฉพาะตัวเลข + จุดทศนิยม แล้วใส่ comma ให้ระหว่างพิมพ์
+  const fmtAmtInput = (raw) => {
+    const cleaned = String(raw).replace(/[^\d.]/g, '');
+    const [intPart, ...rest] = cleaned.split('.');
+    const dec = rest.length ? '.' + rest.join('').slice(0, 2) : '';
+    const int = intPart.replace(/^0+(?=\d)/, '');
+    return (int ? Number(int).toLocaleString('en-US') : (dec ? '0' : '')) + dec;
+  };
+  const parseAmt = (s) => Number(String(s).replace(/,/g, '')) || 0;
+
+  //   แถวที่ใช้จริง = ค่าที่แก้แล้ว (ยังไม่แก้ = ค่าที่ก็อปมาตรงๆ) · dup/ยอดรวมคิดจากค่าที่แก้
+  const rows = cands.map(c => {
+    const e = edits[c.id] || {};
+    const date   = e.date   != null ? e.date   : c.newDate;
+    const desc   = e.desc   != null ? e.desc   : c.desc;
+    const amount = e.amount != null ? e.amount : c.amount;
+    return { ...c, date, desc, amount,
+      origAmount: c.amount,                      // ไว้คงเครื่องหมาย จ่าย(−)/รับ(+) ตอนพิมพ์ยอดใหม่
+      amountStr: e.amountStr != null ? e.amountStr : fmtMag(c.amount),
+      edited: date !== c.newDate || desc !== c.desc || amount !== c.amount,
+      dup: existingKeys.has(cfForecastDupKey(desc, date, amount)) };
+  });
+
+  const picked = rows.filter(c => sel[c.id]);
+  const nDup   = rows.filter(c => c.dup).length;
   const sumOut = picked.filter(c => c.amount < 0).reduce((s, c) => s + Math.abs(c.amount), 0);
   const sumIn  = picked.filter(c => c.amount > 0).reduce((s, c) => s + c.amount, 0);
-  const allOn  = cands.length > 0 && picked.length === cands.length;
+  const allOn  = rows.length > 0 && picked.length === rows.length;
   const toggleAll = () => {
     const s = {};
-    cands.forEach(c => { s[c.id] = !allOn; });
+    rows.forEach(c => { s[c.id] = !allOn; });
     setSel(s);
   };
 
   const th = { padding: '5px 8px', textAlign: 'left', fontSize: 11.5, color: 'var(--ink-600)', fontWeight: 600 };
   const td = { padding: '4px 8px', fontSize: 12 };
+  const inp = (extra) => ({
+    padding: '3px 7px', border: '1px solid var(--ink-200)', borderRadius: 6, background: 'var(--surface)',
+    color: 'inherit', fontSize: 12, fontFamily: 'inherit', outline: 'none', ...extra,
+  });
+  const stopClick = (e) => e.stopPropagation();   // กดในช่องกรอก ≠ ติ๊กเลือก/ยกเลิกแถว
 
   return (
-    <Modal open title={`ก็อปประมาณการยกชุด → ${monthNames[tgtM - 1]} ${tgtY}`} maxWidth={880} onClose={onClose}
+    <Modal open title={`ก็อปประมาณการยกชุด → ${monthNames[tgtM - 1]} ${tgtY}`} maxWidth={960} onClose={onClose}
       footer={<>
         <button className="btn" onClick={onClose}>ยกเลิก</button>
         <button className="btn btn-primary" disabled={picked.length === 0}
@@ -975,14 +1014,14 @@ function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, t
             </select>
           : <b style={{ fontSize: 13.5 }}>{monthNames[tgtM - 1]} {tgtY}</b>}
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-500)' }}>
-          เลื่อนวันตามเดือนใหม่ · ยอดเดิม · สถานะ PLANNED
+          เลื่อนวันตามเดือนใหม่ · สถานะ PLANNED · <strong style={{ color: 'var(--ink-600)' }}>แก้วัน/ชื่อ/ยอดในตารางได้เลยก่อนกดก็อป</strong>
         </span>
       </div>
 
       {/* สรุปสิ่งที่จะก็อป */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
         {[
-          { label: 'จะก็อป',      txt: `${picked.length} / ${cands.length} รายการ`, color: 'var(--brand-600)' },
+          { label: 'จะก็อป',      txt: `${picked.length} / ${rows.length} รายการ`, color: 'var(--brand-600)' },
           { label: 'รวมคาดจ่าย', txt: fmtNum(sumOut, 0), color: 'var(--bad)' },
           { label: 'รวมคาดรับ',  txt: fmtNum(sumIn, 0),  color: 'var(--good)' },
         ].map(({ label, txt, color }) => (
@@ -1005,7 +1044,7 @@ function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, t
         </div>
       )}
 
-      {cands.length === 0 ? (
+      {rows.length === 0 ? (
         <div style={{ padding: 26, textAlign: 'center', color: 'var(--ink-500)', fontSize: 12.5 }}>
           เดือนที่เลือกไม่มีรายการประมาณการที่คีย์มือ<br />
           <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>
@@ -1021,14 +1060,14 @@ function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, t
                   <input type="checkbox" checked={allOn} onChange={toggleAll} style={{ cursor: 'pointer' }}
                     title={allOn ? 'ติ๊กออกทั้งหมด' : 'ติ๊กทั้งหมด'} />
                 </th>
-                <th style={{ ...th, width: 158 }}>วันที่จ่าย</th>
+                <th style={{ ...th, width: 196 }}>วันที่จ่าย <span style={{ fontWeight: 400, color: 'var(--ink-400)' }}>(เดิม → ใหม่)</span></th>
                 <th style={th}>รายการ</th>
-                <th style={{ ...th, width: 92 }}>หมวด</th>
-                <th style={{ ...th, width: 120, textAlign: 'right' }}>จำนวน</th>
+                <th style={{ ...th, width: 88 }}>หมวด</th>
+                <th style={{ ...th, width: 122, textAlign: 'right' }}>จำนวน</th>
               </tr>
             </thead>
             <tbody>
-              {cands.map(c => (
+              {rows.map(c => (
                 <tr key={c.id} onClick={() => setSel(s => ({ ...s, [c.id]: !s[c.id] }))}
                   style={{ borderBottom: '1px solid var(--ink-100)', cursor: 'pointer',
                            background: sel[c.id] ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' : 'transparent',
@@ -1037,16 +1076,31 @@ function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, t
                     <input type="checkbox" checked={!!sel[c.id]} onChange={() => {}} style={{ cursor: 'pointer' }} />
                   </td>
                   <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--ink-500)' }}>
-                    {fmtDate(c.oldDate)} <span style={{ color: 'var(--ink-300)' }}>→</span> <b>{fmtDate(c.newDate)}</b>
+                    {fmtDate(c.oldDate)} <span style={{ color: 'var(--ink-300)' }}>→</span>{' '}
+                    <input type="date" value={c.date} onClick={stopClick}
+                      onChange={e => setEdit(c.id, { date: e.target.value })}
+                      title="วันที่จ่ายของแถวใหม่ — แก้ได้"
+                      style={inp({ width: 124, fontWeight: 700 })} />
                   </td>
                   <td style={td}>
-                    {c.desc}
-                    {c.dup && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--warn)' }}>· มีอยู่แล้ว</span>}
+                    <input type="text" value={c.desc} onClick={stopClick}
+                      onChange={e => setEdit(c.id, { desc: e.target.value })}
+                      placeholder="ชื่อรายการ"
+                      style={inp({ width: '100%', boxSizing: 'border-box' })} />
+                    {c.dup && <span style={{ fontSize: 10.5, color: 'var(--warn)' }}>· มีอยู่แล้วในเดือนปลายทาง</span>}
+                    {c.edited && <span title="แก้จากของเดิมแล้ว" style={{ fontSize: 10.5, color: 'var(--brand-600)', marginLeft: 6 }}>✏️ แก้แล้ว</span>}
                   </td>
                   <td style={{ ...td, color: 'var(--ink-500)' }}>{c.catLabel}</td>
-                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-                               color: c.amount < 0 ? 'var(--bad)' : 'var(--good)' }}>
-                    {c.amount < 0 ? `(${fmtNum(Math.abs(c.amount), 0)})` : fmtNum(c.amount, 0)}
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <input type="text" inputMode="decimal" value={c.amountStr} onClick={stopClick}
+                      onChange={e => {
+                        const s = fmtAmtInput(e.target.value);
+                        setEdit(c.id, { amountStr: s, amount: (c.origAmount < 0 ? -1 : 1) * parseAmt(s) });
+                      }}
+                      placeholder="0"
+                      title={c.origAmount < 0 ? 'ยอดจ่าย — พิมพ์เป็นเลขบวก ระบบคงเครื่องหมายจ่ายให้' : 'ยอดรับ'}
+                      style={inp({ width: 108, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600,
+                                   color: c.origAmount < 0 ? 'var(--bad)' : 'var(--good)' })} />
                   </td>
                 </tr>
               ))}
@@ -2369,12 +2423,13 @@ function CashFlowDashboard({ data, setData, toast }) {
     const rows = picked.map((c, i) => ({
       id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('fe-cp-' + stamp + '-' + i),
       DATE:         cfTodayISO,
-      PAYMENT_DATE: c.newDate,
+      // ★ ใช้ค่าที่ user แก้ในหน้าต่างก็อป (c.date/c.desc/c.amount) ไม่ใช่ค่าเดิมของแถวต้นทาง
+      PAYMENT_DATE: c.date || c.newDate,
       EXPENSE_TYPE: c.fe.EXPENSE_TYPE || 'Manual',
-      DESCRIPTION:  c.fe.DESCRIPTION || '',
+      DESCRIPTION:  String(c.desc || '').trim() || c.fe.DESCRIPTION || '',
       JOB_NO:       c.fe.JOB_NO || null,
       PROJECT_NAME: c.fe.PROJECT_NAME || null,
-      AMOUNT:       c.fe.AMOUNT,
+      AMOUNT:       c.amount != null ? c.amount : c.fe.AMOUNT,
       Bank_AC:      c.fe.Bank_AC || null,
       STATUS:       'PLANNED',
       CATEGORY:     c.fe.CATEGORY || null,
