@@ -2468,8 +2468,8 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     return (v < 0 ? '−' : (mode === 'plus' ? '+' : '')) + fmtMoney(Math.abs(v));
   };
   const numTd = (extra) => Object.assign({
-    padding: pad('8px 10px'), textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-    whiteSpace: 'nowrap', fontSize: fz(13.5),
+    padding: pad('4px 10px'), textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap', fontSize: fz(12.5),
   }, extra || {});
 
   if (!rows.length) return null;   // ไม่มีบัญชีที่เลือก = ไม่ต้องแสดงใบสรุป
@@ -2547,12 +2547,12 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
     );
     return (
       <tr key={cfg.key} style={{ background: cfg.tint || '#fff', borderTop: '1px solid ' + (cfg.line || '#e2e8f0') }}>
-        <td style={{ padding: pad('11px 12px'), maxWidth: 0, overflow: 'hidden',
+        <td style={{ padding: pad('4px 12px'), maxWidth: 0, overflow: 'hidden',
                      borderLeft: '3px solid ' + (cfg.rail || 'transparent') }}>
           <span onClick={cfg.expandable ? () => toggleRow(cfg.key, null) : undefined}
             title={cfg.hint || (cfg.expandable ? 'กดเพื่อดูรายละเอียดรวมทุกบัญชี' : undefined)}
             style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
-                     whiteSpace: 'nowrap', fontSize: fz(14), fontWeight: 800, color: cfg.labelColor || '#16324a',
+                     whiteSpace: 'nowrap', fontSize: fz(13), fontWeight: 800, color: cfg.labelColor || '#16324a',
                      cursor: cfg.expandable ? 'pointer' : 'default' }}>
             <span style={{ color: cfg.rail || '#94a3b8', fontSize: fz(9.5), marginRight: caret ? sp(5) : 0 }}>{caret}</span>
             {cfg.label}
@@ -2573,7 +2573,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
             </td>
           );
         })}
-        <td style={numTd({ fontWeight: 800, fontSize: fz(14), background: BD_SUM_SKIN.totalTint,
+        <td style={numTd({ fontWeight: 800, fontSize: fz(13), background: BD_SUM_SKIN.totalTint,
                            borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
                            color: cfg.total < 0 ? '#b4453a' : (cfg.cellColor || '#0f172a') })}>
           {Math.abs(cfg.total) > 0.005 ? dash(showNum(cfg.total, cfg.mode), cfg.dashColor) : '—'}
@@ -2592,7 +2592,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
                                    borderLeft: '2px solid ' + (i === 0 ? (cfg.rail || '#cbd5e1') : BD_SUM_SKIN.guide) }} />
           ))}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: sp(6),
-                        whiteSpace: 'nowrap', padding: pad('7px 10px 7px 7px') }}>
+                        whiteSpace: 'nowrap', padding: pad('3px 10px 3px 7px') }}>
             <span onClick={cfg.onToggle} style={{ flex: '0 0 auto', width: sp(10), color: cfg.rail || '#94a3b8',
                                                   fontSize: fz(9), cursor: cfg.onToggle ? 'pointer' : 'default' }}>
               {cfg.onToggle ? (cfg.open ? '▼' : '▶') : ''}
@@ -2600,7 +2600,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
             {cfg.tag ? <span style={{ flex: '0 0 auto', fontSize: fz(10), color: '#a8b3c2' }}>{cfg.tag}</span> : null}
             <span onClick={cfg.onToggle} title={cfg.name}
               style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
-                       fontSize: fz(cfg.level === 1 ? 13 : 12.5), fontWeight: cfg.level === 1 ? 800 : 600,
+                       fontSize: fz(cfg.level === 1 ? 12.5 : 12), fontWeight: cfg.level === 1 ? 800 : 600,
                        color: cfg.nameColor || (cfg.level === 1 ? '#334155' : '#475569'),
                        cursor: cfg.onToggle ? 'pointer' : 'default' }}>
               {cfg.name}
@@ -2622,14 +2622,14 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
           <td key={r.acctNo}
             onClick={hot ? () => cfg.onCell(r.acctNo) : undefined}
             title={hot ? 'กดเพื่อดูเฉพาะบัญชีนี้' : undefined}
-            style={numTd({ fontSize: fz(12.5), fontWeight: cfg.level === 1 ? 700 : 500,
+            style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 700 : 500,
                            color: v < 0 ? '#b4453a' : '#475569', cursor: hot ? 'pointer' : 'default',
                            background: (cfg.open && cfg.scope === r.acctNo) ? BD_SUM_SKIN.pickBg : 'transparent' })}>
             {v ? (cfg.mode === 'plus' ? showNum(v, 'plus') : fmtMoney(Math.abs(v))) : ''}
           </td>
         );
       })}
-      <td style={numTd({ fontSize: fz(12.5), fontWeight: cfg.level === 1 ? 800 : 700,
+      <td style={numTd({ fontSize: fz(12), fontWeight: cfg.level === 1 ? 800 : 700,
                          background: BD_SUM_SKIN.totalTint, borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine,
                          color: cfg.total < 0 ? '#b4453a' : (cfg.totalColor || '#334155') })}>
         <span style={{ borderBottom: cfg.dash ? '1px dashed #e6c8b4' : 'none', paddingBottom: cfg.dash ? 1 : 0 }}>
@@ -2944,7 +2944,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
 
       {/* ── ตารางหลัก ── */}
       <div data-hscroll="1" style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: tblMinW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', minWidth: tblMinW, borderCollapse: 'collapse', tableLayout: 'fixed', lineHeight: 1.6 }}>
           <colgroup>
             <col style={{ width: sp(460) }} />
             {rows.map(r => <col key={r.acctNo} style={{ width: sp(128) }} />)}
@@ -2952,17 +2952,17 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
           </colgroup>
           <thead>
             <tr style={{ background: BD_SUM_SKIN.theadTint, borderBottom: '1px solid ' + BD_SUM_SKIN.brand }}>
-              <th style={{ textAlign: 'left', padding: pad('11px 12px'), fontSize: fz(11.5), fontWeight: 700,
+              <th style={{ textAlign: 'left', padding: pad('7px 12px'), fontSize: fz(11), fontWeight: 700,
                            color: '#7c8a99', letterSpacing: 0.4 }}>ธนาคาร</th>
               {rows.map(r => {
                 const br = bdBrand(r.acct.bankName);
                 return (
                   <th key={r.acctNo} title={r.acct.accountNo + (r.acct.accountName ? ' · ' + r.acct.accountName : '')}
-                      style={{ padding: pad('8px 10px'), fontWeight: 700 }}>
+                      style={{ padding: pad('6px 10px'), fontWeight: 700 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: sp(7) }}>
                       <BDBankLogo name={r.acct.bankName} size={sp(28)} />
                       <div style={{ textAlign: 'right', lineHeight: 1.25, minWidth: 0 }}>
-                        <div style={{ fontSize: fz(13.5), fontWeight: 800, color: br.color }}>{br.label}</div>
+                        <div style={{ fontSize: fz(13), fontWeight: 800, color: br.color }}>{br.label}</div>
                         <div style={{ fontSize: fz(9.5), color: '#a8b3c2', fontFamily: 'ui-monospace' }}>{r.acct.accountNo}</div>
                         <div style={{ fontSize: fz(9.5), color: '#c3cbd6' }}>{br.label} {bdLast4(r.acct.accountNo)}</div>
                       </div>
@@ -2970,7 +2970,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
                   </th>
                 );
               })}
-              <th style={{ textAlign: 'right', padding: pad('9px 10px'), fontSize: fz(12.5), fontWeight: 800,
+              <th style={{ textAlign: 'right', padding: pad('7px 10px'), fontSize: fz(12), fontWeight: 800,
                            color: BD_SUM_SKIN.brandDeep, background: '#e7f1ea',
                            borderLeft: '1px solid ' + BD_SUM_SKIN.totalLine, verticalAlign: 'bottom' }}>รวม</th>
             </tr>
@@ -2980,7 +2980,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       </div>
 
       {/* ── ท้ายใบ (จุดตัดรูป) ── */}
-      <div data-capture-end="1" style={{ padding: pad('10px 14px'),
+      <div data-capture-end="1" style={{ padding: pad('8px 14px'),
                                          borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : '#cfe3d7'),
                                          background: T.net < 0 ? '#fdf8f7' : '#f2f9f4',
                                          display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
