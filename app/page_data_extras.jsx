@@ -422,6 +422,9 @@ function DataCrudPage({ data, setData, toast, config }) {
     existingByTuple.forEach((rows, tuple) => {
       rows.forEach(r => {
         if (!inDateScope(r)) return;
+        // แถวที่ต้นทางเป็นไฟล์อื่น (เช่นใบ AV จาก "ใบอนุมัติจ่าย") ไม่มีทางอยู่ในไฟล์นี้อยู่แล้ว
+        // → ห้ามนับเป็น "หาย" ไม่งั้นติ๊กลบทีเดียวหายทั้งชุด
+        if (config.skipMissingFn && config.skipMissingFn(r)) return;
         if (importedTuples.has(tuple)) {
           // tuple นี้มีใน import แต่ DB มีหลาย row → row ที่เกินถือเป็น duplicate (ไม่ใช่ missing) — ข้าม
           return;
@@ -442,16 +445,54 @@ function DataCrudPage({ data, setData, toast, config }) {
     setImportStats(null);
   };
 
+  // ── โหมด "เติมจากใบอนุมัติจ่าย" (ไฟล์ไม่มีดีเทล) ───────────────────────────────
+  //   ไฟล์นี้เป็นตัวเสริม ไม่ใช่ตัวหลัก → กติกา:
+  //     • ใบที่มีในระบบแล้ว (เทียบด้วยเลขที่เอกสารล้วน) = ข้าม ไม่ทับของเดิม (ใบ PS มีบิลย่อย/WHT ที่ไฟล์นี้ไม่มี)
+  //     • ใบ PS ที่ยังไม่มีในระบบ = ข้ามเหมือนกัน + เตือนให้ไปลงไฟล์ PS (ถ้าเพิ่มจากที่นี่จะได้ใบไม่มีดีเทล
+  //       แล้วพอลงไฟล์ PS ทีหลังจะกลายเป็นซ้ำ เพราะ dedupKey ของ PV เป็น PL_PV_No+AP_No)
+  //     • ใบที่ไม่ใช่ PS (AV/AE…) ที่ยังไม่มี = เพิ่มให้ ← เหตุผลทั้งหมดของไฟล์นี้
+  //   ไม่มี missing ในโหมดนี้ (ไฟล์ไม่ใช่แหล่งความจริงของทั้งตาราง)
+  const buildApprovalPreview = (parsed) => {
+    const rows = parsed.rows || [];
+    const existing = data[config.dataKey] || [];
+    const byNo = new Map();
+    existing.forEach(r => {
+      const k = String(r.PL_PV_No || '').trim();
+      if (!k) return;
+      if (!byNo.has(k)) byNo.set(k, []);
+      byNo.get(k).push(r);
+    });
+    const cat = { added: [], changed: [], unchanged: [], missing: [] };
+    const psPending = [];
+    rows.forEach(obj => {
+      const no = obj.PL_PV_No;
+      const pool = byNo.get(no);
+      if (pool && pool.length) { cat.unchanged.push({ row: obj, existing: pool.shift(), key: no, primary: no }); return; }
+      if (/^PS\d/.test(no)) { psPending.push(no); return; }
+      cat.added.push({ row: obj, key: no, primary: no });
+    });
+    cat.blankSkipped = 0;
+    cat.fieldByKey   = Object.fromEntries(importFields.map(f => [f.key, f]));
+    cat.dedupKeys    = ['PL_PV_No'];
+    cat.primaryKey   = 'PL_PV_No';
+    cat.approval     = { total: rows.length, dupSkipped: parsed.dupSkipped || 0, canceled: parsed.canceled || 0, psPending };
+    setImportPreview(cat);
+    setDeleteMissingChoice(false);
+    setImportStats(null);
+  };
+
   // XML path (config.xmlParser) — rows ผ่าน parser มาแล้ว (coerce type + settles[] ครบ) → diff เลย
-  //   ใช้กับ DATA PV (parsePaymentXML: รายงานจ่ายชำระหนี้). ต้องมี dedupKey (PV มี ['PL_PV_No','AP_No'])
-  const handleXmlImport = (xmlRows) => {
-    if (!Array.isArray(xmlRows) || xmlRows.length === 0) {
-      toast('ไม่พบใบจ่าย (PS) ในไฟล์ — ตรวจสอบว่าเป็นรายงาน "การจ่ายชำระหนี้" ของ EXPRESS');
+  //   ใช้กับ DATA PV (parsePaymentXML: รายงานจ่ายชำระหนี้ / ใบอนุมัติจ่าย — parser เลือกให้เอง)
+  //   ต้องมี dedupKey (PV มี ['PL_PV_No','AP_No'])
+  const handleXmlImport = (parsed) => {
+    if (!config.dedupKey) { toast('หน้านี้ไม่รองรับนำเข้า XML'); return; }
+    if (parsed && !Array.isArray(parsed) && parsed._mode === 'approval') { buildApprovalPreview(parsed); return; }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      toast('ไม่พบรายการจ่ายในไฟล์ — ต้องเป็นรายงาน "การจ่ายชำระหนี้" หรือ "อนุมัติจ่าย" ของ EXPRESS');
       return;
     }
-    if (!config.dedupKey) { toast('หน้านี้ไม่รองรับนำเข้า XML'); return; }
     const fieldByKey = Object.fromEntries(importFields.map(f => [f.key, f]));
-    buildDiffPreview(xmlRows, fieldByKey, 0, []);
+    buildDiffPreview(parsed, fieldByKey, 0, []);
   };
 
   const handleImport = () => {
@@ -943,6 +984,32 @@ function DataCrudPage({ data, setData, toast, config }) {
           {/* ── Preview / Diff stage (only when dedupKey set + handleImport ran) ── */}
           {importPreview ? (
             <>
+            {importPreview.approval && (
+              <div style={{
+                fontSize: 12, marginBottom: 12, padding: '9px 12px', borderRadius: 7,
+                background: 'color-mix(in oklch, var(--brand-500) 8%, transparent)',
+                border: '1px solid color-mix(in oklch, var(--brand-500) 30%, transparent)',
+                borderLeft: '3px solid var(--brand-500)', color: 'var(--ink-800)', lineHeight: 1.7,
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 2 }}>📋 ไฟล์ “ใบอนุมัติจ่าย” (ไม่มีดีเทล) — โหมดเติมเฉพาะใบที่ขาด</div>
+                <div style={{ color: 'var(--ink-600)' }}>
+                  อ่านได้ <strong>{importPreview.approval.total}</strong> ใบ ·
+                  เพิ่มใหม่ <strong style={{ color: 'var(--good)' }}>{importPreview.added.length}</strong> ใบ (AV/AE ที่ไม่เข้ารายงาน PS) ·
+                  มีในระบบแล้ว <strong>{importPreview.unchanged.length}</strong> ใบ (ไม่ทับของเดิม)
+                  {importPreview.approval.dupSkipped > 0 && <> · ยุบเลขซ้ำ+ยอดซ้ำ <strong>{importPreview.approval.dupSkipped}</strong> แถว</>}
+                  {importPreview.approval.canceled > 0 && <> · ใบยกเลิก <strong>{importPreview.approval.canceled}</strong> ใบ</>}
+                </div>
+                {importPreview.approval.psPending.length > 0 && (
+                  <div style={{ marginTop: 5, paddingTop: 5, borderTop: '1px dashed color-mix(in oklch, var(--brand-500) 30%, transparent)', color: 'oklch(52% 0.17 60)' }}>
+                    ⚠️ มีใบ <strong>PS {importPreview.approval.psPending.length}</strong> ใบในไฟล์นี้ที่ยังไม่มีในระบบ — <strong>ไม่เพิ่มให้จากที่นี่</strong> (จะได้ใบไม่มีบิลย่อย/WHT แล้วซ้ำทีหลัง)
+                    ให้ลงจากไฟล์ “รายงานการจ่ายชำระหนี้” แทน:{' '}
+                    <span style={{ fontFamily: 'ui-monospace', fontSize: 11.5 }}>
+                      {importPreview.approval.psPending.slice(0, 6).join(', ')}{importPreview.approval.psPending.length > 6 ? ` …อีก ${importPreview.approval.psPending.length - 6}` : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
             {importPreview.skippedCols?.length > 0 && (
               <div style={{
                 fontSize: 12, marginBottom: 12, padding: '9px 12px', borderRadius: 7,
@@ -1941,13 +2008,15 @@ function DataPVPage({ data, setData, toast }) {
       dataKey: 'pvVouchers',
       trackFreshness: true,   // โชว์ "อัปเดตล่าสุดเมื่อไหร่/โดยใคร" ที่หัวหน้า
 
-      importSourceNote: 'โยนไฟล์ .xml "รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (EXPRESS) — ยอดสุทธิ = เช็คจ่าย (หัก WHT แล้ว) · 1 เช็ค = 1 แถว · บิลที่จ่ายทั้งหมดเก็บไว้ดูได้ · ใบยกเลิก (*) ตัดออกให้ · หรือวาง RAW จาก AP รายงาน 4.3',
-      // ★ ตัวอ่าน XML รายงานจ่ายชำระหนี้ (2 ชั้น PS/บิลย่อย) → 1 pvVoucher/ใบจ่าย + settles[]
+      importSourceNote: 'ต้องลง 2 ไฟล์ให้ครบ: (1) .xml "รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" = ตัวหลัก (ยอดสุทธิ = เช็คจ่าย หัก WHT แล้ว · 1 เช็ค = 1 แถว · เก็บบิลที่จ่ายไว้ดูได้ · ใบยกเลิก (*) ตัดออกให้) → (2) .xml "รายงานอนุมัติจ่าย (ไม่มีดีเทล)" = เติมใบที่ไม่เข้ารายงาน PS (AV จ่ายมัดจำ/ทดรอง, AE) · ระบบดูหัวตารางแล้วรู้เองว่าไฟล์ไหน · หรือวาง RAW จาก AP รายงาน 4.3',
+      // ★ ตัวอ่าน XML — เลือกเองระหว่างรายงานมีดีเทล (2 ชั้น PS/บิลย่อย → settles[]) กับใบอนุมัติจ่าย
       xmlParser: parsePaymentXML,
       // ทะเบียน PV ต้นทางตั้งหัวคอลัมน์บัญชีที่ตัดจ่ายว่า "Account_Code" (ไม่ใช่ Bank_AC) → map เข้าให้ตรง
       headerAliases: { 'Account_Code': 'Bank_AC' },
       dedupKey: ['PL_PV_No', 'AP_No'],   // compound key — PV เดียวมีหลาย AP ได้
       scopeDateField: 'Pmt_Date',         // เทียบ missing เฉพาะ row ที่อยู่ในช่วงวันที่ของไฟล์ import
+      // ★ ใบที่มาจาก "ใบอนุมัติจ่าย" (AV/AE) ไม่มีทางอยู่ในไฟล์ PS → ห้ามนับเป็น "หาย" ตอนลงไฟล์ PS
+      skipMissingFn: (r) => r.Doc_Src === 'อนุมัติจ่าย',
       previewSubFields: ['Payee', 'cc_remark'],   // subtitle ใน preview
       addLabel: 'เพิ่ม PV',
       singular: 'PV',
@@ -1967,6 +2036,7 @@ function DataPVPage({ data, setData, toast }) {
         Amount: 0, Down_payment: 0, Deduct: 0, Vat: 0, Ret: 0,
         Before_WHT: 0, WHT: 0, Less_Other: 0, Total: 0, Minus_Other: 0, Net_Amount: 0,
         settles: [],         // บิล/หนี้ที่เช็คนี้ไปจ่าย (จาก XML จ่ายชำระหนี้): [{vchno,billno,paid,note}]
+        Doc_Src: '',         // 'PS' = จากรายงานมีดีเทล · 'อนุมัติจ่าย' = จากใบอนุมัติ (ไม่มีบิลย่อย/WHT)
       },
       readOnlyRows: true,    // PV records come from accounting system — don't edit them
       allowDelete: true,     // …but allow deleting stale entries that never actually paid out
@@ -1981,7 +2051,13 @@ function DataPVPage({ data, setData, toast }) {
         { key: 'Net_Amount', label: 'ยอดสุทธิ', align: 'right', headerAlign: 'right', width: 130, sortValue: r => parseNum(r.Net_Amount),
           render: r => <span style={{ fontWeight: 700, color: parseNum(r.Net_Amount) < 0 ? 'var(--bad)' : 'var(--ink-800)', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(parseNum(r.Net_Amount), 2)}</span> },
         { key: 'settles', label: 'บิลที่จ่าย', align: 'center', width: 92, sortValue: r => (Array.isArray(r.settles) ? r.settles.length : 0),
-          render: r => { const n = Array.isArray(r.settles) ? r.settles.length : 0; return n ? <span title={r.settles.map(s => `${s.vchno || s.docno || '?'}${s.paid ? ' · ' + fmtNum(s.paid, 2) : ''}`).join('\n')} style={{ display: 'inline-block', minWidth: 20, padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)', color: 'var(--brand-700)', fontWeight: 600, fontSize: 11.5 }}>{n} บิล</span> : <span style={{ color: 'var(--ink-300)' }}>—</span>; } },
+          render: r => {
+            const n = Array.isArray(r.settles) ? r.settles.length : 0;
+            if (n) return <span title={r.settles.map(s => `${s.vchno || s.docno || '?'}${s.paid ? ' · ' + fmtNum(s.paid, 2) : ''}`).join('\n')} style={{ display: 'inline-block', minWidth: 20, padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)', color: 'var(--brand-700)', fontWeight: 600, fontSize: 11.5 }}>{n} บิล</span>;
+            // ใบจากใบอนุมัติจ่าย (AV/AE) — ไม่มีบิลย่อย/WHT โดยธรรมชาติ ไม่ใช่ข้อมูลขาด
+            if (r.Doc_Src === 'อนุมัติจ่าย') return <span title="มาจากใบอนุมัติจ่าย (ไม่มีดีเทลบิล/WHT)" style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, oklch(60% 0.18 75) 14%, transparent)', color: 'oklch(48% 0.16 70)', fontWeight: 600, fontSize: 11 }}>ใบอนุมัติ</span>;
+            return <span style={{ color: 'var(--ink-300)' }}>—</span>;
+          } },
         { key: 'cc_remark',  label: 'หมายเหตุ' },
       ],
       modalFields: [
@@ -2624,64 +2700,173 @@ function parseExpressXML(xmlText) {
   return results;
 }
 
-// ── Parser: รายงาน "การจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (EXPRESS, SpreadsheetML) ──
-//   โครงสร้าง 2 ชั้น (ต่างจากเจ้าหนี้คงค้างที่ classify ด้วย StyleID):
-//     • แถวหัว PS = col3 ขึ้นต้น "PS" → 1 ใบจ่าย (1 เช็ค) → 1 pvVoucher
-//     • แถวย่อย   = col4 มีเลขเอกสาร (RO/AP/RC/RR/RS) + col3 ว่าง → บิล/หนี้ที่เช็คนั้นไปจ่าย → settles[]
-//   คอลัมน์หัว PS: 1=วันจ่าย 2='*'(ยกเลิก) 3=PS 4=ผู้จำหน่าย 8=ยอดตามใบรับ(gross) 9=เงินสด
-//     10=เช็คจ่าย(สุทธิ=gross−WHT) 13=ภาษีWHT 15=หมายเหตุ 16=เลขเช็ค 17=ลงวันที่ 18=ธนาคาร 19=สถานะ
-//   ★ WHT เกิดที่นี่ (ตอนจ่าย) ไม่เหมือนตั้งหนี้ → Net_Amount = เช็คจ่าย (เงินสดออกจริง), เก็บ WHT + gross ด้วย
-//   ★ Net_Amount เก็บเป็น "บวก" (ตรงกับ pvActualByWeekCat ที่ += amt ตรงๆ ไม่ abs)
-//   คืน array ของ pvVoucher (1/ใบจ่าย) — ตัดใบที่ยกเลิก ('*') ทิ้ง
-function parsePaymentXML(xmlText) {
+// ── ตัวอ่าน SpreadsheetML (EXPRESS) → array ของแถว { cm: index→ข้อความ, tm: index→ss:Type } ──
+//   ใช้ร่วมกันทั้ง 2 รายงาน: "การจ่ายชำระหนี้" (มีดีเทล) และ "จ่ายชำระหนี้ (ประจำงวด)" = ใบอนุมัติจ่าย
+function _ssRowMaps(xmlText) {
   var SS = 'urn:schemas-microsoft-com:office:spreadsheet';
   function ssAttr(el, name) { return el.getAttributeNS(SS, name) || el.getAttribute('ss:' + name) || ''; }
   xmlText = xmlText.replace(/&(?![a-zA-Z_][\w.-]*;|#[0-9]+;|#x[0-9a-fA-F]+;)/g, '&amp;');
   var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
-  var num = function (s) { if (s == null || s === '') return 0; var n = parseFloat(String(s).replace(/[, ]/g, '')); return isNaN(n) ? 0 : n; };
-  var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
-  var out = [], cur = null;
-  rowEls.forEach(function (rowEl) {
-    var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
-    if (!cellEls.length) return;
-    var cm = {}, li = 0;
-    cellEls.forEach(function (cell) {
+  return Array.from(doc.getElementsByTagNameNS('*', 'Row')).map(function (rowEl) {
+    var cm = {}, tm = {}, li = 0;
+    Array.from(rowEl.getElementsByTagNameNS('*', 'Cell')).forEach(function (cell) {
       var is = ssAttr(cell, 'Index');
-      li = is ? parseInt(is) : li + 1;
+      li = is ? parseInt(is, 10) : li + 1;
       var d = cell.getElementsByTagNameNS('*', 'Data')[0];
       cm[li] = d ? d.textContent.trim() : '';
+      tm[li] = d ? (ssAttr(d, 'Type') || '') : '';
     });
-    var c3 = cm[3] || '', c4 = cm[4] || '';
-    // แถวหัว PS (ใบจ่าย)
-    if (/^PS\d/.test(c3)) {
-      var gross = num(cm[8]), cash = num(cm[9]), cheque = num(cm[10]), wht = num(cm[13]);
-      var net = cheque || cash || (gross - wht);
+    return { cm: cm, tm: tm };
+  });
+}
+function _ssNum(s) { if (s == null || s === '') return 0; var n = parseFloat(String(s).replace(/[, ]/g, '')); return isNaN(n) ? 0 : n; }
+
+// ★ หา index คอลัมน์จาก "ป้ายหัวตาราง" ไม่ใช่ตำแหน่งตายตัว — EXPRESS เปลี่ยน layout ได้
+//   (ไฟล์รุ่นใหม่แทรกคอลัมน์ "ตัดเงินมัดจำ" ที่ช่อง 8 → คอลัมน์ตั้งแต่ 8 เลื่อนไป 1 ช่องทั้งแถว
+//    ตัวอ่านเดิมที่ hardcode เลยอ่านสลับช่องทั้งไฟล์แบบเงียบ ๆ: net กลายเป็น gross, WHT=0,
+//    เลขเช็ค/ธนาคาร/หมายเหตุสลับกัน, ยอดบิลย่อย=0) — คืน null ถ้าไม่ใช่รายงานแบบมีดีเทล
+function _psHeaderCols(rowMaps) {
+  var main = null, sub = null;
+  for (var i = 0; i < Math.min(rowMaps.length, 25); i++) {
+    var cm = rowMaps[i].cm;
+    var hit = Object.keys(cm).some(function (k) { return String(cm[k]).replace(/\s+/g, '') === 'ยอดตามใบรับ'; });
+    if (hit) { main = cm; sub = (rowMaps[i + 1] || {}).cm || null; break; }
+  }
+  if (!main) return null;
+  var idxOf = function (m, label) {
+    if (!m) return 0;
+    var want = label.replace(/\s+/g, ''), keys = Object.keys(m);
+    for (var j = 0; j < keys.length; j++) if (String(m[keys[j]]).replace(/\s+/g, '') === want) return parseInt(keys[j], 10);
+    return 0;
+  };
+  var gross = idxOf(main, 'ยอดตามใบรับ');
+  var sPaid = idxOf(sub, 'จ่ายชำระ') || (gross ? gross - 1 : 7);   // แถวย่อย: ยอดจ่ายอยู่ซ้ายมือ gross 1 ช่องเสมอ
+  return {
+    date:    idxOf(main, 'วันที่จ่าย') || 1,
+    doc:     idxOf(main, 'เลขที่')     || 3,
+    vendor:  idxOf(main, 'ผู้จำหน่าย') || 4,
+    billno:  idxOf(main, 'เลขที่บิล')  || 6,
+    deposit: idxOf(main, 'ตัดเงินมัดจำ'),        // 0 = ไฟล์รุ่นเก่าไม่มีคอลัมน์นี้
+    gross:   gross || 8,
+    cash:    idxOf(main, 'จ่ายเป็น ง/ส'),
+    cheque:  idxOf(main, 'เช็คจ่าย'),
+    disc:    idxOf(main, 'ส่วนลด'),
+    tax:     idxOf(main, 'ภาษี'),
+    remark:  idxOf(main, 'หมายเหตุ'),
+    chqNo:   idxOf(main, 'เลขที่เช็ค'),
+    chqDate: idxOf(main, 'ลงวันที่'),
+    bank:    idxOf(main, 'ธนาคาร'),
+    status:  idxOf(main, 'สถานะเช็ค'),
+    sDate:   idxOf(sub, 'วันที่') || 5,
+    sPaid:   sPaid,
+    sNote:   idxOf(sub, 'หมายเหตุ') || (sPaid + 1),
+  };
+}
+
+// ── Parser A: รายงาน "การจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (มีดีเทล) ──────────
+//   โครงสร้าง 2 ชั้น:
+//     • แถวหัว PS = คอลัมน์ "เลขที่" ขึ้นต้น "PS" → 1 ใบจ่าย (1 เช็ค) → 1 pvVoucher
+//     • แถวย่อย   = คอลัมน์ "ผู้จำหน่าย" มีเลขเอกสาร (RO/AP/RC/RR/RS/CV) + "เลขที่" ว่าง → settles[]
+//   ★ WHT เกิดที่นี่ (ตอนจ่าย) ไม่เหมือนตั้งหนี้ → Net_Amount = เช็คจ่าย (เงินสดออกจริง), เก็บ WHT + gross ด้วย
+//   ★ Net_Amount เก็บเป็น "บวก" (ตรงกับ pvActualByWeekCat ที่ += amt ตรงๆ ไม่ abs)
+//   ตัดทิ้ง: ใบยกเลิก (ดาวหน้าเลขที่) + แถวขยะยอด 0 ที่ไม่มีบิลย่อย/เลขเช็ค (subtotal artifact ของ EXPRESS)
+function _psParseDetail(rowMaps, C) {
+  var out = [], cur = null;
+  rowMaps.forEach(function (r) {
+    var cm = r.cm;
+    var cDoc = cm[C.doc] || '', cVen = cm[C.vendor] || '';
+    if (/^PS\d/.test(cDoc)) {
+      var deposit = C.deposit ? _ssNum(cm[C.deposit]) : 0;
+      var gross   = _ssNum(cm[C.gross]);
+      var cash    = C.cash   ? _ssNum(cm[C.cash])   : 0;
+      var cheque  = C.cheque ? _ssNum(cm[C.cheque]) : 0;
+      var wht     = C.tax    ? _ssNum(cm[C.tax])    : 0;
+      var disc    = C.disc   ? _ssNum(cm[C.disc])   : 0;
+      var net = cheque || cash || (gross - wht - disc);
       cur = {
-        PL_PV_No: c3,
-        Pmt_Date: cm[1] || '',
-        Payee: c4,
+        PL_PV_No: cDoc,
+        Pmt_Date: cm[C.date] || '',
+        Payee: cVen,
         AP_No: '',                 // เลขเอกสารบิลแรกที่จ่าย — เติมจากแถวย่อยแรก (ให้ paidApSet เดิมใช้ได้)
-        Amount: gross, Before_WHT: gross, Total: gross, WHT: wht, Net_Amount: net,
-        Type_of_Pmt: cm[19] || 'เช็คจ่าย',
-        Chq_No: cm[16] || '', Chq_Date: cm[17] || '', Bank_AC: cm[18] || '',
-        Remark: cm[15] || '', cc_remark: cm[15] || '',
+        Amount: gross, Before_WHT: gross, Total: gross, WHT: wht,
+        Down_payment: deposit, Deduct: disc, Net_Amount: net,
+        Type_of_Pmt: cm[C.status] || 'เช็คจ่าย',
+        Chq_No: cm[C.chqNo] || '', Chq_Date: cm[C.chqDate] || '', Bank_AC: cm[C.bank] || '',
+        Remark: cm[C.remark] || '', cc_remark: cm[C.remark] || '',
+        Doc_Src: 'PS',
         settles: [],
-        _canceled: /\*/.test(cm[2] || ''),
+        _canceled: /^\s*\*+\s*$/.test(cm[2] || ''),
       };
       out.push(cur);
       return;
     }
-    // แถวย่อย (บิลที่เช็คนี้จ่าย) — col4 เป็นเลขเอกสาร, col3 ว่าง
-    if (cur && !c3 && c4 && /^[A-Za-z]/.test(c4)) {
-      cur.settles.push({ vchno: c4, billdate: cm[5] || '', billno: cm[6] || '', paid: num(cm[7]), note: cm[8] || '' });
-      if (!cur.AP_No) cur.AP_No = c4;
+    if (cur && !cDoc && cVen && /^[A-Za-z]/.test(cVen)) {
+      cur.settles.push({ vchno: cVen, billdate: cm[C.sDate] || '', billno: cm[C.billno] || '', paid: _ssNum(cm[C.sPaid]), note: cm[C.sNote] || '' });
+      if (!cur.AP_No) cur.AP_No = cVen;
       return;
     }
   });
   return out
     .filter(function (r) { return r.PL_PV_No && !r._canceled; })
+    .filter(function (r) { return r.Net_Amount !== 0 || r.settles.length > 0 || r.Chq_No; })
     .map(function (r) { delete r._canceled; return r; });
+}
+
+// ── Parser B: รายงาน "จ่ายชำระหนี้ (ประจำงวด) เรียงตามวันที่จ่ายเงิน" = ใบอนุมัติจ่าย (ไม่มีดีเทล) ──
+//   ★ ทำไมต้องมีไฟล์นี้: เอกสารจ่ายที่ไม่ใช่ PS (AV = จ่ายมัดจำ/เงินทดรอง, AE …) ไม่ถูกดึงเข้ารายงาน PS เลย
+//     → ลงไฟล์ PS อย่างเดียว ยอดจ่ายจริงจะขาดใบพวกนี้ทั้งหมด. ไฟล์นี้ครบทุกใบ แต่ไม่มีบิลย่อย/WHT/เลขเช็ค
+//   คอลัมน์ (ข้อมูล): 1=วันที่ 2=เลขที่ 3=ผู้จำหน่าย 7=จำนวนเงิน(สุทธิ) 8=เลขบัญชีผู้รับ 9=วันที่ 10=หมายเหตุ 12=สั่งจ่ายให้
+//   ⚠️ หัวตารางไฟล์นี้เป็น merged cell เยื้องจากข้อมูล 1 ช่อง → ห้ามยึดป้ายหัว ให้ยึด "ช่องที่เป็นตัวเลข" เป็นหลัก
+//   ⚠️ "เลขบัญชีผู้รับ" = บัญชีปลายทาง ไม่ใช่บัญชีที่เราจ่ายออก → ลง Bnf_Acct_No ห้ามลง Bank_AC
+//   ★ ดึงซ้ำแล้วได้เลขเดิม+ยอดเดิม = แถวเดียวกัน → นับ 1 บรรทัด
+function _psParseApproval(rowMaps) {
+  var rows = [], seen = {}, dupSkipped = 0, canceled = 0;
+  rowMaps.forEach(function (r) {
+    var cm = r.cm, tm = r.tm;
+    var keys = Object.keys(cm).map(Number).sort(function (a, b) { return a - b; });
+    var docIdx = 0, doc = '';
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i] > 4) break;
+      var v = String(cm[keys[i]] || '').trim();
+      if (/^\*?\s*[A-Z]{2}\d{8,}$/.test(v)) { docIdx = keys[i]; doc = v; break; }
+    }
+    if (!docIdx) return;
+    var amtIdx = 0;
+    keys.forEach(function (k) { if (!amtIdx && k > docIdx && tm[k] === 'Number') amtIdx = k; });
+    if (!amtIdx) return;
+    if (/^\*/.test(doc)) { canceled++; return; }                 // ใบยกเลิก
+    var amt = _ssNum(cm[amtIdx]);
+    var key = doc + '|' + amt.toFixed(2);
+    if (seen[key]) { dupSkipped++; return; }
+    seen[key] = 1;
+    var dateIdx = 0;
+    keys.forEach(function (k) { if (!dateIdx && k < docIdx && tm[k] === 'DateTime') dateIdx = k; });
+    rows.push({
+      PL_PV_No: doc,
+      Pmt_Date: (dateIdx ? cm[dateIdx] : '') || '',
+      Payee: cm[docIdx + 1] || '',
+      AP_No: '',
+      Amount: amt, Before_WHT: amt, Total: amt, WHT: 0, Net_Amount: amt,
+      Bnf_Acct_No: cm[amtIdx + 1] || '',
+      Remark: cm[amtIdx + 3] || '', cc_remark: cm[amtIdx + 3] || '',
+      Doc_Src: 'อนุมัติจ่าย',
+      settles: [],
+    });
+  });
+  return { rows: rows, dupSkipped: dupSkipped, canceled: canceled };
+}
+
+// ── ตัวอ่านไฟล์ XML หน้า DATA PV — ดูหัวตารางแล้วเลือก parser เอง ──────────────
+//   คืน array              → รายงานมีดีเทล (PS) = ตัวหลัก diff ตามปกติ
+//   คืน {_mode:'approval'} → ใบอนุมัติจ่าย = โหมด "เติมเฉพาะใบที่ขาด" (ดู buildApprovalPreview)
+function parsePaymentXML(xmlText) {
+  var rowMaps = _ssRowMaps(xmlText);
+  var C = _psHeaderCols(rowMaps);
+  if (C) return _psParseDetail(rowMaps, C);
+  var ap = _psParseApproval(rowMaps);
+  if (ap.rows.length) return { _mode: 'approval', rows: ap.rows, dupSkipped: ap.dupSkipped, canceled: ap.canceled };
+  return [];
 }
 
 // เทียบค่าให้ทน format ต่าง — date → epoch (กัน DD/MM vs ISO), number → parseNum (กัน "2,000.00")
