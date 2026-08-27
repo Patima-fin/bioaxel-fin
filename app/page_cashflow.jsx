@@ -815,6 +815,249 @@ function CfReconCard({
   );
 }
 
+// ─── ก็อปประมาณการยกชุดข้ามเดือน ──────────────────────────────────────────
+//   ขึ้นเดือนใหม่ทีต้องคีย์รายการประจำใหม่ทั้งชุด (เงินเดือน · ค่าเช่า · ค่าน้ำไฟ · ค่างวด)
+//   → ก็อปจากเดือนก่อนมายกชุดก่อน ให้ "มีรายการ" แล้วค่อยไล่แก้ตัวเลขทีหลัง
+//   กติกา: เลื่อนวันตามเดือนใหม่ · ยอดเดิม · สถานะกลับเป็น PLANNED ทุกแถว
+//   วันที่ 29-31 ที่ไม่มีในเดือนปลายทาง → ตกลงมาที่วันสุดท้ายของเดือน (ไม่เด้งข้ามเดือน)
+function cfShiftDateToMonth(dateISO, year, month) {
+  const iso  = toISODate(dateISO);
+  const day  = Number(String(iso || '').split('-')[2]) || 1;
+  const last = new Date(year, month, 0).getDate();
+  const d    = Math.min(day, last);
+  return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+//   ก็อปได้เฉพาะ "ประมาณการที่คีย์มือ" เท่านั้น —
+//   AP = ผูกใบเจ้าหนี้จริง (ก็อปมาเดือนใหม่ = หนี้ผี ไม่มีใบจริงรองรับ)
+//   BANK_RECON = จ่ายจริงที่กระทบยอดมาแล้ว · CANCELED = ยกเลิกไปแล้ว
+//   RECURRING = ทะเบียนค่าใช้จ่ายประจำเป็นเจ้าของ (หน้า #recurring กด Materialise สร้างงวดเอง
+//     พร้อม REF_DOC กันซ้ำ) — ก็อปมาจะกลายเป็นซ้ำกับงวดที่ทะเบียนสร้างให้
+function cfIsCopyableForecast(fe) {
+  const et = String(fe.EXPENSE_TYPE || '').trim().toUpperCase();
+  if (et === 'AP' || et === 'BANK_RECON' || et === 'RECURRING') return false;
+  return String(fe.STATUS || '').trim().toUpperCase() !== 'CANCELED';
+}
+//   กันก็อปซ้ำ — รายการที่ (ชื่อ + วันที่ + ยอด) ตรงกับของที่มีอยู่แล้วในเดือนปลายทาง
+//   จะถูกติ๊กออกให้ตั้งแต่แรก (ติ๊กกลับเองได้ถ้าตั้งใจให้มี 2 รอบจริงๆ)
+function cfForecastDupKey(desc, iso, amount) {
+  return [
+    String(desc || '').trim().toLowerCase(),
+    Number(String(iso || '').split('-')[2]) || 0,
+    Math.round(Math.abs(Number(amount) || 0)),
+  ].join('|');
+}
+
+//   targetPick = ให้เลือก "เดือนปลายทาง" ได้เอง (หน้าที่ไม่มีตัวเลือกเดือนของตัวเอง เช่น หน้าประมาณการรายจ่าย)
+function CfCopyForecastModal({ data, year, month, monthNames, onClose, onCopy, targetPick }) {
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const prevKeyOf = (y, m) => `${m === 1 ? y - 1 : y}-${pad2(m === 1 ? 12 : m - 1)}`;
+
+  const [tgtKey, setTgtKey] = cfState(`${year}-${pad2(month)}`);
+  const tgtY = Number(tgtKey.split('-')[0]);
+  const tgtM = Number(tgtKey.split('-')[1]);
+  const [srcKey, setSrcKey] = cfState(() => prevKeyOf(year, month));
+  const srcY = Number(srcKey.split('-')[0]);
+  const srcM = Number(srcKey.split('-')[1]);
+  // เปลี่ยนเดือนปลายทาง → ตั้งต้นทางเป็น "เดือนก่อนหน้าเดือนนั้น" ให้อัตโนมัติ (แก้เองต่อได้)
+  const changeTarget = (k) => {
+    setTgtKey(k);
+    const y = Number(k.split('-')[0]), m = Number(k.split('-')[1]);
+    setSrcKey(prevKeyOf(y, m));
+  };
+
+  // เดือนต้นทางเลือกย้อนหลังได้ 12 เดือน (เดือนก่อนหน้าคีย์ไม่ครบ → ย้อนไปหยิบเดือนที่ครบแทน)
+  const monthOpts = cfMemo(() => {
+    const out = [];
+    for (let i = 1; i <= 12; i++) {
+      let m = tgtM - i, y = tgtY;
+      while (m <= 0) { m += 12; y -= 1; }
+      out.push({ v: `${y}-${pad2(m)}`, label: `${monthNames[m - 1]} ${y}` });
+    }
+    return out;
+  }, [tgtY, tgtM]);
+
+  // เดือนปลายทางให้เลือก — ย้อนหลัง 3 เดือน ถึงล่วงหน้า 9 เดือน จากเดือนตั้งต้น
+  const targetOpts = cfMemo(() => {
+    const out = [];
+    for (let i = -3; i <= 9; i++) {
+      let m = month + i, y = year;
+      while (m <= 0) { m += 12; y -= 1; }
+      while (m > 12)  { m -= 12; y += 1; }
+      out.push({ v: `${y}-${pad2(m)}`, label: `${monthNames[m - 1]} ${y}` });
+    }
+    return out;
+  }, [year, month]);
+
+  // รายการที่มีอยู่แล้วในเดือนปลายทาง — ใช้เช็คซ้ำ
+  const existingKeys = cfMemo(() => {
+    const s = new Set();
+    (data.forecastEntries || []).forEach(fe => {
+      const d = toISODate(fe.PAYMENT_DATE || fe.DATE);
+      if (!inMonth(d, tgtY, tgtM)) return;
+      s.add(cfForecastDupKey(fe.DESCRIPTION, d, fe.AMOUNT));
+    });
+    return s;
+  }, [data.forecastEntries, tgtY, tgtM]);
+
+  const cands = cfMemo(() => {
+    const out = [];
+    (data.forecastEntries || []).forEach(fe => {
+      if (!cfIsCopyableForecast(fe)) return;
+      const d = toISODate(fe.PAYMENT_DATE || fe.DATE);
+      if (!inMonth(d, srcY, srcM)) return;
+      const newDate = cfShiftDateToMonth(d, tgtY, tgtM);
+      const amount = Number(fe.AMOUNT || fe.amount || 0);
+      const isLoan = String(fe.EXPENSE_TYPE || '').trim().toUpperCase() === 'LOAN';
+      out.push({
+        fe, id: fe.id, oldDate: d, newDate, amount,
+        desc: fe.DESCRIPTION || '—',
+        // ฝั่งรับ (เงินกู้/คาดรับ) ไม่มีหมวดรายจ่าย — โชว์ป้ายฝั่งรับแทน ไม่งั้นไปโผล่ "ดำเนินงาน" ทั้งที่เป็นเงินเข้า
+        catLabel: amount > 0 ? (isLoan ? 'เงินกู้' : 'รับเงิน') : (CATEGORY_LABELS_SHORT[categorizeForecastEntry(fe)] || '—'),
+        dup: existingKeys.has(cfForecastDupKey(fe.DESCRIPTION, newDate, fe.AMOUNT)),
+      });
+    });
+    return out.sort((a, b) => (a.newDate < b.newDate ? -1 : a.newDate > b.newDate ? 1 : 0));
+  }, [data.forecastEntries, srcY, srcM, tgtY, tgtM, existingKeys]);
+
+  // งวดที่มาจากทะเบียนค่าใช้จ่ายประจำในเดือนต้นทาง — ไม่ก็อป แต่บอกให้รู้ว่าไปกด Materialise ได้
+  const nRecurring = cfMemo(() =>
+    (data.forecastEntries || []).filter(fe => {
+      if (String(fe.EXPENSE_TYPE || '').trim().toUpperCase() !== 'RECURRING') return false;
+      return inMonth(toISODate(fe.PAYMENT_DATE || fe.DATE), srcY, srcM);
+    }).length, [data.forecastEntries, srcY, srcM]);
+
+  // ติ๊กไว้ทั้งหมด ยกเว้นที่ซ้ำกับของเดิมในเดือนปลายทาง
+  const [sel, setSel] = cfState({});
+  cfEffect(() => {
+    const s = {};
+    cands.forEach(c => { s[c.id] = !c.dup; });
+    setSel(s);
+  }, [cands]);
+
+  const picked = cands.filter(c => sel[c.id]);
+  const nDup   = cands.filter(c => c.dup).length;
+  const sumOut = picked.filter(c => c.amount < 0).reduce((s, c) => s + Math.abs(c.amount), 0);
+  const sumIn  = picked.filter(c => c.amount > 0).reduce((s, c) => s + c.amount, 0);
+  const allOn  = cands.length > 0 && picked.length === cands.length;
+  const toggleAll = () => {
+    const s = {};
+    cands.forEach(c => { s[c.id] = !allOn; });
+    setSel(s);
+  };
+
+  const th = { padding: '5px 8px', textAlign: 'left', fontSize: 11.5, color: 'var(--ink-600)', fontWeight: 600 };
+  const td = { padding: '4px 8px', fontSize: 12 };
+
+  return (
+    <Modal open title={`ก็อปประมาณการยกชุด → ${monthNames[tgtM - 1]} ${tgtY}`} maxWidth={880} onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={picked.length === 0}
+          onClick={() => onCopy(picked, { year: tgtY, month: tgtM, label: `${monthNames[tgtM - 1]} ${tgtY}` })}
+          style={picked.length === 0 ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}>
+          <Icon name="copy" size={14} /> ก็อปมา {picked.length} รายการ
+        </button>
+      </>}>
+      {/* เลือกเดือนต้นทาง */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        <span style={{ fontSize: 12.5, color: 'var(--ink-600)' }}>ก็อปจากเดือน</span>
+        <select value={srcKey} onChange={e => setSrcKey(e.target.value)}
+          style={{ padding: '5px 10px', borderRadius: 8, border: '1.5px solid var(--ink-300)', background: 'var(--surface)',
+                   color: 'inherit', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' }}>
+          {monthOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+        <span style={{ fontSize: 12.5, color: 'var(--ink-600)' }}>→ มาที่</span>
+        {targetPick
+          ? <select value={tgtKey} onChange={e => changeTarget(e.target.value)}
+              style={{ padding: '5px 10px', borderRadius: 8, border: '1.5px solid var(--brand-500)', background: 'var(--surface)',
+                       color: 'inherit', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' }}>
+              {targetOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+            </select>
+          : <b style={{ fontSize: 13.5 }}>{monthNames[tgtM - 1]} {tgtY}</b>}
+        <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-500)' }}>
+          เลื่อนวันตามเดือนใหม่ · ยอดเดิม · สถานะ PLANNED
+        </span>
+      </div>
+
+      {/* สรุปสิ่งที่จะก็อป */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+        {[
+          { label: 'จะก็อป',      txt: `${picked.length} / ${cands.length} รายการ`, color: 'var(--brand-600)' },
+          { label: 'รวมคาดจ่าย', txt: fmtNum(sumOut, 0), color: 'var(--bad)' },
+          { label: 'รวมคาดรับ',  txt: fmtNum(sumIn, 0),  color: 'var(--good)' },
+        ].map(({ label, txt, color }) => (
+          <div key={label} style={{ flex: 1, background: 'var(--ink-50)', borderRadius: 8, padding: '8px 14px', textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-500)', marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{txt}</div>
+          </div>
+        ))}
+      </div>
+
+      {nDup > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--warn)', marginBottom: 8 }}>
+          ⚠ มี {nDup} รายการที่เดือน {monthNames[tgtM - 1]} มีอยู่แล้ว (ชื่อ+วัน+ยอดตรงกัน) — ติ๊กออกให้แล้ว กันก็อปซ้ำ
+        </div>
+      )}
+      {nRecurring > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginBottom: 8 }}>
+          ℹ️ เดือนต้นทางมีงวดจาก<strong>ทะเบียนค่าใช้จ่ายประจำ</strong> {nRecurring} รายการ — ไม่ต้องก็อป
+          กด Materialise ที่หน้า <a href="#recurring" style={{ color: 'var(--brand-600)' }}>ค่าใช้จ่ายประจำ</a> จะสร้างงวดของเดือนใหม่ให้เอง
+        </div>
+      )}
+
+      {cands.length === 0 ? (
+        <div style={{ padding: 26, textAlign: 'center', color: 'var(--ink-500)', fontSize: 12.5 }}>
+          เดือนที่เลือกไม่มีรายการประมาณการที่คีย์มือ<br />
+          <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>
+            (ไม่นับ AP ที่วางแผนจ่ายจาก Bank Diary · รายการจ่ายจริงจากกระทบยอด · งวดจากทะเบียนค่าใช้จ่ายประจำ)
+          </span>
+        </div>
+      ) : (
+        <div style={{ maxHeight: '46vh', overflow: 'auto', border: '1px solid var(--ink-100)', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ position: 'sticky', top: 0, background: 'var(--ink-100)', zIndex: 1 }}>
+              <tr>
+                <th style={{ ...th, width: 34, textAlign: 'center' }}>
+                  <input type="checkbox" checked={allOn} onChange={toggleAll} style={{ cursor: 'pointer' }}
+                    title={allOn ? 'ติ๊กออกทั้งหมด' : 'ติ๊กทั้งหมด'} />
+                </th>
+                <th style={{ ...th, width: 158 }}>วันที่จ่าย</th>
+                <th style={th}>รายการ</th>
+                <th style={{ ...th, width: 92 }}>หมวด</th>
+                <th style={{ ...th, width: 120, textAlign: 'right' }}>จำนวน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cands.map(c => (
+                <tr key={c.id} onClick={() => setSel(s => ({ ...s, [c.id]: !s[c.id] }))}
+                  style={{ borderBottom: '1px solid var(--ink-100)', cursor: 'pointer',
+                           background: sel[c.id] ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' : 'transparent',
+                           opacity: sel[c.id] ? 1 : 0.6 }}>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <input type="checkbox" checked={!!sel[c.id]} onChange={() => {}} style={{ cursor: 'pointer' }} />
+                  </td>
+                  <td style={{ ...td, whiteSpace: 'nowrap', color: 'var(--ink-500)' }}>
+                    {fmtDate(c.oldDate)} <span style={{ color: 'var(--ink-300)' }}>→</span> <b>{fmtDate(c.newDate)}</b>
+                  </td>
+                  <td style={td}>
+                    {c.desc}
+                    {c.dup && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--warn)' }}>· มีอยู่แล้ว</span>}
+                  </td>
+                  <td style={{ ...td, color: 'var(--ink-500)' }}>{c.catLabel}</td>
+                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+                               color: c.amount < 0 ? 'var(--bad)' : 'var(--good)' }}>
+                    {c.amount < 0 ? `(${fmtNum(Math.abs(c.amount), 0)})` : fmtNum(c.amount, 0)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ─── Main page ─────────────────────────────────────────────────────────────
 function CashFlowDashboard({ data, setData, toast }) {
   const today = new Date();
@@ -839,6 +1082,8 @@ function CashFlowDashboard({ data, setData, toast }) {
   const [detailItem, setDetailItem] = cfState(null);
   // IV plan detail modal — แสดงรายละเอียด IV แยกราย tab
   const [ivDrill, setIvDrill] = cfState(false);
+  // ก็อปประมาณการยกชุดจากเดือนก่อน → เดือนที่กำลังดู
+  const [copyOpen, setCopyOpen] = cfState(false);
   // โหมดช่องรายจ่าย Section 01: 'remaining' = ประมาณการตั้งมือ − จ่ายจริง (เดิม)
   //   'apPlan' = แผนจ่ายจริง = รายการ AP ที่เลือกจ่าย (ขึ้น CARD BANK) + รายการตั้งมือที่ติ๊กรวมเอง
   //   เก็บไว้ต่อเครื่อง (localStorage) — เป็น view preference ส่วนตัว ไม่ sync ทีม
@@ -2115,6 +2360,36 @@ function CashFlowDashboard({ data, setData, toast }) {
     setCurrentWeekOverride(null);
   };
 
+  // ── ก็อปประมาณการยกชุด → เขียนเป็นแถวใหม่ในเดือนที่กำลังดู ──────────────
+  //   id ใหม่ทุกแถว (ไม่ทับของเดิม) · ยอด/หมวด/บัญชีเดิม · วันเลื่อนตามเดือนใหม่
+  //   ล้างร่องรอยของเดิมทิ้ง: REF_DOC / ยอดจ่ายจริง / วันจ่ายจริง / วันลงบัญชี → เริ่มเป็นแผนใหม่ล้วน
+  const handleCopyForecast = (picked, tgt) => {
+    if (!picked || !picked.length) return;
+    const stamp = Date.now();
+    const rows = picked.map((c, i) => ({
+      id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('fe-cp-' + stamp + '-' + i),
+      DATE:         cfTodayISO,
+      PAYMENT_DATE: c.newDate,
+      EXPENSE_TYPE: c.fe.EXPENSE_TYPE || 'Manual',
+      DESCRIPTION:  c.fe.DESCRIPTION || '',
+      JOB_NO:       c.fe.JOB_NO || null,
+      PROJECT_NAME: c.fe.PROJECT_NAME || null,
+      AMOUNT:       c.fe.AMOUNT,
+      Bank_AC:      c.fe.Bank_AC || null,
+      STATUS:       'PLANNED',
+      CATEGORY:     c.fe.CATEGORY || null,
+      IS_ACCRUED:   c.fe.IS_ACCRUED || null,
+      NOTE:         c.fe.NOTE || null,
+      ACTUAL_AMOUNT: null, ACTUAL_DATE: null, REF_DOC: null, BOOKED_AT: null,
+      CFS_ACTIVITY: c.fe.CFS_ACTIVITY || null,
+    }));
+    let updated;
+    setData(d => { updated = { ...d, forecastEntries: [...(d.forecastEntries || []), ...rows] }; return updated; });
+    if (updated && window.WTPData && WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updated), 0);
+    setCopyOpen(false);
+    if (typeof toast === 'function') toast(`ก็อปประมาณการมา ${rows.length} รายการ → ${(tgt && tgt.label) || `${monthNames[month - 1]} ${year}`} · ปรับตัวเลขได้เลย`);
+  };
+
   return (
     <div className="page bg-pattern cf-page present-page">
       {/* ── Print-only gradient header — shown in cf-print-mode (like iv-print-header) ── */}
@@ -2148,6 +2423,12 @@ function CashFlowDashboard({ data, setData, toast }) {
             {monthNames[month - 1]} {year}
           </div>
           <button className="btn btn-ghost" onClick={goNextMonth} title="เดือนถัดไป">›</button>
+          {!cfIsReadOnly() && (
+            <button className="btn btn-ghost no-present" onClick={() => setCopyOpen(true)}
+              title={`ดึงรายการประมาณการยกชุดจากเดือนก่อน มาลงเดือน ${monthNames[month - 1]} ${year} — แล้วค่อยแก้ตัวเลขทีหลัง`}>
+              <Icon name="copy" size={14} /> ก็อปประมาณการ
+            </button>
+          )}
           <span className="no-present" style={{ display: 'contents' }}><CloudSyncStatusButton /></span>
           <span className="no-present" style={{ display: 'contents' }}><EditModeToggle value={editMode} onChange={setEditMode} /></span>
           <button className="btn btn-ghost no-present" onClick={() => {
@@ -2359,7 +2640,7 @@ function CashFlowDashboard({ data, setData, toast }) {
                     2: กระแสเงินสดออก (Outflow Details) · 4 หมวด
                     <span className="no-present" style={{ fontWeight: 500, fontSize: cfScale(11.5), color: 'var(--ink-500)', marginLeft: cfScale(8) }}>
                       {s01OutMode === 'apPlan'
-                        ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
+                        ? <span>· <strong>แผนจ่ายจริง</strong> = รายการ AP ที่เลือกจ่าย (CARD BANK) + ตั้งมือที่ติ๊กรวม · ช่องที่เป็น <strong>“—”</strong> ก็กดเข้าไปเลือกประมาณการมารวมได้{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
                         : s01OutMode === 'pv'
                         ? <span>· <strong>ยอด PV ที่ตัด</strong> = ใบจ่าย (PV) ที่ตัดล่วงหน้า ยังไม่ถึงวันจ่าย · พอกดจ่ายจริงแล้วจะหักออก · <strong>หมวดที่ไม่มี PV (เช่น เงินเดือน) ใช้ประมาณการแทน</strong>{s01ApScope === 'week' ? <span> · <strong>เฉพาะสัปดาห์นี้</strong></span> : ''}</span>
                         : <span>· ยอด<strong>คงเหลือต้องจ่าย</strong> (หักที่จ่ายจริงแล้ว)</span>}
@@ -2405,6 +2686,9 @@ function CashFlowDashboard({ data, setData, toast }) {
                   editMode={editMode}
                   ovKey={`${ovPrefix}.s01.out${cat}`}
                   onCellClick={drill}
+                  /* โหมดแผนจ่ายจริง — ช่องที่ยังเป็น "—" ก็กดเข้าไปติ๊กรวมประมาณการได้
+                     (หมวด 4 เบ็ดเตล็ด+เงินเดือน ไม่ได้จ่ายผ่าน AP/PV ยอดเลยเป็น 0 ตลอด) */
+                  clickZero={s01OutMode === 'apPlan'}
                 />
               );
             })}
@@ -2818,6 +3102,18 @@ function CashFlowDashboard({ data, setData, toast }) {
       {/* ═════ What-if Simulator — จำลองเลื่อนจ่าย/รับ (พาเนลแยก, จำลองล้วน) ═══ */}
       <CfWhatIfPanel bf={liveAvailable} weeks={weeks} items={whatIfItems} />
 
+      {/* ═════ ก็อปประมาณการยกชุดจากเดือนก่อน ═══════════════════════════ */}
+      {copyOpen && (
+        <CfCopyForecastModal
+          data={data}
+          year={year}
+          month={month}
+          monthNames={monthNames}
+          onClose={() => setCopyOpen(false)}
+          onCopy={handleCopyForecast}
+        />
+      )}
+
       {/* ═════ Drill-down modal — verify which rows make up each cell ═══════ */}
       {drillDown && (
         <Modal open={!!drillDown} title={'รายละเอียด · ' + drillDown.title} maxWidth={920}
@@ -2887,7 +3183,9 @@ function CashFlowDashboard({ data, setData, toast }) {
                 </div>
                 {drillDown.manualCands.length === 0 ? (
                   <div style={{ padding: 14, textAlign: 'center', color: 'var(--ink-500)', fontSize: 12, background: 'var(--ink-50)', borderRadius: 8 }}>
-                    ไม่มีรายการตั้งมือในช่วงนี้
+                    ไม่มีรายการตั้งมือในช่วงนี้ — กดปุ่ม <strong style={{ color: 'var(--ink-700)' }}>ก็อปประมาณการ</strong> ที่หัวหน้าจอ
+                    เพื่อดึงรายการประจำจากเดือนก่อนมาทั้งชุด แล้วกลับมาติ๊กที่นี่
+                    {' '}(รายจ่ายประจำที่ตั้งไว้แล้ว กด Materialise ที่หน้า <a href="#recurring" style={{ color: 'var(--brand-600)' }}>ค่าใช้จ่ายประจำ</a> ได้เลย)
                   </div>
                 ) : (
                   <div style={{ maxHeight: '30vh', overflow: 'auto' }}>
@@ -3512,11 +3810,14 @@ function KpiCompare({ label, forecast, actual, accent, icon }) {
   );
 }
 
-function PlanRow({ label, current, rest, total, subtle, negative, carrySigned, onCellClick, editMode, ovKey }) {
+function PlanRow({ label, current, rest, total, subtle, negative, carrySigned, onCellClick, editMode, ovKey, clickZero }) {
   // negative   → outflow (always positive number wrapped in parens)
   // carrySigned→ row may show negative carry-forward without parens (e.g. -2,612,841)
   // onCellClick: (period) => void  — if provided, makes cells clickable for drill-down
   // ovKey      → if provided + editMode, cells become EditableNumber with keys ovKey.current/.rest/.total
+  // clickZero  → ★ ให้ช่องที่ยอดเป็น 0 ("—") กดได้ด้วย
+  //   เดิมช่อง 0 กดไม่ได้เลย → หมวดที่ยังไม่มีรายการ (เช่น 4 เบ็ดเตล็ด+เงินเดือน ที่ไม่ได้จ่ายผ่าน AP/PV)
+  //   เข้าไปติ๊กเลือกรายการประมาณการมารวมไม่ได้ ทั้งที่หมวดอื่นทำได้ — ตันตั้งแต่ยอดยังเป็น 0
   const fmtVal = v => {
     if (v == null || v === 0) return '—';
     if (carrySigned) return fmtNum(v, 0);
@@ -3530,12 +3831,15 @@ function PlanRow({ label, current, rest, total, subtle, negative, carrySigned, o
     return subtle ? 'var(--ink-500)' : 'inherit';
   };
   const clickable = !!onCellClick && !editMode;  // disable drill in edit mode
+  const canClick = (val) => clickable && (!!val || !!clickZero);
+  const cellTitle = (val) => !canClick(val) ? ''
+    : (val ? 'คลิกเพื่อดูรายการรายตัว' : 'ยังไม่มียอด — คลิกเพื่อเลือกรายการประมาณการมารวม');
   const cellStyle = (val, extra) => ({
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums',
     color: colorFor(val),
-    cursor: clickable && val ? 'pointer' : 'default',
-    textDecorationLine: clickable && val ? 'underline' : 'none',
+    cursor: canClick(val) ? 'pointer' : 'default',
+    textDecorationLine: canClick(val) ? 'underline' : 'none',
     textDecorationStyle: 'dotted',
     textDecorationColor: 'var(--ink-300)',
     textUnderlineOffset: 3,
@@ -3569,26 +3873,26 @@ function PlanRow({ label, current, rest, total, subtle, negative, carrySigned, o
     <tr>
       <td style={{ paddingLeft: cfScale(24), fontSize: cfScale(16), color: subtle ? 'var(--ink-500)' : 'inherit' }}>{label}</td>
       <td
-        onClick={() => clickable && current && onCellClick('current')}
+        onClick={() => canClick(current) && onCellClick('current')}
         onMouseEnter={e => hover(e, true)}
         onMouseLeave={e => hover(e, false)}
-        title={clickable && current ? 'คลิกเพื่อดูรายการรายตัว' : ''}
+        title={cellTitle(current)}
         style={cellStyle(current)}>
         {renderCell(current, 'current')}
       </td>
       <td
-        onClick={() => clickable && rest && onCellClick('rest')}
+        onClick={() => canClick(rest) && onCellClick('rest')}
         onMouseEnter={e => hover(e, true)}
         onMouseLeave={e => hover(e, false)}
-        title={clickable && rest ? 'คลิกเพื่อดูรายการรายตัว' : ''}
+        title={cellTitle(rest)}
         style={cellStyle(rest)}>
         {renderCell(rest, 'rest')}
       </td>
       <td
-        onClick={() => clickable && total && onCellClick('total')}
+        onClick={() => canClick(total) && onCellClick('total')}
         onMouseEnter={e => hover(e, true)}
         onMouseLeave={e => hover(e, false)}
-        title={clickable && total ? 'คลิกเพื่อดูรายการรายตัว' : ''}
+        title={cellTitle(total)}
         style={cellStyle(total, { fontWeight: 600 })}>
         {renderCell(total, 'total')}
       </td>

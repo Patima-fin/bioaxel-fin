@@ -1627,6 +1627,65 @@ function ForecastEntriesPage({ data, setData, toast }) {
     if (toast) toast(`ลบ ${batch.length} รายการแล้ว` + (remaining > 0 ? ` · เหลืออีก ${remaining}` : ' · ครบแล้ว'));
   };
 
+  // ── ก็อปประมาณการยกชุดจากเดือนก่อน (ใช้ modal ตัวเดียวกับหน้า Weekly Forecast) ──
+  //   ขึ้นเดือนใหม่ทีต้องคีย์รายการประจำใหม่หมด — ดึงของเดือนก่อนมาทั้งชุดก่อน แล้วค่อยไล่แก้ตัวเลข
+  //   (งวดจากทะเบียนค่าใช้จ่ายประจำไม่ถูกก็อป — หน้า #recurring กด Materialise สร้างเองอยู่แล้ว)
+  const feCanEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
+  const [copyOpen, setCopyOpen] = dxState(false);
+  const nowFe = new Date();
+  const handleCopyForecast = (picked, tgt) => {
+    if (!picked || !picked.length) return;
+    const todayISO = `${nowFe.getFullYear()}-${String(nowFe.getMonth() + 1).padStart(2, '0')}-${String(nowFe.getDate()).padStart(2, '0')}`;
+    const stamp = Date.now();
+    const rows = picked.map((c, i) => ({
+      id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('fe-cp-' + stamp + '-' + i),
+      DATE:         todayISO,
+      PAYMENT_DATE: c.newDate,
+      EXPENSE_TYPE: c.fe.EXPENSE_TYPE || 'Manual',
+      DESCRIPTION:  c.fe.DESCRIPTION || '',
+      JOB_NO:       c.fe.JOB_NO || null,
+      PROJECT_NAME: c.fe.PROJECT_NAME || null,
+      AMOUNT:       c.fe.AMOUNT,
+      Bank_AC:      c.fe.Bank_AC || null,
+      STATUS:       'PLANNED',
+      CATEGORY:     c.fe.CATEGORY || null,
+      IS_ACCRUED:   c.fe.IS_ACCRUED || null,
+      NOTE:         c.fe.NOTE || null,
+      ACTUAL_AMOUNT: null, ACTUAL_DATE: null, REF_DOC: null, BOOKED_AT: null,
+      CFS_ACTIVITY: c.fe.CFS_ACTIVITY || null,
+    }));
+    let updated;
+    setData(d => { updated = { ...d, forecastEntries: [...(d.forecastEntries || []), ...rows] }; return updated; });
+    if (updated && window.WTPData && window.WTPData.forceSyncNow) setTimeout(() => window.WTPData.forceSyncNow(updated), 0);
+    setCopyOpen(false);
+    if (toast) toast(`ก็อปประมาณการมา ${rows.length} รายการ → ${(tgt && tgt.label) || 'เดือนที่เลือก'} · ปรับตัวเลขได้เลย`);
+  };
+  const copyBar = feCanEdit ? (
+    <div className="card" style={{ padding: '10px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--ink-800)' }}>📋 ขึ้นเดือนใหม่ — ก็อปประมาณการยกชุดจากเดือนก่อน</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 2 }}>
+          ดึงรายการที่คีย์มือมาทั้งเดือน เลื่อนวันให้อัตโนมัติ แล้วค่อยแก้ตัวเลขทีหลัง ·
+          รายจ่ายประจำที่ตั้งทะเบียนไว้ กด Materialise ที่หน้า <a href="#recurring" style={{ color: 'var(--brand-600)' }}>ค่าใช้จ่ายประจำ</a>
+        </div>
+      </div>
+      <button className="btn btn-primary" onClick={() => setCopyOpen(true)}>
+        <Icon name="copy" size={14} /> ก็อปประมาณการ
+      </button>
+    </div>
+  ) : null;
+  const copyModal = copyOpen ? (
+    <CfCopyForecastModal
+      data={data}
+      year={nowFe.getFullYear()}
+      month={nowFe.getMonth() + 1}
+      monthNames={['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']}
+      targetPick
+      onClose={() => setCopyOpen(false)}
+      onCopy={handleCopyForecast}
+    />
+  ) : null;
+
   const purgeBanner = staleApIds.length > 0 ? (
     <div className="card" style={{ padding: '12px 16px', marginBottom: 14, borderLeft: '4px solid var(--bad)',
       background: 'color-mix(in oklch, var(--bad) 5%, var(--surface))', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -1646,7 +1705,7 @@ function ForecastEntriesPage({ data, setData, toast }) {
 
   return (
     <DataCrudPage data={data} setData={setData} toast={toast} config={{
-      banner: purgeBanner,
+      banner: <>{copyBar}{purgeBanner}{copyModal}</>,
       title: 'Manual Expense · ค่าใช้จ่ายที่บันทึกเอง',
       sub: 'RAW_MANUAL_EXPENSE · รายการที่ยังไม่อยู่ในระบบ AP · วาง RAW ได้เลย',
       dataKey: 'forecastEntries',
