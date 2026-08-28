@@ -179,6 +179,24 @@ function DataLoadingState() {
   );
 }
 
+
+// ── rcpHasReceipt(receipts, iv) — "ใบ IV นี้มี receipt อยู่แล้วหรือยัง" ─────────────
+// ★ คีย์หลัก = iv.id (เก็บใน receipt เป็น field `ivId`) ไม่ใช่ ivNo — "เลขที่ IV ไม่ unique"
+//   (ใบคนละงานออกเลขเดียวกันได้) ⇒ เช็คด้วย ivNo จะมองว่าใบที่ 2 "มีแล้ว" แล้วข้ามทิ้ง =
+//   ยอดรับเงินหายเงียบ ๆ. ใบที่ไม่มี id เลยค่อย fallback invoiceNo
+function rcpHasReceipt(list, iv) {
+  if (!iv) return false;
+  const ivId = iv.id == null ? '' : String(iv.id);
+  // ★ ใบที่มี id → ถือว่า "มีแล้ว" เฉพาะเมื่อเจอ receipt ที่ ivId ตรง เท่านั้น. ไม่ fallback
+  //   invoiceNo ตรงนี้โดยตั้งใจ — ปล่อยให้ ensureReceiptForPaidInvoice (idempotent) เป็นคน
+  //   ตัดสิน: มันจะ "อัปเดต + ผูก ivId" ให้ receipt เก่าที่ import มา แทนที่จะสร้างซ้ำ ⇒ แถวเก่า
+  //   ค่อย ๆ ได้ ivId เอง (self-heal) แล้วรอบถัดไปถึงถูกกรองออก. ถ้า fallback ที่นี่ด้วย แถวเก่า
+  //   จะไม่มีวันได้ ivId และใบที่ 2 ที่ "เลขที่ IV ซ้ำ" จะถูกมองว่ามีแล้ว → ตกหล่นถาวร
+  return (list || []).some(r => r && (ivId
+    ? String(r.ivId || '') === ivId
+    : r.invoiceNo === iv.ivNo));
+}
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = aState(() => {
     try {
@@ -449,35 +467,42 @@ function App() {
     // Quick check: any paid IV without a matching receipt? — ใช้ closure ได้
     // เพราะแค่เช็ค "ต้อง backfill ไหม" ไม่ใช่ใช้ค่าจริง
     const closureReceipts = data.receipts || [];
-    const closureIvNos = new Set(closureReceipts.map(r => r.invoiceNo).filter(Boolean));
     const paidNeedingBackfill = data.invoices.filter(iv =>
       iv.status === 'paid' && iv.actualReceive && iv.actualReceive.date &&
-      iv.ivNo && !closureIvNos.has(iv.ivNo));
+      iv.ivNo && !rcpHasReceipt(closureReceipts, iv));
     if (paidNeedingBackfill.length === 0) return;
     // Real work: setData with updater so we use the LATEST d.receipts
     let updatedData;
     setData(d => {
-      // SAFETY: if d.receipts is empty/undefined AND we know server has data,
-      // skip backfill this round to avoid wiping the sheet. The next data
-      // update will retrigger this effect with the real receipts loaded.
+      // SAFETY: receipts ว่าง = อาจเป็น "server ยังโหลดไม่เสร็จ" (ห้าม backfill — เดี๋ยวเขียนทับ)
+      // ★ 2026-08-28: เดิมเช็คแค่ length===0 → แยกไม่ออกจาก "ตารางว่างจริง" ⇒ ตาราง receipts
+      //   ที่ว่างตั้งแต่แรก (BIO ไม่เคยนำเข้าประวัติรับเงิน) จะ "ไม่มีวัน" ได้แถวแรก ต่อให้มีใบ
+      //   IV paid รออยู่ → War Room §01 / "รับแล้ว" ว่างถาวร. ตอนนี้เช็ค serverDataLoaded
+      //   (มีเฉพาะ backend supabase; undefined = ยึดพฤติกรรมเดิม = ข้าม) → โหลดเสร็จแล้วค่อยเติม
       if (!d.receipts || d.receipts.length === 0) {
-        console.warn('[WTP] skip backfill — d.receipts empty (server may not have loaded yet)');
-        return d;
+        let srvLoaded = false;
+        try { srvLoaded = !!(WTPData._autoPushInfo && WTPData._autoPushInfo().serverDataLoaded); } catch (_) {}
+        if (!srvLoaded) {
+          console.warn('[WTP] skip backfill — d.receipts empty (server may not have loaded yet)');
+          return d;
+        }
+        console.info('[WTP] receipts ว่างจริง (server โหลดเสร็จแล้ว) → สร้างแถวแรกจากใบ IV ที่รับเงินแล้ว');
       }
       let receipts = [...d.receipts];
-      const existingIvNos = new Set(receipts.map(r => r.invoiceNo).filter(Boolean));
-      let added = 0;
+      let added = 0, touched = false;
       paidNeedingBackfill.forEach(iv => {
-        if (existingIvNos.has(iv.ivNo)) return;
-        const before = receipts.length;
-        receipts = WTPData.ensureReceiptForPaidInvoice(receipts, iv);
-        if (receipts.length > before) {
-          added++;
-          existingIvNos.add(iv.ivNo);
-        }
+        // ปล่อยให้ ensureReceiptForPaidInvoice ตัดสินเอง (idempotent: match → อัปเดต, ไม่ match
+        // → insert) — ไม่เช็ค ivNo ซ้ำเองในลูป เพราะ "เลขที่ IV ไม่ unique" ใบที่ 2 ที่เลขซ้ำกับ
+        // ใบแรกจะถูกข้ามทิ้ง = ยอดรับเงินหายเงียบ ๆ
+        const prev = receipts;
+        const next = WTPData.ensureReceiptForPaidInvoice(prev, iv);
+        if (next === prev) return;                       // ไม่เข้าเงื่อนไข (ไม่ paid / ไม่มีวันรับ)
+        touched = true;
+        if (next.length > prev.length) added++;          // นับเฉพาะที่ "สร้างใหม่"
+        receipts = next;
       });
-      if (added === 0) return d;
-      console.info('[WTP] auto-created ' + added + ' receipt(s) for paid IVs missing receipts');
+      if (!touched) return d;
+      console.info('[WTP] backfill receipts — สร้างใหม่ ' + added + ' ใบ จากใบ IV ที่รับเงินแล้ว (อัปเดตแถวเดิมด้วยถ้ามี)');
       updatedData = { ...d, receipts };
       return updatedData;
     });

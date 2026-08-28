@@ -832,16 +832,23 @@
     const netRec = Number(iv.actualReceive.amount) || 0;
     // ส่วนต่าง = หักโอนสิทธิ์ (debt) ถ้า net < gross
     const deduct = gross > netRec ? (gross - netRec) : 0;
-    const existing = list.find(r => r.invoiceNo === ivNo);
-    if (existing) {
-      // อัปเดต field สำคัญ (กัน user แก้วันรับ/ยอดใน popup)
-      return list.map(r => r.invoiceNo === ivNo ? Object.assign({}, r, {
+    // ★ คีย์จับคู่ = iv.id (unique จริง) ไม่ใช่ ivNo — "เลขที่ IV ไม่ unique" (ใบคนละงาน
+    //   ออกเลขเดียวกันได้) ⇒ คีย์ด้วย ivNo จะทำให้ใบที่ 2 ทับใบแรก เหลือ receipt เดียว =
+    //   ยอดรับเงินหายเงียบ ๆ. fallback ivNo ไว้จับ receipt เก่าที่ import มา (ยังไม่มี ivId).
+    const ivId = iv.id == null ? '' : String(iv.id);
+    let matchIdx = -1;
+    if (ivId) matchIdx = list.findIndex(r => r && String(r.ivId || '') === ivId);
+    if (matchIdx < 0) matchIdx = list.findIndex(r => r && !r.ivId && r.invoiceNo === ivNo);
+    if (matchIdx >= 0) {
+      // อัปเดต field สำคัญ (กัน user แก้วันรับ/ยอดใน popup) — เฉพาะแถวที่ match เท่านั้น
+      return list.map((r, i) => i !== matchIdx ? r : Object.assign({}, r, {
+        ivId:              ivId || r.ivId || '',
         receiptDate:       iv.actualReceive.date,
         grossAmount:       gross,
         transferDeduction: deduct,
         netReceived:       netRec,
         bankAccount:       iv.actualReceive.bankAccount || r.bankAccount || '',
-      }) : r);
+      }));
     }
     // ── สร้าง receipt ใหม่ ──
     // gen receiptNo แบบ AR{yy}{mm}-{seq} ถ้าไม่มี — ป้องกัน duplicate ด้วย ivNo
@@ -855,7 +862,8 @@
       //   ตอน migrate): เดิม mint id() ใหม่ทุกครั้ง → คนละ id = คนละแถว (PK=id) อยู่รอดทั้งคู่ →
       //   ยอด "รับเงิน" เบิ้ล. ตอนนี้ทั้ง 2 รอบได้ id เดียวกัน → upsert ทับเป็นแถวเดียว. (find-by-
       //   invoiceNo ด้านบนยังจับ receipt ที่มาจาก import/id เดิมได้ตามปกติ — เคสนี้ครอบเฉพาะ "สร้างใหม่")
-      id:                'rcp-' + ivNo,
+      id:                'rcp-' + (ivId || ivNo),
+      ivId:              ivId,
       receiptNo:         `AR${yy}${mm}-${seq}`,
       receiptDate:       iv.actualReceive.date,
       invoiceNo:         ivNo,
