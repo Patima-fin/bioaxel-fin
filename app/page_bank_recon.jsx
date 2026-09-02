@@ -23,6 +23,7 @@ const BR_LS_MAP   = 'bio-bankrecon-map-v1';    // { [brandKey]: ColumnMapping }
 const BR_LS_STATE = 'bio-bankrecon-state-v1';  // { [lineId]: { decision, forecastId } }
 const BR_LS_BOOK  = 'bio-bankrecon-book-v1';   // { [accountNo]: { 'YYYY-MM': { meta, moves[], outs[] } } } (Express book)
 const BR_LS_MATCH = 'bio-bankrecon-match-v1';  // [ { id, accountNo, ym, bookIds[], stmIds[], status, ... } ] (Express ↔ STM matches)
+const BR_LS_DATEWIN = 'bio-bankrecon-datewin-v1'; // 0 = วันตรงเป๊ะ (ค่าตั้งต้น) · >0 = ผ่อนวัน N วัน (ต่อเครื่อง)
 const BankReconStore = {
   _get(k, def) { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? def : v; } catch (_) { return def; } },
   _set(k, v)   { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
@@ -379,7 +380,9 @@ function brNormalizeLines(aoa, mapping, accountNo) {
     if (mapping.mode === 'split') {
       const dr = brNum(r[mapping.debitCol]);    // เดบิต = จ่ายออก
       const cr = brNum(r[mapping.creditCol]);   // เครดิต = รับเข้า
-      amount = cr - dr;
+      // ★ abs ทั้ง 2 ฝั่ง — บาง statement เก็บเดบิตเป็นเลขลบมาแล้ว ถ้าไม่ครอบจะได้ 0 − (−20) = +20
+      //   → ทิศทางเงินกลับด้านทั้งงวดแบบเงียบ ๆ (กับดักข้อ 10 ของสเปค)
+      amount = Math.abs(cr) - Math.abs(dr);
     } else {
       let a = brNum(r[mapping.amountCol]);
       if (mapping.outflowPositive) a = -a;      // บางแบงก์โชว์ยอดถอน/จ่ายเป็นเลขบวก
@@ -718,7 +721,7 @@ function brParseExpress(aoa, fileName) {
     if (joined.includes('ผู้ตรวจสอบ')) break;
     const date = brToISO(gv(row, cDate));
     if (!date) continue;
-    const wd = brNum(gv(row, cWd)), dp = brNum(gv(row, cDp));
+    const wd = Math.abs(brNum(gv(row, cWd))), dp = Math.abs(brNum(gv(row, cDp)));   // ★ abs — กันไฟล์ที่เก็บยอดถอนเป็นเลขลบ (ทิศทางกลับด้าน)
     const vno = String(gv(row, cNo) || '').trim();
     const note = String(gv(row, cNote) || '').trim();
     const bal = brNum(gv(row, cBal)); if (bal) lastBal = bal;
@@ -727,38 +730,139 @@ function brParseExpress(aoa, fileName) {
   out.bankAsDateBal = lastBal; out.ok = true; return out;
 }
 
-// ─── Reconcile Mango (book) ↔ STM (bank) — หารายการลงบัญชี ขาด/เกิน เทียบ STM จริง ──
-//   matched  = Mango ↔ STM (amount รวม sign ±tol + วัน ±win + เลขเช็ค)
-//   stmOnly  = มีใน STM ไม่มีใน Mango = ธนาคารหักแล้ว "บัญชียังไม่ลง" (ลงไม่ครบ/ขาด)
-//   bookOnly = มีใน Mango ไม่มีใน STM = บัญชีลงแล้ว "ธนาคารยังไม่มี" (ลงเกิน / เช็คยังไม่ขึ้น)
-//   เฉพาะรายการเงินจริง (|amount| > tol) — ตัด JV ตัดมัดจำ/รับสินค้า (Debit=Credit=0) ที่ไม่กระทบเงินสด
+// ─── เลขอ้างอิง: ทำให้ Express ↔ ธนาคาร เทียบกันได้ ────────────────────────────
+//   2 ฝั่งเขียนเลขเอกสารไม่เหมือนกันเป๊ะ (prefix เกิน · เลข 0 นำหน้า · มีคำอธิบายต่อท้าย)
+//   ต้อง normalize ก่อนเทียบเสมอ:  "QPPS26080012 - ค่าสินค้า" → "PS26080012"
+function brRefKey(s) {
+  if (!s) return null;
+  let head = String(s).split(/[\s\-]/)[0];          // ตัดคำอธิบายหลังช่องว่าง/ขีด
+  head = head.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!head) return null;
+  head = head.replace(/^Q(?=[A-Z])/, '');           // QPPS → PPS
+  head = head.replace(/^P+(?=S)/, 'P');             // PPS  → PS
+  return head.length >= 4 ? head : null;            // สั้นไป (เช่น "12") = ไม่ใช่เลขอ้างอิง ห้ามเอาไปจับคู่
+}
+// ยอมรับ: ตรงเป๊ะ / อันหนึ่งลงท้ายด้วยอีกอัน / PREFIX+YYMMDD+SEQ ที่ seq เลข 0 นำหน้าไม่เท่ากัน
+function brRefMatch(a, b) {
+  if (!a || !b) return false;
+  if (a === b || a.endsWith(b) || b.endsWith(a)) return true;
+  const re = /^([A-Z]+)(\d{6})(\d+)$/, ma = a.match(re), mb = b.match(re);
+  return !!(ma && mb && ma[1] === mb[1] && ma[2] === mb[2] && parseInt(ma[3], 10) === parseInt(mb[3], 10));
+}
+function brMoveRef(m) { return brRefKey(m && (m.vno || m.chqNo)); }   // Express = เลขที่เอกสาร → เลขเช็ค
+function brStmRef(l)  { return brRefKey(l && l.ref); }               // ธนาคาร  = ช่อง Note/อ้างอิง (SCB คีย์เลขใบสำคัญไว้ตรงนี้)
+
+const brAmtEq = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.005;
+const brCents = (v) => Math.round((Number(v) || 0) * 100);
+function brPairKey(bookId, stmId) { return String(bookId) + '|' + String(stmId); }
+function brNewId() { return (window.WTPData && WTPData.newId) ? WTPData.newId() : ('m-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)); }
+
+// ── หา subset ที่ผลรวม = target (คิดเป็น "สตางค์" = จำนวนเต็ม เลี่ยงปัญหาทศนิยม) ──
+//    หยุดทันทีที่เจอทางที่ 2 — แค่รู้ว่ากำกวมก็พอ ไม่ต้องหาให้ครบ (กำกวม = ไม่เสนอ ให้คนเลือกเอง)
+function brSubsetsToTarget(items, targetCents, maxSize) {
+  const res = [], cents = items.map(x => brCents(x.amount)), n = items.length;
+  (function dfs(start, picks, sum) {
+    if (res.length > 1) return;
+    if (picks.length >= 2 && sum === targetCents) { res.push(picks.slice()); return; }
+    if (picks.length >= maxSize) return;
+    for (let i = start; i < n; i++) {
+      picks.push(i); dfs(i + 1, picks, sum + cents[i]); picks.pop();
+      if (res.length > 1) return;
+    }
+  })(0, [], 0);
+  return res.map(ix => ix.map(i => items[i]));
+}
+
+// ─── Reconcile Express (book) ↔ STM (bank) — 3 ระดับ ไล่จากแม่นสุดไปหลวมสุด ─────
+//   Tier 1  เลขอ้างอิงตรง + วันตรง + ยอดตรง             → confidence 'exact'
+//   Tier 2  วันตรง + ยอดตรง                             → confidence 'suggested'
+//   Tier 3  วันเดียวกัน · ทิศเดียวกัน · ยอดรวมตรง (N:M)  → confidence 'group'
+//   ★ กฎเหล็ก: วันต้องตรงเป๊ะ (dateWindow = 0 = ค่าตั้งต้น) — ผ่อนวันแล้วระบบจับ "ผิดคู่"
+//     ได้เงียบ ๆ (ยอดเท่ากันวันใกล้กันมีเยอะมาก) แล้วงบ balance ทั้งที่ผิด ซึ่งแย่กว่าปล่อยค้าง.
+//     สวิตช์ผ่อนวันมีให้บนหน้าจอ แต่ผู้ใช้ต้องกดเลือกเอง.
+//   ★ blocked = Set ของ "bookId|stmId" ที่ผู้ใช้เคยกด "ไม่ใช่คู่" → ห้ามเสนอซ้ำ
+//     (ไม่งั้นกดนำออกแล้วตัวจับคู่เสนอคู่เดิมกลับมาในเสี้ยววินาที)
+//   stmOnly  = ธนาคารหักแล้ว "บัญชียังไม่ลง" · bookOnly = บัญชีลงแล้ว "ธนาคารยังไม่มี"
+//   เฉพาะรายการเงินจริง (|amount| > 0.005) — ตัด JV ตัดมัดจำ/รับสินค้า ที่ไม่กระทบเงินสด
 function brReconcileMango(opts) {
-  const tol = opts.amtTol != null ? opts.amtTol : 0.01;
-  const win = opts.dateWindow != null ? opts.dateWindow : 5;
-  const moves = (opts.movements || []).filter(m => Math.abs(m.amount) > tol);
-  const stmAvail = (opts.stmLines || []).map(l => ({ l, used: false }));
-  const matched = [], bookOnly = [];
-  moves.slice().sort((a, b) => (a.bkDate < b.bkDate ? -1 : 1)).forEach(m => {
+  const win = Math.max(0, Number(opts.dateWindow) || 0);
+  const blocked = opts.blocked || null;
+  const maxSize = opts.groupMax  != null ? opts.groupMax  : 4;
+  const poolCap = opts.groupPool != null ? opts.groupPool : 18;
+  const moves = (opts.movements || []).filter(m => Math.abs(Number(m.amount) || 0) > 0.005)
+    .slice().sort((a, b) => (a.bkDate < b.bkDate ? -1 : a.bkDate > b.bkDate ? 1 : 0));
+  const stms = (opts.stmLines || []).filter(l => Math.abs(Number(l.amount) || 0) > 0.005);
+  const usedB = new Set(), usedS = new Set();
+  const isBlocked = (m, l) => !!(blocked && blocked.has(brPairKey(m.id, l.id)));
+  const dateOK = (a, b) => (!a || !b) ? false : (win === 0 ? a === b : brDateDiff(a, b) <= win);
+  const matched = [], groups = [];
+
+  // Tier 1 (needRef=true) แล้วค่อย Tier 2 — แถวที่ถูกจับไปแล้วไม่ถูกจับซ้ำ
+  const pass = (needRef) => moves.forEach(m => {
+    if (usedB.has(m.id)) return;
+    const mRef = brMoveRef(m);
+    if (needRef && !mRef) return;
     let best = null, bestScore = -1;
-    stmAvail.forEach(c => {
-      if (c.used) return;
-      if (Math.abs(c.l.amount - m.amount) > tol) return;        // amount ต้องตรง (รวม sign +เข้า/−ออก)
-      const dd = (m.bkDate && c.l.date) ? brDateDiff(m.bkDate, c.l.date) : 999;
-      if (dd > win) return;
-      let score = 50 - dd;
-      if (m.chqNo && c.l.ref && bdDigits(m.chqNo) && bdDigits(m.chqNo) === bdDigits(c.l.ref)) score += 100;
-      if (score > bestScore) { bestScore = score; best = c; }
+    stms.forEach(l => {
+      if (usedS.has(l.id)) return;
+      if (!brAmtEq(l.amount, m.amount)) return;                    // ยอดตรง (รวมทิศ +เข้า −ออก)
+      if (!dateOK(m.bkDate, l.date)) return;                       // ★ วันตรงเป๊ะ
+      if (isBlocked(m, l)) return;
+      const lRef = brStmRef(l);
+      if (needRef && !(lRef && brRefMatch(mRef, lRef))) return;
+      let score = 50 - (win === 0 ? 0 : brDateDiff(m.bkDate, l.date));
+      if (mRef && lRef && brRefMatch(mRef, lRef)) score += 60;     // tie-break: เลขอ้างอิงตรง
+      const chq = bdDigits(m.chqNo || m.vno || '');
+      if (chq && chq === bdDigits(l.ref || '')) score += 40;       // tie-break: เลขเช็ค
+      if (score > bestScore) { bestScore = score; best = l; }
     });
-    if (best) { best.used = true; matched.push({ mango: m, stm: best.l, score: bestScore }); }
-    else bookOnly.push(m);
+    if (!best) return;
+    usedB.add(m.id); usedS.add(best.id);
+    matched.push({ mango: m, stm: best, score: bestScore,
+      confidence: needRef ? 'exact' : 'suggested', reason: needRef ? 'ref+วัน+ยอด' : 'วัน+ยอด' });
   });
-  const stmOnly = stmAvail.filter(c => !c.used).map(c => c.l);
+  pass(true);
+  pass(false);
+
+  // ── Tier 3 — กลุ่มยอดรวม (วันเดียวกัน · ทิศเดียวกัน) ──
+  //    เคสจริง: ลูกค้าโอน 390 แตกเป็น 290 + 100 ในวันเดียว · ขนส่งโอนรวม 1,350 = 450 + 900
+  const byDay = {};
+  const bucket = (d) => (byDay[d] = byDay[d] || { b: [], s: [] });
+  moves.forEach(m => { if (!usedB.has(m.id) && m.bkDate) bucket(m.bkDate).b.push(m); });
+  stms.forEach(l  => { if (!usedS.has(l.id) && l.date)   bucket(l.date).s.push(l); });
+  Object.keys(byDay).sort().forEach(day => {
+    [1, -1].forEach(sign => {
+      const bs = byDay[day].b.filter(m => Math.sign(Number(m.amount) || 0) === sign);
+      const ss = byDay[day].s.filter(l => Math.sign(Number(l.amount) || 0) === sign);
+      if (!bs.length || !ss.length) return;
+      if (bs.length > poolCap || ss.length > poolCap) return;       // กันคำนวณระเบิด
+      bs.forEach(m => {                                            // 1 Express ↔ หลาย Bank
+        if (usedB.has(m.id)) return;
+        const sol = brSubsetsToTarget(ss.filter(l => !usedS.has(l.id)), brCents(m.amount), maxSize);
+        if (sol.length !== 1) return;                              // 0 = ไม่เจอ · ≥2 = กำกวม → ให้คนเลือกเอง
+        if (sol[0].some(l => isBlocked(m, l))) return;
+        usedB.add(m.id); sol[0].forEach(l => usedS.add(l.id));
+        groups.push({ books: [m], stms: sol[0], confidence: 'group', reason: 'ยอดรวม 1:' + sol[0].length, amount: Number(m.amount) || 0 });
+      });
+      ss.forEach(l => {                                            // 1 Bank ↔ หลาย Express
+        if (usedS.has(l.id)) return;
+        const sol = brSubsetsToTarget(bs.filter(m => !usedB.has(m.id)), brCents(l.amount), maxSize);
+        if (sol.length !== 1) return;
+        if (sol[0].some(m => isBlocked(m, l))) return;
+        usedS.add(l.id); sol[0].forEach(m => usedB.add(m.id));
+        groups.push({ books: sol[0], stms: [l], confidence: 'group', reason: 'ยอดรวม ' + sol[0].length + ':1', amount: Number(l.amount) || 0 });
+      });
+    });
+  });
+
+  const bookOnly = moves.filter(m => !usedB.has(m.id));
+  const stmOnly  = stms.filter(l => !usedS.has(l.id));
   const stats = {
-    matched: matched.length, bookOnly: bookOnly.length, stmOnly: stmOnly.length, moves: moves.length,
-    bookOnlyAmt: bookOnly.reduce((s, m) => s + Math.abs(m.amount), 0),
-    stmOnlyAmt: stmOnly.reduce((s, l) => s + Math.abs(l.amount), 0),
+    matched: matched.length, groups: groups.length, bookOnly: bookOnly.length, stmOnly: stmOnly.length, moves: moves.length,
+    bookOnlyAmt: bookOnly.reduce((s, m) => s + Math.abs(Number(m.amount) || 0), 0),
+    stmOnlyAmt: stmOnly.reduce((s, l) => s + Math.abs(Number(l.amount) || 0), 0),
   };
-  return { matched, bookOnly, stmOnly, stats };
+  return { matched, groups, bookOnly, stmOnly, stats };
 }
 
 // ─── สี/ป้ายแบงก์บนหัวบัญชี ────────────────────────────────────────────────────
@@ -856,14 +960,20 @@ function BankReconPage({ data, setData, toast }) {
   };
 
   // ── ยืนยันการจับคู่ (จาก suggestion สด) → เขียน match record status='confirmed' (forceSyncNow) ──
+  //    รับได้ทั้งคู่ 1:1 ({mango, stm}) และคู่แบบกลุ่ม Tier 3 ({books:[], stms:[]})
   const confirmMatches = (suggestions, accNo, ym) => {
     if (readOnly || !suggestions || !suggestions.length) return;
     const nowISO = new Date().toISOString();
-    const add = suggestions.map(s => ({
-      id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('m-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
-      accountNo: accNo, ym: ym, bookIds: [s.mango.id], stmIds: [s.stm.id],
-      status: 'confirmed', groupId: '', confidence: s.confidence || 'suggested', reason: 'auto', confirmedAt: nowISO,
-    }));
+    const add = suggestions.map((s, i) => {
+      const books = s.books || [s.mango], stms = s.stms || [s.stm];
+      const isGroup = books.length > 1 || stms.length > 1;
+      return {
+        id: brNewId(), accountNo: accNo, ym: ym,
+        bookIds: books.map(b => b.id), stmIds: stms.map(l => l.id),
+        status: 'confirmed', groupId: isGroup ? ('g-' + Date.now().toString(36) + '-' + i) : '',
+        confidence: s.confidence || 'suggested', reason: s.reason || 'auto', confirmedAt: nowISO,
+      };
+    });
     const nm = matches.concat(add);
     setMatches(nm); BankReconStore.setMatches(nm); pushReconMatch(nm);
     if (window.WTPData && typeof WTPData.forceSyncNow === 'function')
@@ -880,7 +990,7 @@ function BankReconPage({ data, setData, toast }) {
     if (Math.abs(bSum - sSum) >= 0.01) { if (toast) toast('ผลรวมไม่ตรง: Express ' + fmtNum(bSum, 2) + ' ≠ STM ' + fmtNum(sSum, 2) + ' — จับคู่ไม่ได้'); return false; }
     const isGroup = bookRows.length > 1 || stmRows.length > 1;
     const rec = {
-      id: (window.WTPData && WTPData.newId) ? WTPData.newId() : ('m-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)),
+      id: brNewId(),
       accountNo: accNo, ym: ym, bookIds: bookRows.map(b => b.id), stmIds: stmRows.map(l => l.id),
       status: 'manual', groupId: isGroup ? ('g-' + Date.now().toString(36)) : '', confidence: 'manual', reason: 'manual', confirmedAt: new Date().toISOString(),
     };
@@ -892,14 +1002,85 @@ function BankReconPage({ data, setData, toast }) {
     return true;
   };
 
-  // ── ยกเลิกการจับคู่ — ลบ match record จริงผ่าน forceDeleteRows (ข้ามเกราะ mass-delete) ──
+  // ── เขียน match record ชุดใหม่ลง state + cloud (ใช้ร่วมกันทุก action ด้านล่าง) ──
+  const commitMatches = (nm, msg, delIds) => {
+    setMatches(nm); BankReconStore.setMatches(nm); pushReconMatch(nm);
+    if (delIds && delIds.length && window.WTPData && typeof WTPData.forceDeleteRows === 'function')
+      WTPData.forceDeleteRows('bankReconMatch', delIds);
+    if (window.WTPData && typeof WTPData.forceSyncNow === 'function')
+      WTPData.forceSyncNow(Object.assign({}, data, { bankReconMatch: brMatchToRows(nm) }));
+    if (msg && toast) toast(msg);
+  };
+
+  // ── ยกเลิกการจับคู่ / กู้รายการที่ตัดออกกลับถังรอกระทบ ──
+  //   ★ คู่ที่ "ยืนยันแล้ว" ไม่ลบทิ้ง แต่เปลี่ยนเป็น status='rejected' = ขึ้นบัญชีดำ
+  //     ถ้าลบทิ้งเฉย ๆ ตัวจับคู่จะเสนอคู่เดิมกลับมาทันทีที่ re-render (กับดักข้อ 10 ของสเปค:
+  //     "กดนำออกแล้วรายการเด้งกลับมาเอง") — ปลดบัญชีดำได้ที่แท็บ "ตัดออก · ไม่ใช่คู่"
   const unmatchMango = (matchId) => {
     if (readOnly || !matchId) return;
-    if (!window.confirm('ยกเลิกการจับคู่นี้? รายการจะกลับไปอยู่ถังรอกระทบ')) return;
-    const nm = matches.filter(m => m.id !== matchId);
+    const rec = matches.find(m => m.id === matchId);
+    if (!rec) return;
+    const twoSided = (rec.bookIds || []).length > 0 && (rec.stmIds || []).length > 0;
+    const toBlack = twoSided && rec.status !== 'rejected';
+    const ok = window.confirm(toBlack
+      ? 'ยกเลิกการจับคู่นี้?\n\nรายการทั้ง 2 ฝั่งจะกลับไปอยู่ถังรอกระทบ และระบบจะไม่เสนอ "คู่นี้" ให้อีก\n(ปลดได้ที่แท็บ "ตัดออก · ไม่ใช่คู่")'
+      : 'นำรายการนี้กลับเข้าถังรอกระทบ?');
+    if (!ok) return;
+    if (toBlack) {
+      commitMatches(matches.map(m => m.id === matchId
+        ? Object.assign({}, m, { status: 'rejected', reason: 'user-rejected', confirmedAt: new Date().toISOString() }) : m),
+        'ยกเลิกการจับคู่แล้ว — ระบบจะไม่เสนอคู่นี้อีก');
+    } else {
+      commitMatches(matches.filter(m => m.id !== matchId), 'นำกลับเข้าถังรอกระทบแล้ว', [matchId]);
+    }
+  };
+
+  // ── "ไม่ใช่คู่นี้" กับคู่ที่ระบบเสนอ (ยังไม่เป็น record) → เขียน record status='rejected' = บัญชีดำ ──
+  const rejectSuggestions = (sugs, accNo, ym) => {
+    if (readOnly || !sugs || !sugs.length) return;
+    const nowISO = new Date().toISOString();
+    const add = sugs.map(s => ({
+      id: brNewId(), accountNo: accNo, ym: ym,
+      bookIds: (s.books || [s.mango]).map(b => b.id), stmIds: (s.stms || [s.stm]).map(l => l.id),
+      status: 'rejected', groupId: '', confidence: s.confidence || '', reason: 'user-rejected', confirmedAt: nowISO,
+    }));
+    commitMatches(matches.concat(add), 'ทำเครื่องหมาย "ไม่ใช่คู่" ' + add.length + ' คู่ — จะไม่ถูกเสนออีก');
+  };
+
+  // ── ตัดออกจากงวด / โอนระหว่างบัญชีตัวเอง — record ฝั่งเดียว (สเปคข้อ 08) ──
+  //    ออกจากถังรอกระทบโดยไม่ต้องมีคู่ · ไม่แตะข้อมูลไฟล์ · กู้กลับได้ที่แท็บ "ตัดออก · ไม่ใช่คู่"
+  const parkMangoRows = (rows, side, kind, accNo, ym) => {
+    if (readOnly || !rows || !rows.length) return;
+    const nowISO = new Date().toISOString();
+    const add = rows.map(r => ({
+      id: brNewId(), accountNo: accNo, ym: ym,
+      bookIds: side === 'book' ? [r.id] : [], stmIds: side === 'stm' ? [r.id] : [],
+      status: kind, groupId: '', confidence: '', reason: kind, confirmedAt: nowISO,
+    }));
+    commitMatches(matches.concat(add),
+      (kind === 'interaccount' ? 'ทำเครื่องหมายโอนระหว่างบัญชี ' : 'ตัดออกจากงวดนี้ ') + add.length + ' รายการ');
+  };
+
+  // ── ล้างข้อมูลงบกระทบยอด + การจับคู่ ของบัญชี+เดือนนี้ (ไว้เริ่มใหม่เมื่ออัปผิด) ──
+  //    ต้องพิมพ์ยืนยัน · statement ธนาคารไม่ถูกลบ (คนละชุดข้อมูล)
+  const clearMangoPeriod = (accNo, ym) => {
+    if (readOnly || !accNo || !ym) return;
+    const ans = window.prompt('ล้างงบกระทบยอด Express + การจับคู่ ของบัญชี ···' + bdLast4(accNo) + ' เดือน ' + brFmtMonth(ym)
+      + '\n(statement ธนาคารไม่ถูกลบ)\n\nพิมพ์ "ล้าง" เพื่อยืนยัน');
+    if (String(ans || '').trim() !== 'ล้าง') return;
+    const cur = (bookAll[accNo] || {})[ym];
+    const bookIds = cur ? brBookToRows({ [accNo]: { [ym]: cur } }).map(r => r.id) : [];
+    const dropIds = matches.filter(m => m.accountNo === accNo && m.ym === ym).map(m => m.id);
+    const byAcct = Object.assign({}, bookAll[accNo] || {}); delete byAcct[ym];
+    const nb = Object.assign({}, bookAll, { [accNo]: byAcct });
+    const nm = matches.filter(m => !(m.accountNo === accNo && m.ym === ym));
+    setBookAll(nb); BankReconStore.setBook(nb); pushReconBook(nb);
     setMatches(nm); BankReconStore.setMatches(nm); pushReconMatch(nm);
-    if (window.WTPData && typeof WTPData.forceDeleteRows === 'function') WTPData.forceDeleteRows('bankReconMatch', matchId);
-    if (toast) toast('ยกเลิกการจับคู่แล้ว');
+    if (window.WTPData && typeof WTPData.forceDeleteRows === 'function') {
+      if (bookIds.length) WTPData.forceDeleteRows('bankReconBook', bookIds);
+      if (dropIds.length) WTPData.forceDeleteRows('bankReconMatch', dropIds);
+    }
+    if (toast) toast('ล้างข้อมูลงวดนี้แล้ว — Express ' + bookIds.length + ' แถว · การจับคู่ ' + dropIds.length + ' รายการ');
   };
 
   // ── Self-heal: กู้แถว "บันทึกจ่ายจริง" (BANK_RECON) ที่หายจาก forecastEntries กลับมา ──────────
@@ -1327,7 +1508,8 @@ function BankReconPage({ data, setData, toast }) {
           acct={acct} month={month} stmLines={lines} linesAll={linesAll} bookAll={bookAll} matches={matches}
           readOnly={readOnly} toast={toast}
           onImportBook={importMangoBook} onImportStatement={() => setImportOpen(true)}
-          onConfirm={confirmMatches} onManualLink={manualLinkMango} onUnmatch={unmatchMango} />
+          onConfirm={confirmMatches} onManualLink={manualLinkMango} onUnmatch={unmatchMango}
+          onReject={rejectSuggestions} onPark={parkMangoRows} onClearPeriod={clearMangoPeriod} />
       )}
 
       {/* Import modal — popup โยนไฟล์หลายไฟล์ + สรุป → นำเข้าทีเดียว */}
@@ -1531,20 +1713,60 @@ function brAmtCell(v) {
     {n >= 0 ? '' : '−'}{fmtNum(Math.abs(n), 2)}
   </span>;
 }
+// ── สรุปให้ผู้ใช้ยืนยันก่อน insert จริง (สเปคข้อ 07): "ไฟล์มี N แถว · เพิ่มใหม่ X · ซ้ำเดิม Y" ──
+//    คนจะจับได้เองทันทีถ้าอัปไฟล์ผิดบัญชี/ผิดงวด
+//    ★ ลายเซ็นแถว (brAssignBookIds) = บัญชี|เดือน|วันที่|เลขที่|ยอด — ไม่มี "ยอดคงเหลือสะสม" อยู่ใน
+//      ลายเซ็นโดยตั้งใจ: พอบัญชียกเลิกใบสำคัญกลางงวด ยอดสะสมของทุกแถวหลังจากนั้นเปลี่ยนหมด ทั้งที่
+//      รายการจริงไม่เปลี่ยน → ถ้าเอา balance เข้าลายเซ็น ระบบจะมองว่าเป็นแถวใหม่ทั้งงวด = ข้อมูลซ้ำทั้งงวด
+function brBookImportDiff(parsed, accNo, ym, oldMoves) {
+  const moves = brAssignBookIds((parsed && parsed.movements) || [], accNo, ym);
+  const oldIds = {}; (oldMoves || []).forEach(m => { oldIds[m.id] = 1; });
+  const newIds = {}; moves.forEach(m => { newIds[m.id] = 1; });
+  // ลายเซ็นซ้ำ "ในไฟล์เดียวกัน" = คนละรายการจริงที่บังเอิญเหมือนกัน (เช่นวันเดียวกันมีคนโอนเข้า 740 บาท
+  //   2 คน — ชื่อผู้โอนไม่ได้อยู่ในลายเซ็น) → เก็บให้ครบทุกแถว ห้ามรวมอัตโนมัติ · ตัวนับ #n กันทับกันเอง
+  const dates = moves.map(m => m.bkDate).filter(Boolean).sort();
+  return {
+    parsed: parsed, moves: moves,
+    added: moves.filter(m => !oldIds[m.id]),
+    same: moves.filter(m => oldIds[m.id]),
+    gone: (oldMoves || []).filter(m => !newIds[m.id]),
+    ambiguous: moves.filter(m => !/#1$/.test(String(m.id))),
+    offMonth: moves.filter(m => m.bkDate && brMonthOf(m.bkDate) !== ym).length,
+    from: dates[0] || '', to: dates[dates.length - 1] || '',
+  };
+}
+
+// ── สถานะของ match record (สเปคข้อ 08) ──
+//   confirmed / manual  = กระทบยอดแล้ว (มีทั้ง 2 ฝั่ง)
+//   excluded            = ตัดออกจากการกระทบยอดงวดนี้ (ฝั่งเดียวก็ได้)
+//   interaccount        = โอนระหว่างบัญชีตัวเอง (ฝั่งเดียวก็ได้)
+//   rejected            = "คู่นี้ไม่ใช่" — ไม่ลบแถว แต่ขึ้นบัญชีดำกันตัวจับคู่เสนอคู่เดิมซ้ำ
+//   orphaned            = อ้างถึงแถวที่หายไปหลังนำเข้าใหม่ → ต้องตรวจ
+const BR_PARK_STATUS = { excluded: 1, interaccount: 1 };
 // สถิติกระทบ Express ของบัญชี+เดือน (ใช้ทั้ง overview + detail) — suggestion คำนวณสดจาก match ที่ยืนยันแล้ว
-function brMangoStat(accNo, ym, bookAll, linesAll, matches) {
+//   dateWindow: 0 = วันตรงเป๊ะ (ค่าตั้งต้นตามกฎเหล็ก) · >0 = ผ่อนวัน (ผู้ใช้กดเปิดเอง)
+function brMangoStat(accNo, ym, bookAll, linesAll, matches, dateWindow) {
   const moves = (((bookAll[accNo] || {})[ym]) || {}).moves || [];
   const stm = ((linesAll[accNo] || {})[ym]) || [];
-  const myM = (matches || []).filter(m => m.accountNo === accNo && m.ym === ym && m.status !== 'orphaned');
+  const mine = (matches || []).filter(m => m.accountNo === accNo && m.ym === ym);
+  const rejected = mine.filter(m => m.status === 'rejected');
+  const live = mine.filter(m => m.status !== 'rejected' && m.status !== 'orphaned');
+  const parked = live.filter(m => BR_PARK_STATUS[m.status]);        // ตัดออก / โอนระหว่างบัญชี
+  const confirmed = live.filter(m => !BR_PARK_STATUS[m.status]);    // กระทบแล้ว (confirmed/manual)
+  // บัญชีดำคู่ที่ผู้ใช้เคยปฏิเสธ → ส่งเข้าตัวจับคู่ทุกครั้ง (กับดักข้อ 10: กดนำออกแล้วเด้งกลับเอง)
+  const blocked = new Set();
+  rejected.forEach(m => (m.bookIds || []).forEach(b => (m.stmIds || []).forEach(t => blocked.add(brPairKey(b, t)))));
   const usedBook = new Set(), usedStm = new Set();
-  myM.forEach(m => { (m.bookIds || []).forEach(id => usedBook.add(id)); (m.stmIds || []).forEach(id => usedStm.add(id)); });
+  live.forEach(m => { (m.bookIds || []).forEach(id => usedBook.add(id)); (m.stmIds || []).forEach(id => usedStm.add(id)); });
   const freeMoves = moves.filter(m => !usedBook.has(m.id));
   const freeStm = stm.filter(l => !usedStm.has(l.id));
-  const sg = brReconcileMango({ movements: freeMoves, stmLines: freeStm });
+  const sg = brReconcileMango({ movements: freeMoves, stmLines: freeStm, blocked: blocked, dateWindow: dateWindow || 0 });
   const totalStm = stm.length;
-  return { moves: moves, stm: stm, freeMoves: freeMoves, freeStm: freeStm, sg: sg, confirmed: myM,
+  return { moves: moves, stm: stm, freeMoves: freeMoves, freeStm: freeStm, sg: sg,
+    mine: mine, confirmed: confirmed, parked: parked, rejected: rejected, blocked: blocked,
     usedStm: usedStm, totalStm: totalStm, pct: totalStm ? Math.round(usedStm.size / totalStm * 100) : 0,
-    suggested: sg.matched.length, unmatched: sg.bookOnly.length + sg.stmOnly.length, hasData: moves.length > 0 || totalStm > 0 };
+    suggested: sg.matched.length + sg.groups.length, unmatched: sg.bookOnly.length + sg.stmOnly.length,
+    hasData: moves.length > 0 || totalStm > 0 };
 }
 function brPctColor(pct, hasData) {
   if (!hasData) return 'var(--ink-300)';
@@ -1554,12 +1776,17 @@ function brPctColor(pct, hasData) {
 // ─── หน้าย่อย: เทียบงบกระทบยอด Express ERP ↔ STM (overview ⇄ detail · จับคู่ + ยืนยัน + M-to-N) ──
 function BRMangoTab(props) {
   const { accounts, accountNo, setAccountNo, acct, month, stmLines, linesAll, bookAll, matches, readOnly, toast,
-          onImportBook, onImportStatement, onConfirm, onManualLink, onUnmatch } = props;
+          onImportBook, onImportStatement, onConfirm, onManualLink, onUnmatch, onReject, onPark, onClearPeriod } = props;
   const [view, setView] = brState('overview');   // 'overview' (การ์ดทุกบัญชี) | 'detail' (บัญชีที่เลือก)
+  // ── กฎเหล็ก: วันตรงเป๊ะ (0) เป็นค่าตั้งต้น · ผ่อนวันได้แต่ต้องกดเอง (จำในเครื่องผู้ใช้) ──
+  const [dateWindow, setDateWindowRaw] = brState(() => {
+    const v = Number(localStorage.getItem(BR_LS_DATEWIN)); return v > 0 ? v : 0;
+  });
+  const setDateWindow = (v) => { setDateWindowRaw(v); try { localStorage.setItem(BR_LS_DATEWIN, String(v)); } catch (_) {} };
 
   // ── overview: สถิติกระทบรายบัญชีของเดือนที่เลือก ──
   const ov = brMemo(() => accounts.map(a => Object.assign({ a: a, accNo: a.accountNo },
-    brMangoStat(a.accountNo, month, bookAll, linesAll, matches))), [accounts, bookAll, linesAll, matches, month]);
+    brMangoStat(a.accountNo, month, bookAll, linesAll, matches, dateWindow))), [accounts, bookAll, linesAll, matches, month, dateWindow]);
   const withData = ov.filter(o => o.hasData);
   const kAvgPct = withData.length ? Math.round(withData.reduce((s, o) => s + o.pct, 0) / withData.length) : 0;
   const kPending = ov.reduce((s, o) => s + o.suggested, 0);
@@ -1572,6 +1799,8 @@ function BRMangoTab(props) {
       book={book} matches={myMatches} readOnly={readOnly} toast={toast}
       onImportBook={onImportBook} onImportStatement={onImportStatement}
       onConfirm={onConfirm} onManualLink={onManualLink} onUnmatch={onUnmatch}
+      onReject={onReject} onPark={onPark} onClearPeriod={onClearPeriod}
+      dateWindow={dateWindow} setDateWindow={setDateWindow}
       onBack={() => setView('overview')} />;
   }
 
@@ -1666,13 +1895,17 @@ function BRSide({ rows, emptyLabel }) {
   );
 }
 const BR_STATUS = {
-  exact:     { t: 'EXACT',      c: 'var(--good)' },
-  suggested: { t: 'รอยืนยัน',    c: 'var(--warn)' },
-  confirmed: { t: 'ยืนยันแล้ว',   c: 'var(--good)' },
-  manual:    { t: 'จับคู่เอง',    c: 'var(--brand-600)' },
-  orphaned:  { t: 'ต้องตรวจ',     c: 'var(--bad)' },
-  bankOnly:  { t: 'ค้าง Bank',    c: 'var(--bad)' },
-  bookOnly:  { t: 'ค้าง Express',   c: 'var(--warn)' },
+  exact:       { t: 'EXACT',        c: 'var(--good)' },
+  suggested:   { t: 'รอยืนยัน',      c: 'var(--warn)' },
+  group:       { t: 'กลุ่มยอดรวม',   c: 'oklch(60% 0.13 250)' },
+  confirmed:   { t: 'ยืนยันแล้ว',     c: 'var(--good)' },
+  manual:      { t: 'จับคู่เอง',      c: 'var(--brand-600)' },
+  orphaned:    { t: 'ต้องตรวจ',       c: 'var(--bad)' },
+  bankOnly:    { t: 'ค้าง Bank',      c: 'var(--bad)' },
+  bookOnly:    { t: 'ค้าง Express',   c: 'var(--warn)' },
+  excluded:    { t: 'ตัดออกจากงวด',   c: 'var(--ink-500)' },
+  interaccount:{ t: 'โอนภายใน',      c: 'oklch(60% 0.13 250)' },
+  rejected:    { t: 'ไม่ใช่คู่',       c: 'var(--ink-500)' },
 };
 function BRStatusBadge({ kind, sub }) {
   const m = BR_STATUS[kind] || { t: kind, c: 'var(--ink-500)' };
@@ -1708,9 +1941,12 @@ function BRAssignSelect({ itemId, financeUsers, readOnly }) {
 // สีพื้นหัวตาราง — ต้องตั้งที่ <th> ราย cell (border-collapse + sticky ทำให้ bg บน <thead>/<tr> ไม่วาด)
 //   ใช้ srgb + white (ไม่ใช่ oklch/var(--surface)) เพราะ var(--surface)=โปร่งใส & บางเบราว์เซอร์ไม่รองรับ oklch color-mix
 const BR_TH_BG = 'color-mix(in srgb, var(--brand-500) 12%, white)';
-// ตารางแถวกระทบ side-by-side (EXPRESS | BANK STATEMENT | สถานะ | [ผู้รับผิดชอบ] | จัดการ) — item: {key,mango[],bank[],statusKind,statusSub,action,assignee,checkId,checkSide,rowBg}
-function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssignee, maxH }) {
+// ตารางแถวกระทบ side-by-side (EXPRESS | BANK STATEMENT | สถานะ | [ผู้รับผิดชอบ] | จัดการ)
+//   item: {key,mango[],bank[],statusKind,statusSub,action,assignee,checkId,checkSide,rowBg,noteEl}
+//   noteEl = หมายเหตุที่ผู้ใช้พิมพ์เอง → แสดงเป็นแถวย่อยใต้แถวหลัก (ไม่เบียดคอลัมน์)
+function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssignee, maxH, actionW }) {
   if (!items.length) return <BREmpty text={emptyText || 'ไม่มีรายการ'} />;
+  const nCols = 4 + (selectable ? 1 : 0) + (showAssignee ? 1 : 0);
   return (
     <div style={{ maxHeight: maxH || '54vh', overflow: 'auto', border: '1px solid var(--line)', borderRadius: 10 }}>
       <table style={{ width: '100%', fontSize: 12, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
@@ -1721,12 +1957,13 @@ function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssigne
             <th style={{ textAlign: 'left', padding: '8px 10px', borderLeft: '1px solid var(--ink-100)', borderBottom: '1px solid var(--line)', fontWeight: 700, background: BR_TH_BG }}>BANK STATEMENT</th>
             <th style={{ width: 118, textAlign: 'left', padding: '8px 8px', borderLeft: '1px solid var(--ink-100)', borderBottom: '1px solid var(--line)', fontWeight: 700, background: BR_TH_BG }}>สถานะ</th>
             {showAssignee && <th style={{ width: 120, textAlign: 'left', padding: '8px 8px', borderLeft: '1px solid var(--ink-100)', borderBottom: '1px solid var(--line)', fontWeight: 700, background: BR_TH_BG }}>ผู้รับผิดชอบ</th>}
-            <th style={{ width: 86, textAlign: 'center', borderLeft: '1px solid var(--ink-100)', borderBottom: '1px solid var(--line)', fontWeight: 700, background: BR_TH_BG }}>จัดการ</th>
+            <th style={{ width: actionW || 86, textAlign: 'center', borderLeft: '1px solid var(--ink-100)', borderBottom: '1px solid var(--line)', fontWeight: 700, background: BR_TH_BG }}>จัดการ</th>
           </tr>
         </thead>
         <tbody>
           {items.map(it => (
-            <tr key={it.key} style={Object.assign({ borderTop: '1px solid var(--ink-100)' }, it.rowBg ? { background: it.rowBg } : null)}>
+            <React.Fragment key={it.key}>
+            <tr style={Object.assign({ borderTop: '1px solid var(--ink-100)' }, it.rowBg ? { background: it.rowBg } : null)}>
               {selectable && <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>{it.checkId != null ? <input type="checkbox" checked={!!(sel && sel[it.checkId])} onChange={() => onToggle(it.checkId, it.checkSide)} /> : null}</td>}
               <td style={{ verticalAlign: 'middle', padding: '7px 10px' }}><BRSide rows={it.mango} emptyLabel="— ไม่พบใน Express —" /></td>
               <td style={{ verticalAlign: 'middle', padding: '7px 10px', borderLeft: '1px solid var(--ink-100)' }}><BRSide rows={it.bank} emptyLabel="— ไม่พบใน Bank —" /></td>
@@ -1734,6 +1971,12 @@ function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssigne
               {showAssignee && <td style={{ verticalAlign: 'middle', padding: '7px 8px', borderLeft: '1px solid var(--ink-100)' }}>{it.assignee || <span style={{ color: 'var(--ink-300)' }}>—</span>}</td>}
               <td style={{ textAlign: 'center', verticalAlign: 'middle', borderLeft: '1px solid var(--ink-100)' }}>{it.action}</td>
             </tr>
+            {it.noteEl && (
+              <tr style={it.rowBg ? { background: it.rowBg } : null}>
+                <td colSpan={nCols} style={{ padding: '0 10px 7px 10px' }}>{it.noteEl}</td>
+              </tr>
+            )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
@@ -1743,9 +1986,10 @@ function BRReconTable({ items, selectable, sel, onToggle, emptyText, showAssigne
 
 // ─── Detail — กระทบบัญชี+เดือนเดียว: นำเข้า → KPI → tabs (รอยืนยัน/รอกระทบ/กระทบแล้ว/ทั้งหมด/Outstanding) ──
 function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
-                         onImportBook, onImportStatement, onConfirm, onManualLink, onUnmatch, onBack }) {
+                         onImportBook, onImportStatement, onConfirm, onManualLink, onUnmatch,
+                         onReject, onPark, onClearPeriod, dateWindow, setDateWindow, onBack }) {
   const [busy, setBusy] = brState(false);
-  const [tab, setTab] = brState('pending');   // pending | unmatched | matched | all | outstanding
+  const [tab, setTab] = brState('pending');   // pending | unmatched | matched | parked | all | outstanding
   const [selB, setSelB] = brState({});         // เลือก bookId (ฝั่งเกิน) เพื่อจับคู่เอง
   const [selS, setSelS] = brState({});         // เลือก stmId (ฝั่งขาด)
   const [q, setQ] = brState('');
@@ -1756,6 +2000,7 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
   const [aMin, setAMin] = brState('');
   const [aMax, setAMax] = brState('');
   const [fullscreen, setFullscreen] = brState(false);  // ขยายตารางทำงานเต็มหน้าเว็บ — ซ่อนหัว/KPI ด้านบน
+  const [pendingImp, setPendingImp] = brState(null);   // สรุปไฟล์ที่อ่านได้ รอผู้ใช้ยืนยันก่อนนำเข้าจริง
   const fileRef = brRef(null);
 
   brEffect(() => {
@@ -1778,10 +2023,37 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
   const assigneeOf = (id) => (window.WTPOverride && WTPOverride.get('brAssign.' + id)) || '';
   const assigneeName = (uname) => { const f = financeUsers.find(x => x.u === uname); return f ? (f.n || f.u) : uname; };
 
-  const st = brMemo(() => brMangoStat(accNo, month, { [accNo]: { [month]: book } }, { [accNo]: { [month]: stmLines || [] } }, matches),
-    [accNo, month, book, stmLines, matches]);
-  const suggestions = brMemo(() => st.sg.matched.map(s => Object.assign({}, s, { confidence: s.score >= 100 ? 'exact' : 'suggested' })), [st]);
+  const st = brMemo(() => brMangoStat(accNo, month, { [accNo]: { [month]: book } }, { [accNo]: { [month]: stmLines || [] } }, matches, dateWindow),
+    [accNo, month, book, stmLines, matches, dateWindow]);
+  // คู่ที่ระบบเสนอ — รวม 1:1 (Tier 1/2) กับกลุ่มยอดรวม (Tier 3) เป็นรูปแบบเดียว { books[], stms[] }
+  const suggestions = brMemo(() =>
+    st.sg.matched.map(x => ({ books: [x.mango], stms: [x.stm], confidence: x.confidence, reason: x.reason }))
+      .concat((st.sg.groups || []).map(g => ({ books: g.books, stms: g.stms, confidence: 'group', reason: g.reason }))), [st]);
   const orphans = matches.filter(m => m.status === 'orphaned');
+  const parkedM = st.parked || [];          // ตัดออกจากงวด / โอนระหว่างบัญชี (ฝั่งเดียวได้)
+  const rejectedM = st.rejected || [];      // บัญชีดำ "ไม่ใช่คู่นี้"
+  // ── หมายเหตุรายแถวที่ผู้ใช้พิมพ์เอง (สเปคข้อ 09) — เก็บแยกจากข้อมูลไฟล์ ไม่ถูกทับตอนอัปซ้ำ ──
+  //    คีย์ brNote.<rowId> ใน manualOverrides → ทีมเห็นร่วมกัน เหมือน brAssign.*
+  const [noteTick, setNoteTick] = brState(0);
+  const noteOf = (id) => (window.WTPOverride && WTPOverride.get('brNote.' + id)) || '';
+  const editNote = (id) => {
+    const v = window.prompt('หมายเหตุของรายการนี้ (เช่น "รอเช็คเคลียร์") — เว้นว่างเพื่อลบ', noteOf(id));
+    if (v == null) return;
+    if (window.WTPOverride) WTPOverride.setRaw('brNote.' + id, String(v).trim() || null);
+    setNoteTick(t => t + 1);
+  };
+  const noteEl = (id) => {
+    const n = noteOf(id);
+    if (!n) return null;
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--ink-700)',
+        background: '#fffbeb', border: '1px solid #f6e05e', borderRadius: 6, padding: '2px 8px', maxWidth: '100%' }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>📝 {n}</span>
+        {!readOnly && <button onClick={() => editNote(id)} title="แก้หมายเหตุ"
+          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--brand-600)', fontSize: 11, fontFamily: 'inherit', padding: 0 }}>แก้</button>}
+      </div>
+    );
+  };
 
   // lookup สำหรับ resolve match ที่ยืนยันแล้ว → แสดงในแท็บ "กระทบแล้ว"
   const bookById = brMemo(() => { const o = {}; moves.forEach(m => o[m.id] = m); return o; }, [moves]);
@@ -1800,10 +2072,10 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
       }
       setBusy(false);
       if (!best || !best.ok) { if (toast) toast('อ่านไฟล์ Express ไม่ได้: ' + ((best && best.error) || '')); return; }
-      if (best.account && bdDigits(accNo).length >= 4 && !bdAcctMatchesCheck(accNo, best.account)) {
-        if (!window.confirm('ไฟล์นี้เป็นบัญชี ' + best.account + ' แต่กำลังนำเข้าให้บัญชี ' + bdLast4(accNo) + ' เดือน ' + brFmtMonth(month) + '\nยืนยันนำเข้า?')) return;
-      }
-      onImportBook(best);
+      const mismatch = !!(best.account && bdDigits(accNo).length >= 4 && !bdAcctMatchesCheck(accNo, best.account));
+      // ★ สรุปให้ดูก่อน insert — อัปผิดบัญชี/ผิดงวดจะเห็นเองทันทีจากตัวเลข (สเปคข้อ 07)
+      setPendingImp(Object.assign(brBookImportDiff(best, accNo, month, moves),
+        { fileName: file.name, fileAcct: best.account || '', mismatch: mismatch }));
     }).catch(e => { setBusy(false); if (toast) toast('อ่านไฟล์ไม่ได้: ' + (e.message || e)); });
   };
 
@@ -1840,34 +2112,61 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
   const actBtn = (label, col, fn) => <button onClick={fn} style={{ fontSize: 11.5, padding: '4px 9px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit', border: '1px solid ' + col, background: '#fff', color: col, fontWeight: 700 }}>{label}</button>;
 
   // ── build items ราย bucket → BRReconTable ──
-  const pendingItems = suggestions.map((s, i) => ({
-    key: 'p' + (s.mango.id || i), mango: [moveSide(s.mango)], bank: [stmSide(s.stm)],
-    statusKind: s.confidence === 'exact' ? 'exact' : 'suggested', statusSub: s.confidence === 'exact' ? 'ref+วัน+ยอด' : 'วัน+ยอด',
-    _iso: s.mango.bkDate || s.stm.date, _amt: s.mango.amount, _text: [s.mango.vendor, s.mango.vno, s.stm.desc, s.stm.ref, s.mango.amount].join(' '),
-    action: readOnly ? null : actBtn('ยืนยัน', 'var(--good)', () => onConfirm([s], accNo, month)),
-  }));
+  //    คู่ที่ระบบเสนอ: ยืนยัน หรือกด "ไม่ใช่คู่" (ขึ้นบัญชีดำ ไม่ถูกเสนอซ้ำ)
+  const pendingItems = suggestions.map((sg, i) => {
+    const b0 = sg.books[0], l0 = sg.stms[0];
+    const amt = sg.books.reduce((a, m) => a + (Number(m.amount) || 0), 0);
+    return {
+      key: 'p' + (b0 && b0.id || '') + '~' + (l0 && l0.id || '') + '#' + i,
+      mango: sg.books.map(moveSide), bank: sg.stms.map(stmSide),
+      statusKind: sg.confidence, statusSub: sg.reason,
+      _iso: (b0 && b0.bkDate) || (l0 && l0.date), _amt: amt,
+      _text: sg.books.map(m => [m.vendor, m.vno, m.remark].join(' '))
+        .concat(sg.stms.map(l => [l.desc, l.ref].join(' '))).concat([amt]).join(' '),
+      action: readOnly ? null : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {actBtn('✓ ยืนยัน', 'var(--good)', () => onConfirm([sg], accNo, month))}
+          {onReject && actBtn('✕ ไม่ใช่คู่', 'var(--ink-500)', () => onReject([sg], accNo, month))}
+        </div>
+      ),
+    };
+  });
+  // ปุ่มเล็กท้ายแถวค้างกระทบ — โอนภายใน / ตัดออกจากงวด / หมายเหตุ
+  const miniBtn = (label, title, col, fn) => (
+    <button title={title} onClick={fn} style={{ fontSize: 11.5, padding: '3px 7px', borderRadius: 6, cursor: 'pointer',
+      fontFamily: 'inherit', border: '1px solid var(--line)', background: '#fff', color: col, lineHeight: 1.15 }}>{label}</button>
+  );
+  const rowActions = (row, side, selMap, setSel) => readOnly ? null : (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <button onClick={() => setSel(v => Object.assign({}, v, { [row.id]: !v[row.id] }))}
+        style={{ fontSize: 11.5, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, whiteSpace: 'nowrap',
+          border: '1px solid ' + (selMap[row.id] ? 'var(--brand-600)' : 'var(--line)'), background: selMap[row.id] ? 'var(--brand-600)' : '#fff', color: selMap[row.id] ? '#fff' : 'var(--brand-600)' }}>
+        {selMap[row.id] ? '✓ เลือกแล้ว' : '🔗 เลือก'}</button>
+      <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
+        {onPark && miniBtn('⇄', 'โอนระหว่างบัญชีตัวเอง — ตัดออกจากถังค้างกระทบ', 'oklch(60% 0.13 250)', () => onPark([row], side, 'interaccount', accNo, month))}
+        {onPark && miniBtn('🚫', 'ตัดออกจากการกระทบยอดงวดนี้', 'var(--ink-600)', () => onPark([row], side, 'excluded', accNo, month))}
+        {miniBtn('📝', 'หมายเหตุ (เช่น "รอเช็คเคลียร์")', noteOf(row.id) ? 'var(--brand-600)' : 'var(--ink-500)', () => editNote(row.id))}
+      </div>
+    </div>
+  );
   const unmatchedItems = st.sg.bookOnly.map((m, i) => ({
     key: 'b' + (m.id || i), mango: [moveSide(m)], bank: null, statusKind: 'bookOnly', statusSub: 'Express ลง · ธนาคารยังไม่มี',
     checkId: m.id, checkSide: 'book', rowBg: selB[m.id] ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' : null,
-    _iso: m.bkDate, _amt: m.amount, _text: [m.vendor, m.vno, m.remark, m.amount].join(' '),
+    _iso: m.bkDate, _amt: m.amount, _text: [m.vendor, m.vno, m.remark, m.amount, noteOf(m.id)].join(' '),
     _assignee: assigneeOf(m.id), _assigneeName: assigneeName(assigneeOf(m.id)),
     assignee: <BRAssignSelect itemId={m.id} financeUsers={financeUsers} readOnly={readOnly} />,
-    action: readOnly ? null : <button onClick={() => setSelB(s => Object.assign({}, s, { [m.id]: !s[m.id] }))}
-      style={{ fontSize: 11.5, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, whiteSpace: 'nowrap',
-        border: '1px solid ' + (selB[m.id] ? 'var(--brand-600)' : 'var(--line)'), background: selB[m.id] ? 'var(--brand-600)' : '#fff', color: selB[m.id] ? '#fff' : 'var(--brand-600)' }}>
-      {selB[m.id] ? '✓ เลือกแล้ว' : '🔗 เลือก'}</button>,
+    noteEl: noteEl(m.id),
+    action: rowActions(m, 'book', selB, setSelB),
   })).concat(st.sg.stmOnly.map((l, i) => ({
     key: 's' + (l.id || i), mango: null, bank: [stmSide(l)], statusKind: 'bankOnly', statusSub: 'ธนาคารหัก · ยังไม่ลงบัญชี',
     checkId: l.id, checkSide: 'stm', rowBg: selS[l.id] ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' : null,
-    _iso: l.date, _amt: l.amount, _text: [l.desc, l.ref, l.amount].join(' '),
+    _iso: l.date, _amt: l.amount, _text: [l.desc, l.ref, l.amount, noteOf(l.id)].join(' '),
     _assignee: assigneeOf(l.id), _assigneeName: assigneeName(assigneeOf(l.id)),
     assignee: <BRAssignSelect itemId={l.id} financeUsers={financeUsers} readOnly={readOnly} />,
-    action: readOnly ? null : <button onClick={() => setSelS(s => Object.assign({}, s, { [l.id]: !s[l.id] }))}
-      style={{ fontSize: 11.5, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700, whiteSpace: 'nowrap',
-        border: '1px solid ' + (selS[l.id] ? 'var(--brand-600)' : 'var(--line)'), background: selS[l.id] ? 'var(--brand-600)' : '#fff', color: selS[l.id] ? '#fff' : 'var(--brand-600)' }}>
-      {selS[l.id] ? '✓ เลือกแล้ว' : '🔗 เลือก'}</button>,
+    noteEl: noteEl(l.id),
+    action: rowActions(l, 'stm', selS, setSelS),
   })));
-  const matchItems = matches.map((mt) => {
+  const matchItems = st.confirmed.concat(orphans).map((mt) => {
     const bRows = (mt.bookIds || []).map(id => bookById[id]).filter(Boolean);
     const sRows = (mt.stmIds || []).map(id => stmById[id]).filter(Boolean);
     const amt = sRows.reduce((s, l) => s + (Number(l.amount) || 0), 0) || bRows.reduce((s, b) => s + (Number(b.amount) || 0), 0);
@@ -1881,7 +2180,22 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
       action: readOnly ? null : <button onClick={() => onUnmatch(mt.id)} style={{ fontSize: 11.5, padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', border: '1px solid var(--line)', background: '#fff', color: 'var(--ink-600)' }}>↩ ยกเลิก</button>,
     };
   });
-  const allItems = pendingItems.concat(matchItems).concat(unmatchedItems);
+  // ── ตัดออกจากงวด / โอนภายใน / บัญชีดำ "ไม่ใช่คู่" — กู้กลับเข้าถังรอกระทบได้ทุกแถว ──
+  const parkItems = parkedM.concat(rejectedM).map((mt) => {
+    const bRows = (mt.bookIds || []).map(id => bookById[id]).filter(Boolean);
+    const sRows = (mt.stmIds || []).map(id => stmById[id]).filter(Boolean);
+    const amt = (bRows.length ? bRows : sRows).reduce((a, r) => a + (Number(r.amount) || 0), 0);
+    return {
+      key: 'x' + mt.id, mango: bRows.length ? bRows.map(moveSide) : null, bank: sRows.length ? sRows.map(stmSide) : null,
+      statusKind: mt.status,
+      statusSub: mt.status === 'rejected' ? 'ระบบจะไม่เสนอคู่นี้อีก'
+        : mt.status === 'interaccount' ? 'โอนระหว่างบัญชีตัวเอง' : 'ไม่นับในงวดนี้',
+      _iso: (bRows[0] && bRows[0].bkDate) || (sRows[0] && sRows[0].date), _amt: amt,
+      _text: bRows.concat(sRows).map(r => [r.vendor, r.desc, r.vno, r.ref].join(' ')).join(' '),
+      action: readOnly ? null : actBtn('↩ กู้คืน', 'var(--brand-600)', () => onUnmatch(mt.id)),
+    };
+  });
+  const allItems = pendingItems.concat(matchItems).concat(unmatchedItems).concat(parkItems);
 
   // ── จับคู่เองจากที่เลือก (M-to-N) ──
   const selBookRows = st.sg.bookOnly.filter(m => selB[m.id]);
@@ -1903,15 +2217,20 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
 
   const noBook = moves.length === 0;
   const noStm = stm.length === 0;
+  // ── งบสรุปงวดของ statement: ยกมา → รับ → จ่าย → ยกไป · ถ้าไม่ลงตัว = ไฟล์อาจไม่ครบงวด ──
+  //    ตัวจับความผิดปกติที่คุ้มที่สุด — ถ้าไม่บอก คนจะไปไล่หาสาเหตุที่การจับคู่แทน
+  const stmView = brMemo(() => brMonthlyView(stm), [stm]);
 
   const tabs = [
-    { key: 'pending',     label: 'รอยืนยัน',    n: pendingItems.length,   color: 'var(--warn)' },
-    { key: 'unmatched',   label: 'รอกระทบยอด',  n: unmatchedItems.length, color: 'var(--bad)' },
-    { key: 'matched',     label: 'กระทบแล้ว',   n: matchItems.length,     color: 'var(--good)' },
-    { key: 'all',         label: 'ทั้งหมด',      n: allItems.length,       color: 'var(--brand-600)' },
-    { key: 'outstanding', label: 'Outstanding', n: outs.length,           color: 'oklch(60% 0.13 250)' },
+    { key: 'pending',     label: 'รอยืนยัน',        n: pendingItems.length,   color: 'var(--warn)' },
+    { key: 'unmatched',   label: 'รอกระทบยอด',      n: unmatchedItems.length, color: 'var(--bad)' },
+    { key: 'matched',     label: 'กระทบแล้ว',       n: matchItems.length,     color: 'var(--good)' },
+    { key: 'parked',      label: 'ตัดออก · ไม่ใช่คู่', n: parkItems.length,      color: 'var(--ink-500)' },
+    { key: 'all',         label: 'ทั้งหมด',          n: allItems.length,       color: 'var(--brand-600)' },
+    { key: 'outstanding', label: 'Outstanding',     n: outs.length,           color: 'oklch(60% 0.13 250)' },
   ];
-  const curItems = tab === 'pending' ? pendingItems : tab === 'unmatched' ? unmatchedItems : tab === 'matched' ? matchItems : tab === 'all' ? allItems : [];
+  const curItems = tab === 'pending' ? pendingItems : tab === 'unmatched' ? unmatchedItems
+    : tab === 'matched' ? matchItems : tab === 'parked' ? parkItems : tab === 'all' ? allItems : [];
   const shownItems = sortItems(curItems.filter(passFilter));
   const inpSt = { padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 7, fontSize: 12, fontFamily: 'inherit' };
   const lblSt = { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--ink-500)' };
@@ -1950,7 +2269,21 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
             <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 2 }}>Express {moves.length} รายการ · STM {(stmLines || []).length} รายการ</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* ★ กฎเหล็ก: วันต้องตรงเป๊ะ — ผ่อนวันแล้วระบบจับผิดคู่ได้เงียบ ๆ (ยอดเท่ากันวันใกล้กันมีเยอะ) */}
+          {!noBook && setDateWindow && (
+            <div title="กติกาจับคู่อัตโนมัติ: 'ตรงเป๊ะ' = วันของ Express ต้องตรงกับวันในธนาคาร — ผ่อนวันทำให้จับผิดคู่ได้เงียบ ๆ แล้วงบดูสมดุลทั้งที่ผิด"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 8px', borderRadius: 8,
+                border: '1px solid ' + (dateWindow ? 'var(--warn)' : 'var(--line)'), background: dateWindow ? '#fffbeb' : '#fff' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--ink-500)', fontWeight: 600 }}>จับคู่วันที่</span>
+              {[{ v: 0, t: 'ตรงเป๊ะ' }, { v: 3, t: '±3 วัน' }, { v: 5, t: '±5 วัน' }].map(o => (
+                <button key={o.v} onClick={() => setDateWindow(o.v)}
+                  style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, padding: '3px 9px', borderRadius: 6,
+                    background: dateWindow === o.v ? (o.v ? 'var(--warn)' : 'var(--good)') : 'var(--ink-100)',
+                    color: dateWindow === o.v ? '#fff' : 'var(--ink-600)', fontWeight: dateWindow === o.v ? 700 : 500 }}>{o.t}</button>
+              ))}
+            </div>
+          )}
           {!noBook && <button className="btn btn-ghost" onClick={() => setFullscreen(true)} title="ขยายตารางทำงานเต็มหน้าเว็บ — ซ่อนหัวสรุป/KPI ด้านบน"
             style={{ background: '#ebf8ff', color: '#1e4fbd', border: '1px solid #63b3ed' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
@@ -1967,6 +2300,8 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }} />
+            {!noBook && onClearPeriod && <button className="btn btn-ghost" title="ล้างงบกระทบยอด + การจับคู่ของงวดนี้ (ไว้เริ่มใหม่เมื่ออัปผิด) — statement ไม่ถูกลบ"
+              onClick={() => onClearPeriod(accNo, month)} style={{ color: 'var(--bad)', borderColor: 'var(--bad)' }}>🧹 ล้างข้อมูลงวดนี้</button>}
           </React.Fragment>}
         </div>
       </div>
@@ -1997,6 +2332,31 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
           <KpiTile label="กระทบแล้ว" value={matchItems.length} digits={0} unit="" accent="var(--good)" icon="check" />
           <KpiTile label="ค้างกระทบ" value={unmatchedItems.length} digits={0} unit="" accent="var(--bad)" icon="arrow_down" />
         </div>
+        )}
+
+        {/* ── งบสรุปงวดของ statement: ยกมา → รับ → จ่าย → ยกไป (ตอบว่า "ไฟล์ที่อัปมาครบงวดไหม") ── */}
+        {!fullscreen && stmView.count > 0 && (
+          <div className="card" style={{ padding: '10px 14px', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontWeight: 700, color: 'var(--ink-700)' }}>งบสรุปงวด · STATEMENT</span>
+              <span style={{ color: 'var(--ink-600)' }}>ยอดยกมา <b>{stmView.opening != null ? fmtNum(stmView.opening, 2) : '—'}</b></span>
+              <span style={{ color: 'var(--good)' }}>+ รับ <b>{fmtNum(stmView.inTotal, 2)}</b></span>
+              <span style={{ color: 'var(--bad)' }}>− จ่าย <b>{fmtNum(stmView.outTotal, 2)}</b></span>
+              <span style={{ color: 'var(--ink-800)', fontWeight: 700 }}>= ยกไป {stmView.closing != null ? fmtNum(stmView.closing, 2) : '—'}</span>
+              {meta && meta.opening != null && (
+                <span style={{ color: 'var(--ink-500)', borderLeft: '1px solid var(--line)', paddingLeft: 16 }}>
+                  ยกมาฝั่ง Express <b>{fmtNum(meta.opening, 2)}</b>
+                </span>
+              )}
+            </div>
+            {stmView.balOK === false && (
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: 'var(--bad)', background: 'color-mix(in oklch, var(--bad) 6%, transparent)',
+                borderRadius: 7, padding: '6px 10px' }}>
+                ⚠️ ยกมา + รับ − จ่าย ≠ ยกไป (ต่าง {fmtNum(Math.abs(stmView.closing - stmView.expectedClosing), 2)}) —
+                <b> อาจมีรายการขาดหายในงวดนี้</b> ส่วนใหญ่แปลว่า statement ที่อัปมาไม่ครบช่วง (ตรวจไฟล์ก่อนไล่หาสาเหตุที่การจับคู่)
+              </div>
+            )}
+          </div>
         )}
 
         <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
@@ -2042,7 +2402,11 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
                       style={{ background: 'var(--good)', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
                       ✓ ยืนยันทั้งหมด ({pendingItems.length})
                     </button>
-                    <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>🤖 ระบบจับคู่ EXPRESS ↔ BANK ด้วยยอด+วัน+เลขเช็ค — ตรวจแล้วกดยืนยัน</span>
+                    <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>
+                      🤖 จับคู่ 3 ระดับ: <b>เลขอ้างอิง+วัน+ยอด</b> → <b>วัน+ยอด</b> → <b>ยอดรวมกลุ่ม (N:M)</b>
+                      {dateWindow ? <b style={{ color: 'var(--warn)' }}> · โหมดผ่อนวัน ±{dateWindow} วัน (เสี่ยงจับผิดคู่ — ตรวจให้ดีก่อนยืนยัน)</b>
+                        : ' · วันต้องตรงเป๊ะ'}
+                    </span>
                   </div>
                 )}
                 <BRReconTable items={shownItems} maxH={tableMaxH} emptyText={st.freeMoves.length === 0 && st.freeStm.length === 0 ? '✓ จับคู่ครบแล้ว — ไม่มีรายการรอยืนยัน' : 'ไม่มีคู่อัตโนมัติ — ใช้แท็บ "รอกระทบยอด" จับคู่เอง'} />
@@ -2098,12 +2462,24 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
                     <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>ยังไม่มีผู้ใช้ฝ่าย "การเงิน" — ตั้งหน่วยงานที่หน้าจัดการผู้ใช้ก่อน</span>
                   )}
                 </div>
-                <BRReconTable items={shownItems} maxH={tableMaxH} selectable={!readOnly} sel={selMerged} onToggle={toggleSel} showAssignee emptyText={assignFilter !== 'all' ? 'ไม่มีรายการค้างกระทบตามตัวกรองผู้รับผิดชอบ' : '✓ ไม่มีรายการค้างกระทบ'} />
+                <BRReconTable items={shownItems} maxH={tableMaxH} selectable={!readOnly} sel={selMerged} onToggle={toggleSel} showAssignee actionW={118}
+                  emptyText={assignFilter !== 'all' ? 'ไม่มีรายการค้างกระทบตามตัวกรองผู้รับผิดชอบ' : '✓ ไม่มีรายการค้างกระทบ'} />
               </div>
             )}
 
             {/* ── กระทบแล้ว ── */}
             {tab === 'matched' && <BRReconTable items={shownItems} maxH={tableMaxH} emptyText="ยังไม่มีการจับคู่ที่ยืนยัน — ดูแท็บ 'รอยืนยัน'" />}
+
+            {/* ── ตัดออกจากงวด · โอนภายใน · บัญชีดำ "ไม่ใช่คู่" ── */}
+            {tab === 'parked' && (
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8 }}>
+                  รายการที่ <b>ไม่ต้องกระทบยอดในงวดนี้</b> — ตัดออก / โอนระหว่างบัญชีตัวเอง / คู่ที่กด "ไม่ใช่คู่"
+                  (คู่ที่ปฏิเสธจะไม่ถูกระบบเสนอซ้ำ · กด <b>↩ กู้คืน</b> เพื่อเอากลับเข้าถังรอกระทบ)
+                </div>
+                <BRReconTable items={shownItems} maxH={tableMaxH} emptyText="ไม่มีรายการที่ตัดออก" />
+              </div>
+            )}
 
             {/* ── ทั้งหมด ── */}
             {tab === 'all' && <BRReconTable items={shownItems} maxH={tableMaxH} emptyText="ไม่มีรายการ" />}
@@ -2129,7 +2505,59 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
           </div>
         </div>
       </div>)}
+
+      {/* สรุปไฟล์ก่อนนำเข้าจริง — เห็นเองทันทีถ้าอัปผิดบัญชี/ผิดงวด */}
+      {pendingImp && (
+        <BRBookDiffModal diff={pendingImp} accNo={accNo} month={month}
+          onConfirm={() => { const p = pendingImp.parsed; setPendingImp(null); onImportBook(p); }}
+          onClose={() => setPendingImp(null)} />
+      )}
     </div>
+  );
+}
+
+// ─── Modal สรุปไฟล์งบกระทบยอด Express ก่อนนำเข้า (สเปคข้อ 07) ─────────────────
+//    บอกจำนวน: อ่านได้ / เพิ่มใหม่ / ซ้ำเดิม / ลายเซ็นซ้ำในไฟล์ / หายไปจากไฟล์ใหม่
+//    "หายไปจากไฟล์ใหม่" สำคัญ — แถวพวกนี้จะทำให้การจับคู่ที่ยืนยันไว้กลายเป็น "ต้องตรวจ"
+function BRBookDiffModal({ diff, accNo, month, onConfirm, onClose }) {
+  const row = (label, value, color, hint) => (
+    <tr>
+      <td style={{ color: 'var(--ink-500)', width: 150 }}>{label}</td>
+      <td style={{ fontWeight: 700, color: color || 'var(--ink-800)', fontVariantNumeric: 'tabular-nums', width: 70, textAlign: 'right' }}>{fmtNum(value, 0)}</td>
+      <td style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>{hint}</td>
+    </tr>
+  );
+  const warn = diff.mismatch || diff.offMonth > 0;
+  return (
+    <Modal open title="ตรวจก่อนนำเข้างบกระทบยอด Express" maxWidth={560} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" onClick={onConfirm}>นำเข้า {fmtNum(diff.moves.length, 0)} รายการ</button>
+      </>}>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-600)', marginBottom: 10 }}>
+        ไฟล์ <b>{diff.fileName}</b> → บัญชี <b>···{bdLast4(accNo)}</b> เดือน <b>{brFmtMonth(month)}</b>
+        {diff.from && <span> · ช่วงวันในไฟล์ {fmtDate(diff.from)} – {fmtDate(diff.to)}</span>}
+      </div>
+      {warn && (
+        <div style={{ background: '#fffbeb', border: '1px solid #f6ad55', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--ink-700)' }}>
+          {diff.mismatch && <div>⚠️ ไฟล์ระบุบัญชี <b>{diff.fileAcct}</b> ซึ่งไม่ตรงกับบัญชีที่เลือก (···{bdLast4(accNo)})</div>}
+          {diff.offMonth > 0 && <div>⚠️ มี <b>{fmtNum(diff.offMonth, 0)}</b> รายการที่วันที่ไม่ได้อยู่ในเดือน {brFmtMonth(month)} — อาจอัปผิดงวด</div>}
+        </div>
+      )}
+      <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
+        <tbody>
+          {row('อ่านได้จากไฟล์', diff.moves.length, 'var(--ink-800)', 'รายการเคลื่อนไหวทั้งหมด')}
+          {row('เพิ่มใหม่', diff.added.length, 'var(--good)', 'ยังไม่มีในระบบ')}
+          {row('ซ้ำเดิม', diff.same.length, 'var(--ink-500)', 'มีอยู่แล้ว — อัปทับได้ ไม่เกิดแถวซ้ำ')}
+          {diff.ambiguous.length > 0 && row('ลายเซ็นซ้ำในไฟล์', diff.ambiguous.length, 'var(--warn)', 'วัน+เลขที่+ยอด เหมือนกัน — เก็บครบทุกแถว ไม่รวมให้อัตโนมัติ')}
+          {diff.gone.length > 0 && row('หายไปจากไฟล์ใหม่', diff.gone.length, 'var(--bad)', 'การจับคู่ที่อ้างถึงแถวเหล่านี้จะถูกทำเครื่องหมาย "ต้องตรวจ"')}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 10, lineHeight: 1.7 }}>
+        💡 นำเข้าทับงวดเดิมได้ตลอด — ลายเซ็นแถวใช้ <b>วันที่ + เลขที่ + ยอด</b> (ไม่ใช้ยอดคงเหลือสะสม)
+        จึงไม่เกิดข้อมูลซ้ำทั้งงวดเวลาบัญชียกเลิกใบสำคัญกลางงวด
+      </div>
+    </Modal>
   );
 }
 
