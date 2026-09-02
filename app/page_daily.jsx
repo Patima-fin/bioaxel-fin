@@ -84,7 +84,9 @@ function DailyRevenueDashboard({ data, setData, toast }) {
         receiveDate: r.receiptDate,
         jobNo:       cj || r.projectCode || linkedIv?.jobNo || '—',
         ivNo:        r.invoiceNo || r.receiptNo,
-        projectName: r.projectName || p['พื้นที่'] || p.name || linkedIv?.projectName || '—',
+        projectName: ((window.ivHasProjectNameOverride && window.ivHasProjectNameOverride(linkedIv))
+                      ? String(linkedIv.projectNameOverride).trim()
+                      : (r.projectName || p['พื้นที่'] || p.name || linkedIv?.projectName || '—')),
         period:      (() => { const v = linkedIv?.period ?? r.period ?? 1; const n = Number(v); return Number.isFinite(n) ? n : 1; })(),
         balance:     Number(r.grossAmount) || 0,
         netReceived: Number(r.netReceived) || Number(r.grossAmount) || 0,
@@ -108,7 +110,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
         receiveDate: rd,
         jobNo:       cj,
         ivNo:        iv.ivNo,
-        projectName: p['พื้นที่'] || p.name || iv.projectName || '—',
+        projectName: (window.resolveProjectName ? window.resolveProjectName(iv, p) : (p['พื้นที่'] || p.name || iv.projectName || '—')),
         period:      (() => { const n = Number(iv.period ?? 1); return Number.isFinite(n) ? n : 1; })(),
         balance:     Number(iv.balance) || 0,
         netReceived: Number(iv.actualReceive?.amount) || Number(iv.balance) || 0,   // ★ guard: actualReceive อาจเป็น null (วันรับมาจากคอลัมน์แบน)
@@ -147,7 +149,7 @@ function DailyRevenueDashboard({ data, setData, toast }) {
         status,
         invType: drInvType(iv),
         balance,
-        projectName: p['พื้นที่'] || p.name || iv.projectName || '—',
+        projectName: (window.resolveProjectName ? window.resolveProjectName(iv, p) : (p['พื้นที่'] || p.name || iv.projectName || '—')),
         assignee,
         debt,
         // คาดรับสุทธิ = balance หลังหัก WHT 1% (balance × 106/107) − ภาระหนี้

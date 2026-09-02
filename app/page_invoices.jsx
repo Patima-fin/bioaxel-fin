@@ -45,6 +45,23 @@ function ivHasAssigneeOverride(iv) {
   const ov = iv && iv.assigneeOverride;
   return ov != null && String(ov).trim() !== '';
 }
+// ── ชื่อโครงการ: Override ราย IV ทับชื่อที่ดึงจากตารางโครงการ ──────────────
+// ลำดับ: iv.projectNameOverride (พิมพ์เอง) → ชื่อจากโครงการ (พื้นที่/name จับคู่ด้วย Job no)
+//        → iv.projectName (ชื่อที่ติดมากับใบตอน import) → '—'
+// ⚠️ อย่าเขียนทับ iv.projectName ตรง ๆ เพื่อ "แก้ชื่อ" — ชื่อจากโครงการชนะเสมอ
+//    (ivJoinRow ให้โครงการมาก่อน) ต้องคีย์ที่ projectNameOverride เท่านั้น
+function resolveProjectName(iv, p) {
+  const ov = iv && iv.projectNameOverride;
+  if (ov != null && String(ov).trim() !== '') return String(ov).trim();
+  const fromProject = String((p && (p['พื้นที่'] || p.name)) || '').trim();
+  if (fromProject) return fromProject;
+  const own = String((iv && iv.projectName) || '').trim();
+  return own || '—';
+}
+function ivHasProjectNameOverride(iv) {
+  const ov = iv && iv.projectNameOverride;
+  return ov != null && String(ov).trim() !== '';
+}
 function ivHasDebtOverride(iv) {
   const ov = iv && iv.debtOverride;
   // ถือว่า 0 = "ไม่มี override" (ไม่ใช่ override เป็นศูนย์)
@@ -53,7 +70,7 @@ function ivHasDebtOverride(iv) {
   return Number(ov) > 0;
 }
 // expose globally so page_daily/page_warroom_p1 can reuse without duplication
-Object.assign(window, { resolveAssignee, resolveDebt, ivHasAssigneeOverride, ivHasDebtOverride });
+Object.assign(window, { resolveAssignee, resolveDebt, resolveProjectName, ivHasAssigneeOverride, ivHasDebtOverride, ivHasProjectNameOverride });
 
 // ── ivJoinRow / ivBuildRows — ใบแจ้งหนี้ + โครงการ + ภาระหนี้ → แถวที่มี netExpected ──
 // ★ นี่คือ "จุดเดียว" ที่คำนวณ netExpected (balance × 106/107 − ภาระหนี้)
@@ -95,7 +112,7 @@ function ivJoinRow(iv, projectByCode, financeByCode) {
     customer: customerName,
     customerName,
     customerCode,
-    projectName: p['พื้นที่'] || p.name || iv.projectName || '—',
+    projectName: resolveProjectName(iv, p),
     assignee,
     assigneeIsOverride,
     debt,
@@ -1579,6 +1596,7 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
   const [saveError, setSaveError]         = ivState('');
   const [debtOvFocused, setDebtOvFocused] = ivState(false);
   const [debtOvRaw, setDebtOvRaw]         = ivState('');
+  const projNameRef                       = ivRef(null);
 
   React.useEffect(() => {
     setDraft(iv);
@@ -1596,8 +1614,17 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
 
   const isNew    = !draft.id;
   const isPaid   = draft.status === 'paid';
-  const project  = projectByCode[draft.jobNo];
+  const project  = projectByCode[draft.jobNo] || projectByCode[draft.contractRef];
   const finance  = financeByCode[draft.jobNo];
+  // ชื่อโครงการ: ชื่อ "อัตโนมัติ" จากหน้าโครงการ (จับคู่ด้วย Job no) vs ชื่อที่ใช้จริง (override ชนะ)
+  const projNameAuto  = String((project && (project['พื้นที่'] || project.name)) || '').trim();
+  const projNameShown = resolveProjectName(draft, project);
+  const focusProjName = () => {
+    const el = projNameRef.current;
+    if (!el) return;
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
+    el.focus(); el.select();
+  };
   const debt     = resolveDebt(draft, finance);
 
   // ── debt override display state — formatted number with commas, blank = use default ─
@@ -1638,7 +1665,16 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
       return;
     }
     setSaveError('');
-    onSave(draft);
+    // trim ชื่อโครงการที่พิมพ์เอง — ช่องว่างล้วน = ไม่ override (กลับไปใช้ชื่อจากโครงการ)
+    const out = { ...draft };
+    if (out.projectNameOverride != null) out.projectNameOverride = String(out.projectNameOverride).trim();
+    // ใบใหม่: พิมพ์ชื่อเองแล้วไม่ตรงกับชื่อจากโครงการ → ถือเป็น override
+    // (ไม่งั้น ivJoinRow จะเอาชื่อจากโครงการมาทับ ชื่อที่พิมพ์จะไม่ขึ้นเลย)
+    if (isNew && !out.projectNameOverride) {
+      const typed = String(out.projectName || '').trim();
+      if (typed && projNameAuto && typed !== projNameAuto) out.projectNameOverride = typed;
+    }
+    onSave(out);
   };
 
   const s = WTPData.IV_STATUS_META[draft.status] || { label: draft.status || '—', badge: 'b-gray', short: draft.status || '—' };
@@ -1709,7 +1745,21 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
             }}>{draft.productType}</span>
           )}
           <span style={{ color: 'var(--ink-300)', fontSize: 12 }}>·</span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-700)' }}>{project?.['พื้นที่'] || project?.name || iv.projectName || '—'}</span>
+          <span
+            onClick={canEdit ? focusProjName : undefined}
+            title={canEdit ? 'คลิกเพื่อแก้ชื่อโครงการ / รายการ' : projNameShown}
+            style={{
+              fontSize: 13, fontWeight: 500, color: 'var(--ink-700)',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              cursor: canEdit ? 'text' : 'default',
+              borderBottom: canEdit ? '1px dashed var(--ink-200,#cfd6e0)' : 'none',
+            }}>
+            {projNameShown}
+            {ivHasProjectNameOverride(draft) && (
+              <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--brand-500)', color: '#fff', borderRadius: 4, padding: '0 4px' }}>แก้เอง</span>
+            )}
+            {canEdit && <span style={{ fontSize: 10, opacity: 0.45 }}>✏️</span>}
+          </span>
         </div>
       )}
       maxWidth={920}
@@ -1916,6 +1966,50 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
           {/* ── ข้อมูลติดตาม ───────────────────────────────────────────────── */}
           <div>
             <SectionHdr label="ข้อมูลติดตาม — กรอกได้" icon="edit" />
+            {/* ── ชื่อโครงการ / รายการ — พิมพ์เอง หรือ ดึงจากหน้าโครงการ (Job no ตรงกัน) ── */}
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {canEdit ? <span style={{ fontSize: 10, color: 'var(--brand-500)' }}>✏️</span> : <span style={{ fontSize: 10, opacity: 0.5 }}>🔒</span>}
+                ชื่อโครงการ / รายการ
+                {ivHasProjectNameOverride(draft) && <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--brand-500)', color: '#fff', borderRadius: 4, padding: '0 4px', marginLeft: 4 }}>OVERRIDE</span>}
+              </label>
+              {canEdit ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                    <input ref={projNameRef} className="input" type="text"
+                      value={draft.projectNameOverride || ''}
+                      onChange={(e) => set('projectNameOverride', e.target.value)}
+                      placeholder={projNameAuto || 'พิมพ์ชื่อโครงการ / รายการเอง'}
+                      title="ว่าง = ใช้ชื่อจากหน้าโครงการ (จับคู่ด้วย Job no) · กรอก = ใช้ชื่อนี้เฉพาะ IV นี้"
+                      style={{ fontSize: 12.5, height: 32, paddingRight: (draft.projectNameOverride || '') !== '' ? 22 : undefined }} />
+                    {(draft.projectNameOverride || '') !== '' && (
+                      <button type="button" onClick={() => set('projectNameOverride', '')} title="ล้างชื่อที่พิมพ์เอง กลับไปใช้ชื่อจากโครงการ"
+                        style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-400)', fontSize: 14, padding: '0 4px' }}>×</button>
+                    )}
+                  </div>
+                  <button type="button" className="btn btn-ghost"
+                    disabled={!projNameAuto}
+                    onClick={() => { set('projectNameOverride', projNameAuto); }}
+                    title={projNameAuto
+                      ? ('ดึงชื่อจากหน้าโครงการ (' + (draft.jobNo || '—') + '): ' + projNameAuto)
+                      : 'ไม่พบโครงการที่ Job no ตรงกัน — พิมพ์ชื่อเอง'}
+                    style={{ height: 32, fontSize: 11.5, whiteSpace: 'nowrap', opacity: projNameAuto ? 1 : 0.45, cursor: projNameAuto ? 'pointer' : 'not-allowed' }}>
+                    ⤵ ดึงจากโครงการ
+                  </button>
+                </div>
+              ) : (
+                <div style={{ height: 32, borderRadius: 7, border: '1px solid var(--ink-100)', background: 'var(--ink-50)', padding: '0 9px', display: 'flex', alignItems: 'center', fontSize: 12.5, color: 'var(--ink-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={projNameShown}>
+                  {projNameShown}
+                </div>
+              )}
+              {canEdit && (
+                <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 4 }}>
+                  {projNameAuto
+                    ? <>ว่าง = ใช้ชื่อจากโครงการ <strong style={{ color: 'var(--ink-700)' }}>{draft.jobNo || '—'}</strong> · “{projNameAuto}”</>
+                    : <>ไม่พบโครงการที่ Job no <strong style={{ color: 'var(--ink-700)' }}>{draft.jobNo || '—'}</strong> ตรงกัน — พิมพ์ชื่อเองได้เลย</>}
+                </div>
+              )}
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '95px 195px 170px 125px minmax(110px, 1fr) 125px', gap: '0 10px' }}>
               <div className="field">
                 <label style={{ fontSize: 12 }}>งวดที่</label>
@@ -3128,7 +3222,7 @@ function IvReportStandalonePage({ data, setData, toast }) {
     const debt     = Number(f.debt ?? f['ภาระหนี้'] ?? 0);
     // Prefer existing fields, fall back to imported v2 fields
     const assignee = iv.assignee || f.assignee || f['ผู้รับโอนสิทธิ์'] || '—';
-    const projectName = iv.projectName || p['พื้นที่'] || p.name || '—';
+    const projectName = resolveProjectName(iv, p);
     // Map v2 'pending' → 'tracking' so existing date-bucketed sections include it.
     // Real 'paid' rows keep status='paid'.
     const status = iv.status === 'pending' ? 'tracking' : iv.status;
