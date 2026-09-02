@@ -16,6 +16,27 @@ function isWeekend(iso) {
   const d = new Date(iso); const day = d.getDay();
   return day === 0 || day === 6;
 }
+/* ★ วันที่นี้เป็น "วันล่าสุด" ของบัญชีนี้ไหม (เทียบกับ snapshot อื่นที่เหลืออยู่)
+ *   bankAccounts.BALANCE/DATE = "ยอดล่าสุดที่รู้" ซึ่งหน้า Bank Daily ใช้เป็นจุดตั้งต้น
+ *   (bdBuildAccountView: asOfRef = acct.asOf = DATE → นับทุกรายการที่ >= วันนั้น)
+ *   ⇒ เปิดวันเก่าแล้วกดบันทึก แล้วเขียนทับ = ยอดล่าสุด "ถอยหลัง" + Bank Daily หักรายการซ้ำ
+ *      ตั้งแต่วันเก่านั้นเป็นต้นมา โดยไม่มีอะไรเตือน */
+function dbIsLatestDate(otherSnaps, ac, date) {
+  let newest = '';
+  (otherSnaps || []).forEach(s => {
+    if (s && s.bankAc === ac && s.date && s.date > newest) newest = s.date;
+  });
+  return !newest || date >= newest;
+}
+/* snapshot ล่าสุดที่เหลืออยู่ของบัญชี — ใช้ตอนลบแถว (ต้องกลับไปหา "ล่าสุดจริง" ไม่ใช่แค่วันก่อนหน้า) */
+function dbNewestSnap(snaps, ac) {
+  let best = null;
+  (snaps || []).forEach(s => {
+    if (s && s.bankAc === ac && s.date && (!best || s.date > best.date)) best = s;
+  });
+  return best;
+}
+
 function fmtDateInput(iso) {
   if (!iso) return '';
   return iso.length >= 10 ? iso.slice(0, 10) : iso;
@@ -248,15 +269,22 @@ function DailyBalancePage({ data, setData, toast }) {
       source: 'manual_daily',
       note: existing ? 'override ' + new Date().toLocaleTimeString('th-TH') : '',
     };
+    // ★ อัปยอดล่าสุดใน bankAccounts เฉพาะตอนบันทึก "วันล่าสุด" ของบัญชีนี้
+    //   (แก้ย้อนหลังต้องไม่ทับ — ดู dbIsLatestDate)
+    const mirror = dbIsLatestDate(snapshots.filter(s => !(s.date === entryDate && s.bankAc === ac)), ac, entryDate);
     setData(d => {
       const others = (d.cashflowSnapshots || []).filter(s => !(s.date === entryDate && s.bankAc === ac));
       // Also update bankAccounts.BALANCE + HOLD_AMOUNT so live balance stays in sync
-      const updatedAccounts = (d.bankAccounts || []).map(acc =>
-        acc.Bank_AC === ac ? { ...acc, BALANCE: balance, HOLD_AMOUNT: holdVal, DATE: entryDate } : acc
-      );
+      const updatedAccounts = mirror
+        ? (d.bankAccounts || []).map(acc =>
+            acc.Bank_AC === ac ? { ...acc, BALANCE: balance, HOLD_AMOUNT: holdVal, DATE: entryDate } : acc
+          )
+        : (d.bankAccounts || []);
       return { ...d, cashflowSnapshots: [...others, row], bankAccounts: updatedAccounts };
     });
-    toast(`บันทึก ${a?.BANK_NAME || ac} แล้ว`);
+    toast(mirror
+      ? `บันทึก ${a?.BANK_NAME || ac} แล้ว`
+      : `บันทึกย้อนหลัง ${a?.BANK_NAME || ac} แล้ว — ยอดล่าสุดใน DATA BANK ไม่ถูกทับ`);
   };
 
   // ยกเลิก/ลบยอดที่บันทึกไปแล้วของวันนี้ (เผื่อยังไม่จบวัน ยังไม่อยากยกเป็นยอดยกไป)
@@ -265,13 +293,14 @@ function DailyBalancePage({ data, setData, toast }) {
     if (!existing) return;
     const a = accounts.find(x => x.Bank_AC === ac);
     if (!confirm(`ยกเลิกการบันทึกยอด ${a?.BANK_NAME || ac} ของวันที่ ${entryDate}?\n(ยอดใน DATA BANK จะกลับไปใช้ค่าล่าสุดก่อนหน้า)`)) return;
-    const y = yesterdayByAc[ac];
     setData(d => {
       const others = (d.cashflowSnapshots || []).filter(s => !(s.date === entryDate && s.bankAc === ac));
       const updatedAccounts = (d.bankAccounts || []).map(acc => {
         if (acc.Bank_AC !== ac) return acc;
-        // กลับไปใช้ยอดล่าสุดก่อนหน้า ถ้ามี — ไม่งั้นคงไว้
-        return y ? { ...acc, BALANCE: Number(y.balance), DATE: y.date } : acc;
+        // กลับไปใช้ snapshot "ล่าสุดที่เหลืออยู่จริง" ของบัญชีนี้ — ไม่ใช่แค่วันก่อนหน้า
+        // (ลบวันเก่าทิ้งต้องไม่ดึงยอดล่าสุดถอยหลัง) · ไม่เหลือเลย = คงค่าเดิมไว้
+        const latest = dbNewestSnap(others, ac);
+        return latest ? { ...acc, BALANCE: Number(latest.balance), DATE: latest.date } : acc;
       });
       return { ...d, cashflowSnapshots: others, bankAccounts: updatedAccounts };
     });
@@ -303,6 +332,8 @@ function DailyBalancePage({ data, setData, toast }) {
       const updatedAccounts = (d.bankAccounts || []).map(acc => {
         const newRow = newRows.find(r => r.bankAc === acc.Bank_AC);
         if (!newRow) return acc;
+        // ★ แก้ย้อนหลัง (บัญชีนี้มี snapshot วันใหม่กว่าอยู่แล้ว) → ไม่ทับยอดล่าสุด
+        if (!dbIsLatestDate(others, acc.Bank_AC, entryDate)) return acc;
         // Save HOLD_AMOUNT too if user changed it
         const holdVal = holdDraft[acc.Bank_AC] !== undefined && holdDraft[acc.Bank_AC] !== '' ? Number(holdDraft[acc.Bank_AC]) : (Number(acc.HOLD_AMOUNT) || 0);
         return { ...acc, BALANCE: newRow.balance, HOLD_AMOUNT: holdVal, DATE: entryDate };
@@ -314,6 +345,49 @@ function DailyBalancePage({ data, setData, toast }) {
 
   // Permission gate — manager/staff can save; viewer/owner can't
   const canEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
+
+  /* ★ ยอดล่าสุดใน bankAccounts (DATA BANK) ตรงกับ snapshot ล่าสุดไหม
+   *   หน้า Bank Daily ยึด bankAccounts.DATE เป็นจุดตั้งต้น (asOfRef) แล้วหักทุกรายการที่ >= วันนั้น
+   *   ⇒ ถ้า DATE ค้างอยู่วันเก่า หน้านั้นจะโชว์รายการย้อนไปถึงวันเก่า "และหักซ้ำ" กับเงินที่จ่ายไปแล้ว
+   *   นับเฉพาะบัญชีหลัก (dormant ตั้งใจให้ค้างได้) · DATE ใหม่กว่า snapshot = ตั้งมือไว้ ไม่ยุ่ง */
+  const staleAccounts = dbMemo(() => {
+    const out = [];
+    accountsByType.main.forEach(a => {
+      const latest = dbNewestSnap(snapshots, a.Bank_AC);
+      if (!latest) return;
+      const acctDate = String(a.DATE || '').slice(0, 10);
+      const balOff   = Math.abs(Number(a.BALANCE || 0) - Number(latest.balance || 0)) > 0.005;
+      if ((acctDate && acctDate > latest.date)) return;          // DATA BANK ล้ำหน้า → ปล่อยไว้
+      if (acctDate !== latest.date || balOff) out.push({ a, latest, acctDate });
+    });
+    return out;
+  }, [accountsByType.main, snapshots]);
+
+  const syncLatestToBank = () => {
+    if (!staleAccounts.length) return;
+    if (!confirm(`อัปเดต DATA BANK ให้ตรงกับยอดที่บันทึกล่าสุด ${staleAccounts.length} บัญชี?
+
+(หน้า Bank Daily ใช้ยอด + วันที่นี้เป็นจุดตั้งต้น — ไม่แตะรายการที่บันทึกไว้)`)) return;
+    const byAc = {};
+    staleAccounts.forEach(x => { byAc[x.a.Bank_AC] = x.latest; });
+    setData(d => ({
+      ...d,
+      bankAccounts: (d.bankAccounts || []).map(acc => {
+        const l = byAc[acc.Bank_AC];
+        if (!l) return acc;
+        const next = { ...acc, BALANCE: Number(l.balance), DATE: l.date };
+        if (l.hold != null && l.hold !== '') next.HOLD_AMOUNT = Number(l.hold);
+        return next;
+      }),
+    }));
+    toast(`ซิงค์ยอดล่าสุดเข้า DATA BANK แล้ว ${staleAccounts.length} บัญชี`);
+  };
+
+  // กำลังเปิดวันที่เก่ากว่าวันที่บันทึกล่าสุด = โหมดแก้ย้อนหลัง (บันทึกแล้วจะไม่ทับยอดล่าสุด)
+  const newestAnySnap = dbMemo(
+    () => snapshots.reduce((m, s) => (s && s.date && s.date > m ? s.date : m), ''),
+    [snapshots]);
+  const isBackdated = !!newestAnySnap && entryDate < newestAnySnap;
 
   const weekend = isWeekend(entryDate);
 
@@ -346,6 +420,11 @@ function DailyBalancePage({ data, setData, toast }) {
             {mainSavedCount === mainTotalCount && mainTotalCount > 0
               ? <span style={{ color: 'var(--good)', fontWeight: 600 }}>✓ บันทึกครบ {mainTotalCount}/{mainTotalCount} บัญชีหลักแล้ว</span>
               : <span style={{ color: 'var(--bad)' }}>⏳ บันทึกแล้ว {mainSavedCount}/{mainTotalCount} บัญชีหลัก — ค้าง {mainTotalCount - mainSavedCount}</span>}
+            {isBackdated && (
+              <span style={{ color: 'var(--warn)', marginLeft: 10, fontWeight: 600 }}>
+                ✏️ แก้ย้อนหลัง — ยอดล่าสุดใน DATA BANK (บันทึกไว้ถึง {fmtDate(newestAnySnap)}) จะไม่ถูกทับ
+              </span>
+            )}
           </div>
         </div>
         <div className="page-head-r">
@@ -359,6 +438,35 @@ function DailyBalancePage({ data, setData, toast }) {
           <PrintButton />
         </div>
       </div>
+
+      {/* ⚠️ DATA BANK ค้างอยู่วันเก่า → หน้า Bank Daily จะยึดวันเก่าแล้วหักรายการซ้ำ */}
+      {staleAccounts.length > 0 && (
+        <div className="card anim-in" style={{
+          padding: '12px 16px', marginBottom: 14, borderLeft: '4px solid var(--warn)',
+          display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+        }}>
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>
+              ⚠️ DATA BANK ไม่ตรงกับยอดที่บันทึกล่าสุด ({staleAccounts.length} บัญชี)
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--ink-600)' }}>
+              {staleAccounts.slice(0, 4).map(x =>
+                `${x.a.BANK_NAME || x.a.Bank_AC}: DATA BANK ${x.acctDate ? fmtDate(x.acctDate) : '—'} → บันทึกล่าสุด ${fmtDate(x.latest.date)}`
+              ).join(' · ')}
+              {staleAccounts.length > 4 ? ` · อีก ${staleAccounts.length - 4} บัญชี` : ''}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-400)', marginTop: 4 }}>
+              หน้า <b>Bank Daily</b> ใช้ยอด + วันที่ใน DATA BANK เป็นจุดตั้งต้น แล้วหักทุกรายการตั้งแต่วันนั้น —
+              ถ้าไม่ซิงค์ จะยังโชว์รายการย้อนไปถึงวันเก่า และหักเงินที่จ่ายไปแล้วซ้ำอีกรอบ
+            </div>
+          </div>
+          {canEdit
+            ? <button className="btn btn-primary btn-sm" onClick={syncLatestToBank}>
+                <Icon name="refresh" size={13} /> ซิงค์ยอดล่าสุดเข้า DATA BANK
+              </button>
+            : <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>ให้ manager/staff กดซิงค์</span>}
+        </div>
+      )}
 
       {/* KPI */}
       <div className="grid grid-4 anim-stagger" style={{ marginBottom: 16 }}>
