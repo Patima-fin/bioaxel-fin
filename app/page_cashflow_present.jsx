@@ -85,6 +85,9 @@
   function cfpFmtM(v) { return (v < 0 ? '-' : '') + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
   function cfpFmtSigned(v) { return (v < 0 ? '-' : '+') + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
   function cfpFmtPlain(v) { return Math.round(Math.abs(v || 0)).toLocaleString('en-US'); }
+  // ยอดเต็มทศนิยม 2 ตำแหน่ง (ใช้ในการ์ดสรุปผู้บริหาร) · cfpFmtAcct = ติดลบใส่วงเล็บแบบงบการเงิน
+  function cfpFmtFull(v) { return Math.abs(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function cfpFmtAcct(v) { const s = cfpFmtFull(v); return (v || 0) < 0 ? '(' + s + ')' : s; }
   function cfpThaiDate(iso) {
     if (!iso || iso.length < 10) return iso || '';
     let y = +iso.slice(0, 4); const m = +iso.slice(5, 7), d = +iso.slice(8, 10);
@@ -412,12 +415,13 @@
       const mnet = o + iv + f; run += mnet;
       return { m, label: CFP_MONTHS[m] || ('เดือน ' + m), op: o, inv: iv, fin: f, net: mnet, end: run };
     });
-    let interest = 0, payroll = 0, inflowTotal = 0; const inflowByCat = {};
+    let interest = 0, payroll = 0, inflowTotal = 0, outflowTotal = 0; const inflowByCat = {};
     txns.forEach(t => {
       if (t.actKey === 'transfer' || t.actKey === 'other') return;
       if (/ดอกเบี้ย/.test(t.category)) interest += Math.abs(t.flow);
       if (/เงินเดือน/.test(t.category)) payroll += Math.abs(t.flow);
       if (t.flow > 0) { inflowTotal += t.flow; inflowByCat[t.category] = (inflowByCat[t.category] || 0) + t.flow; }
+      else outflowTotal += -t.flow;   // ★ inflowTotal - outflowTotal = net (ตัด transfer/other ออกชุดเดียวกัน)
     });
     let topInflow = { name: '', amt: 0 };
     Object.keys(inflowByCat).forEach(n => { if (inflowByCat[n] > topInflow.amt) topInflow = { name: n, amt: inflowByCat[n] }; });
@@ -440,7 +444,7 @@
       months, monthly, acts, opening, ending, net, transferNet, otherNet,
       accountInfo, monthsAll, hasAcctBalances,
       allTxns: txns, txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
-      accounts: Object.keys(accounts), interest, payroll, inflowTotal, topInflow,
+      accounts: Object.keys(accounts), interest, payroll, inflowTotal, outflowTotal, topInflow,
       summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
       monthLabels: ((summary && summary.monthLabels) || []).map(cfpCeText),
       periodLabel: cfpCeText(cfpPeriodLabel(summary, months, txns)),
@@ -612,12 +616,79 @@
   }
 
   /* ---------- KPI cards ---------- */
-  function CfpKpiHero({ label, value, sub, color }) {
+  // ชื่อ/ไอคอน/คำอธิบายการ์ดกิจกรรม (ไทย + อังกฤษ) — สไลด์นำเสนออ่านได้ทั้งสองภาษา
+  const CFP_ACT_EN = { op: 'Operating', inv: 'Investing', fin: 'Financing' };
+  const CFP_ACT_ICON = { op: '⚙️', inv: '📊', fin: '🏛️' };
+  const CFP_ACT_DESC = { op: 'เงินสดจาก/ใช้ในการดำเนินงาน', inv: 'ซื้อ/ขายสินทรัพย์ · เงินลงทุน', fin: 'เงินกู้ / เพิ่มทุน / จ่ายคืน' };
+
+  /* ★ แถบสรุปผู้บริหาร — เลย์เอาต์ชุดเดียวกับ WTP เพื่อให้สไลด์นำเสนอสองบริษัทไปทางเดียวกัน:
+   *     ซ้าย = ภาพรวมรับ–จ่าย (เงินรับรวม / เงินจ่ายรวม / กระแสเงินสดสุทธิ)
+   *     ขวา  = เงินสดปลายงวด (ยอดชูโรง) + ต้นงวด → % เปลี่ยนแปลง
+   *   สีคงชุดแบรนด์ BIOAXEL: เขียว = การ์ดหลัก/เงินเข้า · แดง = เงินออก
+   *   ยอดในแถบนี้แสดง "บาทเต็ม ทศนิยม 2 ตำแหน่ง" (ไม่ใช่ M) — ผู้บริหารอ่านตัวเลขจริงบนสไลด์ */
+  function CfpHeroBoard({ model }) {
+    const inflow = model.inflowTotal || 0;
+    const outflow = model.outflowTotal || 0;
+    const mx = Math.max(inflow, outflow, 1);
+    const up = model.net >= 0;
+    const chg = model.opening ? (model.net / Math.abs(model.opening) * 100) : null;
+    const tile = grad => ({ background: grad, borderRadius: 16, padding: '13px 16px', color: '#fff', boxShadow: '0 8px 20px rgba(20,52,34,.13)' });
+    const flows = [
+      { lab: 'เงินรับรวม', val: inflow, tag: '▲ เข้า', grad: 'linear-gradient(140deg,#22c98d,#0f9c67)' },
+      { lab: 'เงินจ่ายรวม', val: outflow, tag: '▼ ออก', grad: 'linear-gradient(140deg,#fb6b78,#e0414f)' },
+    ];
     return (
-      <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow }}>
-        <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 4px', color: color || C.ink, letterSpacing: '-.5px' }}>{value}</div>
-        {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
+      <div className="cfp-hero-grid">
+        {/* ซ้าย — เงินเข้า / เงินออก / สุทธิ */}
+        <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 13 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>ภาพรวมรับ–จ่าย <span style={{ fontSize: 12, fontWeight: 500, color: C.faint }}>Cash In–Out Overview</span></div>
+            <div style={{ fontSize: 12, color: C.mut }}>{model.months.length} เดือน · เงินหมุน {cfpFmtM(inflow + outflow)}</div>
+          </div>
+          <div className="cfp-hero-flows">
+            {flows.map(f => (
+              <div key={f.lab} style={tile(f.grad)}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>▪ {f.lab}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, background: 'rgba(255,255,255,.22)', borderRadius: 99, padding: '3px 10px', whiteSpace: 'nowrap' }}>{f.tag}</span>
+                </div>
+                <div style={{ fontSize: 'clamp(19px,2.1vw,27px)', fontWeight: 800, letterSpacing: '-.6px', marginTop: 9, fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(f.val)}</div>
+                <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,.3)', marginTop: 11, overflow: 'hidden' }}><div style={{ width: (f.val / mx * 100) + '%', height: '100%', background: 'rgba(255,255,255,.92)', borderRadius: 99 }} /></div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: up ? C.posBg : C.negBg, border: '1px solid ' + (up ? '#c3f0de' : '#ffd3d9'), borderRadius: 16, padding: '12px 16px' }}>
+            <div style={{ width: 34, height: 34, borderRadius: 12, background: up ? C.pos : C.neg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 800, flex: '0 0 auto' }}>{up ? '↑' : '↓'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: up ? C.pos : C.neg }}>กระแสเงินสดสุทธิ</div>
+              <div style={{ fontSize: 12, color: C.mut }}>{up ? 'รับมากกว่าจ่าย — เงินสดเพิ่มขึ้นในงวดนี้' : 'จ่ายมากกว่ารับ — เงินสดลดลงในงวดนี้'}</div>
+            </div>
+            <div style={{ marginLeft: 'auto', fontSize: 'clamp(19px,2.3vw,28px)', fontWeight: 800, color: up ? C.pos : C.neg, letterSpacing: '-.6px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{cfpFmtAcct(model.net)}</div>
+          </div>
+        </div>
+
+        {/* ขวา — เงินสดปลายงวด (ยอดชูโรง) */}
+        <div className="cfp-card cfp-hero-end" style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '18px 22px', color: '#fff', background: 'linear-gradient(140deg,#34a86e 0%,#1f7d46 52%,#134d2c 100%)', boxShadow: '0 14px 36px rgba(31,120,60,.32)' }}>
+          <div aria-hidden style={{ position: 'absolute', right: -62, top: -74, width: 210, height: 210, borderRadius: '50%', background: 'rgba(255,255,255,.09)' }} />
+          <div aria-hidden style={{ position: 'absolute', right: 34, bottom: -96, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,.07)' }} />
+          <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><span>🏦</span>เงินสดปลายงวด <span style={{ fontSize: 12, fontWeight: 500, opacity: .72 }}>Ending Cash</span></div>
+            <div style={{ fontSize: 'clamp(26px,3.2vw,42px)', fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1.06, margin: '10px 0 5px', fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(model.ending)}</div>
+            <div style={{ fontSize: 12, opacity: .78 }}>คงเหลือสุทธิ ณ สิ้นงวด · หน่วย บาท</div>
+            <div style={{ height: 1, background: 'rgba(255,255,255,.22)', marginTop: 'auto', marginBottom: 0, minHeight: 1, flex: '0 0 auto' }} />
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, opacity: .75 }}>เงินสดต้นงวด</div>
+                <div style={{ fontSize: 'clamp(15px,1.6vw,20px)', fontWeight: 700, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(model.opening)}</div>
+              </div>
+              <div style={{ flex: 1, textAlign: 'center', fontSize: 17, opacity: .55 }}>→</div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 12, opacity: .75 }}>เปลี่ยนแปลง</div>
+                <div style={{ fontSize: 'clamp(15px,1.6vw,20px)', fontWeight: 800, marginTop: 3, whiteSpace: 'nowrap' }}>{chg == null ? '–' : (up ? '▲ ' : '▼ ') + Math.abs(chg).toFixed(1) + '%'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -653,14 +724,82 @@
       </div>
     );
   }
-  function CfpKpiAct({ k, value, sub, onClick }) {
-    const col = ACT_COLOR[k];
+  /* การ์ดกิจกรรม (ดำเนินงาน/ลงทุน/จัดหาเงิน) — ขอบซ้ายบอกทิศทางเงิน (เขียว=รับสุทธิ แดง=จ่ายสุทธิ),
+   * แถบ + "สัดส่วน %" = น้ำหนักกิจกรรมนั้นเทียบยอดสัมบูรณ์ทั้ง 3 กิจกรรม, 🚩 = จุดเฝ้าระวัง, กดการ์ด → รายการจริง */
+  function CfpKpiAct({ k, value, share, flags, onClick }) {
+    const up = value >= 0, col = up ? C.pos : C.neg, bg = up ? C.posBg : C.negBg;
+    const pct = Math.max(0, Math.min(100, Math.round((share || 0) * 100)));
     return (
-      <div onClick={onClick} className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ height: 5, margin: '-16px -20px 12px', background: col }} />
-        <div style={{ fontSize: 13, color: C.mut, fontWeight: 600 }}>{CFP_ACT_NAME[k]} <span style={{ color: C.faint, fontSize: 11 }}>กดดู ›</span></div>
-        <div style={{ fontSize: 22, fontWeight: 800, margin: '7px 0 2px', color: value < 0 ? C.neg : C.pos, letterSpacing: '-.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtM(value)}</div>
-        {sub && <div style={{ fontSize: 11, color: C.mut }}>{sub}</div>}
+      <div onClick={onClick} className="cfp-card" title={'กดดูรายการ' + CFP_ACT_NAME[k]} style={{ background: C.cardSolid, border: '1px solid ' + C.line, borderLeft: '5px solid ' + col, borderRadius: 18, padding: '14px 18px', boxShadow: C.shadow, cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 11, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flex: '0 0 auto' }}>{CFP_ACT_ICON[k]}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap' }}>{CFP_ACT_SHORT[k]}</div>
+            <div style={{ fontSize: 11, color: C.faint }}>{CFP_ACT_EN[k]}</div>
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            {flags > 0 && <span title={flags + ' จุดเฝ้าระวัง'} style={{ fontSize: 11, fontWeight: 700, color: '#a8620a', background: '#fff5e6', border: '1px solid #f0d6a8', borderRadius: 99, padding: '2px 8px', whiteSpace: 'nowrap' }}>🚩 {flags}</span>}
+            <span style={{ fontSize: 11, fontWeight: 700, color: col, background: bg, borderRadius: 99, padding: '3px 10px', whiteSpace: 'nowrap' }}>{up ? 'รับสุทธิ' : 'จ่ายสุทธิ'}</span>
+          </div>
+        </div>
+        <div style={{ fontSize: 'clamp(19px,2.1vw,27px)', fontWeight: 800, color: col, letterSpacing: '-.6px', margin: '12px 0 10px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtAcct(value)}</div>
+        <div style={{ height: 6, borderRadius: 99, background: C.soft, overflow: 'hidden' }}><div style={{ width: pct + '%', height: '100%', background: col, borderRadius: 99 }} /></div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8, fontSize: 11, color: C.mut }}>
+          <span>{CFP_ACT_DESC[k]}</span><span style={{ whiteSpace: 'nowrap' }}>สัดส่วน {pct}%</span>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------- Top 5 รับ – Top 5 จ่าย (แทนบล็อก Executive Insights เดิม) ----------
+   *  แบ่ง 2 ฝั่งในสไลด์เดียว: "เงินก้อนใหญ่เข้ามาจากไหน" กับ "ออกไปทางไหน"
+   *  ใช้ชุดรายการเดียวกับที่คิดกระแสเงินสดสุทธิ (ตัดโอนระหว่างบัญชี/อื่นๆ ออก)
+   *  → ตัวเลขจึงตรงกับการ์ดเงินรับรวม/เงินจ่ายรวมด้านบนเสมอ */
+  function CfpTopFlows({ model, onAll }) {
+    const base = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other');
+    const sides = [
+      { key: 'in', title: 'Top 5 รายการรับ', en: 'Top Cash In', icon: '📥', col: C.pos, bg: C.posBg, total: model.inflowTotal || 0, list: base.filter(t => t.flow > 0).sort((a, b) => b.flow - a.flow) },
+      { key: 'out', title: 'Top 5 รายการจ่าย', en: 'Top Cash Out', icon: '📤', col: C.neg, bg: C.negBg, total: model.outflowTotal || 0, list: base.filter(t => t.flow < 0).sort((a, b) => a.flow - b.flow) },
+    ];
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
+        {sides.map(s => {
+          const top = s.list.slice(0, 5);
+          const mx = Math.max.apply(null, top.map(t => Math.abs(t.flow)).concat([1]));
+          const topSum = top.reduce((a, t) => a + Math.abs(t.flow), 0);
+          return (
+            <div key={s.key} className="cfp-card" style={{ ...cfpCard, marginBottom: 0, borderTop: '4px solid ' + s.col }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 26, height: 26, borderRadius: 9, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>{s.icon}</span>
+                  {s.title} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>{s.en}</span>
+                </span>
+                <span onClick={() => onAll(s.key)} title={'ดูรายการ' + (s.key === 'in' ? 'รับ' : 'จ่าย') + 'ทั้งหมด'} style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: s.col, background: s.bg, borderRadius: 99, padding: '4px 11px', whiteSpace: 'nowrap' }}>รวม {cfpFmtM(s.total)} · ดูทั้งหมด ›</span>
+              </div>
+              {top.map((t, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: i ? '1px solid ' + C.line : 'none' }}>
+                  <span style={{ width: 21, height: 21, borderRadius: 7, background: s.bg, color: s.col, fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>{i + 1}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div title={t.note || t.category} style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.note || t.category}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                      <span style={{ fontSize: 11, color: C.faint, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</span>
+                      <CfpBankPill acct={t.account} />
+                      <CfpTag k={t.actKey} />
+                      <span style={{ flex: 1, minWidth: 20, height: 4, borderRadius: 99, background: C.soft, overflow: 'hidden' }}><span style={{ display: 'block', width: (Math.abs(t.flow) / mx * 100) + '%', height: '100%', background: s.col, borderRadius: 99 }} /></span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: s.col, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{cfpFmtB(t.flow)}</div>
+                </div>
+              ))}
+              {!top.length && <div style={{ fontSize: 12, color: C.faint, padding: '10px 0' }}>ไม่มีรายการ</div>}
+              {top.length > 0 && s.total > 0 && (
+                <div style={{ fontSize: 11, color: C.mut, borderTop: '1px solid ' + C.line, marginTop: 4, paddingTop: 8 }}>
+                  5 อันดับนี้ = <b style={{ color: s.col }}>{Math.round(topSum / s.total * 100)}%</b> ของยอด{s.key === 'in' ? 'รับ' : 'จ่าย'}ทั้งงวด · จากทั้งหมด {s.list.length} รายการ
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1160,9 +1299,14 @@
     }
 
     function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
+    function openFlowSide(side) {
+      const txns = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other' && (side === 'in' ? t.flow > 0 : t.flow < 0)).sort((x, y) => Math.abs(y.flow) - Math.abs(x.flow));
+      const sum = txns.reduce((s, t) => s + t.flow, 0);
+      setModal({ title: side === 'in' ? 'รายการเงินสดรับทั้งหมด' : 'รายการเงินสดจ่ายทั้งหมด', subtitle: txns.length + ' รายการ · รวม ' + cfpFmtB(sum) + ' · ' + model.periodLabel, txns });
+    }
     function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }
     function openCat(c) { const txns = (c.txns || []).slice().sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: c.name, subtitle: c.count + ' รายการ · สุทธิ ' + cfpFmtB(c.net), txns }); }
-    function watchSub(k) { const n = cfpWatch(model, k).filter(f => f.sev === 'red' || f.sev === 'amber').length; return n ? ('🚩 ' + n + ' จุดเฝ้าระวัง') : 'กดดูรายการ'; }
+    function watchN(k) { return cfpWatch(model, k).filter(f => f.sev === 'red' || f.sev === 'amber').length; }
         function openStmt(row, monthNum) {
       const mlab = monthNum ? ' · เดือน ' + (CFP_MONTHS[monthNum] || monthNum) : '';
       if (row.type === 'grand') {
@@ -1327,28 +1471,23 @@
           </div>
 
           {tab === 'overview' && <React.Fragment>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 14, marginBottom: 16 }}>
-              <CfpKpiHero label="เงินสดต้นงวด" value={cfpFmtM(model.opening)} />
-              <CfpKpiHero label="กระแสเงินสดสุทธิ" value={cfpFmtSigned(model.net)} color={model.net < 0 ? C.neg : C.pos} sub={model.net >= 0 ? 'เงินสดเพิ่มขึ้น' : 'เงินสดลดลง'} />
-              <CfpKpiHero label="เงินสดปลายงวด" value={cfpFmtM(model.ending)} color={C.primaryD} sub={(model.net >= 0 ? '▲ ' : '▼ ') + cfpFmtSigned(model.net) + ' จากต้นงวด'} />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14, marginBottom: 16 }}>
-              <CfpKpiAct k="op" value={model.acts.op.net} onClick={() => openAct('op')} sub={watchSub('op')} />
-              <CfpKpiAct k="inv" value={model.acts.inv.net} onClick={() => openAct('inv')} sub={watchSub('inv')} />
-              <CfpKpiAct k="fin" value={model.acts.fin.net} onClick={() => openAct('fin')} sub={watchSub('fin')} />
-            </div>
+            <CfpHeroBoard model={model} />
+            {(function () {
+              const tot = Math.abs(model.acts.op.net) + Math.abs(model.acts.inv.net) + Math.abs(model.acts.fin.net) || 1;
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(255px,1fr))', gap: 14, marginBottom: 16 }}>
+                  {['op', 'inv', 'fin'].map(k => <CfpKpiAct key={k} k={k} value={model.acts[k].net} share={Math.abs(model.acts[k].net) / tot} flags={watchN(k)} onClick={() => openAct(k)} />)}
+                </div>
+              );
+            })()}
             <CfpReconBadge model={model} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(370px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
               <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
               <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
             </div>
             <CfpCashUsable model={model} acctTypes={stored && stored.acctTypes} canEdit={canEdit} onSave={saveAcctTypes} />
-            <div style={secTitle}><span>🤖 Executive Insights</span></div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 14, marginBottom: 8 }}>
-              {model.acts.fin.net > 0 && model.acts.op.net < 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>🔁 อยู่ได้ด้วยการจัดหาเงิน</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>ดำเนินงาน {cfpFmtM(model.acts.op.net)}</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>จัดหาเงินหนุน {cfpFmtSigned(model.acts.fin.net)}</div></div>)}
-              {model.interest > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>％ ดอกเบี้ยจ่าย</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{cfpFmtM(model.interest)}</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>{model.payroll > 0 ? '≈ ' + Math.round(model.interest / model.payroll * 100) + '% ของเงินเดือน (' + cfpFmtM(model.payroll) + ')' : 'ภาระดอกเบี้ยรวมทั้งงวด'}</div></div>)}
-              {model.topInflow.amt > 0 && model.inflowTotal > 0 && (<div className="cfp-card" style={{ ...card, marginBottom: 0, background: 'linear-gradient(135deg,rgba(46,139,74,.12),rgba(26,164,111,.14))' }}><div style={{ fontSize: 12, fontWeight: 700, color: C.primaryD }}>📦 รายได้กระจุกตัว</div><div style={{ fontSize: 15, fontWeight: 800, marginTop: 7 }}>{Math.round(model.topInflow.amt / model.inflowTotal * 100)}% จากสินค้าหลัก</div><div style={{ fontSize: 11, color: C.mut, marginTop: 3 }}>{model.topInflow.name.replace(/^เงินสดรับจากการขาย-?/, '')} ({cfpFmtM(model.topInflow.amt)})</div></div>)}
-            </div>
+            <div style={secTitle}><span>🏅 Top 5 รับ–จ่าย</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>เงินก้อนใหญ่เข้ามาจากไหน · ออกไปทางไหน · กด "ดูทั้งหมด" → รายการจริง</span></div>
+            <CfpTopFlows model={model} onAll={openFlowSide} />
             {(function () {
               const ranked = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').slice().sort((a, b) => Math.abs(b.flow) - Math.abs(a.flow)).slice(0, topN);
               return (

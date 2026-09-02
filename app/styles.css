@@ -2037,3 +2037,18 @@ body.role-owner [data-owner-readonly] { pointer-events: none !important; cursor:
 .hp-bank-bal { font-size: 14px; font-weight: 700; color: var(--ink-900); font-variant-numeric: tabular-nums; }
 .hp-bank-bal.neg { color: var(--bad); }
 
+/* ── Cash Flow Present (#cashflow_present) — แถบสรุปผู้บริหาร (แท็บภาพรวม) ──────────
+   ซ้าย = ภาพรวมรับ–จ่าย (กว้างกว่า) · ขวา = การ์ดเงินสดปลายงวด
+   จอแคบ / ปรินต์แนวตั้ง → ซ้อนเป็นคอลัมน์เดียว (A4 แนวนอน ≈ 1047px ยังได้ 2 คอลัมน์) */
+.cfp-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+.cfp-hero-flows { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 1000px) { .cfp-hero-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .cfp-hero-flows { grid-template-columns: 1fr; } }
+/* การ์ดปลายงวดพื้นเข้ม — เงาแบนตอนปรินต์ (สีพื้นยังพิมพ์ครบจาก print-color-adjust ด้านบน) */
+@media print { .cfp-page .cfp-hero-end { box-shadow: none !important; } }
