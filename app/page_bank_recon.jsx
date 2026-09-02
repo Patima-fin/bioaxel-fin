@@ -287,13 +287,30 @@ function brDecodeText(buf) {
     catch (_2) { return new TextDecoder('utf-8').decode(buf); }
   }
 }
-// ─── ไฟล์ → AOA (CSV decode เอง · Excel ผ่าน global XLSX) ─────────────────────
+// ── ⚠️ EXPRESS เขียน SpreadsheetML ผิดสเปค: <Data ss:Type="Number">104,992.26</Data> (มีคอมมา) ──
+//    ค่า Number ตามสเปคต้องเป็นทศนิยมล้วน — SheetJS จึงแปลงได้ NaN แล้วเก็บเซลล์เป็น v:null
+//    ⇒ คอลัมน์ "ยอดถอน / ยอดฝาก / ยอดคงเหลือ" หายทั้งไฟล์แบบเงียบสนิท (แถวยังนำเข้าครบ แต่ amount = 0
+//      → ถูกกรองออกจากตัวจับคู่ เหลือเฉพาะยอดที่ไม่มีคอมมา คือ < 1,000 เท่านั้น).
+//    ของจริงที่เจอ: ไฟล์ 4839 ส.ค. 2569 นำเข้า 85 แถว แต่เหลือให้กระทบยอดแค่ 4 แถว (2026-09-02)
+//    ★ ตัวอ่าน XML อีกตัวของแอป (page_data_extras: DATA PV) ใช้ DOMParser อ่าน text ตรง ๆ จึงไม่เจอปัญหานี้
+//      ที่นี่เดินผ่าน SheetJS (เพื่อใช้ตัวเดา header/หลายชีตร่วมกับ statement) → ต้องซ่อมข้อความก่อนอ่าน
+function brFixSpreadsheetMLNumbers(xml) {
+  return String(xml).replace(/(<Data\b[^>]*ss:Type\s*=\s*"Number"[^>]*>)([^<]*)(<\/Data>)/g,
+    (m, open, val, close) => open + String(val).replace(/[,\s]/g, '') + close);
+}
+function brLooksLikeSpreadsheetML(buf) {
+  try { return /<\?xml|<Workbook/i.test(new TextDecoder('utf-8').decode(new Uint8Array(buf).slice(0, 512))); }
+  catch (_) { return false; }
+}
+// ─── ไฟล์ → AOA (CSV/XML decode เอง · Excel ผ่าน global XLSX) ─────────────────
 function brParseFile(file, password) {
   return file.arrayBuffer().then(buf => {
     const name = (file.name || '').toLowerCase();
     let wb;
     if (/\.(csv|txt)$/.test(name)) {
       wb = XLSX.read(brDecodeText(buf), { type: 'string', raw: true });        // decode เอง กัน mojibake ไทย
+    } else if (/\.xml$/.test(name) || brLooksLikeSpreadsheetML(buf)) {
+      wb = XLSX.read(brFixSpreadsheetMLNumbers(brDecodeText(buf)), { type: 'string', cellDates: true });
     } else {
       // .xls/.xlsx binary — ถ้ามีรหัส (เช่น KTB) ส่ง password ให้ SheetJS ถอด (RC4/Standard)
       const opts = { type: 'array', cellDates: true };
@@ -951,8 +968,17 @@ function BankReconPage({ data, setData, toast }) {
     const rl = brRelinkMatches(scoped, oldMoves, moves);
     const nm = rest.concat(rl.matches);
     const nb = Object.assign({}, bookAll, { [accNo]: Object.assign({}, bookAll[accNo] || {}, { [ym]: { meta: meta, moves: moves, outs: outs } }) });
+    // ★ แถวเก่าของงวดนี้ที่ไม่มีในไฟล์ใหม่ ต้องสั่งลบตรง ๆ ด้วย forceDeleteRows —
+    //   นำเข้าทับ = แทนทั้งงวด ถ้าลายเซ็นแถวเปลี่ยน (เช่นแก้ยอด/เลขที่ หรือ parser อ่านยอดได้แล้ว)
+    //   id จะเปลี่ยนทั้งชุด → diff สั่งลบเกิน max(8, 50% ของตาราง) → เกราะกัน mass-delete ปัด deleteIds
+    //   ทิ้งเงียบ ๆ แต่ปล่อย upsert ไหลต่อ = ตารางเบิ้ล 2 เท่า (ดู gotcha ใน CLAUDE.md)
+    const rowIdsOf = (b) => (b ? brBookToRows({ [accNo]: { [ym]: b } }).map(r => r.id) : []);
+    const newIdSet = new Set(rowIdsOf({ meta: meta, moves: moves, outs: outs }));
+    const staleIds = rowIdsOf((bookAll[accNo] || {})[ym]).filter(id => !newIdSet.has(id));
     setBookAll(nb); BankReconStore.setBook(nb); pushReconBook(nb);
     if (rl.relinked || rl.orphaned) { setMatches(nm); BankReconStore.setMatches(nm); pushReconMatch(nm); }
+    if (staleIds.length && window.WTPData && typeof WTPData.forceDeleteRows === 'function')
+      WTPData.forceDeleteRows('bankReconBook', staleIds);
     if (window.WTPData && typeof WTPData.forceSyncNow === 'function')
       WTPData.forceSyncNow(Object.assign({}, data, { bankReconBook: brBookToRows(nb), bankReconMatch: brMatchToRows(nm) }));
     if (toast) toast('นำเข้างบกระทบยอด Express ' + moves.length + ' รายการ'
@@ -1732,6 +1758,9 @@ function brBookImportDiff(parsed, accNo, ym, oldMoves) {
     gone: (oldMoves || []).filter(m => !newIds[m.id]),
     ambiguous: moves.filter(m => !/#1$/.test(String(m.id))),
     offMonth: moves.filter(m => m.bkDate && brMonthOf(m.bkDate) !== ym).length,
+    // แถวยอด 0 = JV ที่ไม่กระทบเงินสด (ปกติมีไม่กี่แถว) — ถ้าเกือบทั้งไฟล์แปลว่า "อ่านคอลัมน์ยอดไม่ได้"
+    //   (เคสจริง: SpreadsheetML ของ EXPRESS ใส่คอมมาในค่า Number → SheetJS อ่านเป็น null ทั้งคอลัมน์)
+    zeroAmt: moves.filter(m => Math.abs(Number(m.amount) || 0) <= 0.005).length,
     from: dates[0] || '', to: dates[dates.length - 1] || '',
   };
 }
@@ -2527,7 +2556,8 @@ function BRBookDiffModal({ diff, accNo, month, onConfirm, onClose }) {
       <td style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>{hint}</td>
     </tr>
   );
-  const warn = diff.mismatch || diff.offMonth > 0;
+  const badAmt = diff.moves.length > 0 && diff.zeroAmt > diff.moves.length / 2;   // ยอดหายเกินครึ่งไฟล์ = อ่านคอลัมน์ยอดไม่ได้
+  const warn = diff.mismatch || diff.offMonth > 0 || badAmt;
   return (
     <Modal open title="ตรวจก่อนนำเข้างบกระทบยอด Express" maxWidth={560} onClose={onClose}
       footer={<>
@@ -2542,6 +2572,8 @@ function BRBookDiffModal({ diff, accNo, month, onConfirm, onClose }) {
         <div style={{ background: '#fffbeb', border: '1px solid #f6ad55', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--ink-700)' }}>
           {diff.mismatch && <div>⚠️ ไฟล์ระบุบัญชี <b>{diff.fileAcct}</b> ซึ่งไม่ตรงกับบัญชีที่เลือก (···{bdLast4(accNo)})</div>}
           {diff.offMonth > 0 && <div>⚠️ มี <b>{fmtNum(diff.offMonth, 0)}</b> รายการที่วันที่ไม่ได้อยู่ในเดือน {brFmtMonth(month)} — อาจอัปผิดงวด</div>}
+          {badAmt && <div>⛔ <b>{fmtNum(diff.zeroAmt, 0)}</b> จาก {fmtNum(diff.moves.length, 0)} รายการอ่าน "ยอดถอน/ยอดฝาก" ไม่ได้ (เป็น 0) —
+            แถวพวกนี้จะ<b>ไม่ถูกนำไปจับคู่</b> · ตรวจว่าคอลัมน์ยอดในไฟล์ถูกต้องก่อนนำเข้า</div>}
         </div>
       )}
       <table className="tbl" style={{ width: '100%', fontSize: 13 }}>
