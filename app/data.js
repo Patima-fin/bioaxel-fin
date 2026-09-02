@@ -892,10 +892,21 @@
   const markInvoicesPaidFromReceipts = (invoices, receipts) => {
     const list = invoices || [];
     if (!list.length || !receipts || !receipts.length) return { invoices: list, changed: 0 };
-    // receipt ล่าสุด (receiptDate มากสุด — ISO เทียบ string ได้ตรง) ต่อ invoiceNo
+    // receipt ล่าสุด (receiptDate มากสุด — ISO เทียบ string ได้ตรง)
+    // ★ คีย์หลัก = ivId ไม่ใช่ invoiceNo — "เลขที่ IV ไม่ unique" (ใบคนละงานออกเลขซ้ำกันได้)
+    //   receipt ที่ "ผูก ivId ไว้แล้ว" จึงต้องไม่ไปโผล่ในแมป invoiceNo ด้วย ไม่งั้น receipt ของ
+    //   ใบ A จะไป flip ใบ B ที่เลขซ้ำกันให้เป็น paid — และทำให้ "ยกเลิกการรับเงิน" ของใบ B
+    //   ถูกดันกลับเป็น paid ทุกครั้งที่ sync (ivCancelReceive ลบเฉพาะ receipt ของใบตัวเอง)
+    const rcpById = {};
     const rcpByIv = {};
     receipts.forEach(function (r) {
       if (!r) return;
+      const kId = String(r.ivId == null ? '' : r.ivId).trim();
+      if (kId) {
+        const curId = rcpById[kId];
+        if (!curId || String(r.receiptDate || '') > String(curId.receiptDate || '')) rcpById[kId] = r;
+        return;
+      }
       const k = String(r.invoiceNo == null ? '' : r.invoiceNo).trim();
       if (!k) return;
       const cur = rcpByIv[k];
@@ -904,9 +915,11 @@
     let changed = 0;
     const out = list.map(function (iv) {
       if (!iv) return iv;
-      const k = String(iv.ivNo == null ? '' : iv.ivNo).trim();
-      if (!k) return iv;
-      const rcp = rcpByIv[k];
+      const ivId = String(iv.id == null ? '' : iv.id).trim();
+      const k    = String(iv.ivNo == null ? '' : iv.ivNo).trim();
+      // ivId ก่อนเสมอ · invoiceNo เป็น fallback สำหรับ receipt เก่าที่ import มาก่อนมี ivId
+      let rcp = ivId ? rcpById[ivId] : null;
+      if (!rcp && k) rcp = rcpByIv[k];
       if (!rcp) return iv;
       const ar = iv.actualReceive;
       // ★ มี "วันรับเงิน" อยู่แล้วไหม — ต้องเช็คทั้ง actualReceive.date (JSON) และ

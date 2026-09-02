@@ -560,6 +560,15 @@ function InvoicesPage({ data, setData, toast }) {
       }
     }
   };
+  // ── ยกเลิกการรับเงิน (คีย์ผิด / ยังไม่ได้รับจริง) ────────────────────────────
+  //    ต้องลบแถว receipts ที่ผูกไว้ด้วย ไม่งั้น backfill ทางกลับ flip ใบกลับเป็น paid
+  const cancelReceive = (iv) => {
+    ivCancelReceive({
+      iv, setData, toast,
+      receipts: data.receipts,
+      onDone:   (cleared) => setDetail(prev => (prev && String(prev.id) === String(cleared.id)) ? cleared : prev),
+    });
+  };
   // ── ลบใบแจ้งหนี้ (รองรับหลายใบ) ────────────────────────────────────────────
   // ⚠️ data_supabase.pushDiff มีเกราะกัน mass-delete: ถ้า diff สั่งลบ > max(8, 50%)
   //    ของทั้งตาราง มันจะ "ปัด deleteIds ทิ้งเงียบ ๆ" → แถวค้างบน server แล้วเด้งกลับ
@@ -1117,6 +1126,7 @@ function InvoicesPage({ data, setData, toast }) {
         iv={detail}
         onClose={() => setDetail(null)}
         onSave={save}
+        onCancelReceive={cancelReceive}
         onDelete={canDeletePage ? remove : null}
         bankAccounts={data.bankAccounts}
         projects={data.projects}
@@ -1588,9 +1598,79 @@ function IvAmountInput({ value, onChange }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// ยกเลิกการรับเงิน (คีย์ผิด / ยังไม่ได้รับจริง) — global ใช้ร่วมกันทั้ง 2 หน้า
+// ────────────────────────────────────────────────────────────────────────────
+// ⚠️ ถอนการรับเงิน "ต้องทำ 3 อย่างพร้อมกัน" ไม่งั้นมันเด้งกลับเองภายในไม่กี่วินาที:
+//   (1) ล้าง actualReceive + actualReceiveDate ของใบ IV
+//   (2) ดึงสถานะออกจาก 'paid' — handleSave บล็อกใบ paid ที่ไม่มียอดรับ
+//   (3) ลบแถว receipts ที่ผูกกับใบนี้ — ไม่ลบ = backfill ทางกลับ
+//       (WTPData.markInvoicesPaidFromReceipts เรียกจาก app.jsx) จะ flip ใบกลับเป็น paid
+//       แล้วเติม actualReceive คืนจาก receipt ให้อัตโนมัติ = "ยกเลิกแล้วไม่ยอมหาย"
+// นอกจากนั้น receipts ยังเป็นแหล่งเดียวที่ War Room §01 / หน้า Daily / การ์ด "✓ รับแล้ว" อ่าน
+// → ไม่ลบแถวนี้ ยอดรับเงินในรายงานก็ไม่ลด ต่อให้ถอนใบ IV แล้วก็ตาม
+function ivReceiptsOfInvoice(receipts, iv) {
+  const list = receipts || [];
+  if (!iv) return [];
+  // ลำดับเดียวกับ ensureReceiptForPaidInvoice (data.js): ivId ก่อนเสมอ — "เลขที่ IV ไม่ unique"
+  // จึงใช้ invoiceNo ได้เฉพาะเมื่อไม่เจอทาง ivId เลย (= receipt เก่าที่ import มาก่อนมี ivId)
+  const ivId = iv.id == null ? '' : String(iv.id);
+  const ivNo = String(iv.ivNo == null ? '' : iv.ivNo).trim();
+  if (ivId) {
+    const byId = list.filter(r => r && (String(r.ivId || '') === ivId || String(r.id || '') === 'rcp-' + ivId));
+    if (byId.length) return byId;
+  }
+  if (!ivNo) return [];
+  return list.filter(r => r && !r.ivId && String(r.invoiceNo || '').trim() === ivNo);
+}
+
+// คืน true ถ้าถอนจริง (false = ผู้ใช้กดยกเลิกที่กล่องยืนยัน)
+function ivCancelReceive(o) {
+  const iv = o && o.iv;
+  if (!iv || !o.setData) return false;
+  const linked = ivReceiptsOfInvoice(o.receipts, iv);
+  const sumRcp = linked.reduce((s, r) => s + (Number(r.netReceived) || Number(r.grossAmount) || 0), 0);
+  const lines = [
+    'ยกเลิกการรับเงินของใบ ' + (iv.ivNo || '—') + ' ?',
+    '',
+    '• ล้างวันที่ / จำนวนเงินที่รับจริง ออกจากใบนี้',
+    '• เปลี่ยนสถานะกลับเป็น "อยู่ระหว่างติดตามเงิน"',
+    linked.length
+      ? '• ลบใบเสร็จรับเงินที่ระบบสร้างไว้ ' + linked.length + ' แถว (' + fmtNum(sumRcp, 2) + ' ฿) → ยอดรับเงินใน War Room / หน้า Daily จะลดตาม'
+      : '• ไม่พบใบเสร็จรับเงินที่ผูกกับใบนี้',
+    '',
+    'ใบแจ้งหนี้ยังอยู่ครบ — กลับไปเป็น "ยังไม่ได้รับเงิน"',
+  ];
+  if (!confirm(lines.join('\n'))) return false;
+
+  const cleared = Object.assign({}, iv, {
+    status:            o.revertStatus || 'tracking',
+    actualReceive:     null,
+    actualReceiveDate: '',
+  });
+  // CRITICAL: อ่าน d.receipts ใน updater (ไม่ใช่ closure) — closure อาจ stale ถ้า server
+  // push ข้อมูลมาระหว่างทาง → snapshot เก่าทับของใหม่
+  let updatedData;
+  o.setData(d => {
+    const victims = new Set(ivReceiptsOfInvoice(d.receipts, iv).map(r => String(r.id)));
+    updatedData = Object.assign({}, d, {
+      invoices: (d.invoices || []).map(x => String(x.id) === String(iv.id) ? cleared : x),
+      receipts: (d.receipts || []).filter(r => !victims.has(String(r.id))),
+    });
+    return updatedData;
+  });
+  if (o.onDone) o.onDone(cleared);
+  if (o.toast) o.toast('ยกเลิกการรับเงินแล้ว' + (linked.length ? ' · ลบใบเสร็จ ' + linked.length + ' แถว' : ''));
+  if (updatedData) {
+    try { WTPData.save(updatedData); } catch (_) {}
+    if (WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updatedData), 0);
+  }
+  return true;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Detail modal: landscape split — read-only system data (left) + tracking (right)
 // ────────────────────────────────────────────────────────────────────────────
-function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, projects, financeByCode, projectByCode }) {
+function InvoiceDetailModal({ iv, onClose, onSave, onDelete, onCancelReceive, bankAccounts, projects, financeByCode, projectByCode }) {
   const [draft, setDraft]                 = ivState(iv);
   const [newLog, setNewLog]               = ivState({ date: new Date().toISOString().slice(0, 10), note: '' });
   const [saveError, setSaveError]         = ivState('');
@@ -1647,6 +1727,10 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
   // Computed: เงินเข้าบัญชีสุทธิ — หักทุกรายการ
   const ar       = draft.actualReceive;
   const netCash  = ar ? (ar.amount || 0) - (ar.bankFee || 0) - (ar.debtDeduct || 0) - (ar.otherFee || 0) : 0;
+  // ★ ใบที่ "รับเงินแล้วจริง" (บันทึกลง DB ไปแล้ว) ต้องถอนผ่าน ivCancelReceive เท่านั้น —
+  //   ล้าง draft เฉย ๆ ไม่พอ: แถว receipts ที่ผูกไว้จะ flip ใบกลับเป็น paid ให้เอง (ดูหัวไฟล์)
+  //   เช็คจาก iv (ค่าที่เซฟแล้ว) ไม่ใช่ draft — ใบที่เพิ่งกด "+ บันทึก" ในป๊อปอัปยังถอนแบบเดิมได้
+  const savedPaid = iv.status === 'paid' && !!(iv.actualReceive || iv.actualReceiveDate);
 
   const addLog = () => {
     if (!newLog.note.trim()) return;
@@ -1661,7 +1745,9 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
       return;
     }
     if (isPaid && (!ar || !ar.amount)) {
-      setSaveError('กรุณากรอก "จำนวนเงินที่ได้รับจริง" เนื่องจากสถานะเป็น "รับชำระแล้ว"');
+      setSaveError(savedPaid
+        ? 'สถานะเป็น "รับชำระแล้ว" จึงต้องมียอดรับเงิน — ถ้าใบนี้ยังไม่ได้รับเงินจริง ให้กดปุ่ม "↩️ ยกเลิกการรับเงิน" ท้ายบล็อก "การรับเงินจริง" (ถอนให้ครบทั้งชุด รวมใบเสร็จที่ผูกไว้)'
+        : 'กรุณากรอก "จำนวนเงินที่ได้รับจริง" เนื่องจากสถานะเป็น "รับชำระแล้ว"');
       return;
     }
     setSaveError('');
@@ -2139,11 +2225,22 @@ function InvoiceDetailModal({ iv, onClose, onSave, onDelete, bankAccounts, proje
                     </select>
                   </div>
                 </div>
-                {/* ลบบันทึก */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, color: 'var(--bad)' }} onClick={() => setReceive(null)}>
-                    <Icon name="trash" size={11} /> ลบบันทึก
-                  </button>
+                {/* ลบบันทึก / ยกเลิกการรับเงิน */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+                  {savedPaid && onCancelReceive && canEdit ? (
+                    <>
+                      <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>คีย์ผิด / ยังไม่ได้รับเงินจริง?</span>
+                      <button className="btn btn-sm" onClick={() => onCancelReceive(iv)}
+                        title={'ถอนการรับเงินของใบนี้ทั้งชุด — ล้างวันที่/ยอด + ดึงสถานะกลับเป็น "อยู่ระหว่างติดตามเงิน" + ลบใบเสร็จรับเงินที่ผูกไว้ (ไม่ลบใบเสร็จ ระบบจะ mark กลับเป็นรับชำระแล้วเอง)'}
+                        style={{ fontSize: 11.5, fontWeight: 600, background: 'var(--bad)', color: '#fff', border: '1px solid var(--bad)' }}>
+                        ↩️ ยกเลิกการรับเงิน
+                      </button>
+                    </>
+                  ) : (
+                    <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, color: 'var(--bad)' }} onClick={() => setReceive(null)}>
+                      <Icon name="trash" size={11} /> ลบบันทึก
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -3293,6 +3390,15 @@ function IvReportStandalonePage({ data, setData, toast }) {
     }
   };
 
+  // ── ยกเลิกการรับเงิน — ใช้ helper ตัวเดียวกับหน้า #invoices (ลบ receipts ที่ผูกด้วย) ──
+  const cancelReceive = (iv) => {
+    ivCancelReceive({
+      iv, setData, toast,
+      receipts: data.receipts,
+      onDone:   (cleared) => setDetail(prev => (prev && String(prev.id) === String(cleared.id)) ? cleared : prev),
+    });
+  };
+
   // ── A4 portrait print handler — ทำให้พิมพ์ออกมาเหมือนหน้าเว็บ + scale พอดี ──
   const handlePrint = () => {
     const styleId = 'iv-print-portrait-style';
@@ -3463,6 +3569,7 @@ function IvReportStandalonePage({ data, setData, toast }) {
         iv={detail}
         onClose={() => setDetail(null)}
         onSave={save}
+        onCancelReceive={cancelReceive}
         bankAccounts={data.bankAccounts}
         projects={data.projects}
         financeByCode={financeByCode}
