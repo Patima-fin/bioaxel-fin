@@ -322,9 +322,20 @@ function App() {
     });
     const onStatus = e => setSyncInfo(e.detail);
     window.addEventListener('wtpSyncStatus', onStatus);
+    // ★ ตาข่ายกันแถบสถานะค้าง: event อาจยิงไปแล้วก่อน listener นี้จะติด (sync จบเร็วกว่า React mount)
+    //   → poll เบา ๆ ทุก 30 วิ แล้ว setState เฉพาะตอนค่าเปลี่ยนจริง (ไม่ re-render ฟรี ๆ)
+    const pollStatus = setInterval(() => {
+      if (!WTPData.getSyncStatus) return;
+      const s = WTPData.getSyncStatus();
+      setSyncInfo(prev => (
+        prev && prev.status === s.status
+        && String(prev.time || '') === String(s.time || '')
+        && prev.lastError === s.lastError
+      ) ? prev : s);
+    }, 30000);
     // กันค้าง: ถ้า server โหลดไม่สำเร็จ/ไม่ยิง callback ใน 12 วิ → เลิกโชว์ loading (โชว์หน้าตามจริง)
     const failSafe = setTimeout(() => setFirstLoadDone(true), 12000);
-    return () => { unsub(); clearTimeout(failSafe); window.removeEventListener('wtpSyncStatus', onStatus); };
+    return () => { unsub(); clearTimeout(failSafe); clearInterval(pollStatus); window.removeEventListener('wtpSyncStatus', onStatus); };
   }, []);
 
   // ── แจ้งเตือนผู้ใช้เมื่อ sync ถูกบล็อก/รีซิงค์ (เดิมขึ้นแค่ใน console ผู้ใช้ไม่เห็น
@@ -964,7 +975,9 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
               type="button"
               onClick={handleManualRefresh}
               title={syncTooltip}
-              disabled={refreshing || syncInfo.status === 'syncing'}
+              /* ★ ห้าม disable ตาม syncInfo.status: ถ้าสถานะค้างที่ 'syncing' (เน็ตค้าง/ไม่มีคนยิง event)
+                    ปุ่มจะกดไม่ได้ถาวร = ผู้ใช้หมดทางโหลดใหม่เอง. refreshing ปลดล็อกเองใน 1.5 วิ */
+              disabled={refreshing}
               style={{
                 marginLeft: 2, padding: '1px 4px', borderRadius: 4,
                 border: '1px solid var(--ink-100)', background: 'transparent',

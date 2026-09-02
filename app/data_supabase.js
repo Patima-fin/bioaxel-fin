@@ -94,14 +94,25 @@
   var syncStatus       = 'syncing';
   var lastSyncTime     = null;
   var lastSyncError    = null;
+  var failedTables     = [];            // ชื่อตารางที่โหลดล้มเหลวรอบล่าสุด (โชว์ใน tooltip)
   var syncTimer        = null;
   var inSyncDiff       = false;
   var lastUserActivity = 0;             // ts แตะล่าสุด; 0 = แท็บค้าง/เพิ่งเปิด → ไม่ auto-push
 
-  function setSyncStatus(s, err) {
+  function _statusDetail() {
+    return { status: syncStatus, time: lastSyncTime, lastError: lastSyncError,
+             failedSheets: failedTables.slice(), consecutiveFails: 0, currentInterval: 0 };
+  }
+
+  function setSyncStatus(s, err, tables) {
     syncStatus = s;
-    if (s === 'ok') { lastSyncTime = new Date(); lastSyncError = null; }
-    else if (s === 'error') { lastSyncError = err || 'error'; }
+    if (s === 'ok') { lastSyncTime = new Date(); lastSyncError = null; failedTables = []; }
+    else if (s === 'error') { lastSyncError = err || 'error'; failedTables = (tables || []).slice(); }
+    // ★ ต้องยิง event ที่นี่: Sidebar ฟัง 'wtpSyncStatus' ซึ่งเดิม data_sync.js เป็นคนยิง
+    //   แต่ data_sync.js ปิดตัวเมื่อ BACKEND='supabase' → ไม่ยิง = แถบสถานะค้าง "กำลัง sync…"
+    //   ตลอดกาล (React อ่านค่าแค่ตอน mount) และปุ่ม ↻ ที่ disabled ตอน status==='syncing'
+    //   จะกดไม่ได้ถาวร ทั้งที่ข้อมูลโหลดสำเร็จปกติ
+    try { window.dispatchEvent(new CustomEvent('wtpSyncStatus', { detail: _statusDetail() })); } catch (_) {}
   }
 
   /* ── session / meta helpers (port จาก data_sync.js) ─────────────────── */
@@ -173,7 +184,7 @@
         }
       );
     })).then(function (results) {
-      var anyFail = false, firstErr = null;
+      var anyFail = false, firstErr = null, failNames = [];
       results.forEach(function (r) {
         if (r.ok) {
           var rows = r.rows;
@@ -181,7 +192,7 @@
           base[r.t] = rows;
           lastSnapshot[r.t] = JSON.stringify(rows);
         } else {
-          anyFail = true; if (!firstErr) firstErr = r.err;
+          anyFail = true; if (!firstErr) firstErr = r.err; failNames.push(r.t);
           // ★ ตารางที่โหลดไม่สำเร็จ: คงค่าเดิมจาก cachedData/base ไว้ (ห้ามทับด้วย [] = data loss)
           if (cachedData && Array.isArray(cachedData[r.t])) base[r.t] = cachedData[r.t];
           else if (!Array.isArray(base[r.t])) base[r.t] = [];
@@ -194,7 +205,7 @@
 
       cachedData = base;
       serverDataLoaded = true;
-      setSyncStatus(anyFail ? 'error' : 'ok', firstErr);
+      setSyncStatus(anyFail ? 'error' : 'ok', firstErr, failNames);
       try { origSave(cachedData); } catch (_) {}
       subscribers.forEach(function (cb) { try { cb(cachedData); } catch (_) {} });
       ensureRealtime();
@@ -592,10 +603,7 @@
     return function () { subscribers = subscribers.filter(function (s) { return s !== cb; }); };
   };
 
-  WTPData.getSyncStatus = function () {
-    return { status: syncStatus, time: lastSyncTime, lastError: lastSyncError,
-             failedSheets: [], consecutiveFails: 0, currentInterval: 0 };
-  };
+  WTPData.getSyncStatus = _statusDetail;
 
   WTPData.refreshFromServer = loadFromServer;
 
