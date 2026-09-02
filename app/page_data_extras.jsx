@@ -83,6 +83,9 @@ function DataCrudPage({ data, setData, toast, config }) {
   const [importPasteOpen, setImportPasteOpen] = dxState(false);
   const [importDragOver, setImportDragOver]   = dxState(false);
   const [importFileName, setImportFileName]   = dxState('');
+  // ★ ด่านตรวจชนิดไฟล์ (XML EXPRESS): ป้ายบอกว่าอ่านไฟล์อะไรได้ + กล่องแดงตอนหยิบไฟล์ผิดชนิด
+  const [importReportLabel, setImportReportLabel] = dxState('');    // ไฟล์ที่ผ่านด่าน → โชว์ชื่อรายงานบนพรีวิว
+  const [importReject, setImportReject] = dxState(null);            // {label, hint, file} ไฟล์ที่ไม่รับ
   // Clear selection whenever the filter/search/mode changes
   dxEffect(() => { setSelected(new Set()); }, [filter, query, bulkMode]);
   // Excel-like per-column filters — { [colKey]: Set<displayValue> }
@@ -484,13 +487,27 @@ function DataCrudPage({ data, setData, toast, config }) {
   // XML path (config.xmlParser) — rows ผ่าน parser มาแล้ว (coerce type + settles[] ครบ) → diff เลย
   //   ใช้กับ DATA PV (parsePaymentXML: รายงานจ่ายชำระหนี้ / ใบอนุมัติจ่าย — parser เลือกให้เอง)
   //   ต้องมี dedupKey (PV มี ['PL_PV_No','AP_No'])
-  const handleXmlImport = (parsed) => {
+  const handleXmlImport = (parsed, fileName) => {
     if (!config.dedupKey) { toast('หน้านี้ไม่รองรับนำเข้า XML'); return; }
-    if (parsed && !Array.isArray(parsed) && parsed._mode === 'approval') { buildApprovalPreview(parsed); return; }
+    // ★ ไฟล์ผิดชนิด — ไม่นำเข้า แล้วบอกให้ชัดว่าไฟล์ที่หยิบมาคือรายงานอะไร + ควรเอาไปลงที่ไหน
+    //   (ปล่อยเข้าไป = PV ผีหลายร้อยแถว ไหลไป Weekly Cashflow ฝั่ง Actual ทันที ล้างออกยาก)
+    if (parsed && !Array.isArray(parsed) && parsed._mode === 'reject') {
+      setImportReject({ label: parsed.label || '', hint: parsed.hint || '', file: fileName || '' });
+      setImportReportLabel(''); setImportPreview(null); setImportFileName('');
+      toast('ไม่รับไฟล์นี้ — ไม่ใช่รายงานการจ่ายของ EXPRESS');
+      return;
+    }
+    setImportReject(null);
+    if (parsed && !Array.isArray(parsed) && parsed._mode === 'approval') {
+      setImportReportLabel(parsed.reportLabel || '');
+      buildApprovalPreview(parsed);
+      return;
+    }
     if (!Array.isArray(parsed) || parsed.length === 0) {
       toast('ไม่พบรายการจ่ายในไฟล์ — ต้องเป็นรายงาน "การจ่ายชำระหนี้" หรือ "อนุมัติจ่าย" ของ EXPRESS');
       return;
     }
+    setImportReportLabel(parsed.reportLabel || '');
     const fieldByKey = Object.fromEntries(importFields.map(f => [f.key, f]));
     buildDiffPreview(parsed, fieldByKey, 0, []);
   };
@@ -660,7 +677,7 @@ function DataCrudPage({ data, setData, toast, config }) {
           const rows = config.xmlParser(e.target.result);
           setImportFileName(file.name);
           setImportText('');
-          handleXmlImport(rows);
+          handleXmlImport(rows, file.name);
         } catch (err) {
           toast('อ่านไฟล์ XML ไม่สำเร็จ: ' + err.message);
         }
@@ -967,7 +984,7 @@ function DataCrudPage({ data, setData, toast, config }) {
                 }}>ⓘ</button>
             </span>
           }
-          onClose={() => { setShowImport(false); setImportText(''); setImportStats(null); setImportPreview(null); setImportPasteOpen(false); setImportFileName(''); }}
+          onClose={() => { setShowImport(false); setImportText(''); setImportStats(null); setImportPreview(null); setImportPasteOpen(false); setImportFileName(''); setImportReject(null); setImportReportLabel(''); }}
           footer={importPreview ? <>
             <button className="btn btn-ghost" onClick={() => setImportPreview(null)}>← ย้อนกลับ</button>
             <button className="btn btn-primary" onClick={commitImport}>
@@ -975,7 +992,7 @@ function DataCrudPage({ data, setData, toast, config }) {
               ({importPreview.added.length}+{importPreview.changed.length}{deleteMissingChoice && importPreview.missing.length ? `-${importPreview.missing.length}` : ''})
             </button>
           </> : <>
-            <button className="btn btn-ghost" onClick={() => { setShowImport(false); setImportText(''); setImportStats(null); setImportPreview(null); setImportPasteOpen(false); setImportFileName(''); }}>ปิด</button>
+            <button className="btn btn-ghost" onClick={() => { setShowImport(false); setImportText(''); setImportStats(null); setImportPreview(null); setImportPasteOpen(false); setImportFileName(''); setImportReject(null); setImportReportLabel(''); }}>ปิด</button>
             <button className="btn btn-primary" onClick={handleImport} disabled={!importText.trim()}>
               <Icon name="upload" size={13} /> {config.dedupKey ? 'ตรวจสอบข้อมูล' : 'นำเข้า'} ({previewRows} แถว)
             </button>
@@ -984,6 +1001,17 @@ function DataCrudPage({ data, setData, toast, config }) {
           {/* ── Preview / Diff stage (only when dedupKey set + handleImport ran) ── */}
           {importPreview ? (
             <>
+            {importReportLabel && (
+              <div style={{
+                fontSize: 12, marginBottom: 10, padding: '7px 11px', borderRadius: 7,
+                background: 'color-mix(in oklch, var(--good) 8%, transparent)',
+                border: '1px solid color-mix(in oklch, var(--good) 28%, transparent)',
+                color: 'var(--ink-700)',
+              }}>
+                ✅ ตรวจพบไฟล์: <strong>{importReportLabel}</strong>
+                {importFileName && <span style={{ color: 'var(--ink-500)' }}> · 📄 {importFileName}</span>}
+              </div>
+            )}
             {importPreview.approval && (
               <div style={{
                 fontSize: 12, marginBottom: 12, padding: '9px 12px', borderRadius: 7,
@@ -1077,6 +1105,29 @@ function DataCrudPage({ data, setData, toast, config }) {
             </span>
           </div>
 
+          {/* ★ ไฟล์ผิดชนิด — ไม่นำเข้า บอกว่าไฟล์ที่หยิบมาคืออะไร + ควรเอาไปลงหน้าไหน */}
+          {importReject && (
+            <div style={{
+              fontSize: 12.5, marginBottom: 12, padding: '10px 13px', borderRadius: 8,
+              background: 'color-mix(in oklch, var(--bad) 8%, transparent)',
+              border: '1px solid color-mix(in oklch, var(--bad) 32%, transparent)',
+              borderLeft: '3px solid var(--bad)', color: 'var(--ink-800)', lineHeight: 1.7,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 3, color: 'var(--bad)' }}>⛔ ไม่รับไฟล์นี้ — ไม่ใช่รายงานการจ่าย</div>
+              {importReject.file && (
+                <div style={{ color: 'var(--ink-600)', fontSize: 11.5 }}>📄 {importReject.file}</div>
+              )}
+              <div style={{ marginTop: 2 }}>
+                ระบบอ่านชื่อรายงานในไฟล์ได้ว่า: <strong>{importReject.label || '—'}</strong>
+              </div>
+              {importReject.hint && <div style={{ marginTop: 3, color: 'var(--ink-600)' }}>{importReject.hint}</div>}
+              <button type="button" onClick={() => setImportReject(null)}
+                style={{ marginTop: 7, background: 'transparent', border: '1px solid var(--ink-200)', borderRadius: 6, padding: '3px 10px', fontSize: 11, color: 'var(--ink-600)', cursor: 'pointer' }}>
+                ✕ ปิดข้อความนี้
+              </button>
+            </div>
+          )}
+
           {/* Big drop zone — drag & drop or click to choose */}
           <div
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!importDragOver) setImportDragOver(true); }}
@@ -1117,7 +1168,7 @@ function DataCrudPage({ data, setData, toast, config }) {
                 {importDragOver ? '⬇️ วางไฟล์ที่นี่' : (config.xmlParser ? 'หรือลากไฟล์มาวาง — .xml (EXPRESS), .xlsx, .csv' : 'หรือลากไฟล์มาวาง — รองรับ .xlsx, .xls, .csv')}
               </span>
               {importFileName && (
-                <button type="button" onClick={() => { setImportFileName(''); setImportText(''); }}
+                <button type="button" onClick={() => { setImportFileName(''); setImportText(''); setImportReject(null); setImportReportLabel(''); }}
                   style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid var(--ink-200)', borderRadius: 6, padding: '3px 9px', fontSize: 11, color: 'var(--ink-600)', cursor: 'pointer' }}>
                   ✕ ล้างไฟล์
                 </button>
@@ -2728,7 +2779,10 @@ function _ssNum(s) { if (s == null || s === '') return 0; var n = parseFloat(Str
 //    เลขเช็ค/ธนาคาร/หมายเหตุสลับกัน, ยอดบิลย่อย=0) — คืน null ถ้าไม่ใช่รายงานแบบมีดีเทล
 function _psHeaderCols(rowMaps) {
   var main = null, sub = null;
-  for (var i = 0; i < Math.min(rowMaps.length, 25); i++) {
+  // ★ ต้องไล่ทั้งไฟล์ ไม่ใช่แค่ 25 แถวแรก — ไฟล์จริงมีที่หัวตารางอยู่แถวที่ 705 (ข้างบนเป็นแถวว่างยาว ๆ)
+  //   เดิม cap ที่ 25 ⇒ หาหัวไม่เจอ → ตกไปให้ตัวอ่าน "ใบอนุมัติจ่าย" อ่านแทน แล้วได้ยอด gross
+  //   (ยอดตามใบรับ) มาแทนยอดสุทธิหลังหัก WHT แบบเงียบ ๆ
+  for (var i = 0; i < rowMaps.length; i++) {
     var cm = rowMaps[i].cm;
     var hit = Object.keys(cm).some(function (k) { return String(cm[k]).replace(/\s+/g, '') === 'ยอดตามใบรับ'; });
     if (hit) { main = cm; sub = (rowMaps[i + 1] || {}).cm || null; break; }
@@ -2857,16 +2911,89 @@ function _psParseApproval(rowMaps) {
   return { rows: rows, dupSkipped: dupSkipped, canceled: canceled };
 }
 
+// ── ★ ด่านตรวจ "ไฟล์นี้คือรายงานอะไร" — ต้องรู้จักก่อนถึงจะยอมนำเข้า ────────────
+//   ทำไมต้องมี: ตัวอ่านใบอนุมัติจ่าย (Parser B) ตัดสินจาก "มีเลขเอกสาร + ตัวเลข" เท่านั้น
+//   ⇒ รายงาน EXPRESS อื่นที่หน้าตาคล้ายกันหลุดเข้ามาได้หมดแบบเงียบ ๆ (ของจริงในเครื่องผู้ใช้):
+//     • "เจ้าหนี้คงค้างแบบละเอียด" (ของหน้า DATA เจ้าหนี้) → เคยอ่านได้ 521 แถว เพิ่มเป็น PV ผี 480 แถว
+//       (เลขที่ RS…/RR… · ผู้รับเงินกลายเป็นเลขที่บิล) แล้วไหลไป Weekly Cashflow ฝั่ง Actual ทันที
+//     • "ตรวจสอบเงินทดรองจ่าย/เงินมัดจำคงค้าง" → ผู้รับเงิน = วันที่ · ยอด = มูลค่าก่อน VAT · ไม่มีวันจ่าย
+//   กติกา: รู้จัก = ปล่อยผ่าน · รู้จักแต่ผิดหน้า = บอกว่าควรเอาไปลงที่ไหน · ไม่รู้จัก = ไม่นำเข้า
+//   ⚠️ "รายงานการจ่ายชำระหนี้ (มีดีเทล)" ยังตรวจด้วยโครงสร้าง (หัวคอลัมน์ "ยอดตามใบรับ") เหมือนเดิม
+//      ไม่ผูกกับชื่อรายงาน — ไฟล์เก่าบางไฟล์หัวกระดาษไม่มีชื่อรายงานเลย แต่หัวตารางมีครบเสมอ
+function _psCellsIn(rowMaps, n) {
+  // เก็บข้อความ "n แถวแรกที่มีข้อมูลจริง" — ต้องข้ามแถวว่าง เพราะไฟล์จริงบางไฟล์มีแถวว่างนำหน้า
+  // หลายร้อยแถว (หัวกระดาษไปเริ่มที่แถว 350/702) ⇒ ถ้าตัด 8 แถวแรกดื้อ ๆ จะอ่านชื่อรายงานไม่เจอ
+  var out = [], seen = 0;
+  for (var i = 0; i < rowMaps.length && seen < n; i++) {
+    var cm = rowMaps[i].cm;
+    var keys = Object.keys(cm).filter(function (k) { return String(cm[k] || '').trim(); });
+    if (!keys.length) continue;
+    seen++;
+    keys.forEach(function (k) { out.push(String(cm[k])); });
+  }
+  return out;
+}
+function _psHasHeaderCell(rowMaps, label) {
+  var want = label.replace(/\s+/g, '');
+  return rowMaps.some(function (r) {
+    return Object.keys(r.cm).some(function (k) { return String(r.cm[k] || '').replace(/\s+/g, '') === want; });
+  });
+}
+function _psReportTitle(rowMaps) {
+  // ชื่อรายงานที่ EXPRESS พิมพ์ไว้หัวกระดาษ — ใช้โชว์ให้ผู้ใช้รู้ว่า "ไฟล์ที่หยิบมาคือรายงานอะไร"
+  //   บางรายงานพิมพ์รวมบรรทัดเดียวกับชื่อบริษัท → ตัดเอาตั้งแต่คำว่า "รายงาน" เป็นต้นไป
+  //   บางรายงานไม่มีคำว่า "รายงาน" (เช่น "เจ้าหนี้คงค้างแบบละเอียด") → เอาบรรทัดข้อความไทยบรรทัดแรกที่ไม่ใช่ชื่อบริษัท/ช่วงวันที่
+  var cells = _psCellsIn(rowMaps, 6).map(function (s) { return String(s).replace(/\s+/g, ' ').trim(); });
+  var withKeyword = cells.filter(function (s) { return s.indexOf('รายงาน') >= 0; })[0];
+  if (withKeyword) return withKeyword.slice(withKeyword.indexOf('รายงาน')).trim();
+  var plain = cells.filter(function (s) {
+    return /[ก-๙]/.test(s) && s.replace(/\s+/g, '').length >= 8
+        && !/^(บริษัท|ห้าง|ณ ?วันที่|วันที่|เลขที่|รหัส|ประเภท|ผู้จำหน่าย)/.test(s);
+  })[0];
+  return plain || '';
+}
+
+function _psReportKind(rowMaps) {
+  var flat  = _psCellsIn(rowMaps, 8).join(' ').replace(/\s+/g, '');
+  var title = _psReportTitle(rowMaps);
+  var has   = function (s) { return flat.indexOf(s) >= 0; };
+  // ★ เช็ค "ชื่อรายงานที่ไม่รับ" ก่อนเสมอ แล้วค่อยดูโครงสร้าง — ตัวตรวจหัวตารางไล่ทั้งไฟล์
+  //   ถ้ารายงานอื่นบังเอิญมีคำว่า "ยอดตามใบรับ" อยู่ลึก ๆ จะได้ไม่ถูกมองเป็นรายงานจ่าย
+  if (has('เจ้าหนี้คงค้าง'))
+    return { kind: 'reject', label: title || 'เจ้าหนี้คงค้างแบบละเอียด',
+             hint: 'นี่คือรายงาน "ยอดหนี้คงค้าง" ไม่ใช่รายการจ่ายเงิน — ให้ลงที่หน้า DATA เจ้าหนี้คงค้าง แทน' };
+  if (has('เงินมัดจำคงค้าง') || has('เงินทดรองจ่าย/เงิน'))
+    return { kind: 'reject', label: title || 'รายงานตรวจสอบเงินทดรองจ่าย/เงินมัดจำคงค้าง',
+             hint: 'นี่คือรายงาน "ยอดคงค้าง" ไม่ใช่รายการจ่ายเงิน (ไม่มีวันที่จ่าย · ยอดเป็นมูลค่าก่อน VAT) — ใบ AV/AE ให้ลงจากไฟล์ "รายงานอนุมัติจ่าย"' };
+  if (has('รายการเคลื่อนไหวบัญชีธนาคาร') || has('งบกระทบยอด') || /S\/A\s*#/.test(flat))
+    return { kind: 'reject', label: title || 'รายการเคลื่อนไหวบัญชีธนาคาร / งบกระทบยอด',
+             hint: 'นี่คือ statement ธนาคาร — ให้ใช้ที่หน้า "กระทบยอดธนาคาร" แทน' };
+  if (_psHasHeaderCell(rowMaps, 'ยอดตามใบรับ'))
+    return { kind: 'detail', label: 'รายงานการจ่ายชำระหนี้ (แบบมีดีเทล)' };
+  if (has('จ่ายชำระหนี้(ประจำงวด)') || (_psHasHeaderCell(rowMaps, 'เลขบัญชีผู้รับ') && _psHasHeaderCell(rowMaps, 'จำนวนเงิน')))
+    return { kind: 'approval', label: 'รายงานจ่ายชำระหนี้ (ประจำงวด) — ใบอนุมัติจ่าย' };
+  return { kind: 'reject', label: title || '(อ่านชื่อรายงานจากไฟล์ไม่ได้)',
+           hint: 'หน้านี้รับ 2 ไฟล์เท่านั้น: "รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน" (ตัวหลัก) และ "รายงานจ่ายชำระหนี้ (ประจำงวด)" = ใบอนุมัติจ่าย' };
+}
+
 // ── ตัวอ่านไฟล์ XML หน้า DATA PV — ดูหัวตารางแล้วเลือก parser เอง ──────────────
 //   คืน array              → รายงานมีดีเทล (PS) = ตัวหลัก diff ตามปกติ
 //   คืน {_mode:'approval'} → ใบอนุมัติจ่าย = โหมด "เติมเฉพาะใบที่ขาด" (ดู buildApprovalPreview)
 function parsePaymentXML(xmlText) {
   var rowMaps = _ssRowMaps(xmlText);
-  var C = _psHeaderCols(rowMaps);
-  if (C) return _psParseDetail(rowMaps, C);
-  var ap = _psParseApproval(rowMaps);
-  if (ap.rows.length) return { _mode: 'approval', rows: ap.rows, dupSkipped: ap.dupSkipped, canceled: ap.canceled };
-  return [];
+  var rep = _psReportKind(rowMaps);                       // ★ ต้องรู้จักรายงานก่อน ถึงจะยอมอ่าน
+  if (rep.kind === 'detail') {
+    var C = _psHeaderCols(rowMaps);
+    var rows = _psParseDetail(rowMaps, C);
+    rows.reportLabel = rep.label;                         // ติดป้ายไว้โชว์บนหน้าต่างพรีวิว (array รับ prop ได้)
+    return rows;
+  }
+  if (rep.kind === 'approval') {
+    var ap = _psParseApproval(rowMaps);
+    if (ap.rows.length) return { _mode: 'approval', reportLabel: rep.label, rows: ap.rows, dupSkipped: ap.dupSkipped, canceled: ap.canceled };
+    return { _mode: 'reject', label: rep.label, hint: 'อ่านไฟล์ได้แต่ไม่พบรายการจ่ายสักใบ — ตรวจช่วงวันที่ตอนสั่งพิมพ์รายงานอีกครั้ง' };
+  }
+  return { _mode: 'reject', label: rep.label, hint: rep.hint };
 }
 
 // เทียบค่าให้ทน format ต่าง — date → epoch (กัน DD/MM vs ISO), number → parseNum (กัน "2,000.00")

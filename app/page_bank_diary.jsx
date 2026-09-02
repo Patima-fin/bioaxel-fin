@@ -42,6 +42,23 @@ function bdAcctMatchesCheck(acctNo, checkAcctNo) {
   return false;
 }
 
+/* ★ บัญชีจ่ายหลัก — ใช้รองรับ PV ที่ "ไม่มีบัญชีที่จ่ายออก" (Bank_AC ว่าง)
+ *   ใบ AV/AE จาก "รายงานอนุมัติจ่าย" ไม่มีคอลัมน์บัญชีต้นทางเลย (ไฟล์มีแต่ "เลขบัญชีผู้รับ" = ปลายทาง
+ *   → ลง Bnf_Acct_No ตามกติกาเดิม) · ใบ PS บางใบที่คอลัมน์ "ธนาคาร" ในรายงานละเอียดว่างก็เข้าข่ายเดียวกัน
+ *   เดิม pvByAccount ทิ้งแถวพวกนี้ทั้งหมด ⇒ หายจากการ์ดบัญชี + ใบสรุปรอบจ่ายแบบเงียบสนิท
+ *   ทั้งที่หน้า DATA PV มีแถวครบ → ลงบัญชีหลักไปก่อน + ติดป้าย "เอกสารไม่ระบุบัญชี" ให้รู้ว่าเป็นค่าเริ่มต้น
+ *   ลำดับการเลือก: เลข 4 ตัวท้าย BD_MAIN_ACCT_HINT → บัญชีที่ PV จ่ายออกบ่อยสุด → ไม่เจอ = ไม่เดา (คงพฤติกรรมเดิม) */
+const BD_MAIN_ACCT_HINT = '4839';   // SCB ···4839 = บัญชีจ่ายหลักของ BIO
+function bdMainPayAccount(accounts, pvs) {
+  if (!accounts || !accounts.length) return null;
+  const byHint = accounts.find(a => bdAcctMatchesCheck(a.accountNo, BD_MAIN_ACCT_HINT));
+  if (byHint) return byHint;
+  const votes = {};
+  (pvs || []).forEach(p => { if (p.bankAc) votes[p.bankAc] = (votes[p.bankAc] || 0) + 1; });
+  const top = Object.keys(votes).sort((x, y) => votes[y] - votes[x])[0];
+  return (top && accounts.find(a => bdAcctMatchesCheck(a.accountNo, top))) || null;
+}
+
 /* Normalize Thai check status → outstanding | cleared | cancelled */
 function bdCheckStatus(s) {
   s = s || '';
@@ -298,7 +315,8 @@ function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransf
               && !(p.apNo && countedAP.has(String(p.apNo).trim())))
     .forEach(p => {
       const key = (p.pvNo || p.id || '') + '@' + p.date;
-      const g = pvGroups[key] || (pvGroups[key] = { pvNo: p.pvNo, date: p.date, payee: '', amount: 0, aps: [], chqs: [], raws: [] });
+      const g = pvGroups[key] || (pvGroups[key] = { pvNo: p.pvNo, date: p.date, payee: '', amount: 0, aps: [], chqs: [], raws: [], guess: false });
+      if (p.acctGuess) g.guess = true;   // ใบที่เอกสารไม่ระบุบัญชี — ลงบัญชีหลักให้ (ดู bdMainPayAccount)
       g.amount += Math.abs(p.amount);
       if (!g.payee && p.payee) g.payee = p.payee;
       if (p.apNo) g.aps.push(p.apNo);
@@ -310,7 +328,8 @@ function bdBuildAccountView(acct, matchedChecks, matchedForecasts, matchedTransf
     // sub: ไม่ใส่คำว่า "PV" นำหน้า — มีป้าย PV + เลขที่ขึ้นต้นด้วย PV อยู่แล้ว (กันคำซ้ำ)
     const sub = (g.pvNo || '—')
               + (g.aps.length > 1 ? ' • รวม ' + g.aps.length + ' รายการ' : (g.aps[0] ? ' • ' + g.aps[0] : ''))
-              + (g.chqs.length ? ' • เช็ค ' + g.chqs.join(', ') : '');
+              + (g.chqs.length ? ' • เช็ค ' + g.chqs.join(', ') : '')
+              + (g.guess ? ' • เอกสารไม่ระบุบัญชี' : '');
     items.push({
       date: g.date, signed: -Math.abs(g.amount), kind: 'pv', ref: g.pvNo,
       title: g.payee || 'จ่ายตาม PV',
@@ -3107,8 +3126,14 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
   const pvByAccount = React.useMemo(() => {
     const byAcct = {};
     accounts.forEach(a => { byAcct[a.accountNo] = []; });
+    const mainAcct = bdMainPayAccount(accounts, pvList);   // ★ ที่ลงของใบที่เอกสารไม่ระบุบัญชี (AV/AE ฯลฯ)
     pvList.forEach(p => {
-      if (!p.bankAc) return;
+      if (!p.bankAc) {
+        // เอกสารไม่ระบุบัญชีที่จ่ายออก → ลงบัญชีหลัก + ติดธง acctGuess ให้การ์ดบอกว่าเป็นค่าเริ่มต้น
+        // (ทิ้งไปเฉย ๆ แบบเดิม = ใบ AV/AE จากรายงานอนุมัติจ่ายหายจากทุกการ์ด ทั้งที่หน้า DATA PV มีครบ)
+        if (mainAcct) byAcct[mainAcct.accountNo].push({ ...p, acctGuess: true });
+        return;
+      }
       const hit = accounts.find(a => bdAcctMatchesCheck(a.accountNo, p.bankAc));
       if (hit) byAcct[hit.accountNo].push(p);
     });
