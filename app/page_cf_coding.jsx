@@ -111,6 +111,25 @@
     { a: 'transfer', g: 'ไม่นับเป็นกิจกรรม', items: ['โอนเงินระหว่างบัญชี'] },
   ];
 
+  /* ทะเบียนบัญชีธนาคาร — seed จากชีต "Dpt." ของไฟล์ BA-Cash Flow ของเตย
+     type: สามารถใช้ได้ / เงินนักลงทุน / วงเงินค้ำประกัน / บัญชีร่วม
+     ⚠️ บัญชีที่ไม่ใช่ "สามารถใช้ได้" อาจไม่มีรายการเดินบัญชีจริง ๆ ในเดือนนั้น
+        → เตือนแบบเบา (ℹ️) ไม่ใช่แดง ไม่งั้นจะเตือนหลอกทุกเดือน */
+  const CFC_BANK_SEED = [
+    { bank: 'SCB',   no: '433-107769-3',  type: 'เงินนักลงทุน' },
+    { bank: 'SCB',   no: '136-268483-9',  type: 'สามารถใช้ได้' },
+    { bank: 'SCB',   no: '422-058598-1',  type: 'สามารถใช้ได้' },
+    { bank: 'SCB',   no: '218-110840-6',  type: 'วงเงินค้ำประกัน' },
+    { bank: 'SCB',   no: '433-107765-1',  type: 'บัญชีร่วม' },
+    { bank: 'KBANK', no: '145-2-83196-8', type: 'สามารถใช้ได้' },
+    { bank: 'BBL',   no: '451-3-501272',  type: 'สามารถใช้ได้' },
+  ];
+  const cfcDigits = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+  /* คีย์ประจำบัญชี — เลขล้วนก่อน (ไฟล์เขียน "136-268483-9" แต่ตัวอ่านได้ "1362684839")
+     ⚠️ ต้อง fallback เป็นชื่อบัญชี: ถ้าอ่านเลขที่ไม่ออก cfcDigits จะคืน '' เหมือนกันทุกบัญชี
+        → ยุบรวมเป็นบัญชีเดียว ยอดมั่ว และยกยอดเดือนก่อนข้ามบัญชีกัน (เจอตอนทดสอบ) */
+  const cfcAcctKey = (no, label) => cfcDigits(no) || cfcNorm(label) || '(ไม่ระบุบัญชี)';
+
   const CFC_MONTH_TH = { 1: 'ม.ค.', 2: 'ก.พ.', 3: 'มี.ค.', 4: 'เม.ย.', 5: 'พ.ค.', 6: 'มิ.ย.', 7: 'ก.ค.', 8: 'ส.ค.', 9: 'ก.ย.', 10: 'ต.ค.', 11: 'พ.ย.', 12: 'ธ.ค.' };
   const CFC_ACT_TH = { op: 'กิจกรรมการดำเนินงาน', inv: 'กิจกรรมการลงทุน', fin: 'กิจกรรมการจัดหาเงิน', transfer: '' };
   const CFC_ACT_SHORT = { op: 'ดำเนินงาน', inv: 'ลงทุน', fin: 'จัดหาเงิน', transfer: 'โอน' };
@@ -447,7 +466,7 @@
 
   /* ไฟล์ CASH FLOW ของเตย → (1) หมวดมาตรฐานจากหน้าแรก (2) ประวัติที่ลงรหัสไว้ */
   function cfcParseCashflowWorkbook(wb) {
-    const res = { master: [], history: [], sheetUsed: '', error: '' };
+    const res = { master: [], history: [], banks: [], sheetUsed: '', error: '' };
     // (1) หน้า "งบกระแสเงินสด" — บรรทัดย่อหน้า ≥6 ช่อง = รายการจริง
     const gsName = wb.SheetNames.find(n => /งบกระแสเงินสด/.test(n));
     if (gsName) {
@@ -463,6 +482,17 @@
         if (ind >= 6 && act) res.master.push({ name: s, act, group: grp });
       });
     }
+    // (1.5) ชีต "Dpt." — ทะเบียนบัญชีธนาคาร (BANK | ACCOUNT NO. | ประเภท)
+    const dptName = wb.SheetNames.find(n => /^dpt/i.test(n));
+    if (dptName) {
+      cfcAoa(wb.Sheets[dptName]).forEach(r => {
+        const bank = cfcT(r[0]), no = cfcT(r[1]), type = cfcT(r[2]);
+        if (/^(SCB|KBANK|BBL|KTB|KKP|TTB|GSB|UOB|CIMB|LHB|TISCO)$/i.test(bank) && cfcDigits(no).length >= 8) {
+          res.banks.push({ bank: bank.toUpperCase(), no, type: type || '' });
+        }
+      });
+    }
+
     // (2) ชีตที่มีคอลัมน์ "หมวด…" + "ประเภทกิจกรรม…" = ประวัติที่ลงรหัสแล้ว (ชีตไหนก็ได้)
     wb.SheetNames.forEach(sn => {
       const aoa = cfcAoa(wb.Sheets[sn]);
@@ -492,7 +522,40 @@
       res.sheetUsed = res.sheetUsed ? res.sheetUsed + ', ' + sn : sn;
     });
     function cDat(r, i) { return i >= 0 ? r[i] : ''; }
-    if (!res.master.length && !res.history.length) res.error = 'ไม่พบทั้งหน้า "งบกระแสเงินสด" และชีตที่มีคอลัมน์ "หมวด…/ประเภทกิจกรรม…"';
+
+    /* (3) ชีตรายเดือนแบบ "รหัสบัญชี" — โครง BANK | ACCOUNT NO. | Department |
+           Document No. | DD/MM/YYYY | Vender | Description | Amount | รหัส | Account Code
+       ★ ไฟล์ปีก่อน (BA-Cash Flow 2026.xlsx) ลงรหัสตัวเลข 140 รหัส แทนชื่อหมวด
+         → ถ้าไม่อ่าน ผู้ใช้จะเห็น "ประวัติที่อ่านได้: 0 แถว" แล้วนึกว่าพัง
+         ชื่อของรหัส (เช่น "เงินสดจ่ายค่าธรรมเนียมธนาคาร") ส่งเข้า canon เดียวกับชื่อหมวด
+         → จับเข้าหมวดมาตรฐานได้เอง; ที่จับไม่ได้ = ข้าม ไม่เดา                              */
+    wb.SheetNames.forEach(sn => {
+      const aoa = cfcAoa(wb.Sheets[sn]);
+      let hr = -1, H = null;
+      for (let i = 0; i < aoa.length && i < 40; i++) {
+        const row = (aoa[i] || []).map(c => cfcT(c));
+        if (row.some(c => /^Document No\.?$/i.test(c)) && row.some(c => /^Account Code$/i.test(c))) { hr = i; H = row; break; }
+      }
+      if (hr < 0) return;
+      const at = re => H.findIndex(c => re.test(c));
+      const cDoc = at(/^Document No/i), cDate = at(/^DD\/MM\/YYYY$/i), cDesc = at(/^Description$/i),
+            cAmt = at(/^Amount$/i), cName = at(/^Account Code$/i), cVend = at(/^Vender$/i);
+      let n = 0;
+      for (let i = hr + 1; i < aoa.length; i++) {
+        const r = aoa[i] || [];
+        const name = cfcT(cDat(r, cName)); if (!name) continue;
+        const amt = cfcNum(cDat(r, cAmt)); if (!amt) continue;
+        const desc = cfcT(cDat(r, cDesc)); const sp = cfcSplitNote(desc);
+        res.history.push({
+          cat: name, actRaw: '', docNo: cfcT(cDat(r, cDoc)), note: desc,
+          memo: sp.memo || cfcT(cDat(r, cVend)), payee: sp.payee, iso: cfcISO(cDat(r, cDate)),
+          out: amt < 0 ? -amt : 0, in: amt > 0 ? amt : 0, sheet: sn,
+        });
+        n++;
+      }
+      if (n) res.sheetUsed = res.sheetUsed ? res.sheetUsed + ', ' + sn : sn;
+    });
+    if (!res.master.length && !res.history.length && !res.banks.length) res.error = 'ไม่พบทั้งหน้า "งบกระแสเงินสด", ชีตที่มีคอลัมน์ "หมวด…/ประเภทกิจกรรม…" และชีต "Dpt."';
     return res;
   }
 
@@ -503,7 +566,9 @@
   function cfcAcctSummary(rows) {
     const by = {};
     rows.forEach(r => {
-      const k = (r.acctNo || '') + '|' + String(r.iso).slice(0, 7);
+      // ★ ต้องผ่าน cfcAcctKey — acctNo ว่างเหมือนกันทุกบัญชีที่อ่านเลขที่ไม่ออก
+      //   ถ้าใช้ acctNo ดิบ บัญชีพวกนั้นจะถูกยุบรวมเป็นบัญชีเดียว ยอดต้น/ปลายมั่วทันที
+      const k = cfcAcctKey(r.acctNo, r.acctLabel) + '|' + String(r.iso).slice(0, 7);
       const g = by[k] || (by[k] = { acctNo: r.acctNo, acctLabel: r.acctLabel, ym: String(r.iso).slice(0, 7),
         n: 0, inSum: 0, outSum: 0, uncoded: 0, first: null, last: null });
       g.n++; g.inSum += r.in; g.outSum += r.out;
@@ -519,6 +584,37 @@
       const closingFile = l ? cfcNum(l.balance) : 0;
       const closingCalc = opening + g.inSum - g.outSum;
       return Object.assign(g, { opening, closingFile, closingCalc, diff: closingCalc - closingFile });
+    });
+  }
+
+  /* ปลายงวดของ "เดือนก่อนหน้าที่มีข้อมูล" ของบัญชีนั้น (ไม่จำเป็นต้องเป็น ym-1 —
+     เดือนที่ไม่มีไฟล์ให้ข้ามไป) · ym ว่าง = เอาเดือนล่าสุดเท่าที่มี */
+  function cfcPrevMonth(hist, acctNo, ym, acctLabel) {
+    const k = cfcAcctKey(acctNo, acctLabel); let best = null;
+    (hist || []).forEach(g => {
+      if (cfcAcctKey(g.acctNo, g.acctLabel) !== k) return;
+      if (ym && g.ym >= ym) return;
+      if (!best || g.ym > best.ym) best = g;
+    });
+    return best;
+  }
+
+  /* ยุบหลายเดือนของบัญชีเดียวกันเป็นแถวเดียว (ตอนเลือก "ทุกเดือน")
+     ⚠️ ก่อนหน้านี้ index ด้วยเลขบัญชีอย่างเดียว → เดือนหลังทับเดือนก่อน เห็นแค่เดือนเดียว */
+  function cfcAggByAcct(list) {
+    const by = {};
+    (list || []).forEach(g => { const k = cfcAcctKey(g.acctNo, g.acctLabel); (by[k] = by[k] || []).push(g); });
+    return Object.keys(by).map(k => {
+      const arr = by[k].slice().sort((a, b) => (a.ym < b.ym ? -1 : 1));
+      const f = arr[0], l = arr[arr.length - 1];
+      const inSum = arr.reduce((a, g) => a + g.inSum, 0), outSum = arr.reduce((a, g) => a + g.outSum, 0);
+      const calc = f.opening + inSum - outSum;
+      return {
+        acctNo: f.acctNo, acctLabel: f.acctLabel, ymFirst: f.ym, ymLast: l.ym, months: arr.length,
+        ym: arr.length > 1 ? (f.ym + ' … ' + l.ym) : f.ym,
+        opening: f.opening, closingFile: l.closingFile, closingCalc: calc, diff: calc - l.closingFile,
+        inSum, outSum, n: arr.reduce((a, g) => a + g.n, 0), uncoded: arr.reduce((a, g) => a + g.uncoded, 0),
+      };
     });
   }
 
@@ -670,6 +766,59 @@
 
     const acctCheck = useMemo(() => cfcAcctSummary(rows), [rows]);
 
+    /* สรุป "ทุกเดือนทุกบัญชีที่นำเข้าไว้" — ใช้หายอดปลายงวดของเดือนก่อนเท่านั้น
+       (ไม่สนตัวกรองหน้าจอ ไม่ต้องมี sug → ไม่ต้องรอเครื่องเสนอหมวด) */
+    const histCheck = useMemo(() => {
+      const all = [];
+      buckets.forEach(b => (b.lines || []).forEach(L => all.push(Object.assign({ sug: null }, L, { acctLabel: b.acctLabel || L.acctLabel }))));
+      return cfcAcctSummary(all);
+    }, [buckets]);
+
+    /* ทะเบียนบัญชี (ส่วนกลาง > seed) — ใช้บอกว่า "มีกี่แบงค์ / ขาดแบงค์ไหน" */
+    const bankMaster = useMemo(() => {
+      const m = store.banks && Array.isArray(store.banks.items) && store.banks.items.length ? store.banks.items : CFC_BANK_SEED;
+      return m.map(b => Object.assign({}, b, { key: cfcAcctKey(b.no, b.no) }));
+    }, [store.banks]);
+
+    /* รวมทะเบียน × ข้อมูลที่นำเข้าจริง เป็นตารางเดียว (แถวที่ยังไม่มีข้อมูล = ขาด) */
+    const overview = useMemo(() => {
+      const aggRows = cfcAggByAcct(acctCheck);
+      const byKey = {}; aggRows.forEach(g => { byKey[cfcAcctKey(g.acctNo, g.acctLabel)] = g; });
+      const used = {};
+      /* ★ ยอดต้นงวดยกมาจากเดือนก่อน (ถ้ามี):
+           - บัญชีที่มีข้อมูลเดือนนี้ → เทียบ "ต้นงวดที่อ่านจากไฟล์" กับ "ปลายงวดเดือนก่อน"
+             ต่างกัน = มีเดือน/รายการขาดหายระหว่างกลาง ต้องเห็น ไม่ใช่กลืน
+           - บัญชีที่ไม่มีข้อมูลเดือนนี้เลย → ยกยอดเดือนก่อนมาแสดงเป็นต้นงวด=ปลายงวด
+             (บัญชีที่ไม่มีรายการทั้งเดือนก็ยังมีเงินอยู่ — เดิมโชว์ว่าง เหมือนยอดหาย) */
+      const attach = (b, g) => {
+        const prev = cfcPrevMonth(histCheck, g ? g.acctNo : b.no, g ? g.ymFirst : (ym || ''), g ? g.acctLabel : '');
+        if (g) return Object.assign({}, b, { data: g, prev, carryDiff: prev ? (g.opening - prev.closingFile) : null });
+        if (prev) return Object.assign({}, b, { prev, carried: true, data: {
+          acctNo: prev.acctNo, acctLabel: prev.acctLabel, ym: ym || prev.ym, ymFirst: prev.ym, ymLast: prev.ym,
+          opening: prev.closingFile, closingFile: prev.closingFile, closingCalc: prev.closingFile,
+          diff: 0, inSum: 0, outSum: 0, n: 0, uncoded: 0 } });
+        return Object.assign({}, b, { data: null, prev: null });
+      };
+      const listed = bankMaster.map(b => { const g = byKey[b.key]; if (g) used[b.key] = 1; return attach(b, g); });
+      // บัญชีที่นำเข้ามาแต่ไม่มีในทะเบียน (เช่นเปิดบัญชีใหม่ / ไฟล์ผิดบริษัท)
+      const extra = aggRows.filter(g => !used[cfcAcctKey(g.acctNo, g.acctLabel)])
+        .map(g => attach({ bank: '', no: g.acctLabel || g.acctNo, type: 'ไม่อยู่ในทะเบียน', key: cfcAcctKey(g.acctNo, g.acctLabel) }, g));
+      const all = listed.concat(extra);
+      const tot = { inSum: 0, outSum: 0, opening: 0, closing: 0, n: 0, uncoded: 0, bad: 0 };
+      all.forEach(r => {
+        if (!r.data) return;
+        tot.inSum += r.data.inSum; tot.outSum += r.data.outSum;
+        tot.opening += r.data.opening; tot.closing += r.data.closingFile;
+        tot.n += r.data.n; tot.uncoded += r.data.uncoded;
+        if (Math.abs(r.data.diff) > 0.02) tot.bad++;
+      });
+      const loaded = all.filter(r => r.data && !r.carried).length;
+      const carried = all.filter(r => r.carried).length;
+      const missingActive = listed.filter(r => !r.data && r.type === 'สามารถใช้ได้').length;
+      const gapBreak = all.filter(r => r.carryDiff != null && Math.abs(r.carryDiff) > 0.02).length;
+      return { all, tot, loaded, carried, gapBreak, total: bankMaster.length, missingActive };
+    }, [acctCheck, histCheck, bankMaster, ym]);
+
     const shown = useMemo(() => {
       const needle = cfcNorm(q);
       return rows.filter(r => {
@@ -776,9 +925,10 @@
           master: { items: nextMaster, at },
           rules: { map, at },
         });
+        if (p.banks.length) next.banks = { items: p.banks, at };
         await persist(next);
         setBusy('');
-        setTeachRes({ master: nextMaster.length, history: p.history.length, learned, sheets: p.sheetUsed, missed: Object.entries(missed).sort((a, b) => b[1] - a[1]) });
+        setTeachRes({ master: nextMaster.length, history: p.history.length, learned, sheets: p.sheetUsed, banks: p.banks.length, missed: Object.entries(missed).sort((a, b) => b[1] - a[1]) });
       } catch (e) { setBusy(''); toast && toast('อ่านไฟล์ไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }
     }
 
@@ -853,17 +1003,22 @@
 
       /* ── ชีต 3: ตรวจยอดรายบัญชี ── */
       const sum = cfcAcctSummary(rows);
-      const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'], [],
-        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
-      sum.forEach(g => s3.push([g.acctLabel || '', g.acctNo || '', monLabel(g.ym), g.opening, g.inSum, g.outSum,
-        g.closingCalc, g.closingFile, g.diff, g.n, g.uncoded]));
+      const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'],
+        ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง'], [],
+        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
+      sum.forEach(g => {
+        const pv = cfcPrevMonth(histCheck, g.acctNo, g.ym, g.acctLabel);
+        s3.push([g.acctLabel || '', g.acctNo || '', monLabel(g.ym), g.opening,
+          pv ? pv.closingFile : '', pv ? (g.opening - pv.closingFile) : '',
+          g.inSum, g.outSum, g.closingCalc, g.closingFile, g.diff, g.n, g.uncoded]);
+      });
       s3.push([]);
-      s3.push(['รวมทุกบัญชี', '', '', sum.reduce((a, g) => a + g.opening, 0), sum.reduce((a, g) => a + g.inSum, 0),
-        sum.reduce((a, g) => a + g.outSum, 0), sum.reduce((a, g) => a + g.closingCalc, 0),
-        sum.reduce((a, g) => a + g.closingFile, 0), sum.reduce((a, g) => a + g.diff, 0),
-        rows.length, uncodedTot]);
+      s3.push(['รวมทุกบัญชี', '', '', sum.reduce((a, g) => a + g.opening, 0), '', '',
+        sum.reduce((a, g) => a + g.inSum, 0), sum.reduce((a, g) => a + g.outSum, 0),
+        sum.reduce((a, g) => a + g.closingCalc, 0), sum.reduce((a, g) => a + g.closingFile, 0),
+        sum.reduce((a, g) => a + g.diff, 0), rows.length, uncodedTot]);
       const ws3 = XLSX.utils.aoa_to_sheet(s3);
-      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 12 }, { wch: 12 }];
+      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws3, 'ตรวจยอดรายบัญชี');
 
       XLSX.writeFile(wb, 'BIO-ลงรหัส-' + (ym || 'ทุกเดือน') + (acct ? '-' + acct : '-ทุกบัญชี') + '.xlsx');
@@ -938,8 +1093,89 @@
           )}
         </div>
 
-        {/* ตรวจยอดรายบัญชี — โผล่เมื่อมีมากกว่า 1 บัญชี-เดือน */}
-        {acctCheck.length > 1 && (
+        {/* ── ภาพรวมธนาคาร + ตรวจยอด (โครงเดียวกับหัวชีตรายเดือนในไฟล์ BA-Cash Flow) ── */}
+        {buckets.length > 0 && (
+          <div style={Object.assign({}, card, { padding: 0, overflow: 'hidden' })}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 8px' }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>
+                🏦 ภาพรวมธนาคาร
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.mut, marginLeft: 8 }}>
+                  ทะเบียน {overview.total} บัญชี · นำเข้าแล้ว {overview.loaded}
+                  {overview.carried > 0 && <span> · ยกยอดจากเดือนก่อน {overview.carried}</span>}
+                  {overview.missingActive > 0 && <span style={{ color: C.neg }}> · ยังขาด {overview.missingActive} บัญชีที่ใช้งานอยู่</span>}
+                  {overview.gapBreak > 0 && <span style={{ color: C.neg }}> · ต่อเดือนก่อนไม่ตรง {overview.gapBreak}</span>}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5 }}>
+                <span>รับรวม <strong style={{ color: C.pos, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.inSum)}</strong></span>
+                <span>จ่ายรวม <strong style={{ color: C.neg, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.outSum)}</strong></span>
+                <span>สุทธิ <strong style={{ color: (overview.tot.inSum - overview.tot.outSum) >= 0 ? C.pos : C.neg, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.inSum - overview.tot.outSum)}</strong></span>
+              </div>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 900 }}>
+                <thead><tr>
+                  <th style={{ minWidth: 74 }}>ธนาคาร</th>
+                  <th style={{ minWidth: 128 }}>เลขที่บัญชี</th>
+                  <th style={{ minWidth: 108 }}>ประเภท</th>
+                  <th style={{ textAlign: 'right', minWidth: 112 }}>ต้นงวด</th>
+                  <th style={{ textAlign: 'right', minWidth: 108 }}>รับ</th>
+                  <th style={{ textAlign: 'right', minWidth: 108 }}>จ่าย</th>
+                  <th style={{ textAlign: 'right', minWidth: 118 }}>ปลายงวด</th>
+                  <th style={{ minWidth: 150 }}>สถานะ</th>
+                </tr></thead>
+                <tbody>
+                  {overview.all.map(r => {
+                    const g = r.data, ok = g && Math.abs(g.diff) <= 0.02;
+                    const active = r.type === 'สามารถใช้ได้';
+                    return (
+                      <tr key={r.key + r.no} style={{ background: g ? undefined : (active ? '#fffafa' : '#fafbfa') }}>
+                        <td style={{ fontWeight: 700, fontSize: 12 }}>{r.bank || '—'}</td>
+                        <td style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace' }}>{r.no}</td>
+                        <td><CfcChip tone={active ? 'ok' : 'mute'}>{r.type || '—'}</CfcChip></td>
+                        {g ? <React.Fragment>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                            {cfcMoney(g.opening)}
+                            {r.carried && <div><CfcChip tone="mute" title={'ไม่มีรายการเดือนนี้ — ยกยอดปลายงวด ' + r.prev.ym + ' มา'}>ยกมาจาก {r.prev.ym}</CfcChip></div>}
+                            {!r.carried && r.carryDiff != null && Math.abs(r.carryDiff) > 0.02 &&
+                              <div><CfcChip tone="bad" title={'ปลายงวด ' + r.prev.ym + ' = ' + cfcMoney(r.prev.closingFile) + ' แต่ต้นงวดเดือนนี้ = ' + cfcMoney(g.opening)}>ต่อเดือนก่อนไม่ตรง {cfcMoney(r.carryDiff)}</CfcChip></div>}
+                          </td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.inSum ? C.pos : C.faint }}>{g.inSum ? cfcMoney(g.inSum) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.outSum ? C.neg : C.faint }}>{g.outSum ? cfcMoney(g.outSum) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{cfcMoney(g.closingFile)}</td>
+                          <td>
+                            {ok ? <CfcChip tone="ok">✓ ยอดลงตัว</CfcChip> : <CfcChip tone="bad" title="ยอดยกมา + รับ − จ่าย ไม่เท่ากับยอดคงเหลือปลายงวด">ต่าง {cfcMoney(g.diff)}</CfcChip>}
+                            {g.uncoded > 0 && <span style={{ marginLeft: 5 }}><CfcChip tone="warn">ยังไม่ลงหมวด {g.uncoded}</CfcChip></span>}
+                          </td>
+                        </React.Fragment> : <React.Fragment>
+                          <td colSpan={4} style={{ textAlign: 'center', color: C.faint, fontSize: 12 }}>— ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนี้ —</td>
+                          <td>{active ? <CfcChip tone="bad">⚠️ ขาด</CfcChip> : <CfcChip tone="mute">ℹ️ ไม่มีความเคลื่อนไหว?</CfcChip>}</td>
+                        </React.Fragment>}
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ fontWeight: 800, borderTop: '2px solid ' + C.line }}>
+                    <td colSpan={3}>รวม {overview.loaded} บัญชีที่นำเข้าแล้ว</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.opening)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.pos }}>{cfcMoney(overview.tot.inSum)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.neg }}>{cfcMoney(overview.tot.outSum)}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.closing)}</td>
+                    <td style={{ fontWeight: 600, fontSize: 11.5, color: C.mut }}>
+                      {overview.tot.bad ? '⚠️ ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : '✓ ยอดลงตัวทุกบัญชี'}
+                      {overview.tot.uncoded ? ' · ยังไม่ลงหมวด ' + overview.tot.uncoded : ''}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '6px 16px 10px', fontSize: 11.5, color: C.faint }}>
+              ต้นงวด/ปลายงวด อ่านจากงบกระทบยอดเอง (ไม่ต้องคีย์) · "ยอดลงตัว" = ยอดยกมา + รับ − จ่าย เท่ากับยอดคงเหลือแถวสุดท้ายพอดี
+            </div>
+          </div>
+        )}
+
+        {/* ตรวจยอดรายบัญชี (แบบเดิม) — ซ่อนแล้ว รวมอยู่ในการ์ดภาพรวมด้านบน */}
+        {false && acctCheck.length > 1 && (
           <div style={Object.assign({}, card, { padding: 0, overflow: 'hidden' })}>
             <div style={{ padding: '10px 16px 6px', fontSize: 13.5, fontWeight: 800, color: C.ink }}>
               🏦 ตรวจยอดรายบัญชี <span style={{ fontSize: 11.5, fontWeight: 500, color: C.mut }}>ยอดยกมา + รับ − จ่าย ต้องเท่ากับปลายงวด · ไม่ตรง = นำเข้ายังไม่ครบ</span>
@@ -1105,6 +1341,7 @@
               <div>• หมวดมาตรฐานจากหน้าแรก: <strong>{teachRes.master}</strong> รายการ</div>
               <div>• ประวัติที่อ่านได้: <strong>{teachRes.history}</strong> แถว (ชีต {teachRes.sheets || '—'})</div>
               <div>• จับเข้าหมวดมาตรฐานได้: <strong style={{ color: C.pos }}>{teachRes.learned}</strong> แถว</div>
+              {teachRes.banks > 0 && <div>• ทะเบียนบัญชีธนาคาร (ชีต Dpt.): <strong>{teachRes.banks}</strong> บัญชี</div>}
               {teachRes.missed.length > 0 && <>
                 <div style={{ marginTop: 10, fontWeight: 700 }}>ชื่อหมวดที่จับไม่ได้ (ข้ามไป — ไม่เดา):</div>
                 <div style={{ maxHeight: 200, overflow: 'auto', background: C.soft, borderRadius: 8, padding: '6px 10px', marginTop: 4 }}>
@@ -1124,6 +1361,6 @@
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
     cfcParseBankSheet, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
-    cfcLoadLocal, cfcAcctSummary, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
+    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
