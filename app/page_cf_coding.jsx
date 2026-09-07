@@ -464,6 +464,84 @@
     return out;
   }
 
+  /* ── รายงานการจ่ายชำระหนี้ เรียงตามวันที่จ่ายเงิน (ไฟล์ "291") ──────────
+     โครง 2 ชั้น: แถวหลัก = ใบจ่าย (PS) · แถวย่อยถัดมา = บิลที่เช็คใบนั้นไปจ่าย
+     คอลัมน์อ่านจาก "ป้ายหัวตาราง" เสมอ ห้าม hardcode ตำแหน่ง — EXPRESS แทรก
+     คอลัมน์ "ตัดเงินมัดจำ" กลางตารางในรุ่นใหม่ ทำให้ช่องหลังจากนั้นเลื่อนทั้งแถบ
+     ★ ยอดเงินสดจริงต่อบิล = เช็คจ่าย × (ยอดบิล ÷ ผลรวมบิลในใบเดียวกัน)
+       — เกลี่ยตามสัดส่วนเพื่อดูด WHT/ส่วนลด/มัดจำเข้าไปในตัว แล้วผลรวมบิล
+         จะเท่ากับเงินที่ออกจากบัญชีจริงเป๊ะทุกใบ (ข้อมูลจริง ส.ค.: 96/97 ใบ
+         เข้าสมการ เช็คจ่าย = ยอดตามใบรับ − ภาษี − ส่วนลด − มัดจำ)                */
+  function cfcParseSettleReport(aoa) {
+    const out = { vouchers: [], error: '' };
+    if (!Array.isArray(aoa) || !aoa.length) { out.error = 'ไฟล์ว่าง'; return out; }
+    let hr = -1;
+    for (let i = 0; i < aoa.length; i++) {
+      if ((aoa[i] || []).some(c => cfcT(c).replace(/\s/g, '') === 'ยอดตามใบรับ')) { hr = i; break; }
+    }
+    if (hr < 0) { out.error = 'ไม่พบหัวตาราง "ยอดตามใบรับ"'; return out; }
+    const H = (aoa[hr] || []).map(c => cfcT(c).replace(/\s/g, ''));
+    const S = (aoa[hr + 1] || []).map(c => cfcT(c).replace(/\s/g, ''));
+    const at = (row, label) => { const i = row.indexOf(label.replace(/\s/g, '')); return i; };
+    const C = {
+      date: at(H, 'วันที่จ่าย'), doc: at(H, 'เลขที่'), payee: at(H, 'ผู้จำหน่าย'), billno: at(H, 'เลขที่บิล'),
+      dep: at(H, 'ตัดเงินมัดจำ'), gross: at(H, 'ยอดตามใบรับ'), cash: at(H, 'จ่ายเป็นง/ส'),
+      cheque: at(H, 'เช็คจ่าย'), disc: at(H, 'ส่วนลด'), tax: at(H, 'ภาษี'),
+      memo: at(H, 'หมายเหตุ'), chq: at(H, 'เลขที่เช็ค'), bank: at(H, 'ธนาคาร'), status: at(H, 'สถานะเช็ค'),
+      sRecv: at(S, 'เลขที่ใบรับ'), sDate: at(S, 'วันที่'), sPaid: at(S, 'จ่ายชำระ'), sNote: at(S, 'หมายเหตุ'),
+    };
+    const gv = (r, i) => (i >= 0 ? r[i] : '');
+    const isDoc = v => /^[A-Z]{2}\d{6,}/.test(cfcT(v));
+    let cur = null;
+    for (let i = hr + 2; i < aoa.length; i++) {
+      const r = aoa[i] || [];
+      const doc = cfcT(gv(r, C.doc));
+      if (isDoc(doc)) {
+        // ★ ใบที่ถูกยกเลิกมีเครื่องหมาย '*' นำหน้าเลขที่ — ต้องตัดทิ้ง ไม่ใช่เงินที่จ่ายจริง
+        const canceled = /^\*/.test(cfcT(gv(r, C.doc)).replace(/\s/g, '')) || /^\*/.test(cfcT(r[C.doc - 1] || ''));
+        cur = { doc, canceled, iso: cfcISO(gv(r, C.date)), payee: cfcT(gv(r, C.payee)),
+          gross: cfcNum(gv(r, C.gross)), cheque: cfcNum(gv(r, C.cheque)), cash: cfcNum(gv(r, C.cash)),
+          wht: cfcNum(gv(r, C.tax)), disc: cfcNum(gv(r, C.disc)), dep: cfcNum(gv(r, C.dep)),
+          memo: cfcT(gv(r, C.memo)), chqNo: cfcT(gv(r, C.chq)), bank: cfcT(gv(r, C.bank)),
+          status: cfcT(gv(r, C.status)), billNo: cfcT(gv(r, C.billno)), bills: [] };
+        out.vouchers.push(cur);
+        continue;
+      }
+      const recv = cfcT(gv(r, C.sRecv));
+      if (cur && isDoc(recv)) cur.bills.push({ recv, iso: cfcISO(gv(r, C.sDate)),
+        paid: cfcNum(gv(r, C.sPaid)), note: cfcT(gv(r, C.sNote)), billno: cfcT(gv(r, C.billno)) });
+      if (/จบรายงาน|รวมทั้งสิ้น/.test(r.map(x => cfcT(x)).join(''))) break;
+    }
+    out.vouchers = out.vouchers.filter(v => !v.canceled && v.doc);
+    if (!out.vouchers.length) out.error = 'อ่านหัวตารางได้ แต่ไม่พบใบจ่ายเงิน';
+    return out;
+  }
+
+  /* แตกใบจ่าย 1 ใบ → แถวลงรหัสรายบิล (ยอดเกลี่ยตามสัดส่วนให้รวมเท่าเงินสดที่ออกจริง) */
+  function cfcVoucherToRows(v, acctOf) {
+    const cashOut = Math.abs(v.cheque || v.cash || v.gross);
+    const acct = acctOf ? acctOf(v.bank) : { no: '', label: v.bank };
+    const base = { iso: v.iso, mne: 'PS', chqStatus: v.status, payee: v.payee,
+      acctNo: acct.no, acctLabel: acct.label, psNo: v.doc, chqNo: v.chqNo,
+      wht: v.wht, gross: v.gross, cheque: v.cheque, src: 'ps' };
+    if (!v.bills.length) {
+      return [Object.assign({}, base, { idx: 0, docNo: v.doc, memo: v.memo, billno: v.billNo,
+        note: (v.memo ? v.memo + '/ ' : '') + v.payee, out: cashOut, in: 0, share: 1 })];
+    }
+    const tot = v.bills.reduce((a, b) => a + Math.abs(b.paid), 0);
+    let left = Math.round(cashOut * 100);
+    return v.bills.map((b, i) => {
+      const share = tot ? Math.abs(b.paid) / tot : 1 / v.bills.length;
+      // ★ ปัดเศษแบบเก็บเศษไว้ที่บิลสุดท้าย — ผลรวมต้องเท่าเงินที่ออกจริงเป๊ะ ห้ามคลาดแม้สตางค์เดียว
+      const cents = (i === v.bills.length - 1) ? left : Math.round(cashOut * share * 100);
+      left -= cents;
+      const memo = b.note || v.memo;
+      return Object.assign({}, base, { idx: i, docNo: b.recv, billno: b.billno || v.billNo, memo,
+        note: (memo ? memo + '/ ' : '') + v.payee, billPaid: b.paid,
+        out: cents / 100, in: 0, share });
+    });
+  }
+
   /* ไฟล์ CASH FLOW ของเตย → (1) หมวดมาตรฐานจากหน้าแรก (2) ประวัติที่ลงรหัสไว้ */
   function cfcParseCashflowWorkbook(wb) {
     const res = { master: [], history: [], banks: [], sheetUsed: '', error: '' };
@@ -573,7 +651,7 @@
       const g = by[k] || (by[k] = { acctNo: r.acctNo, acctLabel: r.acctLabel, ym: String(r.iso).slice(0, 7),
         n: 0, inSum: 0, outSum: 0, uncoded: 0, first: null, last: null });
       g.n++; g.inSum += r.in; g.outSum += r.out;
-      if (!r.sug || !r.sug.cat) g.uncoded++;
+      if (r.sug && !r.sug.cat) g.uncoded++;   // แถวที่ส่งมาแค่คิดยอด (ไม่มี sug) ไม่นับ
       const key = String(r.iso) + '#' + String(r.idx == null ? 0 : r.idx).padStart(6, '0');
       if (!g.first || key < g.first.k) g.first = { k: key, row: r };
       if (!g.last || key > g.last.k) g.last = { k: key, row: r };
@@ -731,7 +809,20 @@
       });
       return out.sort((a, b) => (a.ym === b.ym ? String(a.acctNo).localeCompare(String(b.acctNo)) : (a.ym < b.ym ? 1 : -1)));
     }, [store]);
-    const allYms = useMemo(() => [...new Set(buckets.map(b => b.ym))].sort().reverse(), [buckets]);
+    /* ใบจ่ายจากรายงานการจ่ายชำระหนี้ (291) — แหล่งหลักของ "ค่าใช้จ่ายรายบิล" */
+    const psBuckets = useMemo(() => {
+      const out = [];
+      Object.keys(store).forEach(id => {
+        if (id.indexOf('ps:') !== 0) return;
+        const b = store[id]; if (!b || !Array.isArray(b.vouchers)) return;
+        out.push({ id, ym: b.ym || '', vouchers: b.vouchers, uploadedAt: b.uploadedAt, file: b.file });
+      });
+      return out.sort((a, b) => (a.ym < b.ym ? 1 : -1));
+    }, [store]);
+
+    const allYms = useMemo(() =>
+      [...new Set(buckets.map(b => b.ym).concat(psBuckets.map(b => b.ym)))].filter(Boolean).sort().reverse(),
+      [buckets, psBuckets]);
     const allAccts = useMemo(() => {
       const m = {}; buckets.forEach(b => { m[b.acctNo] = b.acctLabel || b.acctNo; }); return Object.entries(m);
     }, [buckets]);
@@ -739,10 +830,51 @@
 
     /* ── join กับ pvVouchers + เสนอหมวด ── */
     const pvIdx = useMemo(() => cfcBuildPvIndex(data.pvVouchers || []), [data.pvVouchers]);
+
+    /* ทะเบียนบัญชี (ส่วนกลาง > seed) — ใช้บอกว่า "มีกี่แบงค์ / ขาดแบงค์ไหน" */
+    const bankMaster = useMemo(() => {
+      const m = store.banks && Array.isArray(store.banks.items) && store.banks.items.length ? store.banks.items : CFC_BANK_SEED;
+      return m.map(b => Object.assign({}, b, { key: cfcAcctKey(b.no, b.no) }));
+    }, [store.banks]);
+
+    /* หาบัญชีจากข้อความธนาคารในใบจ่าย ("SCB#4839") → เทียบ 4 ตัวท้ายกับทะเบียน/ไฟล์ที่นำเข้า */
+    const acctOf = useMemo(() => {
+      const cands = bankMaster.map(b => ({ no: cfcDigits(b.no), label: b.bank + ' ' + b.no }))
+        .concat(buckets.map(b => ({ no: cfcDigits(b.acctNo), label: b.acctLabel || b.acctNo })));
+      return (txt) => {
+        const d = cfcDigits(txt);
+        if (d.length >= 3) {
+          const tail = d.slice(-4);
+          const hit = cands.find(c => c.no && c.no.slice(-4) === tail);
+          if (hit) return hit;
+        }
+        return { no: '', label: cfcT(txt) || '(ไม่ระบุบัญชี)' };
+      };
+    }, [bankMaster, buckets]);
+
     const rows = useMemo(() => {
-      const sel = buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct));
       const out = [];
+      const norm = v => cfcT(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      /* (ก) บิลจากรายงานการจ่ายชำระหนี้ — 1 บิล = 1 แถวลงรหัส */
+      const covered = new Set();
+      psBuckets.filter(b => !ym || b.ym === ym).forEach(b => (b.vouchers || []).forEach(v => {
+        if (v.chqNo) covered.add(norm(v.chqNo));
+        if (v.doc) covered.add(norm(v.doc));
+        cfcVoucherToRows(v, acctOf).forEach((r, i) => {
+          if (acct && cfcDigits(r.acctNo) !== cfcDigits(acct)) return;
+          const row = Object.assign({}, r, {
+            key: 'ps|' + v.doc + '|' + i, bucketId: b.id, balance: '', pv: null, bills: [],
+            pvPayee: r.payee, matchHow: 'ps',
+            matchText: [r.memo, r.payee].filter(Boolean).join(' '),
+          });
+          row.sug = engine(row);
+          out.push(row);
+        });
+      }));
+      /* (ข) งบกระทบยอด — เอาเฉพาะบรรทัดที่ "ไม่มีใน 291" (เงินเข้า/โอน/ค่าธรรมเนียม/ใบอนุมัติจ่าย) */
+      const sel = buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct));
       sel.forEach(b => (b.lines || []).forEach(L => {
+        if (covered.size && covered.has(norm(L.docNo))) return;   // ลงรหัสจากบิลใน 291 แล้ว
         const m = cfcMatchPv(L, pvIdx);
         const pv = m && m.pv;
         const bills = pv && Array.isArray(pv.settles) ? pv.settles : [];
@@ -755,13 +887,14 @@
           wht: pv ? cfcNum(pv.WHT) : 0,
         });
         row.sug = engine(row);
+        row.src = 'bank';
         out.push(row);
       }));
       // เรียงแบบเดียวกับชีต "รวมทุกบัญชี": วันที่ → บัญชี → ลำดับเดิมในไฟล์
       return out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
         : (a.acctNo !== b.acctNo ? String(a.acctNo).localeCompare(String(b.acctNo))
         : (Number(a.idx || 0) - Number(b.idx || 0)))));
-    }, [buckets, ym, acct, pvIdx, engine]);
+    }, [buckets, psBuckets, ym, acct, pvIdx, engine, acctOf]);
 
     const stat = useMemo(() => {
       const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0 };
@@ -780,13 +913,28 @@
       return m;
     }, [buckets]);
 
-    const acctCheck = useMemo(() => cfcAcctSummary(rows, declaredOpen), [rows, declaredOpen]);
+    /* ★ ยอดต้น/ปลาย/รับ/จ่าย ต้องมาจาก "บรรทัดธนาคาร" เท่านั้น — แถวลงรหัสตอนนี้เป็น
+         บิลรายใบ (ยอดเกลี่ยแล้ว) เอามาบวกเป็นยอดบัญชีไม่ได้ */
+    const bankScoped = useMemo(() => {
+      const out = [];
+      buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct))
+        .forEach(b => (b.lines || []).forEach(L => out.push(Object.assign({}, L, { acctLabel: b.acctLabel || L.acctLabel }))));
+      return out;
+    }, [buckets, ym, acct]);
+    const acctCheck = useMemo(() => cfcAcctSummary(bankScoped, declaredOpen), [bankScoped, declaredOpen]);
+
+    /* จำนวนแถวที่ยังไม่ลงหมวด แยกรายบัญชี (มาจากแถวลงรหัส ไม่ใช่บรรทัดธนาคาร) */
+    const uncodedByAcct = useMemo(() => {
+      const m = {};
+      rows.forEach(r => { if (r.sug && !r.sug.cat) { const k = cfcAcctKey(r.acctNo, r.acctLabel); m[k] = (m[k] || 0) + 1; } });
+      return m;
+    }, [rows]);
 
     /* สรุป "ทุกเดือนทุกบัญชีที่นำเข้าไว้" — ใช้หายอดปลายงวดของเดือนก่อนเท่านั้น
        (ไม่สนตัวกรองหน้าจอ ไม่ต้องมี sug → ไม่ต้องรอเครื่องเสนอหมวด) */
     const histCheck = useMemo(() => {
       const all = [];
-      buckets.forEach(b => (b.lines || []).forEach(L => all.push(Object.assign({ sug: null }, L, { acctLabel: b.acctLabel || L.acctLabel }))));
+      buckets.forEach(b => (b.lines || []).forEach(L => all.push(Object.assign({}, L, { acctLabel: b.acctLabel || L.acctLabel }))));
       return cfcAcctSummary(all, declaredOpen);
     }, [buckets, declaredOpen]);
 
@@ -804,11 +952,6 @@
         r.shared ? undefined : 'error'));
     }
 
-    /* ทะเบียนบัญชี (ส่วนกลาง > seed) — ใช้บอกว่า "มีกี่แบงค์ / ขาดแบงค์ไหน" */
-    const bankMaster = useMemo(() => {
-      const m = store.banks && Array.isArray(store.banks.items) && store.banks.items.length ? store.banks.items : CFC_BANK_SEED;
-      return m.map(b => Object.assign({}, b, { key: cfcAcctKey(b.no, b.no) }));
-    }, [store.banks]);
 
     /* รวมทะเบียน × ข้อมูลที่นำเข้าจริง เป็นตารางเดียว (แถวที่ยังไม่มีข้อมูล = ขาด) */
     const overview = useMemo(() => {
@@ -849,6 +992,7 @@
       const tot = { inSum: 0, outSum: 0, opening: 0, closing: 0, n: 0, uncoded: 0, bad: 0 };
       all.forEach(r => {
         if (!r.data) return;
+        r.data.uncoded = uncodedByAcct[cfcAcctKey(r.data.acctNo, r.data.acctLabel)] || 0;
         tot.inSum += r.data.inSum; tot.outSum += r.data.outSum;
         tot.opening += r.data.opening; tot.closing += r.data.closingFile;
         tot.n += r.data.n; tot.uncoded += r.data.uncoded;
@@ -861,7 +1005,7 @@
       const fileShort = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) > 0.02).length;
       const fileOk = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) <= 0.02).length;
       return { all, tot, loaded, carried, gapBreak, fileShort, fileOk, total: bankMaster.length, missingActive };
-    }, [acctCheck, histCheck, bankMaster, ym, manual]);
+    }, [acctCheck, histCheck, bankMaster, ym, manual, uncodedByAcct]);
 
     const shown = useMemo(() => {
       const needle = cfcNorm(q);
@@ -919,12 +1063,35 @@
       try {
         for (const f of Array.from(files)) {
           const wb = await cfcReadWorkbook(f);
+          /* ★ ปุ่มเดียวรับได้ 2 ชนิด — ผู้ใช้ไม่ควรต้องจำว่าไฟล์ไหนเข้าปุ่มไหน
+               (ก) รายงานการจ่ายชำระหนี้ = ค่าใช้จ่ายรายบิล (แหล่งหลัก)
+               (ข) งบกระทบยอด/รายการเคลื่อนไหวบัญชี = ยอดคงเหลือ + รายการที่ไม่มีในใบจ่าย */
+          let ps = null;
+          wb.SheetNames.forEach(sn => {
+            const r = cfcParseSettleReport(cfcAoa(wb.Sheets[sn]));
+            if (!r.error && (!ps || r.vouchers.length > ps.vouchers.length)) ps = r;
+          });
+          if (ps && ps.vouchers.length) {
+            const byYm = {};
+            ps.vouchers.forEach(v => { const k = String(v.iso).slice(0, 7); if (k) (byYm[k] = byYm[k] || []).push(v); });
+            Object.keys(byYm).forEach(k => {
+              next['ps:' + k] = { ym: k, vouchers: byYm[k], uploadedAt: new Date().toISOString(), file: f.name };
+            });
+            const nb = ps.vouchers.reduce((a, v) => a + (v.bills.length || 1), 0);
+            notes.push('✅ ' + f.name + ' — รายงานการจ่ายชำระหนี้: ' + ps.vouchers.length + ' ใบจ่าย → '
+              + nb + ' บิล · ' + Object.keys(byYm).join(', '));
+            continue;
+          }
           let best = null;
           wb.SheetNames.forEach(sn => {
             const p = cfcParseBankSheet(cfcAoa(wb.Sheets[sn]), f.name);
             if (!p.error && (!best || p.lines.length > best.lines.length)) best = p;
           });
-          if (!best || !best.lines.length) { notes.push('❌ ' + f.name + ' — ' + ((best && best.error) || 'ไม่พบรายการ')); continue; }
+          if (!best || !best.lines.length) {
+            notes.push('❌ ' + f.name + ' — อ่านไม่ออก: ไม่ใช่ทั้ง "รายงานการจ่ายชำระหนี้" (ต้องมีหัวคอลัมน์ '
+              + '"ยอดตามใบรับ") และ "รายการเคลื่อนไหวบัญชีธนาคาร" (ต้องมี MNE / ยอดถอน / ยอดฝาก)');
+            continue;
+          }
           const byYm = {};
           best.lines.forEach(L => { const k = String(L.iso).slice(0, 7); (byYm[k] = byYm[k] || []).push(L); });
           const firstYm = Object.keys(byYm).sort()[0];
@@ -934,7 +1101,7 @@
               opening: (k === firstYm && best.opening != null) ? best.opening : null,   // ★ ยอดยกมาที่ไฟล์ประกาศ
               uploadedAt: new Date().toISOString(), file: f.name };
           });
-          notes.push('✅ ' + f.name + ' — ' + best.lines.length + ' รายการ · บัญชี ' + (best.acctNo || '?') + ' · ' + Object.keys(byYm).join(', '));
+          notes.push('✅ ' + f.name + ' — งบกระทบยอด: ' + best.lines.length + ' รายการ · บัญชี ' + (best.acctNo || '?') + ' · ' + Object.keys(byYm).join(', '));
         }
         const r = await persist(next);
         setBusy('');
@@ -1094,17 +1261,17 @@
             <div>
               <div style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>🧾 ลงรหัสงบกระแสเงินสด</div>
               <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>
-                ข้อมูลดิบจาก EXPRESS → ผูกกับใบสำคัญจ่าย/บิลตั้งหนี้ → เสนอหมวด + จำที่ยืนยันไว้ใช้เดือนถัดไป
+ลงรหัส<strong>รายบิลตั้งหนี้</strong>จากรายงานการจ่ายชำระหนี้ + เก็บรายการที่ไม่มีในใบจ่ายจากงบกระทบยอด → เสนอหมวด + จำที่ยืนยันไว้ใช้เดือนถัดไป
                 {synced ? ' · ข้อมูลส่วนกลาง (ทุกคนเห็น)' : ' · ข้อมูลในเครื่อง'}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {canEdit && <button style={btn()} onClick={() => fileCf.current && fileCf.current.click()}>📚 สอนระบบจากไฟล์ CASH FLOW</button>}
-              {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้างบกระทบยอด</button>}
+              {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้าไฟล์ EXPRESS</button>}
               <button style={btn(true)} onClick={exportSheet}>⬇️ ส่งออกชีต "รวมทุกบัญชี"</button>
             </div>
           </div>
-          <input ref={fileBank} type="file" accept=".xml,.xls,.xlsx" multiple style={{ display: 'none' }}
+          <input ref={fileBank} type="file" accept=".xml,.xls,.xlsx" multiple style={{ display: 'none' }} title="รายงานการจ่ายชำระหนี้ และ/หรือ งบกระทบยอด"
             onChange={e => { onBankFiles(e.target.files); e.target.value = ''; }} />
           <input ref={fileCf} type="file" accept=".xls,.xlsx" style={{ display: 'none' }}
             onChange={e => { onCashflowFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
@@ -1371,12 +1538,16 @@
                         <td><CfcChip tone="mute">{r.mne || '—'}</CfcChip></td>
                         <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11.5 }}>
                           {r.docNo}
+                          {r.psNo && <div style={{ color: C.primary, fontSize: 10.5 }}>← {r.psNo}</div>}
                           {r.pv && <div style={{ color: C.primary, fontSize: 10.5 }}>→ {r.pv.PL_PV_No}</div>}
                         </td>
                         <td>
                           <div style={{ fontSize: 12.5, color: C.ink }}>{r.memo || r.note || '—'}</div>
                           <div style={{ fontSize: 11, color: C.mut }}>
                             {r.pvPayee || r.payee || ''}
+                            {r.src === 'ps' && <span style={{ marginLeft: 6 }}><CfcChip tone="ok" title={'จากรายงานการจ่ายชำระหนี้ · ใบ ' + r.psNo + (r.chqNo ? ' · เช็ค ' + r.chqNo : '')}>บิลตั้งหนี้</CfcChip></span>}
+                            {r.src === 'bank' && <span style={{ marginLeft: 6 }}><CfcChip tone="warn" title="ไม่มีในรายงานการจ่ายชำระหนี้ — มาจากงบกระทบยอด">นอกใบจ่าย</CfcChip></span>}
+                            {r.billno && <span style={{ marginLeft: 6, color: C.faint }}>บิล {r.billno}</span>}
                             {r.bills.length > 0 && <span style={{ marginLeft: 6 }}><CfcChip tone="info" title={r.bills.map(b => cfcT(b.vchno) + ' ' + cfcMoney(b.paid)).join('\n')}>{r.bills.length} บิล</CfcChip></span>}
                             {r.wht > 0 && <span style={{ marginLeft: 6 }}><CfcChip tone="warn">WHT {cfcMoney(r.wht)}</CfcChip></span>}
                             {r.matchHow === 'suspect' && <span style={{ marginLeft: 6 }}><CfcChip tone="bad">เลขคล้าย ยอดไม่ตรง</CfcChip></span>}
@@ -1481,7 +1652,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
