@@ -758,6 +758,31 @@
     const T = { ok: [C.posBg, C.pos], warn: [C.warnBg, C.warn], bad: [C.negBg, C.neg], info: [C.infoBg, C.info], mute: [C.soft, C.mut] }[tone || 'mute'];
     return <span title={title} style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: T[0], color: T[1], whiteSpace: 'nowrap' }}>{children}</span>;
   }
+  /* ช่องกรอกจำนวนเงิน — แสดงคั่นหลักพันเหมือนตัวเลขอื่นในตาราง
+     ⚠️ ใช้ <input type="number"> ไม่ได้ เบราว์เซอร์ไม่ยอมให้ค่ามีคอมมา (ตัวเลขในช่องจะ
+        โล้น ๆ ไม่เหมือนคอลัมน์ข้าง ๆ ที่มีคอมมา — ผู้ใช้ทักว่าดูไม่เป็นสัดส่วน)
+        จึงเป็น type=text + inputMode=decimal: โฟกัส = แก้เป็นเลขดิบ, ออกจากช่อง = จัดรูปให้ */
+  function CfcMoneyInput({ value, placeholder, title, width, bad, onSave }) {
+    const [txt, setTxt] = useState(value == null || value === '' ? '' : cfcMoney(value));
+    const [hot, setHot] = useState(false);
+    useEffect(() => { if (!hot) setTxt(value == null || value === '' ? '' : cfcMoney(value)); }, [value, hot]);
+    return (
+      <input type="text" inputMode="decimal" value={txt} placeholder={placeholder} title={title}
+        onFocus={e => { setHot(true); setTxt(value == null || value === '' ? '' : String(value)); setTimeout(() => e.target.select(), 0); }}
+        onChange={e => setTxt(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+        onBlur={e => {
+          setHot(false);
+          const raw = String(e.target.value).trim();
+          if (raw === '') { setTxt(''); onSave(null); return; }
+          const n = cfcNum(raw); setTxt(cfcMoney(n)); onSave(n);
+        }}
+        style={{ width: width || 120, fontSize: 12, padding: '3px 7px', borderRadius: 8, textAlign: 'right',
+          fontVariantNumeric: 'tabular-nums', color: C.ink,
+          border: '1px solid ' + (bad ? C.neg : C.line), background: bad ? C.negBg : '#fff' }} />
+    );
+  }
+
   const CFC_TIER = {
     locked: { label: '✅ ยืนยันแล้ว', tone: 'ok' },
     auto: { label: '🤖 มั่นใจ', tone: 'info' },
@@ -1375,197 +1400,145 @@
           )}
         </div>
 
-        {/* ── ภาพรวมธนาคาร + ตรวจยอด (โครงเดียวกับหัวชีตรายเดือนในไฟล์ BA-Cash Flow) ── */}
+        {/* ── ภาพรวมธนาคาร + ตรวจยอด ─────────────────────────────────────────
+             ⚠️ เคยเป็นตาราง 10 คอลัมน์ + เซลล์ 2 บรรทัดเกือบทุกช่อง → ผู้ใช้บอก "รกเละเทะ
+                ไม่เป็นสัดส่วน". โครงใหม่: 7 คอลัมน์ · ตัวเลขชิดขวาทุกช่องด้วย tabular-nums
+                · คำอธิบายที่มาย่อเป็นบรรทัดเล็กใต้ตัวเลขเฉพาะที่จำเป็น · สถานะเหลือชิปเดียว */}
         {buckets.length > 0 && (
           <div style={Object.assign({}, card, { padding: 0, overflow: 'hidden' })}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px 8px' }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: C.ink }}>
-                🏦 ภาพรวมธนาคาร
-                <span style={{ fontSize: 12, fontWeight: 600, color: C.mut, marginLeft: 8 }}>
-                  ทะเบียน {overview.total} บัญชี · นำเข้าแล้ว {overview.loaded}
-                  {overview.carried > 0 && <span> · ยกยอดจากเดือนก่อน {overview.carried}</span>}
-                  {overview.missingActive > 0 && <span style={{ color: C.neg }}> · ยังขาด {overview.missingActive} บัญชีที่ใช้งานอยู่</span>}
-                  {overview.gapBreak > 0 && <span style={{ color: C.neg }}> · ต่อเดือนก่อนไม่ตรง {overview.gapBreak}</span>}
-                  {overview.fileShort > 0 && <span style={{ color: C.neg }}> · ยอดไม่ตรงธนาคาร {overview.fileShort}</span>}
-                  {overview.fileShort === 0 && overview.fileOk > 0 && <span style={{ color: C.pos }}> · ตรงยอดธนาคาร {overview.fileOk}</span>}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5 }}>
-                <span>รับรวม <strong style={{ color: C.pos, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.inSum)}</strong></span>
-                <span>จ่ายรวม <strong style={{ color: C.neg, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.outSum)}</strong></span>
-                <span>สุทธิ <strong style={{ color: (overview.tot.inSum - overview.tot.outSum) >= 0 ? C.pos : C.neg, fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.inSum - overview.tot.outSum)}</strong></span>
+            {/* หัวการ์ด: ชื่อ + KPI 3 ตัว */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'baseline', justifyContent: 'space-between', padding: '13px 18px 9px', borderBottom: '1px solid ' + C.line }}>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink }}>🏦 ภาพรวมธนาคาร</div>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12.5, color: C.mut }}>
+                <span>รับรวม <strong style={{ color: C.pos, fontVariantNumeric: 'tabular-nums', fontSize: 13.5 }}>{cfcMoney(overview.tot.inSum)}</strong></span>
+                <span>จ่ายรวม <strong style={{ color: C.neg, fontVariantNumeric: 'tabular-nums', fontSize: 13.5 }}>{cfcMoney(overview.tot.outSum)}</strong></span>
+                <span>สุทธิ <strong style={{ color: (overview.tot.inSum - overview.tot.outSum) >= 0 ? C.pos : C.neg, fontVariantNumeric: 'tabular-nums', fontSize: 13.5 }}>{cfcMoney(overview.tot.inSum - overview.tot.outSum)}</strong></span>
               </div>
             </div>
+
+            {/* แถบสถานะรวม — ชิปสั้น ๆ อ่านทีเดียวจบ แทนประโยคยาวต่อกัน */}
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', padding: '9px 18px', background: C.soft }}>
+              <CfcChip tone="mute">ทะเบียน {overview.total} บัญชี</CfcChip>
+              <CfcChip tone={overview.loaded ? 'ok' : 'mute'}>นำเข้าไฟล์แล้ว {overview.loaded}</CfcChip>
+              {overview.carried > 0 && <CfcChip tone="mute">ยกยอดจากเดือนก่อน {overview.carried}</CfcChip>}
+              {overview.missingActive > 0 && <CfcChip tone="bad">ยังไม่นำเข้า {overview.missingActive}</CfcChip>}
+              {overview.gapBreak > 0 && <CfcChip tone="bad">ยกมาไม่ตรง {overview.gapBreak}</CfcChip>}
+              {overview.fileShort > 0 && <CfcChip tone="bad">ไม่ตรงยอดธนาคาร {overview.fileShort}</CfcChip>}
+              {overview.fileShort === 0 && overview.fileOk > 0 && <CfcChip tone="ok">ตรงยอดธนาคาร {overview.fileOk}</CfcChip>}
+            </div>
+
             <div style={{ overflowX: 'auto' }}>
-              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 1120 }}>
+              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 940, fontVariantNumeric: 'tabular-nums' }}>
                 <thead><tr>
-                  <th style={{ minWidth: 74 }}>ธนาคาร</th>
-                  <th style={{ minWidth: 128 }}>เลขที่บัญชี</th>
-                  <th style={{ minWidth: 108 }}>ประเภท</th>
-                  <th style={{ textAlign: 'right', minWidth: 124 }}>ต้นงวด</th>
-                  <th style={{ minWidth: 156 }}>ตรวจยกมา</th>
-                  <th style={{ textAlign: 'right', minWidth: 108 }}>รับ</th>
-                  <th style={{ textAlign: 'right', minWidth: 108 }}>จ่าย</th>
-                  <th style={{ textAlign: 'right', minWidth: 118 }}>ปลายงวด</th>
-                  <th style={{ minWidth: 150 }}>สถานะ</th>
-                  <th style={{ minWidth: 62 }} title="ติ๊กเมื่อเดือนนี้บัญชีนี้ไม่มีรายการ — จะไม่เตือนว่าขาดไฟล์">ไม่มี<br />เคลื่อนไหว</th>
+                  <th style={{ minWidth: 190 }}>บัญชี</th>
+                  <th style={{ minWidth: 132, textAlign: 'right' }}>ต้นงวด</th>
+                  <th style={{ minWidth: 116, textAlign: 'right' }}>รับ</th>
+                  <th style={{ minWidth: 116, textAlign: 'right' }}>จ่าย</th>
+                  <th style={{ minWidth: 132, textAlign: 'right' }}>ปลายงวด</th>
+                  <th style={{ minWidth: 140, textAlign: 'right' }} title="คีย์ยอดคงเหลือจริงจาก statement / สมุดบัญชี">ยอดจริงธนาคาร</th>
+                  <th style={{ minWidth: 158 }}>สถานะ</th>
                 </tr></thead>
                 <tbody>
                   {overview.all.map(r => {
-                    const g = r.data, ok = g && Math.abs(g.diff) <= 0.02;
+                    const g = r.data;
                     const active = r.type === 'สามารถใช้ได้';
+                    const hasFile = !!g && !r.carried;               // มีบรรทัดเดินบัญชีจริงในเดือนนี้
+                    const miss = r.fileMiss;
+                    const missBad = miss != null && Math.abs(miss) > 0.02;
+                    const cap = { fontSize: 10, color: C.faint, lineHeight: 1.35, marginTop: 1 };
+                    const numTd = { textAlign: 'right', whiteSpace: 'nowrap' };
+                    /* ★ ป้ายสถานะ — เรียงตามความสำคัญ แล้วแสดง "ชิปเดียว"
+                       ⚠️ แถวที่ยังไม่มีไฟล์ ห้ามขึ้น "ไฟล์ขาด" (ไม่มีไฟล์ให้ขาด) — คนละเรื่องกับ
+                          ไฟล์ที่นำเข้ามาแล้วรายการไม่ครบ ต้องแยกให้ชัดไม่งั้นไล่ผิดทาง */
+                    let chip;
+                    if (!g) chip = r.still ? <CfcChip tone="mute">ไม่มีการเคลื่อนไหว</CfcChip>
+                      : (active ? <CfcChip tone="bad">ยังไม่นำเข้าไฟล์</CfcChip> : <CfcChip tone="mute">ไม่มีข้อมูล</CfcChip>);
+                    else if (missBad && !hasFile) chip = <CfcChip tone="warn" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' แต่ยังไม่ได้นำเข้าไฟล์ของบัญชีนี้'}>ยังไม่นำเข้าไฟล์ · ต่าง {cfcMoney(Math.abs(miss))}</CfcChip>;
+                    else if (missBad) chip = <CfcChip tone="bad" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' − ยอดในไฟล์ ' + cfcMoney(g.closingFile)}>{'ไฟล์ขาด ' + cfcMoney(Math.abs(miss)) + (miss > 0 ? ' (รับ)' : ' (จ่าย)')}</CfcChip>;
+                    else if (miss != null) chip = <CfcChip tone="ok">ตรงยอดธนาคาร</CfcChip>;
+                    else if (!hasFile) chip = <CfcChip tone="mute">ไม่มีรายการเดือนนี้</CfcChip>;
+                    else if (Math.abs(g.diff) > 0.02) chip = <CfcChip tone="bad" title="ต้นงวด + รับ − จ่าย ไม่เท่ากับยอดคงเหลือปลายงวด">ยอดไม่ลงตัว {cfcMoney(g.diff)}</CfcChip>;
+                    else chip = <CfcChip tone="ok">ยอดลงตัว</CfcChip>;
+
                     return (
-                      <tr key={r.key + r.no} style={{ background: g ? undefined : (active ? '#fffafa' : '#fafbfa') }}>
-                        <td style={{ fontWeight: 700, fontSize: 12 }}>{r.bank || '—'}</td>
-                        <td style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace' }}>{r.no}</td>
-                        <td><CfcChip tone={active ? 'ok' : 'mute'}>{r.type || '—'}</CfcChip></td>
-                        {g ? <React.Fragment>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                            {cfcMoney(g.opening)}
-                            <div style={{ fontSize: 10, color: C.faint }}>
-                              {r.carried ? (r.openSrc === 'manual' ? 'คีย์เอง' : 'ยกมาจาก ' + r.prev.ym)
+                      <tr key={r.key + r.no} style={{ background: g ? undefined : (active && !r.still ? '#fffafa' : undefined) }}>
+                        {/* บัญชี: ธนาคาร+เลขที่บรรทัดเดียว · ประเภทเป็นชิปเล็กใต้ */}
+                        <td>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap' }}>
+                            {r.bank ? r.bank + ' · ' : ''}<span style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.no}</span>
+                          </div>
+                          <div style={{ marginTop: 2 }}><CfcChip tone={active ? 'ok' : 'mute'}>{r.type || '—'}</CfcChip></div>
+                        </td>
+
+                        {/* ต้นงวด + ที่มา + ผลตรวจยกมา (ยุบ "ตรวจยกมา" มารวมที่นี่ เป็นเรื่องเดียวกัน) */}
+                        <td style={numTd}>
+                          {g ? <React.Fragment>
+                            <div style={{ fontSize: 13 }}>{cfcMoney(g.opening)}</div>
+                            <div style={cap}>
+                              {r.carried ? (r.openSrc === 'manual' ? 'คีย์เอง' : 'ยกมาจาก ' + String(r.prev.ym).slice(5))
                                 : (g.openingSrc === 'file' ? 'ยอดยกมาในไฟล์' : 'คำนวณจากรายการแรก')}
+                              {!r.carried && r.prev && (Math.abs(r.carryDiff) <= 0.02
+                                ? <span style={{ color: C.pos }}> · ✓ ต่อเดือนก่อน</span>
+                                : <span style={{ color: C.neg }} title={'ปลายงวด ' + r.prev.ym + ' = ' + cfcMoney(r.prev.closingFile)}> · ✗ ต่าง {cfcMoney(r.carryDiff)}</span>)}
                             </div>
-                          </td>
-                          {/* ★ ตรวจยกมา = ยอดยกมาที่ไฟล์ประกาศ เทียบกับ ปลายงวดเดือนก่อน */}
-                          <td>
-                            {r.carried
-                              ? <CfcChip tone="mute">{r.openSrc === 'manual' ? 'คีย์ต้นงวดเอง' : 'ยกมาจาก ' + r.prev.ym}</CfcChip>
-                              : (r.prev
-                                ? (Math.abs(r.carryDiff) <= 0.02
-                                  ? <CfcChip tone="ok" title={'ปลายงวด ' + r.prev.ym + ' = ' + cfcMoney(r.prev.closingFile)}>✓ ตรงกับ {r.prev.ym}</CfcChip>
-                                  : <React.Fragment>
-                                      <CfcChip tone="bad">ไม่ตรง {cfcMoney(r.carryDiff)}</CfcChip>
-                                      <div style={{ fontSize: 10, color: C.mut, marginTop: 2 }}>ปลายงวด {r.prev.ym} = {cfcMoney(r.prev.closingFile)}</div>
-                                    </React.Fragment>)
-                                : <CfcChip tone="mute" title="ยังไม่มีข้อมูลเดือนก่อนของบัญชีนี้ให้เทียบ">ไม่มีเดือนก่อนให้เทียบ</CfcChip>)}
-                          </td>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.inSum ? C.pos : C.faint }}>{g.inSum ? cfcMoney(g.inSum) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.outSum ? C.neg : C.faint }}>{g.outSum ? cfcMoney(g.outSum) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
-                            {cfcMoney(g.closingFile)}
-                            {canEdit && <div style={{ marginTop: 2 }}>
-                              <input type="number" step="0.01" defaultValue={r.manClose == null ? '' : r.manClose}
-                                placeholder="ยอดจริงจากธนาคาร" title="คีย์ยอดคงเหลือจริงจาก statement/สมุดบัญชี — ต่างจากยอดในไฟล์ = ไฟล์ดึงมารายการไม่ครบ"
-                                onBlur={e => { const v = e.target.value.trim(); saveManual('closing', r.mk, v === '' ? null : cfcNum(v)); }}
-                                style={{ width: 118, fontSize: 11, padding: '2px 5px', borderRadius: 7, textAlign: 'right', fontWeight: 400,
-                                  border: '1px solid ' + (r.fileMiss != null && Math.abs(r.fileMiss) > 0.02 ? C.neg : C.line) }} />
-                            </div>}
-                          </td>
-                          <td>
-                            {/* ★ ยอดจริงจากธนาคารเป็นตัวชี้ขาด — "ยอดลงตัว" ในไฟล์ตัวเองแทบไม่มีวันไม่ตรง */}
-                            {r.fileMiss != null && Math.abs(r.fileMiss) > 0.02
-                              ? <CfcChip tone="bad" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' − ยอดในไฟล์ ' + cfcMoney(g.closingFile)}>
-                                  ไฟล์ขาด {cfcMoney(Math.abs(r.fileMiss))}{r.fileMiss > 0 ? ' (รายการรับ)' : ' (รายการจ่าย)'}
-                                </CfcChip>
-                              : (r.fileMiss != null
-                                ? <CfcChip tone="ok" title="ตรงกับยอดคงเหลือจริงจากธนาคาร">✓ ตรงยอดธนาคาร</CfcChip>
-                                : (g.n === 0
-                                  ? <CfcChip tone="mute">ไม่มีรายการเดือนนี้</CfcChip>
-                                  : (ok ? <CfcChip tone="ok">✓ ยอดลงตัว</CfcChip>
-                                        : <CfcChip tone="bad" title="ต้นงวด + รับ − จ่าย ไม่เท่ากับยอดคงเหลือปลายงวด">ต่าง {cfcMoney(g.diff)}</CfcChip>)))}
-                            {g.uncoded > 0 && <span style={{ marginLeft: 5 }}><CfcChip tone="warn">ยังไม่ลงหมวด {g.uncoded}</CfcChip></span>}
-                          </td>
-                        </React.Fragment> : <React.Fragment>
-                          {/* ไม่มีไฟล์ + ไม่มีเดือนก่อนให้ยก → ให้คีย์ต้นงวดเองได้ */}
-                          <td style={{ textAlign: 'right' }}>
-                            {canEdit
-                              ? <input type="number" step="0.01" defaultValue={r.manOpen == null ? '' : r.manOpen}
-                                  placeholder="คีย์ต้นงวด" title="ไม่มีข้อมูลเดือนก่อนให้ยกมา — คีย์ยอดต้นงวดเองได้"
-                                  onBlur={e => { const v = e.target.value.trim(); saveManual('opening', r.mk, v === '' ? null : cfcNum(v)); }}
-                                  style={{ width: 112, fontSize: 12, padding: '3px 6px', borderRadius: 8, border: '1px solid ' + C.line, textAlign: 'right' }} />
-                              : <span style={{ color: C.faint, fontSize: 12 }}>—</span>}
-                          </td>
-                          {/* ⚠️ เดิม colSpan=3 ทำให้แถวนี้สั้นกว่าหัวตาราง 1 ช่อง → สถานะเลื่อนไปอยู่ใต้ "ปลายงวด" */}
-                          <td colSpan={3} style={{ textAlign: 'center', color: C.faint, fontSize: 12 }}>— ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนี้ —</td>
-                          <td style={{ textAlign: 'right' }}>
-                            {canEdit
-                              ? <input type="number" step="0.01" defaultValue={r.manClose == null ? '' : r.manClose}
-                                  placeholder="ยอดจริงจากธนาคาร" title="คีย์ยอดคงเหลือจริง — ถ้ามียอดแต่ไม่มีไฟล์ แปลว่ายังไม่ได้นำเข้า"
-                                  onBlur={e => { const v = e.target.value.trim(); saveManual('closing', r.mk, v === '' ? null : cfcNum(v)); }}
-                                  style={{ width: 118, fontSize: 11, padding: '2px 5px', borderRadius: 7, textAlign: 'right', border: '1px solid ' + C.line }} />
-                              : <span style={{ color: C.faint, fontSize: 12 }}>—</span>}
-                          </td>
-                          <td>
-                            {r.still
-                              ? <CfcChip tone="mute">✓ ไม่มีการเคลื่อนไหว</CfcChip>
-                              : (active ? <CfcChip tone="bad">⚠️ ขาด</CfcChip> : <CfcChip tone="mute">ℹ️ ไม่มีความเคลื่อนไหว?</CfcChip>)}
-                          </td>
-                        </React.Fragment>}
-                        {/* ช่องติ๊ก "ไม่มีการเคลื่อนไหว" — ติ๊กแล้วไม่ต้องเอาไฟล์มาลง และไม่เตือน */}
-                        <td style={{ textAlign: 'center' }}>
-                          {canEdit && !g && <input type="checkbox" checked={!!r.still} title="เดือนนี้บัญชีนี้ไม่มีรายการ — ไม่ต้องนำเข้าไฟล์ และไม่ต้องเตือน"
-                            onChange={e => saveManual('still', r.mk, e.target.checked ? 1 : null)} style={{ cursor: 'pointer', width: 15, height: 15 }} />}
-                          {g && <span style={{ color: C.faint, fontSize: 11 }}>—</span>}
+                          </React.Fragment> : (canEdit
+                            ? <CfcMoneyInput value={r.manOpen} placeholder="คีย์ต้นงวด" width={112}
+                                title="ไม่มีข้อมูลเดือนก่อนให้ยกมา — คีย์ยอดต้นงวดเองได้"
+                                onSave={v => saveManual('opening', r.mk, v)} />
+                            : <span style={{ color: C.faint }}>—</span>)}
+                        </td>
+
+                        <td style={Object.assign({}, numTd, { color: g && g.inSum ? C.pos : C.faint, fontSize: 13 })}>{g && g.inSum ? cfcMoney(g.inSum) : '—'}</td>
+                        <td style={Object.assign({}, numTd, { color: g && g.outSum ? C.neg : C.faint, fontSize: 13 })}>{g && g.outSum ? cfcMoney(g.outSum) : '—'}</td>
+                        <td style={Object.assign({}, numTd, { fontWeight: 700, fontSize: 13 })}>{g ? cfcMoney(g.closingFile) : <span style={{ color: C.faint, fontWeight: 400 }}>—</span>}</td>
+
+                        {/* ยอดจริงจากธนาคาร — ช่องคีย์ แสดงคั่นหลักพันเหมือนตัวเลขอื่น */}
+                        <td style={numTd}>
+                          {canEdit
+                            ? <CfcMoneyInput value={r.manClose} placeholder="คีย์ยอดจริง" width={124} bad={missBad}
+                                title="ยอดคงเหลือจริงจาก statement / สมุดบัญชี — ต่างจากยอดในไฟล์ = ไฟล์ดึงมารายการไม่ครบ"
+                                onSave={v => saveManual('closing', r.mk, v)} />
+                            : <span style={{ color: C.faint }}>{r.manClose == null ? '—' : cfcMoney(r.manClose)}</span>}
+                        </td>
+
+                        <td>
+                          {/* ติ๊กแล้ว ช่องติ๊กด้านล่างบอกความหมายอยู่แล้ว ไม่ต้องมีชิปซ้ำอีกบรรทัด */}
+                          {(g || !r.still) && chip}
+                          {g && g.uncoded > 0 && <div style={{ marginTop: 3 }}><CfcChip tone="warn">ยังไม่ลงหมวด {g.uncoded}</CfcChip></div>}
+                          {!g && canEdit && <div style={{ marginTop: 3, fontSize: 11, color: C.mut }}>
+                            <label style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              <input type="checkbox" checked={!!r.still} style={{ cursor: 'pointer', width: 13, height: 13 }}
+                                onChange={e => saveManual('still', r.mk, e.target.checked ? 1 : null)} />
+                              ไม่มีการเคลื่อนไหว
+                            </label>
+                          </div>}
                         </td>
                       </tr>
                     );
                   })}
-                  <tr style={{ fontWeight: 800, borderTop: '2px solid ' + C.line }}>
-                    <td colSpan={3}>รวม {overview.loaded} บัญชีที่นำเข้าแล้ว</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.opening)}</td>
-                    <td style={{ fontSize: 11.5, color: C.mut }}>{overview.gapBreak ? '⚠️ ยกมาไม่ตรง ' + overview.gapBreak + ' บัญชี' : '✓ ยกมาตรงทุกบัญชี'}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.pos }}>{cfcMoney(overview.tot.inSum)}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.neg }}>{cfcMoney(overview.tot.outSum)}</td>
-                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.closing)}</td>
-                    <td style={{ fontWeight: 600, fontSize: 11.5, color: C.mut }}>
-                      {overview.fileShort ? '⚠️ ไม่ตรงยอดธนาคาร ' + overview.fileShort + ' บัญชี'
-                        : (overview.tot.bad ? '⚠️ ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : '✓ ยอดลงตัวทุกบัญชี')}
-                      {overview.tot.uncoded ? ' · ยังไม่ลงหมวด ' + overview.tot.uncoded : ''}
-                    </td>
+                  <tr style={{ fontWeight: 800, borderTop: '2px solid ' + C.line, background: C.soft }}>
+                    <td>รวม {overview.loaded} บัญชีที่นำเข้าแล้ว</td>
+                    <td style={{ textAlign: 'right' }}>{cfcMoney(overview.tot.opening)}</td>
+                    <td style={{ textAlign: 'right', color: C.pos }}>{cfcMoney(overview.tot.inSum)}</td>
+                    <td style={{ textAlign: 'right', color: C.neg }}>{cfcMoney(overview.tot.outSum)}</td>
+                    <td style={{ textAlign: 'right' }}>{cfcMoney(overview.tot.closing)}</td>
                     <td></td>
+                    <td style={{ fontWeight: 600, fontSize: 11.5, color: C.mut }}>
+                      {overview.fileShort ? 'ไม่ตรงยอดธนาคาร ' + overview.fileShort + ' บัญชี'
+                        : (overview.tot.bad ? 'ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : 'ยอดลงตัวทุกบัญชี')}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '6px 16px 10px', fontSize: 11.5, color: C.faint }}>
-              ต้นงวดใช้ "ยอดยกมา" ที่ประกาศในไฟล์ (ไม่มีก็คำนวณจากรายการแรก) · <strong>ตรวจยกมา</strong> = เทียบกับปลายงวดเดือนก่อน ·
-              บัญชีที่ไม่มีเดือนก่อนให้ยก คีย์ต้นงวดเองได้ · ติ๊ก <strong>ไม่มีเคลื่อนไหว</strong> แล้วไม่ต้องเอาไฟล์มาลงและไม่เตือน ·
-              <strong>คีย์ยอดจริงจากธนาคารในช่องใต้ปลายงวด</strong> เพื่อตรวจว่าไฟล์ที่ดึงมารายการครบไหม (ต่างกัน = ไฟล์ขาดรายการ) ·
-              "ยอดลงตัว" = ต้นงวด + รับ − จ่าย เท่ากับยอดคงเหลือแถวสุดท้ายในไฟล์ (ตรงเองเกือบเสมอ จึงไม่พอใช้ตรวจความครบ)
+            <div style={{ padding: '8px 18px 11px', fontSize: 11, color: C.faint, lineHeight: 1.7 }}>
+              <strong style={{ color: C.mut }}>ต้นงวด</strong> ใช้ยอดยกมาในไฟล์ · ไม่มีไฟล์ก็ยกจากเดือนก่อน · ไม่มีอีกก็คีย์เอง — ใต้ตัวเลขบอกที่มาและผลตรวจกับเดือนก่อน<br />
+              <strong style={{ color: C.mut }}>ยอดจริงธนาคาร</strong> คีย์จาก statement เพื่อตรวจว่าไฟล์ดึงมารายการครบไหม · บัญชีที่เดือนนั้นไม่มีรายการ ติ๊ก “ไม่มีการเคลื่อนไหว” แล้วจะไม่เตือน
             </div>
           </div>
         )}
 
-        {/* ตรวจยอดรายบัญชี (แบบเดิม) — ซ่อนแล้ว รวมอยู่ในการ์ดภาพรวมด้านบน */}
-        {false && acctCheck.length > 1 && (
-          <div style={Object.assign({}, card, { padding: 0, overflow: 'hidden' })}>
-            <div style={{ padding: '10px 16px 6px', fontSize: 13.5, fontWeight: 800, color: C.ink }}>
-              🏦 ตรวจยอดรายบัญชี <span style={{ fontSize: 11.5, fontWeight: 500, color: C.mut }}>ยอดยกมา + รับ − จ่าย ต้องเท่ากับปลายงวด · ไม่ตรง = นำเข้ายังไม่ครบ</span>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 820 }}>
-                <thead><tr>
-                  <th style={{ minWidth: 210 }}>บัญชี</th><th style={{ minWidth: 74 }}>เดือน</th>
-                  <th style={{ textAlign: 'right', minWidth: 106 }}>ยกมา</th>
-                  <th style={{ textAlign: 'right', minWidth: 106 }}>รับ</th>
-                  <th style={{ textAlign: 'right', minWidth: 106 }}>จ่าย</th>
-                  <th style={{ textAlign: 'right', minWidth: 116 }}>ปลายงวด</th>
-                  <th style={{ minWidth: 128 }}>สถานะ</th>
-                </tr></thead>
-                <tbody>
-                  {acctCheck.map(g => {
-                    const ok = Math.abs(g.diff) <= 0.02;
-                    return (
-                      <tr key={g.acctNo + g.ym}>
-                        <td style={{ fontSize: 12 }}>{g.acctLabel || g.acctNo}</td>
-                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{g.ym}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(g.opening)}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.pos }}>{cfcMoney(g.inSum)}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.neg }}>{cfcMoney(g.outSum)}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{cfcMoney(g.closingFile)}</td>
-                        <td>
-                          {ok ? <CfcChip tone="ok">✓ ยอดลงตัว</CfcChip> : <CfcChip tone="bad" title={'ต่าง ' + cfcMoney(g.diff)}>ต่าง {cfcMoney(g.diff)}</CfcChip>}
-                          {g.uncoded > 0 && <span style={{ marginLeft: 5 }}><CfcChip tone="warn">ยังไม่ลงหมวด {g.uncoded}</CfcChip></span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+
 
         {/* แถบเตือน */}
         {(stat.suspect > 0 || stat.noPv > 0) && (
