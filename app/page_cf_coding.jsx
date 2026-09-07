@@ -792,14 +792,15 @@
 
     /* ค่าที่คนคีย์เอง: ต้นงวด (เมื่อไม่มีเดือนก่อนให้ยก) + ธง "ไม่มีการเคลื่อนไหว"
        เก็บรวมเป็น 1 แถว id 'manual' ใน cfCoding (คีย์ = "<acctKey>|<ym>") */
-    const manual = useMemo(() => Object.assign({ opening: {}, still: {} }, store.manual || {}), [store.manual]);
+    const manual = useMemo(() => Object.assign({ opening: {}, closing: {}, still: {} }, store.manual || {}), [store.manual]);
     function saveManual(kind, key, value) {
       if (!canEdit) return;
-      const cur = { opening: Object.assign({}, manual.opening), still: Object.assign({}, manual.still) };
+      const cur = { opening: Object.assign({}, manual.opening), closing: Object.assign({}, manual.closing), still: Object.assign({}, manual.still) };
       if (value == null || value === '' || value === false) delete cur[kind][key]; else cur[kind][key] = value;
       const next = Object.assign({}, store, { manual: Object.assign(cur, { at: new Date().toISOString() }) });
       persist(next).then(r => toast && toast(
-        kind === 'still' ? (value ? 'ทำเครื่องหมาย "ไม่มีการเคลื่อนไหว" แล้ว' : 'ยกเลิกเครื่องหมายแล้ว') : 'บันทึกยอดต้นงวดแล้ว',
+        kind === 'still' ? (value ? 'ทำเครื่องหมาย "ไม่มีการเคลื่อนไหว" แล้ว' : 'ยกเลิกเครื่องหมายแล้ว')
+          : (kind === 'closing' ? 'บันทึกยอดปลายงวดจริงแล้ว' : 'บันทึกยอดต้นงวดแล้ว'),
         r.shared ? undefined : 'error'));
     }
 
@@ -823,18 +824,22 @@
         const mk = (g ? cfcAcctKey(g.acctNo, g.acctLabel) : b.key) + '|' + (ym || (g ? g.ymFirst : 'all'));
         const still = !!manual.still[mk];
         const manOpen = manual.opening[mk];
+        const manClose = manual.closing[mk];
         const prev = cfcPrevMonth(histCheck, g ? g.acctNo : b.no, g ? g.ymFirst : (ym || ''), g ? g.acctLabel : '');
         // มีไฟล์ → ยอดยกมาของไฟล์คือตัวจริง, เดือนก่อนเป็น "ตัวตรวจ"
-        if (g) return Object.assign({}, b, { mk, still, data: g, prev,
+        // ★ ยอดจริงที่คีย์เอง − ปลายงวดที่ไฟล์บอก = ส่วนที่ไฟล์ยังขาด (บวก = ไฟล์ขาดรายการรับ / ลบ = ขาดรายการจ่าย)
+        if (g) return Object.assign({}, b, { mk, still, data: g, prev, manClose,
+          fileMiss: manClose == null ? null : (cfcNum(manClose) - g.closingFile),
           carryDiff: prev ? (g.opening - prev.closingFile) : null });
         // ไม่มีไฟล์ → ยกจากเดือนก่อน ถ้าไม่มีก็ใช้ค่าที่คีย์เอง
         const base = prev ? prev.closingFile : (manOpen == null ? null : cfcNum(manOpen));
         if (base != null) return Object.assign({}, b, { mk, still, prev, carried: true,
-          openSrc: prev ? 'prev' : 'manual', manOpen,
+          openSrc: prev ? 'prev' : 'manual', manOpen, manClose,
+          fileMiss: manClose == null ? null : (cfcNum(manClose) - base),
           data: { acctNo: g ? g.acctNo : b.no, acctLabel: b.no, ym: ym || (prev ? prev.ym : ''),
             ymFirst: prev ? prev.ym : (ym || ''), ymLast: prev ? prev.ym : (ym || ''),
             opening: base, closingFile: base, closingCalc: base, diff: 0, inSum: 0, outSum: 0, n: 0, uncoded: 0 } });
-        return Object.assign({}, b, { mk, still, data: null, prev: null, manOpen });
+        return Object.assign({}, b, { mk, still, data: null, prev: null, manOpen, manClose });
       };
       const listed = bankMaster.map(b => { const g = byKey[b.key]; if (g) used[b.key] = 1; return attach(b, g); });
       // บัญชีที่นำเข้ามาแต่ไม่มีในทะเบียน (เช่นเปิดบัญชีใหม่ / ไฟล์ผิดบริษัท)
@@ -853,7 +858,9 @@
       const carried = all.filter(r => r.carried).length;
       const missingActive = listed.filter(r => !r.data && !r.still && r.type === 'สามารถใช้ได้').length;
       const gapBreak = all.filter(r => !r.still && r.carryDiff != null && Math.abs(r.carryDiff) > 0.02).length;
-      return { all, tot, loaded, carried, gapBreak, total: bankMaster.length, missingActive };
+      const fileShort = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) > 0.02).length;
+      const fileOk = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) <= 0.02).length;
+      return { all, tot, loaded, carried, gapBreak, fileShort, fileOk, total: bankMaster.length, missingActive };
     }, [acctCheck, histCheck, bankMaster, ym, manual]);
 
     const shown = useMemo(() => {
@@ -1045,20 +1052,23 @@
       const sum = cfcAcctSummary(rows);
       const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'],
         ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง'], [],
-        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
+        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'ปลายงวดจริง (คีย์)', 'ไฟล์ขาด', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
       sum.forEach(g => {
         const pv = cfcPrevMonth(histCheck, g.acctNo, g.ym, g.acctLabel);
+        const mc = manual.closing[cfcAcctKey(g.acctNo, g.acctLabel) + '|' + g.ym];
         s3.push([g.acctLabel || '', g.acctNo || '', monLabel(g.ym), g.opening,
           pv ? pv.closingFile : '', pv ? (g.opening - pv.closingFile) : '',
-          g.inSum, g.outSum, g.closingCalc, g.closingFile, g.diff, g.n, g.uncoded]);
+          g.inSum, g.outSum, g.closingCalc, g.closingFile, g.diff,
+          mc == null ? '' : cfcNum(mc), mc == null ? '' : (cfcNum(mc) - g.closingFile),
+          g.n, g.uncoded]);
       });
       s3.push([]);
       s3.push(['รวมทุกบัญชี', '', '', sum.reduce((a, g) => a + g.opening, 0), '', '',
         sum.reduce((a, g) => a + g.inSum, 0), sum.reduce((a, g) => a + g.outSum, 0),
         sum.reduce((a, g) => a + g.closingCalc, 0), sum.reduce((a, g) => a + g.closingFile, 0),
-        sum.reduce((a, g) => a + g.diff, 0), rows.length, uncodedTot]);
+        sum.reduce((a, g) => a + g.diff, 0), '', '', rows.length, uncodedTot]);
       const ws3 = XLSX.utils.aoa_to_sheet(s3);
-      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 12 }, { wch: 12 }];
+      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws3, 'ตรวจยอดรายบัญชี');
 
       XLSX.writeFile(wb, 'BIO-ลงรหัส-' + (ym || 'ทุกเดือน') + (acct ? '-' + acct : '-ทุกบัญชี') + '.xlsx');
@@ -1144,6 +1154,8 @@
                   {overview.carried > 0 && <span> · ยกยอดจากเดือนก่อน {overview.carried}</span>}
                   {overview.missingActive > 0 && <span style={{ color: C.neg }}> · ยังขาด {overview.missingActive} บัญชีที่ใช้งานอยู่</span>}
                   {overview.gapBreak > 0 && <span style={{ color: C.neg }}> · ต่อเดือนก่อนไม่ตรง {overview.gapBreak}</span>}
+                  {overview.fileShort > 0 && <span style={{ color: C.neg }}> · ยอดไม่ตรงธนาคาร {overview.fileShort}</span>}
+                  {overview.fileShort === 0 && overview.fileOk > 0 && <span style={{ color: C.pos }}> · ตรงยอดธนาคาร {overview.fileOk}</span>}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5 }}>
@@ -1198,13 +1210,28 @@
                           </td>
                           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.inSum ? C.pos : C.faint }}>{g.inSum ? cfcMoney(g.inSum) : '—'}</td>
                           <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: g.outSum ? C.neg : C.faint }}>{g.outSum ? cfcMoney(g.outSum) : '—'}</td>
-                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{cfcMoney(g.closingFile)}</td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                            {cfcMoney(g.closingFile)}
+                            {canEdit && <div style={{ marginTop: 2 }}>
+                              <input type="number" step="0.01" defaultValue={r.manClose == null ? '' : r.manClose}
+                                placeholder="ยอดจริงจากธนาคาร" title="คีย์ยอดคงเหลือจริงจาก statement/สมุดบัญชี — ต่างจากยอดในไฟล์ = ไฟล์ดึงมารายการไม่ครบ"
+                                onBlur={e => { const v = e.target.value.trim(); saveManual('closing', r.mk, v === '' ? null : cfcNum(v)); }}
+                                style={{ width: 118, fontSize: 11, padding: '2px 5px', borderRadius: 7, textAlign: 'right', fontWeight: 400,
+                                  border: '1px solid ' + (r.fileMiss != null && Math.abs(r.fileMiss) > 0.02 ? C.neg : C.line) }} />
+                            </div>}
+                          </td>
                           <td>
-                            {/* ⚠️ แถวที่ยกยอด/คีย์เองไม่มีรายการเลย — ขึ้น "ยอดลงตัว" จะชวนเข้าใจผิดว่ากระทบยอดแล้ว */}
-                            {g.n === 0
-                              ? <CfcChip tone="mute">ไม่มีรายการเดือนนี้</CfcChip>
-                              : (ok ? <CfcChip tone="ok">✓ ยอดลงตัว</CfcChip>
-                                    : <CfcChip tone="bad" title="ต้นงวด + รับ − จ่าย ไม่เท่ากับยอดคงเหลือปลายงวด">ต่าง {cfcMoney(g.diff)}</CfcChip>)}
+                            {/* ★ ยอดจริงจากธนาคารเป็นตัวชี้ขาด — "ยอดลงตัว" ในไฟล์ตัวเองแทบไม่มีวันไม่ตรง */}
+                            {r.fileMiss != null && Math.abs(r.fileMiss) > 0.02
+                              ? <CfcChip tone="bad" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' − ยอดในไฟล์ ' + cfcMoney(g.closingFile)}>
+                                  ไฟล์ขาด {cfcMoney(Math.abs(r.fileMiss))}{r.fileMiss > 0 ? ' (รายการรับ)' : ' (รายการจ่าย)'}
+                                </CfcChip>
+                              : (r.fileMiss != null
+                                ? <CfcChip tone="ok" title="ตรงกับยอดคงเหลือจริงจากธนาคาร">✓ ตรงยอดธนาคาร</CfcChip>
+                                : (g.n === 0
+                                  ? <CfcChip tone="mute">ไม่มีรายการเดือนนี้</CfcChip>
+                                  : (ok ? <CfcChip tone="ok">✓ ยอดลงตัว</CfcChip>
+                                        : <CfcChip tone="bad" title="ต้นงวด + รับ − จ่าย ไม่เท่ากับยอดคงเหลือปลายงวด">ต่าง {cfcMoney(g.diff)}</CfcChip>)))}
                             {g.uncoded > 0 && <span style={{ marginLeft: 5 }}><CfcChip tone="warn">ยังไม่ลงหมวด {g.uncoded}</CfcChip></span>}
                           </td>
                         </React.Fragment> : <React.Fragment>
@@ -1217,7 +1244,16 @@
                                   style={{ width: 112, fontSize: 12, padding: '3px 6px', borderRadius: 8, border: '1px solid ' + C.line, textAlign: 'right' }} />
                               : <span style={{ color: C.faint, fontSize: 12 }}>—</span>}
                           </td>
+                          {/* ⚠️ เดิม colSpan=3 ทำให้แถวนี้สั้นกว่าหัวตาราง 1 ช่อง → สถานะเลื่อนไปอยู่ใต้ "ปลายงวด" */}
                           <td colSpan={3} style={{ textAlign: 'center', color: C.faint, fontSize: 12 }}>— ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนี้ —</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {canEdit
+                              ? <input type="number" step="0.01" defaultValue={r.manClose == null ? '' : r.manClose}
+                                  placeholder="ยอดจริงจากธนาคาร" title="คีย์ยอดคงเหลือจริง — ถ้ามียอดแต่ไม่มีไฟล์ แปลว่ายังไม่ได้นำเข้า"
+                                  onBlur={e => { const v = e.target.value.trim(); saveManual('closing', r.mk, v === '' ? null : cfcNum(v)); }}
+                                  style={{ width: 118, fontSize: 11, padding: '2px 5px', borderRadius: 7, textAlign: 'right', border: '1px solid ' + C.line }} />
+                              : <span style={{ color: C.faint, fontSize: 12 }}>—</span>}
+                          </td>
                           <td>
                             {r.still
                               ? <CfcChip tone="mute">✓ ไม่มีการเคลื่อนไหว</CfcChip>
@@ -1241,7 +1277,8 @@
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.neg }}>{cfcMoney(overview.tot.outSum)}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(overview.tot.closing)}</td>
                     <td style={{ fontWeight: 600, fontSize: 11.5, color: C.mut }}>
-                      {overview.tot.bad ? '⚠️ ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : '✓ ยอดลงตัวทุกบัญชี'}
+                      {overview.fileShort ? '⚠️ ไม่ตรงยอดธนาคาร ' + overview.fileShort + ' บัญชี'
+                        : (overview.tot.bad ? '⚠️ ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : '✓ ยอดลงตัวทุกบัญชี')}
                       {overview.tot.uncoded ? ' · ยังไม่ลงหมวด ' + overview.tot.uncoded : ''}
                     </td>
                     <td></td>
@@ -1252,7 +1289,8 @@
             <div style={{ padding: '6px 16px 10px', fontSize: 11.5, color: C.faint }}>
               ต้นงวดใช้ "ยอดยกมา" ที่ประกาศในไฟล์ (ไม่มีก็คำนวณจากรายการแรก) · <strong>ตรวจยกมา</strong> = เทียบกับปลายงวดเดือนก่อน ·
               บัญชีที่ไม่มีเดือนก่อนให้ยก คีย์ต้นงวดเองได้ · ติ๊ก <strong>ไม่มีเคลื่อนไหว</strong> แล้วไม่ต้องเอาไฟล์มาลงและไม่เตือน ·
-              "ยอดลงตัว" = ต้นงวด + รับ − จ่าย เท่ากับยอดคงเหลือแถวสุดท้าย
+              <strong>คีย์ยอดจริงจากธนาคารในช่องใต้ปลายงวด</strong> เพื่อตรวจว่าไฟล์ที่ดึงมารายการครบไหม (ต่างกัน = ไฟล์ขาดรายการ) ·
+              "ยอดลงตัว" = ต้นงวด + รับ − จ่าย เท่ากับยอดคงเหลือแถวสุดท้ายในไฟล์ (ตรงเองเกือบเสมอ จึงไม่พอใช้ตรวจความครบ)
             </div>
           </div>
         )}
