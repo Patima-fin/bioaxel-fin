@@ -517,6 +517,38 @@
     return out;
   }
 
+  /* ★ แถว pvVouchers (นำเข้าไว้แล้วที่หน้า "ใบสำคัญจ่าย") → รูปใบจ่ายเดียวกับตัวอ่าน 291
+       ⇒ หน้านี้ไม่ต้องเก็บข้อมูลชุดเดิมซ้ำอีกก้อน ใช้ของที่ sync ทั้งทีมอยู่แล้ว
+       ครอบคลุมทั้งใบ PS (มีบิลย่อยใน settles[]) และใบอนุมัติจ่าย AV/AE (ไม่มีบิลย่อย) */
+  function cfcPvToVoucher(pv) {
+    const bills = Array.isArray(pv.settles) ? pv.settles.map(b => ({
+      recv: cfcT(b.vchno || b.docno), iso: cfcISO(b.billdate), paid: cfcNum(b.paid),
+      note: cfcT(b.note), billno: cfcT(b.billno),
+    })).filter(b => b.recv || b.paid) : [];
+    const gross = cfcNum(pv.Before_WHT) || cfcNum(pv.Amount) || cfcNum(pv.Total);
+    return {
+      doc: cfcT(pv.PL_PV_No), iso: cfcISO(pv.Pmt_Date), payee: cfcT(pv.Payee),
+      gross, cheque: cfcNum(pv.Net_Amount) || gross, cash: 0,
+      wht: cfcNum(pv.WHT), disc: cfcNum(pv.Deduct), dep: cfcNum(pv.Down_payment),
+      memo: cfcT(pv.cc_remark || pv.Remark), chqNo: cfcT(pv.Chq_No), bank: cfcT(pv.Bank_AC),
+      status: cfcT(pv.Type_of_Pmt), billNo: '', docSrc: cfcT(pv.Doc_Src), bills,
+    };
+  }
+
+  /* คีย์ไว้เทียบว่า "บรรทัดธนาคารนี้ถูกลงรหัสจากใบจ่ายแล้วหรือยัง"
+     ⚠️ ต้องเทียบ "เลขที่ผ่อนรูป + ยอดเงิน" คู่กันเสมอ — เลขเช็คในของจริงมีพิมพ์ตกหลัก
+        (QPPS2608314) ที่ผ่อนแล้วไปชนใบอื่นยอดคนละเรื่อง ถ้าเทียบเลขอย่างเดียวจะซ่อน
+        บรรทัดธนาคารผิดใบแบบเงียบสนิท */
+  function cfcCoverKeys(v) {
+    const out = [];
+    [v.chqNo, v.doc].forEach(x => {
+      const raw = cfcT(x).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (raw) out.push(raw);
+      const pt = cfcRefParts(x); if (pt) out.push('~' + pt.loose);
+    });
+    return out;
+  }
+
   /* แตกใบจ่าย 1 ใบ → แถวลงรหัสรายบิล (ยอดเกลี่ยตามสัดส่วนให้รวมเท่าเงินสดที่ออกจริง) */
   function cfcVoucherToRows(v, acctOf) {
     const cashOut = Math.abs(v.cheque || v.cash || v.gross);
@@ -820,9 +852,13 @@
       return out.sort((a, b) => (a.ym < b.ym ? 1 : -1));
     }, [store]);
 
-    const allYms = useMemo(() =>
-      [...new Set(buckets.map(b => b.ym).concat(psBuckets.map(b => b.ym)))].filter(Boolean).sort().reverse(),
-      [buckets, psBuckets]);
+    /* ★ ต้องรวมเดือนจาก pvVouchers ด้วย — ถ้ายังไม่ได้นำเข้างบกระทบยอด แหล่งเดียวที่มีคือ
+         ใบจ่ายที่ sync มา ถ้าไม่นับ ตัวเลือกเดือนจะว่างแล้วดูเหมือนไม่มีข้อมูล */
+    const allYms = useMemo(() => {
+      const set = new Set(buckets.map(b => b.ym).concat(psBuckets.map(b => b.ym)));
+      (data.pvVouchers || []).forEach(pv => { const k = String(cfcISO(pv.Pmt_Date)).slice(0, 7); if (k) set.add(k); });
+      return [...set].filter(Boolean).sort().reverse();
+    }, [buckets, psBuckets, data.pvVouchers]);
     const allAccts = useMemo(() => {
       const m = {}; buckets.forEach(b => { m[b.acctNo] = b.acctLabel || b.acctNo; }); return Object.entries(m);
     }, [buckets]);
@@ -855,26 +891,43 @@
     const rows = useMemo(() => {
       const out = [];
       const norm = v => cfcT(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
-      /* (ก) บิลจากรายงานการจ่ายชำระหนี้ — 1 บิล = 1 แถวลงรหัส */
-      const covered = new Set();
-      psBuckets.filter(b => !ym || b.ym === ym).forEach(b => (b.vouchers || []).forEach(v => {
-        if (v.chqNo) covered.add(norm(v.chqNo));
-        if (v.doc) covered.add(norm(v.doc));
+      /* (ก) บิลจากใบจ่าย — 1 บิล = 1 แถวลงรหัส
+         ★ แหล่งหลัก = pvVouchers (นำเข้าไว้แล้วหน้า "ใบสำคัญจ่าย" · sync ทั้งทีม)
+           ไฟล์ 291 ที่โยนเข้าหน้านี้เป็นแค่ตัวเสริมเฉพาะใบที่ยังไม่มีในระบบ */
+      const covered = new Map();    // key → ยอดเงินของใบนั้น (ไว้เทียบยอดก่อนตัดบรรทัดธนาคารทิ้ง)
+      const seenDoc = new Set();
+      const addVoucher = (v, srcTag, bucketId) => {
+        const dk = norm(v.doc); if (!dk || seenDoc.has(dk)) return;
+        seenDoc.add(dk);
+        const amt = Math.abs(v.cheque || v.cash || v.gross);
+        cfcCoverKeys(v).forEach(k => covered.set(k, amt));
         cfcVoucherToRows(v, acctOf).forEach((r, i) => {
           if (acct && cfcDigits(r.acctNo) !== cfcDigits(acct)) return;
           const row = Object.assign({}, r, {
-            key: 'ps|' + v.doc + '|' + i, bucketId: b.id, balance: '', pv: null, bills: [],
-            pvPayee: r.payee, matchHow: 'ps',
+            key: 'ps|' + v.doc + '|' + i, bucketId: bucketId, balance: '', pv: null, bills: [],
+            pvPayee: r.payee, matchHow: 'ps', psSrc: srcTag,
             matchText: [r.memo, r.payee].filter(Boolean).join(' '),
           });
           row.sug = engine(row);
           out.push(row);
         });
-      }));
+      };
+      (data.pvVouchers || []).forEach(pv => {
+        const v = cfcPvToVoucher(pv);
+        if (!v.doc || !v.iso) return;
+        if (ym && String(v.iso).slice(0, 7) !== ym) return;
+        addVoucher(v, 'pv', 'pvVouchers');
+      });
+      psBuckets.filter(b => !ym || b.ym === ym).forEach(b =>
+        (b.vouchers || []).forEach(v => addVoucher(v, 'file', b.id)));
       /* (ข) งบกระทบยอด — เอาเฉพาะบรรทัดที่ "ไม่มีใน 291" (เงินเข้า/โอน/ค่าธรรมเนียม/ใบอนุมัติจ่าย) */
       const sel = buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct));
       sel.forEach(b => (b.lines || []).forEach(L => {
-        if (covered.size && covered.has(norm(L.docNo))) return;   // ลงรหัสจากบิลใน 291 แล้ว
+        // ลงรหัสจากบิลในใบจ่ายไปแล้ว → ไม่ต้องเอาบรรทัดธนาคารมาซ้ำ
+        // (เลขตรงเป๊ะ = ตัดได้เลย · เลขผ่อนรูป = ต้องยอดตรงด้วย ไม่งั้นเสี่ยงตัดผิดใบ)
+        const lk = norm(L.docNo), lp = cfcRefParts(L.docNo), lamt = Math.abs(L.out || L.in);
+        if (covered.has(lk)) return;
+        if (lp && covered.has('~' + lp.loose) && Math.abs(covered.get('~' + lp.loose) - lamt) < 0.02) return;
         const m = cfcMatchPv(L, pvIdx);
         const pv = m && m.pv;
         const bills = pv && Array.isArray(pv.settles) ? pv.settles : [];
@@ -894,7 +947,7 @@
       return out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
         : (a.acctNo !== b.acctNo ? String(a.acctNo).localeCompare(String(b.acctNo))
         : (Number(a.idx || 0) - Number(b.idx || 0)))));
-    }, [buckets, psBuckets, ym, acct, pvIdx, engine, acctOf]);
+    }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf]);
 
     const stat = useMemo(() => {
       const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0 };
@@ -1072,14 +1125,26 @@
             if (!r.error && (!ps || r.vouchers.length > ps.vouchers.length)) ps = r;
           });
           if (ps && ps.vouchers.length) {
+            /* ★ ไม่เก็บซ้ำ — ใบที่มีใน pvVouchers อยู่แล้ว (นำเข้าที่หน้าใบสำคัญจ่าย) ข้ามไป
+               เก็บเฉพาะใบที่ยังไม่มี เพื่อไม่ให้ข้อมูลชุดเดียวกันกินที่ 2 ก้อน */
+            const have = new Set((data.pvVouchers || []).map(x => cfcT(x.PL_PV_No).toUpperCase()));
+            const fresh = ps.vouchers.filter(v => !have.has(cfcT(v.doc).toUpperCase()));
+            const dup = ps.vouchers.length - fresh.length;
+            if (!fresh.length) {
+              notes.push('ℹ️ ' + f.name + ' — ใบจ่ายทั้ง ' + ps.vouchers.length
+                + ' ใบมีในระบบแล้ว (หน้าใบสำคัญจ่าย) ไม่เก็บซ้ำ · หน้านี้ดึงไปใช้ให้เองอยู่แล้ว');
+              continue;
+            }
             const byYm = {};
-            ps.vouchers.forEach(v => { const k = String(v.iso).slice(0, 7); if (k) (byYm[k] = byYm[k] || []).push(v); });
+            fresh.forEach(v => { const k = String(v.iso).slice(0, 7); if (k) (byYm[k] = byYm[k] || []).push(v); });
             Object.keys(byYm).forEach(k => {
               next['ps:' + k] = { ym: k, vouchers: byYm[k], uploadedAt: new Date().toISOString(), file: f.name };
             });
-            const nb = ps.vouchers.reduce((a, v) => a + (v.bills.length || 1), 0);
-            notes.push('✅ ' + f.name + ' — รายงานการจ่ายชำระหนี้: ' + ps.vouchers.length + ' ใบจ่าย → '
-              + nb + ' บิล · ' + Object.keys(byYm).join(', '));
+            const nb = fresh.reduce((a, v) => a + (v.bills.length || 1), 0);
+            notes.push('✅ ' + f.name + ' — รายงานการจ่ายชำระหนี้: เพิ่ม ' + fresh.length + ' ใบจ่าย → '
+              + nb + ' บิล · ' + Object.keys(byYm).join(', ')
+              + (dup ? ' · ข้าม ' + dup + ' ใบที่มีในระบบแล้ว' : '')
+              + '\\n   ⓘ แนะนำให้ลงไฟล์นี้ที่หน้า "ใบสำคัญจ่าย" ด้วย จะได้ใช้ร่วมกันทั้งทีมและไม่เก็บซ้ำ');
             continue;
           }
           let best = null;
@@ -1652,7 +1717,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
