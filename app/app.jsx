@@ -49,6 +49,7 @@ const PAGE_GROUPS = [
     ['investor',         'Investor Dashboard',     'chart'],
   ] },
   { key: 'reports', label: 'รายงาน / วิเคราะห์', items: [
+    ['cf_coding',         'ลงรหัสงบกระแสเงินสด',    'chart'],
     ['cashflow_forecast', 'ประมาณการรายรับ-รายจ่าย', 'chart'],
     ['recurring',         'ค่าใช้จ่ายประจำ',        'forecast'],
     ['debt',              'ภาระหนี้ทั้งหมด',        'money'],
@@ -665,6 +666,7 @@ function App() {
     cashflow_forecast: { label: 'ประมาณการรายรับ-รายจ่าย', title: 'Cash Flow Forecast', icon: 'chart' },
     recurring: { label: 'ค่าใช้จ่ายประจำ', title: 'Recurring Expenses', icon: 'forecast' },
     cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
+    cf_coding:   { label: 'ลงรหัสงบกระแสเงินสด', title: 'Cash Flow Coding Desk', icon: 'chart' },
     debt:        { label: 'ภาระหนี้ทั้งหมด',       title: 'Debt Register',   icon: 'money' },
     debt_ledger: { label: 'Debt Ledger · ดอกเบี้ย', title: 'Debt Ledger',     icon: 'money' },
     iv_report:   { label: 'รายงานติดตาม IV',         title: 'IV Tracking Report', icon: 'invoice' },
@@ -700,6 +702,7 @@ function App() {
     case 'cashflow_forecast': page = <CashFlowForecastPage data={data} setData={setData} toast={pushToast} />; break;
     case 'recurring':      page = <RecurringExpensesPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
+    case 'cf_coding':      page = <CfCodingPage data={data} setData={setData} toast={pushToast} />; break;
     case 'projects':       page = <ProjectControlPage data={data} setData={setData} toast={pushToast} />; break;
     case 'investor':       page = <InvestorDashboard data={data} setData={setData} toast={pushToast} />; break;
     case 'invoices':       page = <InvoicesPage data={data} setData={setData} toast={pushToast} />; break;
