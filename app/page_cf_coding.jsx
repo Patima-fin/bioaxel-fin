@@ -1428,9 +1428,9 @@
             </div>
 
             <div style={{ overflowX: 'auto' }}>
-              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 940, fontVariantNumeric: 'tabular-nums' }}>
+              <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 968, fontVariantNumeric: 'tabular-nums' }}>
                 <thead><tr>
-                  <th style={{ minWidth: 190 }}>บัญชี</th>
+                  <th style={{ minWidth: 218 }}>บัญชี</th>
                   <th style={{ minWidth: 132, textAlign: 'right' }}>ต้นงวด</th>
                   <th style={{ minWidth: 116, textAlign: 'right' }}>รับ</th>
                   <th style={{ minWidth: 116, textAlign: 'right' }}>จ่าย</th>
@@ -1462,12 +1462,22 @@
 
                     return (
                       <tr key={r.key + r.no} style={{ background: g ? undefined : (active && !r.still ? '#fffafa' : undefined) }}>
-                        {/* บัญชี: ธนาคาร+เลขที่บรรทัดเดียว · ประเภทเป็นชิปเล็กใต้ */}
+                        {/* บัญชี: โลโก้ธนาคาร + เลขที่บรรทัดบน · ประเภทเป็นชิปเล็กบรรทัดล่าง
+                            ★ ใช้ BDBankLogo (global จาก page_bank_diary) — ปรับขนาดได้ + มี fallback
+                              เป็นตัวย่อบนพื้นสีแบรนด์เมื่อไฟล์โลโก้หาย
+                            ⚠️ รูปมาจากโฟลเดอร์ "LOGO BANK/" ที่ต้องถูก commit ขึ้น repo */}
                         <td>
-                          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap' }}>
-                            {r.bank ? r.bank + ' · ' : ''}<span style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.no}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                            {typeof BDBankLogo === 'function'
+                              ? <BDBankLogo name={r.bank || r.no} size={28} />
+                              : <div style={{ width: 28, height: 28, borderRadius: 8, background: C.soft, flex: '0 0 auto' }} />}
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap' }}>
+                                {r.bank ? r.bank + ' · ' : ''}<span style={{ fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.no}</span>
+                              </div>
+                              <div style={{ marginTop: 2 }}><CfcChip tone={active ? 'ok' : 'mute'}>{r.type || '—'}</CfcChip></div>
+                            </div>
                           </div>
-                          <div style={{ marginTop: 2 }}><CfcChip tone={active ? 'ok' : 'mute'}>{r.type || '—'}</CfcChip></div>
                         </td>
 
                         {/* ต้นงวด + ที่มา + ผลตรวจยกมา (ยุบ "ตรวจยกมา" มารวมที่นี่ เป็นเรื่องเดียวกัน) */}
