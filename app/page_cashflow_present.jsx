@@ -1551,4 +1551,8 @@
   }
 
   window.CashFlowPresentPage = CashFlowPresentPage;
+  /* ★ เปิดตัวอ่าน + ค่าคงที่ให้หน้า #cf_coding เรียกข้ามไฟล์ได้ — หน้านั้นสร้าง AOA
+     รูปเดียวกับไฟล์ที่คนอัปมือ แล้วส่งผ่านตัวอ่านชุดนี้ ⇒ ข้อมูลที่ลงเอยเหมือนกัน
+     เป๊ะกับการ "ส่งออกแล้วอัปกลับ" โดยไม่ต้องเขียนตัวแปลงซ้ำ (กันสูตรสองชุดเพี้ยนกัน) */
+  Object.assign(window, { cfpParseStm, cfpParseSummary, CFP_TABLE, CFP_ROW_ID, cfpCurrentUser });
 })();

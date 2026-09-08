@@ -808,6 +808,66 @@
     );
   }
 
+  /* เพิ่มหมวดใหม่เข้าไปในผังหมวด — เลือกกิจกรรม + กลุ่ม แล้วแทรกต่อท้ายกลุ่มนั้น
+     ★ ลำดับใน master คือลำดับแถวของชีต "สรุปตามหมวด" ⇒ ต้องแทรกให้อยู่ในกลุ่มที่ถูก
+       ไม่ใช่ต่อท้ายสุด ไม่งั้นงบที่ส่งออกจะอ่านไม่เป็นเรื่อง */
+  function CfcAddCatModal({ master, onClose, onSave }) {
+    const [name, setName] = useState('');
+    const [act, setAct] = useState('op');
+    const [group, setGroup] = useState('');
+    const [newGroup, setNewGroup] = useState('');
+    const groups = useMemo(() => [...new Set(master.filter(m => m.act === act).map(m => m.group))].filter(Boolean), [master, act]);
+    useEffect(() => { setGroup(groups[0] || ''); setNewGroup(''); }, [act]);   // eslint-disable-line
+    const gFinal = group === '__new' ? cfcT(newGroup) : group;
+    const dup = master.some(m => cfcNorm(m.name) === cfcNorm(name));
+    const ok = cfcT(name) && gFinal && !dup;
+    const lbl = { fontSize: 12, fontWeight: 700, color: C.mut, display: 'block', marginBottom: 4 };
+    const inp = { width: '100%', fontSize: 13, padding: '7px 10px', borderRadius: 9, border: '1px solid ' + C.line };
+    return (
+      <Modal open wide title="➕ เพิ่มหมวดใหม่" onClose={onClose}
+        footer={<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn btn-primary" disabled={!ok}
+            onClick={() => { onSave({ name: cfcT(name), act, group: gFinal }); onClose(); }}>เพิ่มหมวด</button>
+        </div>}>
+        <div style={{ display: 'grid', gap: 13, padding: '4px 2px' }}>
+          <div>
+            <label style={lbl}>ชื่อหมวด</label>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)} style={inp}
+              placeholder="เช่น ค่าบริการคลาวด์" onKeyDown={e => { if (e.key === 'Enter' && ok) { onSave({ name: cfcT(name), act, group: gFinal }); onClose(); } }} />
+            {dup && <div style={{ fontSize: 11.5, color: C.neg, marginTop: 4 }}>มีหมวดชื่อนี้อยู่แล้ว</div>}
+          </div>
+          <div>
+            <label style={lbl}>อยู่ในกิจกรรมไหน</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[['op', 'ดำเนินงาน'], ['inv', 'ลงทุน'], ['fin', 'จัดหาเงิน']].map(([k, t]) => (
+                <button key={k} onClick={() => setAct(k)} style={{
+                  flex: 1, cursor: 'pointer', borderRadius: 10, padding: '8px 6px', fontSize: 13, fontWeight: 700,
+                  border: '1px solid ' + (act === k ? CFC_ACT_COLOR[k] : C.line),
+                  background: act === k ? CFC_ACT_COLOR[k] : '#fff', color: act === k ? '#fff' : C.ink,
+                }}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>กลุ่มในงบ (หมวดจะไปต่อท้ายกลุ่มนี้)</label>
+            <select value={group} onChange={e => setGroup(e.target.value)} style={inp}>
+              {groups.map(g => <option key={g} value={g}>{g}</option>)}
+              <option value="__new">＋ สร้างกลุ่มใหม่…</option>
+            </select>
+            {group === '__new' && <input value={newGroup} onChange={e => setNewGroup(e.target.value)}
+              placeholder="ชื่อกลุ่มใหม่ เช่น ค่าใช้จ่ายเทคโนโลยี" style={Object.assign({}, inp, { marginTop: 7 })} />}
+          </div>
+          <div style={{ fontSize: 11.5, color: C.mut, background: C.soft, borderRadius: 9, padding: '9px 12px', lineHeight: 1.7 }}>
+            หมวดใหม่จะถูก <strong>แชร์ให้ทั้งทีมทันที</strong> และโผล่ในช่องเลือกหมวดของทุกแถว ·
+            ในไฟล์ที่ส่งออก หมวดนี้จะไปอยู่ในกลุ่มที่เลือก ใต้บรรทัดสุดท้ายของกลุ่มนั้น<br />
+            ⚠️ ถ้ายังต้องเอาไปวางทับในไฟล์ CASH FLOW เดิม อย่าลืมเพิ่มบรรทัดนี้ในไฟล์ด้วย ไม่งั้นแถวจะเลื่อนกัน
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   /* ══════════════ หน้าหลัก ══════════════ */
   function CfCodingPage({ data, setData, toast }) {
     const canEdit = typeof WTPAuth !== 'undefined' && WTPAuth.can ? WTPAuth.can('canEdit') : true;
@@ -820,6 +880,7 @@
     const [q, setQ] = useState('');
     const [open, setOpen] = useState({});          // docNo → เปิดดูบิลย่อย
     const [teachRes, setTeachRes] = useState(null);
+    const [addCat, setAddCat] = useState(false);
     const fileBank = useRef(null), fileCf = useRef(null);
 
     /* ── โหลดจากส่วนกลาง ── */
@@ -1141,6 +1202,17 @@
       learn(map, 'ยืนยัน ' + cand.length + ' รายการแล้ว');
     }
 
+    /* เพิ่มหมวดใหม่ — แทรกต่อท้ายกลุ่มที่เลือก (ลำดับใน master = ลำดับแถวของชีตสรุป) */
+    function saveNewCat({ name, act, group }) {
+      let at = -1;
+      master.forEach((m, i) => { if (m.act === act && m.group === group) at = i; });
+      if (at < 0) master.forEach((m, i) => { if (m.act === act) at = i; });
+      const items = master.slice();
+      if (at < 0) items.push({ name, act, group }); else items.splice(at + 1, 0, { name, act, group });
+      persist(Object.assign({}, store, { master: { items, at: new Date().toISOString() } }))
+        .then(r => toast && toast('เพิ่มหมวด "' + name + '" แล้ว' + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error'));
+    }
+
     /* ── นำเข้าไฟล์งบกระทบยอด ── */
     async function onBankFiles(files) {
       if (!files || !files.length) return;
@@ -1249,6 +1321,91 @@
          1) รวมทุกบัญชี   = 13 คอลัมน์เดิม (วางทับชีตเดิมได้ตรง ๆ)
          2) สรุปตามหมวด  = หมวด × เดือน เรียงตามงบหน้าแรกทุกบรรทัด → ก็อปคอลัมน์เดือนไปวางในงบ
          3) ตรวจยอดรายบัญชี = ยกมา + รับ − จ่าย = ปลายงวด ต่อบัญชีต่อเดือน (พิสูจน์ว่านำเข้าครบ) */
+    /* ★ สร้าง AOA ทั้ง 2 ชีตไว้ที่เดียว — ทั้งปุ่มส่งออกไฟล์และปุ่มส่งขึ้นหน้า Cash Flow
+         ใช้ชุดนี้ร่วมกัน จะได้ไม่มีสูตรสองชุดที่เพี้ยนจากกันทีหลัง */
+    function buildSheets() {
+      const months = [...new Set(rows.map(r => String(r.iso).slice(0, 7)))].sort();
+      const monLabel = (m) => { const p2 = m.split('-'); return (CFC_MONTH_TH[+p2[1]] || p2[1]) + ' ' + (Number(p2[0]) + 543 - 2500); };
+      const head = ['ลำดับ', 'บัญชีธนาคาร', 'เลขที่บัญชี', 'วันที่', 'MNE', 'เลขที่เอกสาร', 'ยอดถอน', 'ยอดฝาก',
+        'ยอดคงเหลือ', 'สถานะเช็ค', 'หมายเหตุ', 'หมวดเงินรับ-เงินจ่าย', 'ประเภทกิจกรรมทางการเงิน'];
+      const stmAoa = [head];
+      rows.forEach((r, i) => stmAoa.push([
+        i + 1, r.acctLabel || '', r.acctNo || '', cfcThaiDate(r.iso), r.mne || '', r.docNo || '',
+        r.out || '', r.in || '', r.balance || '', r.chqStatus || '', r.note || '',
+        r.sug.cat || '', CFC_ACT_TH[r.sug.act] === undefined ? '' : CFC_ACT_TH[r.sug.act],
+      ]));
+      const cell = {}; let uncodedTot = 0;
+      rows.forEach(r => {
+        const m = String(r.iso).slice(0, 7), v = r.in - r.out;
+        const k = (r.sug.cat || '(ยังไม่ลงหมวด)') + '|' + m;
+        cell[k] = (cell[k] || 0) + v;
+        if (!r.sug.cat) uncodedTot++;
+      });
+      const val = (name) => months.map(m => cell[name + '|' + m] || 0);
+      const sumRow = (names) => months.map((m, i) => names.reduce((a, n) => a + (cell[n + '|' + m] || 0), 0));
+      const withTotal = (arr) => arr.concat([arr.reduce((a, x) => a + x, 0)]);
+      const sumAoa = [['บริษัท ไบโอแอ็กซ์เซล จำกัด'], ['สรุปตามหมวด — สำหรับวางในงบกระแสเงินสด'],
+        ['สำหรับงวด ' + (months.length ? monLabel(months[0]) + (months.length > 1 ? ' ถึง ' + monLabel(months[months.length - 1]) : '') : '')],
+        [], ['รายการ'].concat(months.map(monLabel)).concat(['รวม'])];
+      const SEC = { op: 'กระแสเงินสดจากกิจกรรมดำเนินงาน', inv: 'กระแสเงินสดจากกิจกรรมลงทุน', fin: 'กระแสเงินสดจากกิจกรรมจัดหาเงิน' };
+      const actNet = {};
+      ['op', 'inv', 'fin'].forEach(a => {
+        const inAct = master.filter(m => m.act === a);
+        if (!inAct.length) return;
+        sumAoa.push([SEC[a]]);
+        [...new Set(inAct.map(m => m.group))].forEach(g => {
+          const items = inAct.filter(m => m.group === g).map(m => m.name);
+          sumAoa.push(['   ' + g]);
+          items.forEach(n => sumAoa.push(['      ' + n].concat(withTotal(val(n)))));
+          sumAoa.push(['   รวม' + g].concat(withTotal(sumRow(items))));
+        });
+        actNet[a] = sumRow(inAct.map(m => m.name));
+        sumAoa.push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])));
+        sumAoa.push([]);
+      });
+      const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
+      sumAoa.push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)));
+      sumAoa.push([]);
+      sumAoa.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
+      sumAoa.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
+      sumAoa.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
+      const known2 = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
+      [...new Set(rows.map(r => r.sug.cat).filter(c => c && !known2.has(c)))]
+        .forEach(n => sumAoa.push(['   ⚠ ' + n + ' (ไม่มีในงบหน้าแรก — ต้องแก้)'].concat(withTotal(val(n)))));
+      return { months, monLabel, stmAoa, sumAoa, uncodedTot };
+    }
+
+    /* ส่งขึ้นหน้า "พรีเซนต์ Cash Flow" ตรง ๆ — ไม่ต้องดาวน์โหลดแล้วอัปกลับ
+       ★ ส่ง AOA ผ่านตัวอ่านของหน้านั้นเอง (cfpParseStm / cfpParseSummary) ⇒ ผลลัพธ์
+         เหมือนกับอัปไฟล์มือเป๊ะ ไม่ต้องมีตัวแปลงชุดที่สอง */
+    async function sendToCashflow() {
+      if (!rows.length) { toast && toast('ยังไม่มีรายการให้ส่ง'); return; }
+      if (typeof cfpParseStm !== 'function' || typeof cfpParseSummary !== 'function') {
+        toast && toast('เปิดหน้า "พรีเซนต์ Cash Flow" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
+      }
+      const miss = rows.filter(r => !r.sug.cat).length;
+      if (miss && !confirm('ยังมี ' + miss + ' รายการที่ยังไม่ลงหมวด — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ\\nส่งขึ้นหน้า Cash Flow เลยไหม?')) return;
+      setBusy('กำลังส่งขึ้นหน้า Cash Flow…');
+      try {
+        const { stmAoa, sumAoa } = buildSheets();
+        const stm = cfpParseStm(stmAoa);
+        const summary = cfpParseSummary(sumAoa);
+        const prev = (await WTPData.fetchSheetRows(CFP_TABLE).catch(() => []))[0];
+        const old = (prev && (prev.data || prev)) || {};
+        const payload = Object.assign({}, old, {
+          id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
+          uploadedAt: Date.now(),
+          uploadedBy: (typeof cfpCurrentUser === 'function' ? cfpCurrentUser() : '') + ' (จากหน้าลงรหัส)',
+          stm, summary,
+        });
+        await WTPData.writeTable(CFP_TABLE, [payload], r => r.id);
+        try { localStorage.setItem('bio-cfpresent-v1', JSON.stringify(payload)); } catch (e) {}
+        setBusy('');
+        toast && toast('ส่งขึ้นหน้าพรีเซนต์ Cash Flow แล้ว · ' + stm.txns.length + ' รายการ · '
+          + (summary.monthLabels || []).length + ' เดือน — เปิดหน้านั้นได้เลย ทุกคนเห็นชุดเดียวกัน');
+      } catch (e) { setBusy(''); toast && toast('ส่งไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }
+    }
+
     function exportSheet() {
       if (!rows.length) { toast && toast('ยังไม่มีรายการให้ส่งออก'); return; }
       const months = [...new Set(rows.map(r => String(r.iso).slice(0, 7)))].sort();
@@ -1258,12 +1415,7 @@
       /* ── ชีต 1: รวมทุกบัญชี ── */
       const head = ['ลำดับ', 'บัญชีธนาคาร', 'เลขที่บัญชี', 'วันที่', 'MNE', 'เลขที่เอกสาร', 'ยอดถอน', 'ยอดฝาก',
         'ยอดคงเหลือ', 'สถานะเช็ค', 'หมายเหตุ', 'หมวดเงินรับ-เงินจ่าย', 'ประเภทกิจกรรมทางการเงิน'];
-      const aoa = [head];
-      rows.forEach((r, i) => aoa.push([
-        i + 1, r.acctLabel || '', r.acctNo || '', cfcThaiDate(r.iso), r.mne || '', r.docNo || '',
-        r.out || '', r.in || '', r.balance || '', r.chqStatus || '', r.note || '',
-        r.sug.cat || '', CFC_ACT_TH[r.sug.act] === undefined ? '' : CFC_ACT_TH[r.sug.act],
-      ]));
+      const aoa = buildSheets().stmAoa;
       const ws1 = XLSX.utils.aoa_to_sheet(aoa);
       ws1['!cols'] = [{ wch: 6 }, { wch: 38 }, { wch: 15 }, { wch: 11 }, { wch: 7 }, { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 10 }, { wch: 46 }, { wch: 34 }, { wch: 22 }];
       ws1['!freeze'] = { xSplit: 0, ySplit: 1 };
@@ -1372,7 +1524,10 @@
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {canEdit && <button style={btn()} onClick={() => fileCf.current && fileCf.current.click()}>📚 สอนระบบจากไฟล์ CASH FLOW</button>}
               {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้าไฟล์ EXPRESS</button>}
-              <button style={btn(true)} onClick={exportSheet}>⬇️ ส่งออกชีต "รวมทุกบัญชี"</button>
+              {canEdit && <button style={btn()} title="เพิ่มหมวดใหม่เข้าผังงบกระแสเงินสด" onClick={() => setAddCat(true)}>➕ เพิ่มหมวด</button>}
+              {canEdit && <button style={btn(true)} title="ส่งขึ้นหน้าพรีเซนต์ Cash Flow ทันที ไม่ต้องดาวน์โหลดแล้วอัปกลับ"
+                onClick={sendToCashflow}>📤 ส่งขึ้นหน้า Cash Flow</button>}
+              <button style={btn()} onClick={exportSheet}>⬇️ ส่งออกไฟล์ Excel</button>
             </div>
           </div>
           <input ref={fileBank} type="file" accept=".xml,.xls,.xlsx" multiple style={{ display: 'none' }} title="รายงานการจ่ายชำระหนี้ และ/หรือ งบกระทบยอด"
@@ -1701,8 +1856,10 @@
 
         <div style={{ fontSize: 11.5, color: C.faint, padding: '0 4px 6px' }}>
           ยอดรวมที่กรองอยู่: ถอน {cfcMoney(stat.outSum)} · ฝาก {cfcMoney(stat.inSum)} ·
-          กฎที่เรียนรู้ไว้ {Object.keys(rules).length} ข้อ · หมวดมาตรฐาน {master.length} รายการ
+          กฎที่เรียนรู้ไว้ {Object.keys(rules).length} ข้อ · หมวดในผังงบ {master.length} รายการ
         </div>
+
+        {addCat && <CfcAddCatModal master={master} onClose={() => setAddCat(false)} onSave={saveNewCat} />}
 
         {teachRes && (
           <Modal open wide title="📚 เรียนรู้จากไฟล์ CASH FLOW แล้ว" onClose={() => setTeachRes(null)}>
