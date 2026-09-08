@@ -868,6 +868,44 @@
     );
   }
 
+  /* สร้าง AOA ของ "งบกระแสเงินสด" จากยอดราย (หมวด|เดือน)
+     แยกออกมานอก component เพื่อให้ทั้งการส่งออกไฟล์และการดันขึ้นหน้า Cash Flow
+     (ซึ่งต้องรวมทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก) ใช้ตัวเดียวกัน */
+  function cfcSummaryAoa(master, months, cell, monLabel, usedCats) {
+    const val = (name) => months.map(m => cell[name + '|' + m] || 0);
+    const sumRow = (names) => months.map(m => names.reduce((a, n) => a + (cell[n + '|' + m] || 0), 0));
+    const withTotal = (arr) => arr.concat([arr.reduce((a, x) => a + x, 0)]);
+    const aoa = [['บริษัท ไบโอแอ็กซ์เซล จำกัด'], ['งบกระแสเงินสด (รายเดือน)'],
+      ['สำหรับงวด ' + (months.length ? monLabel(months[0]) + (months.length > 1 ? ' ถึง ' + monLabel(months[months.length - 1]) : '') : '')],
+      [], ['รายการ'].concat(months.map(monLabel)).concat(['รวม'])];
+    const SEC = { op: 'กระแสเงินสดจากกิจกรรมดำเนินงาน', inv: 'กระแสเงินสดจากกิจกรรมลงทุน', fin: 'กระแสเงินสดจากกิจกรรมจัดหาเงิน' };
+    const actNet = {};
+    ['op', 'inv', 'fin'].forEach(a => {
+      const inAct = master.filter(m => m.act === a);
+      if (!inAct.length) return;
+      aoa.push([SEC[a]]);
+      [...new Set(inAct.map(m => m.group))].forEach(g => {
+        const items = inAct.filter(m => m.group === g).map(m => m.name);
+        aoa.push(['   ' + g]);
+        items.forEach(n => aoa.push(['      ' + n].concat(withTotal(val(n)))));
+        aoa.push(['   รวม' + g].concat(withTotal(sumRow(items))));
+      });
+      actNet[a] = sumRow(inAct.map(m => m.name));
+      aoa.push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])));
+      aoa.push([]);
+    });
+    const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
+    aoa.push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)));
+    aoa.push([]);
+    aoa.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
+    aoa.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
+    aoa.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
+    const known = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
+    (usedCats || []).filter(c => !known.has(c))
+      .forEach(n => aoa.push(['   ⚠ ' + n + ' (ไม่มีในผังหมวด — ต้องแก้)'].concat(withTotal(val(n)))));
+    return aoa;
+  }
+
   /* ══════════════ หน้าหลัก ══════════════ */
   function CfCodingPage({ data, setData, toast }) {
     const canEdit = typeof WTPAuth !== 'undefined' && WTPAuth.can ? WTPAuth.can('canEdit') : true;
@@ -1341,38 +1379,8 @@
         cell[k] = (cell[k] || 0) + v;
         if (!r.sug.cat) uncodedTot++;
       });
-      const val = (name) => months.map(m => cell[name + '|' + m] || 0);
-      const sumRow = (names) => months.map((m, i) => names.reduce((a, n) => a + (cell[n + '|' + m] || 0), 0));
-      const withTotal = (arr) => arr.concat([arr.reduce((a, x) => a + x, 0)]);
-      const sumAoa = [['บริษัท ไบโอแอ็กซ์เซล จำกัด'], ['สรุปตามหมวด — สำหรับวางในงบกระแสเงินสด'],
-        ['สำหรับงวด ' + (months.length ? monLabel(months[0]) + (months.length > 1 ? ' ถึง ' + monLabel(months[months.length - 1]) : '') : '')],
-        [], ['รายการ'].concat(months.map(monLabel)).concat(['รวม'])];
-      const SEC = { op: 'กระแสเงินสดจากกิจกรรมดำเนินงาน', inv: 'กระแสเงินสดจากกิจกรรมลงทุน', fin: 'กระแสเงินสดจากกิจกรรมจัดหาเงิน' };
-      const actNet = {};
-      ['op', 'inv', 'fin'].forEach(a => {
-        const inAct = master.filter(m => m.act === a);
-        if (!inAct.length) return;
-        sumAoa.push([SEC[a]]);
-        [...new Set(inAct.map(m => m.group))].forEach(g => {
-          const items = inAct.filter(m => m.group === g).map(m => m.name);
-          sumAoa.push(['   ' + g]);
-          items.forEach(n => sumAoa.push(['      ' + n].concat(withTotal(val(n)))));
-          sumAoa.push(['   รวม' + g].concat(withTotal(sumRow(items))));
-        });
-        actNet[a] = sumRow(inAct.map(m => m.name));
-        sumAoa.push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])));
-        sumAoa.push([]);
-      });
-      const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
-      sumAoa.push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)));
-      sumAoa.push([]);
-      sumAoa.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
-      sumAoa.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
-      sumAoa.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
-      const known2 = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
-      [...new Set(rows.map(r => r.sug.cat).filter(c => c && !known2.has(c)))]
-        .forEach(n => sumAoa.push(['   ⚠ ' + n + ' (ไม่มีในงบหน้าแรก — ต้องแก้)'].concat(withTotal(val(n)))));
-      return { months, monLabel, stmAoa, sumAoa, uncodedTot };
+      const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))]);
+      return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell };
     }
 
     /* ส่งขึ้นหน้า "พรีเซนต์ Cash Flow" ตรง ๆ — ไม่ต้องดาวน์โหลดแล้วอัปกลับ
@@ -1384,14 +1392,31 @@
         toast && toast('เปิดหน้า "พรีเซนต์ Cash Flow" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
       }
       const miss = rows.filter(r => !r.sug.cat).length;
-      if (miss && !confirm('ยังมี ' + miss + ' รายการที่ยังไม่ลงหมวด — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ\\nส่งขึ้นหน้า Cash Flow เลยไหม?')) return;
+      if (miss && !confirm('ยังมี ' + miss + ' รายการที่ยังไม่ลงหมวด — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ\\n\\nส่งขึ้นหน้า Cash Flow เลยไหม? (เดือนอื่นที่เคยส่งไว้ไม่หาย)')) return;
       setBusy('กำลังส่งขึ้นหน้า Cash Flow…');
       try {
-        const { stmAoa, sumAoa } = buildSheets();
-        const stm = cfpParseStm(stmAoa);
-        const summary = cfpParseSummary(sumAoa);
+        const built = buildSheets();
+        const fresh = cfpParseStm(built.stmAoa);          // รายการของ "เดือนที่เลือก" (ผ่านตัวอ่านของหน้านั้น)
         const prev = (await WTPData.fetchSheetRows(CFP_TABLE).catch(() => []))[0];
         const old = (prev && (prev.data || prev)) || {};
+        /* ★ แทนที่เฉพาะเดือนที่ส่ง — เดือนอื่นที่เคยดันไว้ต้องอยู่ครบ
+           (ดันเดือนเดิมซ้ำ = ทับของเดิม ไม่บวกเพิ่ม จึงแก้แล้วดันใหม่ได้เรื่อย ๆ) */
+        const sendMonths = new Set(built.months);
+        const kept = ((old.stm && old.stm.txns) || []).filter(t => !sendMonths.has(String(t.iso).slice(0, 7)));
+        const allTxns = kept.concat(fresh.txns).sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+        // ยอดต้นงวดต่อบัญชี = ยอดคงเหลือแถวเก่าสุด − กระแสของแถวนั้น (กติกาเดียวกับตัวอ่าน)
+        const openTrack = {};
+        allTxns.forEach(t => { const p2 = openTrack[t.account]; if (!p2 || t.iso < p2.iso) openTrack[t.account] = t; });
+        const openingByAcct = {}; let opening = 0;
+        Object.keys(openTrack).forEach(k => { const t = openTrack[k]; openingByAcct[k] = t.balance - t.flow; opening += openingByAcct[k]; });
+        const stm = { txns: allTxns, opening, openingByAcct };
+        // งบสรุปต้องคิดใหม่จาก "ทุกเดือนที่มี" ไม่ใช่เฉพาะเดือนที่เพิ่งส่ง
+        const allMonths = [...new Set(allTxns.map(t => String(t.iso).slice(0, 7)))].sort();
+        const cell = {};
+        allTxns.forEach(t => { const k = (t.category || '(ยังไม่ลงหมวด)') + '|' + String(t.iso).slice(0, 7);
+          cell[k] = (cell[k] || 0) + (t.flow || 0); });
+        const usedCats = [...new Set(allTxns.map(t => t.category).filter(Boolean))];
+        const summary = cfpParseSummary(cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats));
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
           uploadedAt: Date.now(),
@@ -1401,8 +1426,10 @@
         await WTPData.writeTable(CFP_TABLE, [payload], r => r.id);
         try { localStorage.setItem('bio-cfpresent-v1', JSON.stringify(payload)); } catch (e) {}
         setBusy('');
-        toast && toast('ส่งขึ้นหน้าพรีเซนต์ Cash Flow แล้ว · ' + stm.txns.length + ' รายการ · '
-          + (summary.monthLabels || []).length + ' เดือน — เปิดหน้านั้นได้เลย ทุกคนเห็นชุดเดียวกัน');
+        const replaced = ((old.stm && old.stm.txns) || []).length - kept.length;
+        toast && toast('ส่งขึ้นหน้า Cash Flow แล้ว · เดือน ' + built.months.join(', ') + ' ' +
+          (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
+          ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน');
       } catch (e) { setBusy(''); toast && toast('ส่งไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }
     }
 
@@ -1886,7 +1913,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
