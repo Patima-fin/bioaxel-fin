@@ -135,6 +135,26 @@
   const CFC_ACT_SHORT = { op: 'ดำเนินงาน', inv: 'ลงทุน', fin: 'จัดหาเงิน', transfer: 'โอน' };
   const CFC_ACT_COLOR = { op: C.primary, inv: '#7a5cd0', fin: '#c98a1e', transfer: C.mut };
 
+  /* ฝั่งเงินของหมวด: 'in' = เงินเข้า · 'out' = เงินออก
+     ★ ดูที่ "ชื่อหมวดขึ้นต้น" เป็นหลัก + ชื่อกลุ่มเฉพาะที่ชัดว่าเป็นฝั่งรับ
+       ⚠️ ห้ามเอาคำว่า "ขาย" ลอย ๆ มาตัดสิน — กลุ่ม "ค่าการตลาดและส่งเสริมการขาย"
+          เป็นฝั่งจ่ายทั้งกลุ่ม (เคยเดาผิดยกกลุ่ม 8 หมวดเพราะเรื่องนี้)
+       วัดกับงบจริง: ถูก 94/94 หมวดที่มียอด (100%)
+     ค่าที่ผู้ใช้ตั้งเองรายหมวด (field flow) ชนะกติกาเดาเสมอ */
+  const CFC_NAME_IN = /^(รายรับ|รายได้|รับ|เงินสดรับ|ดอกเบี้ยรับ)/;
+  const CFC_GRP_IN = /^(รายรับ|เงินกู้รับเข้า|เงินสดรับ)/;
+  function cfcFlowOf(m) {
+    if (!m) return 'out';
+    if (m.flow === 'in' || m.flow === 'out') return m.flow;
+    if (m.act === 'transfer') return 'both';
+    return (CFC_NAME_IN.test(cfcT(m.name)) || CFC_GRP_IN.test(cfcT(m.group))) ? 'in' : 'out';
+  }
+  const CFC_FLOW_META = {
+    in:   { label: 'รับ',  mark: '▲', color: '#15875a', bg: '#e6f7ef' },
+    out:  { label: 'จ่าย', mark: '▼', color: '#c0392b', bg: '#fdecea' },
+    both: { label: 'โอน',  mark: '↔', color: '#688275', bg: '#eef6f1' },
+  };
+
   /* ── ชื่อหมวดรุ่นเก่าในไฟล์ประวัติ → หมวดมาตรฐาน ─────────────────────────
    *    ไฟล์จริงมี 127 ชื่อ แต่เป็นชื่อเดียวกันเขียนคนละแบบเยอะมาก
    *    ("ค่าสึกหรอรถพนักงาน" ↔ "เงินสดจ่ายเกี่ยวกับค่าสึกหรอรถพนักงาน") + พิมพ์ตก
@@ -790,20 +810,44 @@
     new: { label: '🆕 รายการใหม่', tone: 'bad' },
   };
 
+  /* ★ เรียง "รับ" ขึ้นก่อน "จ่าย" ในแต่ละกิจกรรม + ป้าย ▲รับ/▼จ่าย นำหน้าชื่อกลุ่ม
+       เลือกหมวดได้เร็วขึ้นมาก เพราะฝั่งเงินคือสิ่งแรกที่คนดูอยู่แล้ว */
   function CfcCatSelect({ value, master, onChange, disabled, width }) {
     const groups = useMemo(() => {
-      const by = {}; master.forEach(m => { const k = m.act + '|' + m.group; (by[k] = by[k] || []).push(m.name); });
-      return Object.entries(by);
+      const by = {};
+      master.forEach(m => {
+        const f = cfcFlowOf(m);
+        const k = m.act + '|' + f + '|' + m.group;
+        (by[k] = by[k] || []).push(m.name);
+      });
+      const rank = { op: 0, inv: 1, fin: 2, transfer: 3 };
+      return Object.entries(by).sort((a, b) => {
+        const [aa, af] = a[0].split('|'), [ba, bf] = b[0].split('|');
+        // ⚠️ rank.op = 0 → (rank[aa] || 9) กลายเป็น 9 ทำให้ "ดำเนินงาน" ตกไปท้ายสุด
+        const ra = rank[aa] == null ? 9 : rank[aa], rb = rank[ba] == null ? 9 : rank[ba];
+        if (aa !== ba) return ra - rb;
+        if (af !== bf) return af === 'in' ? -1 : 1;
+        return 0;
+      });
     }, [master]);
+    const cur = master.find(m => m.name === value);
+    const fm = value ? CFC_FLOW_META[cfcFlowOf(cur || { name: value })] : null;
     return (
       <select value={value || ''} disabled={disabled} onChange={e => onChange(e.target.value)}
-        style={{ width: width || 232, maxWidth: '100%', fontSize: 12, padding: '4px 6px', borderRadius: 8, border: '1px solid ' + (value ? C.line : '#f0c9c9'), background: value ? '#fff' : '#fff8f8', color: C.ink }}>
+        style={{ width: width || 232, maxWidth: '100%', fontSize: 12, padding: '4px 6px', borderRadius: 8,
+          border: '1px solid ' + (value ? (fm ? fm.color + '55' : C.line) : '#f0c9c9'),
+          background: value ? (fm ? fm.bg : '#fff') : '#fff8f8',
+          color: fm ? fm.color : C.ink, fontWeight: value ? 600 : 400 }}>
         <option value="">— ยังไม่ลงหมวด —</option>
-        {groups.map(([k, items]) => (
-          <optgroup key={k} label={(CFC_ACT_SHORT[k.split('|')[0]] || '') + ' · ' + k.split('|')[1]}>
-            {items.map(n => <option key={n} value={n}>{n}</option>)}
-          </optgroup>
-        ))}
+        {groups.map(([k, items]) => {
+          const [a, f, g] = k.split('|');
+          const meta = CFC_FLOW_META[f] || CFC_FLOW_META.out;
+          return (
+            <optgroup key={k} label={meta.mark + ' ' + meta.label + ' · ' + (CFC_ACT_SHORT[a] || '') + ' · ' + g}>
+              {items.map(n => <option key={n} value={n}>{n}</option>)}
+            </optgroup>
+          );
+        })}
       </select>
     );
   }
@@ -816,6 +860,7 @@
     const [act, setAct] = useState('op');
     const [group, setGroup] = useState('');
     const [newGroup, setNewGroup] = useState('');
+    const [flow, setFlow] = useState('out');
     const groups = useMemo(() => [...new Set(master.filter(m => m.act === act).map(m => m.group))].filter(Boolean), [master, act]);
     useEffect(() => { setGroup(groups[0] || ''); setNewGroup(''); }, [act]);   // eslint-disable-line
     const gFinal = group === '__new' ? cfcT(newGroup) : group;
@@ -828,14 +873,29 @@
         footer={<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>ยกเลิก</button>
           <button className="btn btn-primary" disabled={!ok}
-            onClick={() => { onSave({ name: cfcT(name), act, group: gFinal }); onClose(); }}>เพิ่มหมวด</button>
+            onClick={() => { onSave({ name: cfcT(name), act, group: gFinal, flow }); onClose(); }}>เพิ่มหมวด</button>
         </div>}>
         <div style={{ display: 'grid', gap: 13, padding: '4px 2px' }}>
           <div>
             <label style={lbl}>ชื่อหมวด</label>
             <input autoFocus value={name} onChange={e => setName(e.target.value)} style={inp}
-              placeholder="เช่น ค่าบริการคลาวด์" onKeyDown={e => { if (e.key === 'Enter' && ok) { onSave({ name: cfcT(name), act, group: gFinal }); onClose(); } }} />
+              placeholder="เช่น ค่าบริการคลาวด์" onKeyDown={e => { if (e.key === 'Enter' && ok) { onSave({ name: cfcT(name), act, group: gFinal, flow }); onClose(); } }} />
             {dup && <div style={{ fontSize: 11.5, color: C.neg, marginTop: 4 }}>มีหมวดชื่อนี้อยู่แล้ว</div>}
+          </div>
+          <div>
+            <label style={lbl}>เป็นเงินเข้าหรือเงินออก</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['in', 'out'].map(f => {
+                const meta = CFC_FLOW_META[f];
+                return (
+                  <button key={f} onClick={() => setFlow(f)} style={{
+                    flex: 1, cursor: 'pointer', borderRadius: 10, padding: '8px 6px', fontSize: 13, fontWeight: 700,
+                    border: '1px solid ' + (flow === f ? meta.color : C.line),
+                    background: flow === f ? meta.color : '#fff', color: flow === f ? '#fff' : meta.color,
+                  }}>{meta.mark} {meta.label}</button>
+                );
+              })}
+            </div>
           </div>
           <div>
             <label style={lbl}>อยู่ในกิจกรรมไหน</label>
@@ -1817,9 +1877,16 @@
                         <td>
                           <CfcCatSelect value={r.sug.cat} master={master} disabled={!canEdit}
                             onChange={v => confirmRow(r, v)} />
-                          {r.sug.cat && <div style={{ fontSize: 10.5, color: CFC_ACT_COLOR[r.sug.act] || C.mut, marginTop: 2 }}>
-                            {CFC_ACT_TH[r.sug.act] || '(ไม่นับเป็นกิจกรรม)'}
-                          </div>}
+                          {r.sug.cat && (() => {
+                            const mm = master.find(x => x.name === r.sug.cat);
+                            const fm = CFC_FLOW_META[cfcFlowOf(mm || { name: r.sug.cat })];
+                            return (
+                              <div style={{ fontSize: 10.5, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ color: fm.color, fontWeight: 700 }}>{fm.mark} {fm.label}</span>
+                                <span style={{ color: CFC_ACT_COLOR[r.sug.act] || C.mut }}>{CFC_ACT_TH[r.sug.act] || '(ไม่นับเป็นกิจกรรม)'}</span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td>
                           <CfcChip tone={T.tone}>{T.label}</CfcChip>
@@ -1913,7 +1980,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
