@@ -932,38 +932,210 @@
      แยกออกมานอก component เพื่อให้ทั้งการส่งออกไฟล์และการดันขึ้นหน้า Cash Flow
      (ซึ่งต้องรวมทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก) ใช้ตัวเดียวกัน */
   function cfcSummaryAoa(master, months, cell, monLabel, usedCats) {
+    /* ★ kinds[i] = ชนิดของแถวที่ i — ใช้ตอนจัดสีในไฟล์ Excel เท่านั้น
+         สร้างตรงจุดที่ push แถว จะได้ไม่มีตัวเดาชนิดจาก "ช่องว่างหน้าข้อความ" ซ้อนอีกชุด */
+    const kinds = [];
+    const push = (row, kind) => { aoa.push(row); kinds[aoa.length - 1] = kind; return row; };
     const val = (name) => months.map(m => cell[name + '|' + m] || 0);
     const sumRow = (names) => months.map(m => names.reduce((a, n) => a + (cell[n + '|' + m] || 0), 0));
     const withTotal = (arr) => arr.concat([arr.reduce((a, x) => a + x, 0)]);
     const aoa = [['บริษัท ไบโอแอ็กซ์เซล จำกัด'], ['งบกระแสเงินสด (รายเดือน)'],
       ['สำหรับงวด ' + (months.length ? monLabel(months[0]) + (months.length > 1 ? ' ถึง ' + monLabel(months[months.length - 1]) : '') : '')],
       [], ['รายการ'].concat(months.map(monLabel)).concat(['รวม'])];
+    kinds[0] = 'co'; kinds[1] = 'title'; kinds[2] = 'period'; kinds[3] = 'gap'; kinds[4] = 'head';
     const SEC = { op: 'กระแสเงินสดจากกิจกรรมดำเนินงาน', inv: 'กระแสเงินสดจากกิจกรรมลงทุน', fin: 'กระแสเงินสดจากกิจกรรมจัดหาเงิน' };
     const actNet = {};
     ['op', 'inv', 'fin'].forEach(a => {
       const inAct = master.filter(m => m.act === a);
       if (!inAct.length) return;
-      aoa.push([SEC[a]]);
+      push([SEC[a]], 'sec');
       [...new Set(inAct.map(m => m.group))].forEach(g => {
         const items = inAct.filter(m => m.group === g).map(m => m.name);
-        aoa.push(['   ' + g]);
-        items.forEach(n => aoa.push(['      ' + n].concat(withTotal(val(n)))));
-        aoa.push(['   รวม' + g].concat(withTotal(sumRow(items))));
+        push(['   ' + g], 'grp');
+        items.forEach(n => push(['      ' + n].concat(withTotal(val(n))), 'item'));
+        push(['   รวม' + g].concat(withTotal(sumRow(items))), 'gsum');
       });
       actNet[a] = sumRow(inAct.map(m => m.name));
-      aoa.push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])));
-      aoa.push([]);
+      push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])), 'anet');
+      push([], 'gap');
     });
     const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
-    aoa.push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)));
-    aoa.push([]);
-    aoa.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
-    aoa.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
-    aoa.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
+    push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)), 'net');
+    push([], 'gap');
+    push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —'], 'nsec');
+    push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))), 'nitem');
+    push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))), 'nitem');
     const known = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
     (usedCats || []).filter(c => !known.has(c))
-      .forEach(n => aoa.push(['   ⚠ ' + n + ' (ไม่มีในผังหมวด — ต้องแก้)'].concat(withTotal(val(n)))));
+      .forEach(n => push(['   ⚠ ' + n + ' (ไม่มีในผังหมวด — ต้องแก้)'].concat(withTotal(val(n))), 'nbad'));
+    aoa.kinds = kinds;
     return aoa;
+  }
+
+  /* ════════ ตัวจัดสี/จัดตารางไฟล์ Excel ════════
+     ผู้ใช้ขอ "จัดสีจัดตารางให้เรียบร้อย" — สีเดียวกับที่ใช้บนหน้าจอ: เขียว = รับ · แดง = จ่าย */
+  const XS = {
+    brand: '2E8B4A', brandD: '1F6E3A', soft: 'EEF6F1', line: 'D6E7DC',
+    ink: '20342A', mut: '688275', pos: '15875A', neg: 'C0392B',
+    warnBg: 'FFF7E0', warnInk: '8A6400', zebra: 'F7FBF8',
+  };
+  const XS_FONT = 'Leelawadee UI';
+  const xsB = (w) => ({ style: w || 'thin', color: { rgb: XS.line } });
+  const xsBox = (w) => ({ top: xsB(w), bottom: xsB(w), left: xsB(w), right: xsB(w) });
+  const XS_MONEY = '#,##0.00;[Red]-#,##0.00;"–"';
+  /* ใส่ style ให้ทั้งแถว (กว้าง nCol ช่อง) — สร้างเซลล์ว่างให้ด้วย เพื่อให้พื้น/เส้นต่อกันไม่ขาด */
+  function xsRow(ws, r, nCol, style, only) {
+    for (let c = 0; c < nCol; c++) {
+      const a = XLSX.utils.encode_cell({ r, c });
+      if (!ws[a]) { if (only) continue; ws[a] = { t: 's', v: '' }; }
+      ws[a].s = Object.assign({}, ws[a].s, typeof style === 'function' ? style(c) : style);
+    }
+  }
+  function xsCell(ws, r, c, style) {
+    const a = XLSX.utils.encode_cell({ r, c });
+    if (ws[a]) ws[a].s = Object.assign({}, ws[a].s, style);
+  }
+  /* ตัวเลขในงบ: เขียว = เงินเข้า · แดง = เงินออก · 0 = ขีด (ตามที่ใช้บนหน้าจอ) */
+  function xsMoney(ws, r, c, opt) {
+    const a = XLSX.utils.encode_cell({ r, c }), cl = ws[a];
+    if (!cl || typeof cl.v !== 'number') return;
+    const o = opt || {};
+    cl.s = Object.assign({}, cl.s, {
+      numFmt: XS_MONEY,
+      alignment: { horizontal: 'right', vertical: 'center' },
+      font: Object.assign({ name: XS_FONT, sz: o.sz || 10.5, bold: !!o.bold },
+        o.ink ? { color: { rgb: o.ink } } : { color: { rgb: cl.v > 0.004 ? XS.pos : (cl.v < -0.004 ? XS.neg : 'B4C6BB') } }),
+    });
+  }
+
+  /* ── ชีต "งบกระแสเงินสด" — หน้าตาเหมือนหน้าแรกของไฟล์ CASH FLOW ──
+     ⚠️ ใส่ได้แค่ "สี/เส้น/รูปแบบตัวเลข" ห้ามเพิ่ม-ลด-สลับแถว: index แถวต้องตรงกับไฟล์เดิม
+        เตยยังต้องก็อปคอลัมน์เดือนไปวางทับได้ทั้งแถบ */
+  function cfcStyleSummary(ws, aoa, nCol) {
+    const kinds = aoa.kinds || [], n = aoa.length;
+    const merges = [], rows = [];
+    [0, 1, 2].forEach(r => merges.push({ s: { r, c: 0 }, e: { r, c: nCol - 1 } }));
+    rows[0] = { hpt: 26 }; rows[1] = { hpt: 20 }; rows[2] = { hpt: 17 }; rows[3] = { hpt: 7 }; rows[4] = { hpt: 24 };
+    xsRow(ws, 0, nCol, { font: { name: XS_FONT, sz: 15, bold: true, color: { rgb: XS.brandD } }, alignment: { horizontal: 'center', vertical: 'center' } });
+    xsRow(ws, 1, nCol, { font: { name: XS_FONT, sz: 12.5, bold: true, color: { rgb: XS.ink } }, alignment: { horizontal: 'center', vertical: 'center' } });
+    xsRow(ws, 2, nCol, { font: { name: XS_FONT, sz: 10, color: { rgb: XS.mut } }, alignment: { horizontal: 'center', vertical: 'center' } });
+    xsRow(ws, 4, nCol, (c) => ({
+      font: { name: XS_FONT, sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: XS.brand } },
+      alignment: { horizontal: c === 0 ? 'left' : 'center', vertical: 'center' },
+      border: { top: xsB(), bottom: xsB('medium'), left: xsB(), right: xsB() },
+    }));
+    for (let r = 5; r < n; r++) {
+      const k = kinds[r];
+      if (!k || k === 'gap') { rows[r] = { hpt: 6 }; continue; }
+      const label = { name: XS_FONT, sz: 10.5, color: { rgb: XS.ink } };
+      if (k === 'sec') {
+        merges.push({ s: { r, c: 0 }, e: { r, c: nCol - 1 } }); rows[r] = { hpt: 21 };
+        xsRow(ws, r, nCol, { font: { name: XS_FONT, sz: 11.5, bold: true, color: { rgb: XS.brandD } },
+          fill: { patternType: 'solid', fgColor: { rgb: 'DCEEE3' } },
+          alignment: { horizontal: 'left', vertical: 'center' },
+          border: { top: xsB('medium'), bottom: xsB() } });
+      } else if (k === 'grp') {
+        merges.push({ s: { r, c: 0 }, e: { r, c: nCol - 1 } });
+        xsRow(ws, r, nCol, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.mut } },
+          fill: { patternType: 'solid', fgColor: { rgb: XS.soft } }, alignment: { vertical: 'center' } });
+      } else if (k === 'item' || k === 'nitem') {
+        xsRow(ws, r, nCol, { border: xsBox() }, true);
+        xsCell(ws, r, 0, { font: label, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, k === 'nitem' ? { ink: XS.mut } : {});
+      } else if (k === 'gsum') {
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.soft } }, border: { top: xsB(), bottom: xsB() } });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.mut } }, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true });
+      } else if (k === 'anet') {
+        rows[r] = { hpt: 20 };
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: 'CDE7D8' } }, border: { top: xsB('medium'), bottom: xsB('medium') } });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 11, bold: true, color: { rgb: XS.brandD } }, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, sz: 11 });
+      } else if (k === 'net') {
+        rows[r] = { hpt: 24 };
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.brand } },
+          border: { top: xsB('medium'), bottom: xsB('double') } });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 12, bold: true, color: { rgb: 'FFFFFF' } }, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, sz: 12, ink: 'FFFFFF' });
+      } else if (k === 'nsec') {
+        merges.push({ s: { r, c: 0 }, e: { r, c: nCol - 1 } }); rows[r] = { hpt: 19 };
+        xsRow(ws, r, nCol, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.mut } }, alignment: { vertical: 'center' } });
+      } else if (k === 'nbad') {
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.warnBg } }, border: xsBox() });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.warnInk } } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, ink: XS.warnInk });
+      }
+    }
+    ws['!merges'] = merges; ws['!rows'] = rows;
+    ws['!freeze'] = { xSplit: 1, ySplit: 5 };
+  }
+
+  /* ── ชีต "รายละเอียดทุกรายการ" — หัวตารางอยู่แถว 1 เสมอ
+        (ตัวอ่านของหน้า Cash Flow และการก็อปไปวางพึ่งตำแหน่งนี้อยู่) ── */
+  const CFC_XL_MONEY_COL = { 6: XS.neg, 7: XS.pos, 8: XS.ink };
+  function cfcStyleDetail(ws, aoa) {
+    const n = aoa.length, nCol = 13, rows = [{ hpt: 26 }];
+    xsRow(ws, 0, nCol, {
+      font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: XS.brand } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      border: xsBox(),
+    });
+    for (let r = 1; r < n; r++) {
+      const zebra = r % 2 === 0 ? { patternType: 'solid', fgColor: { rgb: XS.zebra } } : null;
+      const noCat = !String((aoa[r] || [])[11] || '').trim();
+      xsRow(ws, r, nCol, (c) => Object.assign(
+        { font: { name: XS_FONT, sz: 10, color: { rgb: XS.ink } }, border: xsBox(),
+          alignment: (c === 0 || c === 3 || c === 4 || c === 9)
+            ? { horizontal: 'center', vertical: 'center' } : { vertical: 'center' } },
+        zebra ? { fill: zebra } : null,
+      ));
+      Object.keys(CFC_XL_MONEY_COL).forEach(c => xsMoney(ws, r, +c, { ink: CFC_XL_MONEY_COL[c] }));
+      /* แถวที่ยังไม่ลงหมวด = ไฮไลต์เหลืองที่ช่องหมวด จะได้ไล่เก็บได้เร็ว */
+      if (noCat) xsCell(ws, r, 11, { fill: { patternType: 'solid', fgColor: { rgb: XS.warnBg } },
+        font: { name: XS_FONT, sz: 10, bold: true, color: { rgb: XS.warnInk } } });
+      else xsCell(ws, r, 11, { font: { name: XS_FONT, sz: 10, bold: true, color: { rgb: XS.brandD } } });
+    }
+    ws['!rows'] = rows;
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+    if (n > 1) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: n - 1, c: nCol - 1 } }) };
+  }
+
+  /* ── ชีต "ตรวจยอดรายบัญชี" — หัวตารางอยู่แถวที่ 4 (index 3) ── */
+  function cfcStyleCheck(ws, aoa, badCols) {
+    const n = aoa.length, nCol = (aoa[3] || []).length, rows = [];
+    rows[0] = { hpt: 19 };
+    [0, 1].forEach(r => xsRow(ws, r, nCol, {
+      font: { name: XS_FONT, sz: r ? 10 : 11.5, bold: !r, color: { rgb: r ? XS.mut : XS.brandD } },
+    }, true));
+    rows[3] = { hpt: 32 };
+    xsRow(ws, 3, nCol, {
+      font: { name: XS_FONT, sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
+      fill: { patternType: 'solid', fgColor: { rgb: XS.brand } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: xsBox(),
+    });
+    for (let r = 4; r < n; r++) {
+      if (!(aoa[r] || []).length) { rows[r] = { hpt: 6 }; continue; }
+      const last = r === n - 1;
+      xsRow(ws, r, nCol, (c) => Object.assign(
+        { font: { name: XS_FONT, sz: 10, bold: last, color: { rgb: XS.ink } }, border: xsBox(),
+          alignment: c === 2 ? { horizontal: 'center', vertical: 'center' } : { vertical: 'center' } },
+        last ? { fill: { patternType: 'solid', fgColor: { rgb: XS.soft } },
+          border: { top: xsB('medium'), bottom: xsB('medium'), left: xsB(), right: xsB() } } : null,
+      ));
+      for (let c = 3; c < nCol - 2; c++) xsMoney(ws, r, c, { ink: XS.ink, bold: last });
+      /* ช่อง "ต่าง" ที่ไม่เป็นศูนย์ = แดงเข้มพื้นแดงจาง — จุดที่ต้องไปไล่หา */
+      (badCols || []).forEach(c => {
+        const a = XLSX.utils.encode_cell({ r, c }), cl = ws[a];
+        if (cl && typeof cl.v === 'number' && Math.abs(cl.v) > 0.02) {
+          cl.s = Object.assign({}, cl.s, { fill: { patternType: 'solid', fgColor: { rgb: 'FDECEA' } },
+            font: { name: XS_FONT, sz: 10, bold: true, color: { rgb: XS.neg } } });
+        }
+      });
+    }
+    ws['!rows'] = rows;
+    ws['!freeze'] = { xSplit: 2, ySplit: 4 };
   }
 
   /* ══════════════ หน้าหลัก ══════════════ */
@@ -1495,71 +1667,30 @@
 
     function exportSheet() {
       if (!rows.length) { toast && toast('ยังไม่มีรายการให้ส่งออก'); return; }
-      const months = [...new Set(rows.map(r => String(r.iso).slice(0, 7)))].sort();
-      const monLabel = (m) => { const p2 = m.split('-'); return (CFC_MONTH_TH[+p2[1]] || p2[1]) + ' ' + (Number(p2[0]) + 543 - 2500); };
+      const { months, monLabel, stmAoa, sumAoa, uncodedTot } = buildSheets();
       const wb = XLSX.utils.book_new();
+      const stamp = new Date().toLocaleString('th-TH-u-ca-gregory');
+      const scope = (acct ? 'บัญชี ' + acct : allAccts.length + ' บัญชี');
 
-      /* ── ชีต 1: รวมทุกบัญชี ── */
-      const head = ['ลำดับ', 'บัญชีธนาคาร', 'เลขที่บัญชี', 'วันที่', 'MNE', 'เลขที่เอกสาร', 'ยอดถอน', 'ยอดฝาก',
-        'ยอดคงเหลือ', 'สถานะเช็ค', 'หมายเหตุ', 'หมวดเงินรับ-เงินจ่าย', 'ประเภทกิจกรรมทางการเงิน'];
-      const aoa = buildSheets().stmAoa;
-      const ws1 = XLSX.utils.aoa_to_sheet(aoa);
-      ws1['!cols'] = [{ wch: 6 }, { wch: 38 }, { wch: 15 }, { wch: 11 }, { wch: 7 }, { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 14 }, { wch: 10 }, { wch: 46 }, { wch: 34 }, { wch: 22 }];
-      ws1['!freeze'] = { xSplit: 0, ySplit: 1 };
-      XLSX.utils.book_append_sheet(wb, ws1, 'รวมทุกบัญชี');
+      /* ── ชีต 1: งบกระแสเงินสด (หน้าเดียวจบ เหมือนหน้าแรกของไฟล์ CASH FLOW) ── */
+      sumAoa[2] = [String(sumAoa[2][0]) + ' · ' + rows.length + ' รายการ · ' + scope];
+      const nCol = months.length + 2;
+      const ws1 = XLSX.utils.aoa_to_sheet(sumAoa);
+      ws1['!cols'] = [{ wch: 52 }].concat(months.map(() => ({ wch: 16 }))).concat([{ wch: 17 }]);
+      cfcStyleSummary(ws1, sumAoa, nCol);
+      XLSX.utils.book_append_sheet(wb, ws1, 'งบกระแสเงินสด');
 
-      /* ── ชีต 2: สรุปตามหมวด (โครงเดียวกับงบหน้าแรก ทุกบรรทัด แม้ยอด 0) ── */
-      const cell = {};   // 'หมวด|ym' → ยอด (ฝาก − ถอน)
-      let uncodedTot = 0;
-      rows.forEach(r => {
-        const m = String(r.iso).slice(0, 7), v = r.in - r.out;
-        const k = (r.sug.cat || '(ยังไม่ลงหมวด)') + '|' + m;
-        cell[k] = (cell[k] || 0) + v;
-        if (!r.sug.cat) uncodedTot++;
-      });
-      const val = (name) => months.map(m => cell[name + '|' + m] || 0);
-      const sumRow = (names) => months.map((m, i) => names.reduce((a, n) => a + (cell[n + '|' + m] || 0), 0));
-      const withTotal = (arr) => arr.concat([arr.reduce((a, x) => a + x, 0)]);
-      const s2 = [['บริษัท ไบโอแอ็กซ์เซล จำกัด'], ['สรุปตามหมวด — สำหรับวางในงบกระแสเงินสด'],
-        ['ที่มา: หน้า "ลงรหัสงบกระแสเงินสด" · ' + rows.length + ' รายการ · ' +
-         (acct ? 'บัญชี ' + acct : allAccts.length + ' บัญชี') + ' · สร้าง ' + new Date().toLocaleString('th-TH-u-ca-gregory')],
-        [], ['รายการ'].concat(months.map(monLabel)).concat(['รวม'])];
-      const SEC = { op: 'กระแสเงินสดจากกิจกรรมดำเนินงาน', inv: 'กระแสเงินสดจากกิจกรรมลงทุน', fin: 'กระแสเงินสดจากกิจกรรมจัดหาเงิน' };
-      const actNet = {};
-      ['op', 'inv', 'fin'].forEach(a => {
-        const inAct = master.filter(m => m.act === a);
-        if (!inAct.length) return;
-        s2.push([SEC[a]]);
-        const groups = [...new Set(inAct.map(m => m.group))];
-        groups.forEach(g => {
-          const items = inAct.filter(m => m.group === g).map(m => m.name);
-          s2.push(['   ' + g]);
-          items.forEach(n => s2.push(['      ' + n].concat(withTotal(val(n)))));
-          s2.push(['   รวม' + g].concat(withTotal(sumRow(items))));
-        });
-        const all = inAct.map(m => m.name);
-        actNet[a] = sumRow(all);
-        s2.push(['กระแสเงินสดสุทธิจาก' + SEC[a].replace('กระแสเงินสดจาก', '')].concat(withTotal(actNet[a])));
-        s2.push([]);
-      });
-      const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
-      s2.push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)));
-      s2.push([]);
-      s2.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
-      s2.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
-      s2.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
-      // ★ หมวดที่ลงไว้แต่ไม่มีในงบหน้าแรกแล้ว — ถ้าไม่พิมพ์ออกมา ยอดจะหายเงียบ ๆ
-      const known2 = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
-      const orphanCats = [...new Set(rows.map(r => r.sug.cat).filter(c => c && !known2.has(c)))];
-      orphanCats.forEach(n => s2.push(['   ⚠ ' + n + ' (ไม่มีในงบหน้าแรก — ต้องแก้)'].concat(withTotal(val(n)))));
-      const ws2 = XLSX.utils.aoa_to_sheet(s2);
-      ws2['!cols'] = [{ wch: 46 }].concat(months.map(() => ({ wch: 15 }))).concat([{ wch: 16 }]);
-      XLSX.utils.book_append_sheet(wb, ws2, 'สรุปตามหมวด');
+      /* ── ชีต 2: รายละเอียดทุกรายการ ── */
+      const ws2 = XLSX.utils.aoa_to_sheet(stmAoa);
+      ws2['!cols'] = [{ wch: 6 }, { wch: 38 }, { wch: 15 }, { wch: 11 }, { wch: 7 }, { wch: 15 }, { wch: 13 }, { wch: 13 },
+        { wch: 14 }, { wch: 10 }, { wch: 46 }, { wch: 34 }, { wch: 22 }];
+      cfcStyleDetail(ws2, stmAoa);
+      XLSX.utils.book_append_sheet(wb, ws2, 'รายละเอียดทุกรายการ');
 
       /* ── ชีต 3: ตรวจยอดรายบัญชี ── */
       const sum = cfcAcctSummary(rows);
       const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'],
-        ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง'], [],
+        ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง · ' + scope + ' · สร้าง ' + stamp], [],
         ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ต้นงวดที่คีย์', 'ต่างจากที่คีย์', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'ปลายงวดจริง (คีย์)', 'ไฟล์ขาด', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
       sum.forEach(g => {
         const pv = cfcPrevMonth(histCheck, g.acctNo, g.ym, g.acctLabel);
@@ -1579,9 +1710,10 @@
         sum.reduce((a, g) => a + g.diff, 0), '', '', rows.length, uncodedTot]);
       const ws3 = XLSX.utils.aoa_to_sheet(s3);
       ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }];
+      cfcStyleCheck(ws3, s3, [5, 7, 12, 14]);   // คอลัมน์ "ต่าง…" ทั้ง 4 ช่อง
       XLSX.utils.book_append_sheet(wb, ws3, 'ตรวจยอดรายบัญชี');
 
-      XLSX.writeFile(wb, 'BIO-ลงรหัส-' + (ym || 'ทุกเดือน') + (acct ? '-' + acct : '-ทุกบัญชี') + '.xlsx');
+      XLSX.writeFile(wb, 'BIO-งบกระแสเงินสด-' + (ym || 'ทุกเดือน') + (acct ? '-' + acct : '-ทุกบัญชี') + '.xlsx');
       const bad = sum.filter(g => Math.abs(g.diff) > 0.02).length;
       toast && toast('ส่งออก ' + rows.length + ' รายการ · ' + sum.length + ' บัญชี-เดือน · 3 ชีต'
         + (uncodedTot ? ' · ⚠️ ยังไม่ลงหมวด ' + uncodedTot + ' รายการ' : '')
@@ -1980,7 +2112,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
