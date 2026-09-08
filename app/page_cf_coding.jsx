@@ -861,9 +861,14 @@
     const [group, setGroup] = useState('');
     const [newGroup, setNewGroup] = useState('');
     const [flow, setFlow] = useState('out');
-    const groups = useMemo(() => [...new Set(master.filter(m => m.act === act).map(m => m.group))].filter(Boolean), [master, act]);
-    useEffect(() => { setGroup(groups[0] || ''); setNewGroup(''); }, [act]);   // eslint-disable-line
+    /* ★ กลุ่มในงบแยกฝั่งเงินอยู่แล้ว (ไม่มีกลุ่มไหนปนทั้งรับและจ่าย — ตรวจกับผังจริงแล้ว)
+         ⇒ เลือกกิจกรรม + รับ/จ่าย แล้วต้องเหลือเฉพาะกลุ่มฝั่งนั้น ไม่งั้นเลือกผิดฝั่งได้ง่าย */
+    const groups = useMemo(() => [...new Set(master.filter(m => m.act === act && cfcFlowOf(m) === flow).map(m => m.group))].filter(Boolean),
+      [master, act, flow]);
+    /* ฝั่ง "รับ" ของกิจกรรมลงทุนยังไม่มีกลุ่มเลย → เด้งไปโหมดตั้งกลุ่มใหม่ให้เอง จะได้ไม่ตัน */
+    useEffect(() => { setGroup(groups[0] || '__new'); setNewGroup(''); }, [act, flow]);   // eslint-disable-line
     const gFinal = group === '__new' ? cfcT(newGroup) : group;
+    const fmSel = CFC_FLOW_META[flow] || CFC_FLOW_META.out;
     const dup = master.some(m => cfcNorm(m.name) === cfcNorm(name));
     const ok = cfcT(name) && gFinal && !dup;
     const lbl = { fontSize: 12, fontWeight: 700, color: C.mut, display: 'block', marginBottom: 4 };
@@ -910,11 +915,20 @@
             </div>
           </div>
           <div>
-            <label style={lbl}>กลุ่มในงบ (หมวดจะไปต่อท้ายกลุ่มนี้)</label>
-            <select value={group} onChange={e => setGroup(e.target.value)} style={inp}>
+            <label style={lbl}>
+              กลุ่มในงบ (หมวดจะไปต่อท้ายกลุ่มนี้)
+              <span style={{ fontWeight: 600, color: fmSel.color, marginLeft: 6 }}>
+                — เฉพาะ {fmSel.mark} {fmSel.label} · {CFC_ACT_SHORT[act] || ''}
+              </span>
+            </label>
+            <select value={group} onChange={e => setGroup(e.target.value)}
+              style={Object.assign({}, inp, { borderColor: fmSel.color + '55', background: fmSel.bg, color: fmSel.color, fontWeight: 600 })}>
               {groups.map(g => <option key={g} value={g}>{g}</option>)}
               <option value="__new">＋ สร้างกลุ่มใหม่…</option>
             </select>
+            {!groups.length && <div style={{ fontSize: 11.5, color: C.warn, marginTop: 4 }}>
+              ยังไม่มีกลุ่มฝั่ง “{fmSel.label}” ในกิจกรรม{CFC_ACT_SHORT[act] || ''} — ตั้งชื่อกลุ่มใหม่ได้เลย
+            </div>}
             {group === '__new' && <input value={newGroup} onChange={e => setNewGroup(e.target.value)}
               placeholder="ชื่อกลุ่มใหม่ เช่น ค่าใช้จ่ายเทคโนโลยี" style={Object.assign({}, inp, { marginTop: 7 })} />}
           </div>
@@ -1473,12 +1487,24 @@
     }
 
     /* เพิ่มหมวดใหม่ — แทรกต่อท้ายกลุ่มที่เลือก (ลำดับใน master = ลำดับแถวของชีตสรุป) */
-    function saveNewCat({ name, act, group }) {
+    /* แทรกหมวดใหม่ให้อยู่ถูกที่ — ลำดับใน master = ลำดับแถวของชีตงบ
+       1) กลุ่มเดิม → ต่อท้ายกลุ่มนั้น
+       2) กลุ่มใหม่แต่มีของฝั่งเดียวกันอยู่แล้ว → ต่อท้ายบล็อกฝั่งนั้น
+       3) ยังไม่มีของฝั่งนี้ในกิจกรรมนี้เลย → ★ ฝั่ง "รับ" ต้องขึ้นก่อนฝั่ง "จ่าย" เสมอ
+          จึงแทรกไว้หน้าสุดของกิจกรรม (ไม่ใช่ต่อท้าย ไม่งั้นกลุ่มรับไปโผล่ใต้กลุ่มจ่าย) */
+    function saveNewCat({ name, act, group, flow }) {
+      const row = { name, act, group, flow };
       let at = -1;
       master.forEach((m, i) => { if (m.act === act && m.group === group) at = i; });
-      if (at < 0) master.forEach((m, i) => { if (m.act === act) at = i; });
+      if (at < 0) master.forEach((m, i) => { if (m.act === act && cfcFlowOf(m) === flow) at = i; });
       const items = master.slice();
-      if (at < 0) items.push({ name, act, group }); else items.splice(at + 1, 0, { name, act, group });
+      if (at >= 0) items.splice(at + 1, 0, row);
+      else {
+        const first = master.findIndex(m => m.act === act);
+        let last = -1; master.forEach((m, i) => { if (m.act === act) last = i; });
+        if (first < 0) items.push(row);
+        else items.splice(flow === 'in' ? first : last + 1, 0, row);
+      }
       persist(Object.assign({}, store, { master: { items, at: new Date().toISOString() } }))
         .then(r => toast && toast('เพิ่มหมวด "' + name + '" แล้ว' + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error'));
     }
