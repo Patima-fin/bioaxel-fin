@@ -975,14 +975,17 @@
     }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf]);
 
     const stat = useMemo(() => {
-      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0 };
+      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [] };
+      const known = new Set(master.map(m => m.name));
       rows.forEach(r => {
+        // หมวดที่เคยลงไว้ แต่ตอนนี้ไม่มีในงบหน้าแรกแล้ว → ยอดจะหายจากชีตสรุป ต้องเตือน
+        if (r.sug.cat && !known.has(r.sug.cat)) { s.orphan++; if (s.orphanNames.indexOf(r.sug.cat) < 0) s.orphanNames.push(r.sug.cat); }
         s[r.sug.tier]++; s.inSum += r.in; s.outSum += r.out;
         if (r.matchHow === 'suspect') s.suspect++;
         else if (!r.pv && r.out > 0) s.noPv++;
       });
       return s;
-    }, [rows]);
+    }, [rows, master]);
 
     /* ยอดยกมาที่ประกาศไว้ในไฟล์ ราย (บัญชี|เดือน) */
     const declaredOpen = useMemo(() => {
@@ -1306,6 +1309,10 @@
       s2.push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —']);
       s2.push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))));
       s2.push(['   (ยังไม่ลงหมวด)'].concat(withTotal(val('(ยังไม่ลงหมวด)'))));
+      // ★ หมวดที่ลงไว้แต่ไม่มีในงบหน้าแรกแล้ว — ถ้าไม่พิมพ์ออกมา ยอดจะหายเงียบ ๆ
+      const known2 = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
+      const orphanCats = [...new Set(rows.map(r => r.sug.cat).filter(c => c && !known2.has(c)))];
+      orphanCats.forEach(n => s2.push(['   ⚠ ' + n + ' (ไม่มีในงบหน้าแรก — ต้องแก้)'].concat(withTotal(val(n)))));
       const ws2 = XLSX.utils.aoa_to_sheet(s2);
       ws2['!cols'] = [{ wch: 46 }].concat(months.map(() => ({ wch: 15 }))).concat([{ wch: 16 }]);
       XLSX.utils.book_append_sheet(wb, ws2, 'สรุปตามหมวด');
@@ -1572,8 +1579,9 @@
         )}
 
         {/* แถบเตือน */}
-        {(stat.suspect > 0 || stat.noPv > 0) && (
+        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0) && (
           <div style={Object.assign({}, card, { padding: '10px 16px', borderColor: '#f0dcb0', background: C.warnBg, fontSize: 12.5, color: C.warn })}>
+            {stat.orphan > 0 && <div>⚠️ <strong>{stat.orphan} รายการ</strong> ลงหมวดที่<strong>ไม่มีในงบหน้าแรกแล้ว</strong> ({stat.orphanNames.slice(0, 3).join(' · ')}{stat.orphanNames.length > 3 ? ' และอีก ' + (stat.orphanNames.length - 3) : ''}) — ยอดจะไม่เข้าบรรทัดไหนในชีตสรุป ให้เพิ่มหมวดนี้กลับในไฟล์ CASH FLOW แล้วกด "สอนระบบ" ใหม่ หรือเลือกหมวดใหม่ให้รายการเหล่านี้</div>}
             {stat.suspect > 0 && <div>⚠️ <strong>{stat.suspect} รายการ</strong> เลขเช็คคล้ายใบสำคัญจ่ายในระบบแต่ <strong>ยอดไม่ตรง</strong> — ไม่ผูกให้โดยตั้งใจ (ของจริงเคยมีเลขเช็คพิมพ์ตกหลักแล้วไปชนใบอื่น) กดขยายแถวเพื่อดูใบที่ใกล้เคียง</div>}
             {stat.noPv > 0 && <div>ℹ️ {stat.noPv} รายการจ่ายออก ยังไม่พบใบสำคัญจ่ายที่ตรงกัน — ลงไฟล์ "รายงานการจ่ายชำระหนี้" + "รายงานอนุมัติจ่าย" ของเดือนนั้นที่หน้า <strong>ใบสำคัญจ่าย</strong> ก่อน</div>}
           </div>
