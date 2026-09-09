@@ -807,7 +807,7 @@ function DataCrudPage({ data, setData, toast, config }) {
 
       <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: config.tableMaxHeight || 'calc(100vh - 330px)' }}>
-          <table className="tbl">
+          <table className={config.compact ? 'tbl tbl-compact' : 'tbl'}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--surface)' }}>
               <tr>
                 {/* Bulk-select header — only visible when bulkMode is on */}
@@ -1948,6 +1948,8 @@ function DataBankPage({ data, setData, toast }) {
     <DataCrudPage data={data} setData={setData} toast={toast} config={{
       title: 'DATA BANK · บัญชีธนาคาร',
       sub: 'RAW_BANK_BALANCE · ยอดคงเหลือบัญชีธนาคาร · วาง RAW ได้เลย',
+      // แถวกระชับ (.tbl-compact) — ดูคู่กับแท็บ "บันทึกยอดธนาคาร" ที่อยู่หน้าเดียวกัน
+      compact: true,
       dataKey: 'bankAccounts',
       addLabel: 'เพิ่มบัญชี',
       singular: 'บัญชี',
