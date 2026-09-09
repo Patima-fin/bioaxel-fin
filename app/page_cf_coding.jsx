@@ -1052,6 +1052,7 @@
                           <option value="">— ยังไม่เลือก —</option>
                           {banks.map(b => <option key={b.no} value={cfcDigits(b.no)}>{b.bank + ' ' + b.no}</option>)}
                           <option value="dup">↩︎ ซ้ำกับบรรทัดธนาคาร — ตัดใบนี้ออก</option>
+                          <option value="skip">🗑 ไม่เกี่ยวข้อง / คีย์ผิดในระบบ — ตัดใบนี้ออก</option>
                         </select>
                       </td>
                     </tr>
@@ -1648,6 +1649,7 @@
     const [addCat, setAddCat] = useState(false);
     const [pushAsk, setPushAsk] = useState(false);   // หน้าต่างยืนยัน "จะดันเดือนไหน"
     const [acctAsk, setAcctAsk] = useState(false);   // หน้าต่างเลือกบัญชีให้รายการที่ไม่มีเลขบัญชี
+    const [cutAsk, setCutAsk] = useState(false);     // หน้าต่างดู/เอากลับรายการที่ตัดออก
     const fileBank = useRef(null), fileCf = useRef(null);
 
     /* ── โหลดจากส่วนกลาง ── */
@@ -1697,6 +1699,10 @@
        บรรทัดธนาคาร ให้ตัดใบทิ้ง). sync ทั้งทีมเหมือนกฎหมวด · ห้ามเขียนกลับลง pvVouchers
        (เอกสารไม่ได้บอก เขียนไปคือปลอมข้อมูลให้ทุกหน้าที่ใช้ร่วมกัน) */
     const acctFix = useMemo(() => (store.acctFix && store.acctFix.map) || {}, [store.acctFix]);
+    /* ⚠️ รายการที่ "ไม่เกี่ยวข้อง" (คีย์ผิดในระบบบัญชี แต่ถูกดึงมาด้วย) — ตัดออกจากงบได้
+       เก็บเป็น rowKey → {why,by,at} · sync ทั้งทีม · **ตัดที่ชั้นแสดงผล ไม่ลบข้อมูลต้นทาง**
+       (เอากลับได้เสมอ · pvVouchers/บรรทัดธนาคารยังอยู่ครบให้หน้าอื่นใช้) */
+    const excluded = useMemo(() => (store.exclude && store.exclude.map) || {}, [store.exclude]);
     const engine = useMemo(() => cfcBuildEngine(rules, catAct), [rules, catAct]);
 
     /* ── บรรทัดดิบทั้งหมดที่นำเข้าไว้ ── */
@@ -1791,9 +1797,9 @@
         cfcCoverKeys(v).forEach(k => covered.set(k, amt));
         const made = [];
         const fix = acctFix[dk];
-        if (fix === 'dup') { vEntries.push({ v: v, rows: [], dropped: true, manualDup: true }); return; }
+        if (fix === 'dup' || fix === 'skip') { vEntries.push({ v: v, rows: [], dropped: true, manualDup: true }); return; }
         cfcVoucherToRows(v, acctOf).forEach((r, i) => {
-          if (fix && !cfcDigits(r.acctNo)) {          // คนเลือกบัญชีให้แล้ว
+          if (fix && fix !== 'dup' && fix !== 'skip' && !cfcDigits(r.acctNo)) {          // คนเลือกบัญชีให้แล้ว
             const b = bankMaster.find(x => cfcDigits(x.no).slice(-4) === cfcDigits(fix).slice(-4));
             r = Object.assign({}, r, { acctNo: cfcDigits(fix),
               acctLabel: acctLabelOf(fix, b ? b.bank + ' ' + b.no : r.acctLabel), acctPicked: true });
@@ -1874,9 +1880,11 @@
       const sorted = out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
         : (a.acctNo !== b.acctNo ? String(a.acctNo).localeCompare(String(b.acctNo))
         : (Number(a.idx || 0) - Number(b.idx || 0)))));
-      sorted.dupPaired = dupPaired;
-      return sorted;
-    }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf, acctFix, acctLabelOf, bankMaster]);
+      const vis = sorted.filter(r => !excluded[r.key]);
+      vis.dupPaired = dupPaired;
+      vis.cut = sorted.filter(r => !!excluded[r.key]);      // ที่ถูกตัดออก — ไว้ให้เอากลับ
+      return vis;
+    }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf, acctFix, acctLabelOf, bankMaster, excluded]);
 
     const stat = useMemo(() => {
       const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [],
@@ -2044,6 +2052,28 @@
       if (vk.length > 3) map['vendor:' + vk] = { cat, n: ((map['vendor:' + vk] && map['vendor:' + vk].cat === cat ? Number(map['vendor:' + vk].n) || 1 : 0) + 1), by: meta.by, at: meta.at };
       learn(map, 'บันทึก "' + cat + '" + จำไว้ใช้ครั้งหน้าแล้ว');
     }
+    /* ตัด/เอากลับรายการที่ไม่เกี่ยวข้อง — ตัดที่ชั้นแสดงผลเท่านั้น ไม่แตะข้อมูลต้นทาง */
+    function setExcluded(row, why) {
+      if (!canEdit) return;
+      const who = (typeof WTPAuth !== 'undefined' && WTPAuth.currentUser && WTPAuth.currentUser()) || null;
+      const map = Object.assign({}, excluded);
+      if (why === null) delete map[row.key];
+      else map[row.key] = { why: why || '', by: who ? (who.displayName || who.username) : '',
+        at: new Date().toISOString(), doc: row.docNo || '', amt: (row.out || 0) - (row.in || 0), iso: row.iso };
+      persist(Object.assign({}, store, { exclude: { map, at: new Date().toISOString() } }))
+        .then(r => toast && toast((why === null ? 'เอา ' + row.docNo + ' กลับเข้างบแล้ว' : 'ตัด ' + row.docNo + ' ออกจากงบแล้ว')
+          + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error'));
+    }
+    function askExclude(row) {
+      if (!canEdit) return;
+      const isBank = row.src === 'bank';
+      const why = prompt((isBank
+        ? '⚠️ นี่คือ "บรรทัดธนาคาร" = เงินที่เคลื่อนไหวจริงในบัญชี\nตัดออกแล้วยอดจะไปโผล่ที่บรรทัด "ผลต่างที่ยังกระทบยอดไม่ลงตัว" แทน\n\n'
+        : '') + 'ตัด ' + (row.docNo || '') + ' (' + cfcMoney(Math.abs(row.out || row.in)) + ') ออกจากงบ\nเหตุผล (เช่น คีย์ผิดในระบบ / ไม่เกี่ยวข้อง):', 'คีย์ผิดในระบบ');
+      if (why === null) return;
+      setExcluded(row, why);
+    }
+
     function acceptAllAuto() {
       if (!canEdit) return;
       const cand = rows.filter(r => r.sug.tier === 'auto' && r.sug.cat);
@@ -2751,10 +2781,12 @@
         )}
 
         {/* แถบเตือน */}
-        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0 || stat.noAcct > 0 || stat.dup > 0) && (
+        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0 || stat.noAcct > 0 || stat.dup > 0 || (rows.cut || []).length > 0) && (
           <div style={Object.assign({}, card, { padding: '10px 16px', borderColor: '#f0dcb0', background: C.warnBg, fontSize: 12.5, color: C.warn })}>
             {stat.orphan > 0 && <div>⚠️ <strong>{stat.orphan} รายการ</strong> ลงหมวดที่<strong>ไม่มีในงบหน้าแรกแล้ว</strong> ({stat.orphanNames.slice(0, 3).join(' · ')}{stat.orphanNames.length > 3 ? ' และอีก ' + (stat.orphanNames.length - 3) : ''}) — ยอดจะไม่เข้าบรรทัดไหนในชีตสรุป ให้เพิ่มหมวดนี้กลับในไฟล์ CASH FLOW แล้วกด "สอนระบบ" ใหม่ หรือเลือกหมวดใหม่ให้รายการเหล่านี้</div>}
             {stat.suspect > 0 && <div>⚠️ <strong>{stat.suspect} รายการ</strong> เลขเช็คคล้ายใบสำคัญจ่ายในระบบแต่ <strong>ยอดไม่ตรง</strong> — ไม่ผูกให้โดยตั้งใจ (ของจริงเคยมีเลขเช็คพิมพ์ตกหลักแล้วไปชนใบอื่น) กดขยายแถวเพื่อดูใบที่ใกล้เคียง</div>}
+            {(rows.cut || []).length > 0 && <div>🗑 <strong>ตัดออกจากงบ {(rows.cut || []).length} รายการ</strong> (รวม {cfcMoney((rows.cut || []).reduce((a, r) => a + Math.abs(r.out || r.in), 0))}) — รายการที่ทำเครื่องหมายว่าไม่เกี่ยวข้อง/คีย์ผิด{' '}
+              <button onClick={() => setCutAsk(true)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '2px 10px' }}>ดู / เอากลับ</button></div>}
             {stat.dup > 0 && <div>✅ ตัด <strong>{stat.dup} ใบอนุมัติจ่าย</strong> ที่ซ้ำกับบรรทัดธนาคารออกแล้ว (รวม {cfcMoney(stat.dupSum)}) — ใบพวกนี้ไม่มีเลขเช็ค/บัญชีต้นทาง ตัวจับคู่ปกติจึงมองไม่เห็น ถ้าไม่ตัดจะถูกนับเงินซ้ำ 2 รอบ</div>}
             {stat.noAcct > 0 && <div>⚠️ <strong>{stat.noAcct} รายการ</strong> <strong>ไม่มีเลขบัญชี</strong> (รวม {cfcMoney(stat.noAcctSum)}) — ใบสำคัญจ่ายที่เอกสารต้นทางไม่ได้บอกว่าจ่ายจากบัญชีไหน (ใบอนุมัติจ่าย AV/AE ไม่มีคอลัมน์นี้เลย · ใบ PS บางใบเว้นช่องธนาคาร) · <strong>บางใบอาจซ้ำกับบรรทัดธนาคารที่นำเข้ามาแล้ว</strong>{' '}
               <button onClick={() => setAcctAsk(true)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1px solid ' + C.warn, background: '#fff', color: C.warn, borderRadius: 8, padding: '2px 10px' }}>🏦 เลือกบัญชี / ตัดใบซ้ำ</button></div>}
@@ -2829,6 +2861,9 @@
                           {canEdit && r.sug.tier !== 'locked' && r.sug.cat &&
                             <button title="ยืนยันหมวดนี้ + จำไว้" onClick={() => confirmRow(r, r.sug.cat)}
                               style={{ cursor: 'pointer', border: '1px solid ' + C.pos, background: '#fff', color: C.pos, borderRadius: 8, padding: '3px 8px', fontSize: 12, fontWeight: 700 }}>✓</button>}
+                          {canEdit &&
+                            <button title="ตัดออกจากงบ — รายการไม่เกี่ยวข้อง / คีย์ผิดในระบบ (เอากลับได้)" onClick={() => askExclude(r)}
+                              style={{ cursor: 'pointer', marginLeft: 4, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 8px', fontSize: 12, fontWeight: 700 }}>✕</button>}
                           {(r.bills.length > 0 || r.pv || r.matchNear) &&
                             <button title="ดูบิลที่ใบนี้ไปจ่าย" onClick={() => setOpen(o => Object.assign({}, o, { [r.key]: !o[r.key] }))}
                               style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 8px', fontSize: 12, marginLeft: 4 }}>{isOpen ? '▲' : '▼'}</button>}
@@ -2888,6 +2923,44 @@
 
         {addCat && <CfcCatManagerModal master={master} rules={rules} onClose={() => setAddCat(false)}
           onAdd={saveNewCat} onEdit={saveCatEdit} onDelete={saveCatDelete} />}
+
+        {cutAsk && (
+          <Modal open wide title="🗑 รายการที่ตัดออกจากงบ" onClose={() => setCutAsk(false)}>
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ fontSize: 12.5, color: C.mut, background: C.soft, borderRadius: 9, padding: '9px 12px', lineHeight: 1.8 }}>
+                ตัดที่ <strong>ชั้นแสดงผล</strong> เท่านั้น — ข้อมูลต้นทาง (ใบสำคัญจ่าย / บรรทัดธนาคาร) ยังอยู่ครบ หน้าอื่นไม่กระทบ · กด “เอากลับ” เมื่อไรก็ได้
+              </div>
+              <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 10 }}>
+                <table className="tbl tbl-compact" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <thead><tr>
+                    {['วันที่', 'เลขที่เอกสาร', 'รายการ', 'ยอด', 'เหตุผล', ''].map((h, i) => (
+                      <th key={i} style={{ textAlign: i === 3 ? 'right' : 'left', padding: '7px 9px', color: C.mut, background: C.soft, position: 'sticky', top: 0, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {!(rows.cut || []).length && <tr><td colSpan={6} style={{ padding: 22, textAlign: 'center', color: C.mut }}>ไม่มีรายการที่ตัดออก</td></tr>}
+                    {(rows.cut || []).map(r => {
+                      const meta = excluded[r.key] || {};
+                      return (
+                        <tr key={r.key} style={{ borderTop: '1px solid ' + C.line }}>
+                          <td style={{ padding: '6px 9px', whiteSpace: 'nowrap' }}>{cfcThaiDate(r.iso)}</td>
+                          <td style={{ padding: '6px 9px', whiteSpace: 'nowrap', fontFamily: 'ui-monospace,monospace' }}>{r.docNo}</td>
+                          <td style={{ padding: '6px 9px', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.note}>{r.memo || r.note || r.pvPayee || '—'}</td>
+                          <td style={{ padding: '6px 9px', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(Math.abs(r.out || r.in))}</td>
+                          <td style={{ padding: '6px 9px', fontSize: 12, color: C.mut }}>{meta.why || '—'}{meta.by ? ' · ' + meta.by : ''}</td>
+                          <td style={{ padding: '6px 9px', textAlign: 'right' }}>
+                            {canEdit && <button onClick={() => setExcluded(r, null)}
+                              style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1px solid ' + C.primary, background: '#fff', color: C.primaryD, borderRadius: 8, padding: '3px 10px' }}>↩︎ เอากลับ</button>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Modal>
+        )}
 
         {acctAsk && <CfcAcctFixModal rows={rows} banks={bankMaster} value={acctFix} canEdit={canEdit}
           onClose={() => setAcctAsk(false)}
