@@ -722,6 +722,24 @@
     });
   }
 
+  /* "ก.ค. 69" → "2026-07" — ใช้แกะคอลัมน์เดือนของงบที่เก็บไว้ (ตรงข้ามกับ monLabel) */
+  function cfcYmOfMonthLabel(lb) {
+    const s = cfcT(lb); let mo = 0;
+    for (let k = 1; k <= 12; k++) { if (s.indexOf(CFC_MONTH_TH[k]) === 0) { mo = k; break; } }
+    const y2 = (s.match(/(\d{2,4})\s*$/) || [])[1];
+    if (!mo || !y2) return '';
+    let y = Number(y2);
+    y = y < 100 ? (y + 2500 - 543) : (y > 2400 ? y - 543 : y);
+    return y + '-' + String(mo).padStart(2, '0');
+  }
+  /* ชื่อบรรทัดในงบเดิม → ชื่อหมวดที่ cfcSummaryAoa ใช้เป็นคีย์ */
+  function cfcCanonRowLabel(l) {
+    return cfcT(l)
+      .replace(/^⚠\s*/, '')
+      .replace(/\s*\(ไม่มีในผังหมวด — ต้องแก้\)$/, '')
+      .replace(/^(โอนเงินระหว่างบัญชี)\s*\(.*\)$/, '$1');
+  }
+
   /* ── เงินสดคงเหลือจริง (จากบรรทัดธนาคาร) ราย ym รวมทุกบัญชี ──────────────
      บัญชีที่ไม่มีรายการในเดือนนั้น = ยกปลายงวดเดือนก่อนมา (ไม่งั้นยอดรวมหายเป็นก้อน)
      ใช้เป็นบรรทัด "เงินสดคงเหลือปลายงวด จาก STM" ท้ายงบ = ตัวตรวจกับยอดที่งบคิดได้ */
@@ -1220,12 +1238,13 @@
     if (cash) {
       const bf = [], bal = []; let run = cfcNum(cash.opening);
       months.forEach((m, i) => { bf.push(run); run += (net[i] || 0); bal.push(run); });
-      const last = a => (a.length ? a[a.length - 1] : 0);
+      /* ★ ช่อง "รวม" ของแถวยอดคงเหลือปล่อยว่าง (ผลรวมของยอดคงเหลือไม่มีความหมาย) —
+         ตรงกับไฟล์ CASH FLOW เดิม: B/F รวม = ต้นงวดของเดือนแรก · อีก 2 แถวเว้นว่าง */
       push(['เงินสดต้นงวดยกมา/Cash B/F'].concat(bf).concat([bf.length ? bf[0] : 0]), 'cash');
-      push(['เงินสดคงเหลือปลายงวด/Cash Balance'].concat(bal).concat([last(bal)]), 'cash');
+      push(['เงินสดคงเหลือปลายงวด/Cash Balance'].concat(bal).concat(['']), 'cash');
       // ยอดจริงจากบรรทัดธนาคาร — ไว้ตรวจว่างบที่คิดได้ตรงกับเงินในบัญชีจริงไหม
       const st = months.map(m => cfcNum((cash.stmClosing || {})[m]));
-      push(['เงินสดคงเหลือปลายงวด จาก STM'].concat(st).concat([last(st)]), 'cash');
+      push(['เงินสดคงเหลือปลายงวด จาก STM'].concat(st).concat(['']), 'cash');
     }
     push([], 'gap');
     push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —'], 'nsec');
@@ -2057,6 +2076,27 @@
         const firstYm = {};
         allTxns.forEach(t => { const m = String(t.iso).slice(0, 7);
           if (!firstYm[t.account] || m < firstYm[t.account]) firstYm[t.account] = m; });
+        /* ⚠️⚠️ กติกาหลักของปุ่มนี้: "ดันเดือนไหน แตะเฉพาะคอลัมน์เดือนนั้น"
+           งบที่เก็บไว้อาจมาจากไฟล์ CASH FLOW ที่อัปเอง (ปรับด้วยมือมาแล้ว — รายการเดียวกัน
+           อาจถูกลงคนละหมวดกับที่ระบบจัด) ⇒ ถ้าคิดงบใหม่จากรายการทั้งหมด เดือนเก่าจะเปลี่ยน
+           ยกแผง ทั้งที่ผู้ใช้สั่งดันแค่เดือนเดียว (ของจริง: ยอดสุทธิ/ยอดรวมกลุ่มเท่าเดิม แต่
+           รายการย่อยสลับหมวดกันเพียบ + ต้นงวดขยับ 28,092) */
+        const oldSum = old.summary || null;
+        const oldMonthCol = {};                       // ym → index คอลัมน์ในงบเดิม
+        ((oldSum && oldSum.monthLabels) || []).forEach((lb, i) => {
+          const y = cfcYmOfMonthLabel(lb); if (y) oldMonthCol[y] = i;
+        });
+        /* เอาเฉพาะแถว "รายการย่อย" — แถวหัวข้อ/แถวรวม/แถวสุทธิ ระบบสร้างเองจากรายการย่อยอยู่แล้ว
+           (ถ้าเอามาด้วย ชื่อแถวรวมจะไปโผล่เป็นหมวดแปลกปลอมท้ายงบ) */
+        const oldRowVal = {};                         // ชื่อบรรทัด → vals[]
+        ((oldSum && oldSum.rows) || []).forEach(r => {
+          if (r.type !== 'leaf') return;
+          oldRowVal[cfcCanonRowLabel(r.label)] = r.vals || [];
+        });
+        const oldRowBy = (re) => {                    // หาแถวท้ายงบด้วยรูปประโยค (ชื่อไฟล์เดิมมี /อังกฤษ ต่อท้าย)
+          const hit = ((oldSum && oldSum.rows) || []).find(r => re.test(String(r.label)));
+          return hit ? (hit.vals || []) : null;
+        };
         const oldOpen = (old.stm && old.stm.openingByAcct) || {};
         /* เดือนแรกสุดยังไม่ได้นำเข้างบกระทบยอด แต่เดือนถัด ๆ ไปมี → เดินถอยหลัง:
            ต้นงวด(เดือนแรก) = ต้นงวด(เดือนที่รู้) − ผลรวมกระแสของทุกแถวก่อนเดือนนั้น */
@@ -2069,35 +2109,64 @@
             ? s + (t.flow || 0) : s), 0);
           return known.opening - before;
         };
+        /* ค่าเดิมของบัญชี อาจถูกเก็บไว้ใต้ป้ายเก่า (ก่อนยุบชื่อบัญชี) และอาจแตกเป็นหลายก้อน
+           จากบั๊กเดิม → รวมทุกก้อนที่เลข 4 ตัวท้ายตรงกัน */
+        const oldOpenOf = (a) => {
+          if (oldOpen[a] != null) return cfcNum(oldOpen[a]);
+          const t = tail4(a); let sum = null;
+          Object.keys(oldOpen).forEach(k => { if (t && tail4(k) === t) sum = (sum || 0) + cfcNum(oldOpen[k]); });
+          return sum;
+        };
         const openingByAcct = {}; let opening = 0; const openMissing = [];
         Object.keys(firstYm).forEach(a => {
           const info = byDisplay[a];
-          let v = info ? openingAt(info.no, info.label, firstYm[a]) : null;
+          // ★ เดือนแรกของบัญชีนี้ไม่ได้อยู่ในรอบที่ส่ง → ห้ามคิดใหม่ ใช้ค่าเดิมเป๊ะ ๆ
+          let v = !sendMonths.has(firstYm[a]) ? oldOpenOf(a) : null;
+          if (v == null && info) v = openingAt(info.no, info.label, firstYm[a]);
           if (v == null && info) v = openingBack(info, firstYm[a], a);
-          // บัญชีที่หน้านี้ไม่รู้จัก (มาจากไฟล์ที่อัปมือบนหน้า Cash Flow) → คงค่าเดิมไว้ ไม่ทับ
-          //   ★ ค่าเดิมอาจถูกเก็บไว้ใต้ป้ายเก่า (ก่อนยุบชื่อบัญชี) และอาจแตกเป็นหลายก้อน
-          //     จากบั๊กเดิม → รวมทุกก้อนที่เลข 4 ตัวท้ายตรงกัน
-          if (v == null) {
-            const t = tail4(a); let sum = null;
-            Object.keys(oldOpen).forEach(k => { if (k === a || (t && tail4(k) === t)) sum = (sum || 0) + cfcNum(oldOpen[k]); });
-            v = sum == null ? cfcNum(fresh.openingByAcct[a]) : sum;
-            if (info) openMissing.push(a);
-          }
+          if (v == null) { const o = oldOpenOf(a); v = o == null ? cfcNum(fresh.openingByAcct[a]) : o; if (info) openMissing.push(a); }
           openingByAcct[a] = v; opening += v;
         });
         const stm = { txns: allTxns, opening, openingByAcct };
-        // งบสรุปต้องคิดใหม่จาก "ทุกเดือนที่มี" ไม่ใช่เฉพาะเดือนที่เพิ่งส่ง
-        const allMonths = [...new Set(allTxns.map(t => String(t.iso).slice(0, 7)))].sort();
+        // คอลัมน์เดือน = เดือนที่มีรายการ + เดือนที่งบเดิมมีอยู่ (เดือนเก่าห้ามหายไปเฉย ๆ)
+        const allMonths = [...new Set(allTxns.map(t => String(t.iso).slice(0, 7))
+          .concat(Object.keys(oldMonthCol)))].sort();
         /* ตัวอ่านตั้งชื่อแถวที่ไม่มีหมวดว่า "(ไม่ระบุหมวด)" แต่บรรทัดตรวจในงบชื่อ "(ยังไม่ลงหมวด)"
            ไม่แปลงชื่อ = บรรทัดตรวจโชว์ 0 ทั้งที่มีรายการค้างอยู่จริง */
         const catOf = c => (!c || c === '(ไม่ระบุหมวด)') ? '(ยังไม่ลงหมวด)' : c;
-        const cell = {};
-        allTxns.forEach(t => { const k = catOf(t.category) + '|' + String(t.iso).slice(0, 7);
-          cell[k] = (cell[k] || 0) + (t.flow || 0); });
-        const usedCats = [...new Set(allTxns.map(t => catOf(t.category)))];
-        /* บรรทัดท้ายงบ: ต้นงวด = ค่าที่คิดไว้ข้างบน (ครอบคลุมทุกบัญชี ทุกที่มาของยอด)
-           · "จาก STM" = ยอดคงเหลือจริงจากบรรทัดธนาคาร ไว้ตรวจกับยอดที่งบคิดได้ */
-        const cash = { opening, stmClosing: cfcStmClosingByYm(histCheck, allMonths) };
+        const cell = {}; const keptMonths = [];
+        allMonths.forEach(m => {
+          if (!sendMonths.has(m) && oldMonthCol[m] != null) {
+            // ★ เดือนที่ไม่ได้ส่ง + งบเดิมมีคอลัมน์นี้ → ยกตัวเลขเดิมมาทั้งคอลัมน์ ห้ามคิดใหม่
+            keptMonths.push(m);
+            Object.keys(oldRowVal).forEach(lab => {
+              const v = cfcNum(oldRowVal[lab][oldMonthCol[m]]);
+              if (v) cell[lab + '|' + m] = v;
+            });
+            return;
+          }
+          allTxns.forEach(t => {
+            if (String(t.iso).slice(0, 7) !== m) return;
+            const k = catOf(t.category) + '|' + m;
+            cell[k] = (cell[k] || 0) + (t.flow || 0);
+          });
+        });
+        const usedCats = [...new Set(allTxns.map(t => catOf(t.category))
+          .concat(Object.keys(oldRowVal)))];
+        /* บรรทัดท้ายงบ — เดือนที่ไม่ได้ส่งต้องใช้ค่าเดิมเช่นกัน:
+           · ต้นงวดของเดือนแรก = ค่าเดิมถ้าเดือนแรกไม่ได้อยู่ในรอบที่ส่ง
+           · "จาก STM" = ยอดจริงจากบรรทัดธนาคาร (เฉพาะเดือนที่ส่ง) · เดือนเก่าใช้ค่าเดิม */
+        const oldBf = oldRowBy(/เงินสด.*ต้นงวด/), oldStm = oldRowBy(/เงินสด.*ปลายงวด.*STM/);
+        const m0 = allMonths[0];
+        let openTotal = opening;
+        if (m0 && !sendMonths.has(m0) && oldBf && oldMonthCol[m0] != null) openTotal = cfcNum(oldBf[oldMonthCol[m0]]);
+        const stmCalc = cfcStmClosingByYm(histCheck, allMonths);
+        const stmClosing = {};
+        allMonths.forEach(m => {
+          stmClosing[m] = (!sendMonths.has(m) && oldStm && oldMonthCol[m] != null)
+            ? cfcNum(oldStm[oldMonthCol[m]]) : stmCalc[m];
+        });
+        const cash = { opening: openTotal, stmClosing };
         const summary = cfpParseSummary(cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash));
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
@@ -2112,6 +2181,7 @@
         toast && toast('ส่งขึ้นหน้า Cash Flow แล้ว · เดือน ' + built.months.join(', ') + ' ' +
           (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
           ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน' +
+          (keptMonths.length ? ' · คงตัวเลขเดิมของอีก ' + keptMonths.length + ' เดือน (' + keptMonths.map(built.monLabel).join(', ') + ')' : '') +
           (dupDropped ? ' · ล้างรายการซ้ำจากข้อมูลเก่า (ปี พ.ศ.) ' + dupDropped + ' รายการ' : '') +
           (openMissing.length ? ' · ⚠️ ยังไม่รู้ยอดต้นงวดของ ' + openMissing.length + ' บัญชี (ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนั้น)' : ''),
           openMissing.length ? 'error' : undefined);
