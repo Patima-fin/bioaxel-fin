@@ -49,7 +49,6 @@ const PAGE_GROUPS = [
     ['investor',         'Investor Dashboard',     'chart'],
   ] },
   { key: 'reports', label: 'รายงาน / วิเคราะห์', items: [
-    ['cf_coding',         'งบกระทบยอด',             'chart'],
     ['recurring',         'ค่าใช้จ่ายประจำ',        'forecast'],
     ['debt',              'ภาระหนี้ทั้งหมด',        'money'],
     ['debt_ledger',       'Debt Ledger · ดอกเบี้ย', 'money'],
@@ -57,6 +56,7 @@ const PAGE_GROUPS = [
     ['receipts',          'ประวัติรับเงิน',          'receivables'],
     ['bank_diary',        'Bank Daily',             'bank'],
     ['bank_recon',        'กระทบยอดธนาคาร',         'bank'],
+    ['cf_coding',         'งบกระทบยอดกระแสเงินสด',  'chart'],
     ['interest_calc',     'คำนวณดอกเบี้ย',          'money'],
     ['sts_calc',          'STS Calculator',         'money'],
     ['sts_workflow',      'STS Workflow',           'invoice'],
@@ -66,10 +66,11 @@ const PAGE_GROUPS = [
     ['invoices',      'ลูกหนี้คงค้าง',    'invoice'],
     ['checks',        'เช็คจ่ายล่วงหน้า', 'money'],
     ['data_forecast', 'ประมาณการรายจ่าย', 'forecast'],
-    ['data_bank',     'บัญชีธนาคาร',      'bank'],
     ['data_pv',       'ใบสำคัญจ่าย',      'money'],
     ['data_payable',  'เจ้าหนี้คงค้าง',   'arrow_up'],
     ['daily_balance', 'บันทึกยอดธนาคาร',  'bank'],
+    // ★ 'data_bank' (บัญชีธนาคาร) ไม่อยู่ในเมนูแล้ว — ย้ายไปเป็นแท็บในหน้า daily_balance
+    //   (route/case ยังเหลือไว้ เผื่อผู้ใช้เก่าที่มีสิทธิ์เฉพาะ data_bank)
   ] },
   // ระบบ — manager เท่านั้น (บังคับใน canViewPage — เลือกให้ role อื่นไม่ได้)
   { key: 'system', label: 'ระบบ', managerOnly: true, items: [
@@ -666,7 +667,7 @@ function App() {
     cashflow: { label: 'Weekly Forecast', title: 'Weekly Forecast', icon: 'chart' },
     recurring: { label: 'ค่าใช้จ่ายประจำ', title: 'Recurring Expenses', icon: 'forecast' },
     cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
-    cf_coding:   { label: 'งบกระทบยอด', title: 'Reconciliation Statement', icon: 'chart' },
+    cf_coding:   { label: 'งบกระทบยอดกระแสเงินสด', title: 'Cash Flow Reconciliation', icon: 'chart' },
     debt:        { label: 'ภาระหนี้ทั้งหมด',       title: 'Debt Register',   icon: 'money' },
     debt_ledger: { label: 'Debt Ledger · ดอกเบี้ย', title: 'Debt Ledger',     icon: 'money' },
     iv_report:   { label: 'รายงานติดตาม IV',         title: 'IV Tracking Report', icon: 'invoice' },

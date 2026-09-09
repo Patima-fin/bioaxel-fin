@@ -1,5 +1,5 @@
 /* =====================================================================
- * งบกระทบยอด (#cf_coding) — BIOAXEL  (เดิมชื่อ "ลงรหัสงบกระแสเงินสด" · route/ตาราง/prefix ยังเป็น cf_coding/cfc เหมือนเดิม)
+ * งบกระทบยอดกระแสเงินสด (#cf_coding) — BIOAXEL  (เดิมชื่อ "ลงรหัสงบกระแสเงินสด" · route/ตาราง/prefix ยังเป็น cf_coding/cfc เหมือนเดิม)
  * ---------------------------------------------------------------------
  *  "โต๊ะทำงาน" ที่รับ **ข้อมูลดิบ** จากไฟล์ EXPRESS แล้วช่วยจับคู่ "หมวด +
  *  ประเภทกิจกรรม" ให้ทีละบรรทัด — ผลลัพธ์ = ชีต "รวมทุกบัญชี" ที่เอาไปวางใน
@@ -764,6 +764,45 @@
 
   /* หมวดที่ไม่ได้อยู่ในงบหน้าแรก แต่ต้องมีให้เลือกเสมอ (บรรทัดธนาคารมีจริง)
      → ผนวกกลับทุกครั้งที่อ่านหมวดมาตรฐานจากไฟล์ CASH FLOW มาทับ */
+  /* แทรกหมวดลงผังให้อยู่ "ถูกบล็อก" — ลำดับใน master = ลำดับแถวของชีตงบ
+     1) กลุ่มเดิม → ต่อท้ายกลุ่มนั้น
+     2) กลุ่มใหม่แต่มีของฝั่งเงินเดียวกันอยู่แล้ว → ต่อท้ายบล็อกฝั่งนั้น
+     3) ยังไม่มีของฝั่งนี้ในกิจกรรมเลย → ★ ฝั่ง "รับ" ต้องขึ้นก่อนฝั่ง "จ่าย" เสมอ
+   ★ ตัวเดียวที่ทุกทาง (เพิ่มเอง · แก้ไข · ผสานตอนสอนระบบ) ต้องเรียก — อย่าก็อปสูตร */
+  function cfcInsertCat(list, row) {
+    let at = -1;
+    list.forEach((m, i) => { if (m.act === row.act && m.group === row.group) at = i; });
+    if (at < 0) list.forEach((m, i) => { if (m.act === row.act && cfcFlowOf(m) === cfcFlowOf(row)) at = i; });
+    if (at >= 0) { list.splice(at + 1, 0, row); return list; }
+    const first = list.findIndex(m => m.act === row.act);
+    let last = -1; list.forEach((m, i) => { if (m.act === row.act) last = i; });
+    if (first < 0) list.push(row);
+    else list.splice(cfcFlowOf(row) === 'in' ? first : last + 1, 0, row);
+    return list;
+  }
+
+  /* ★ ผสานหมวดที่ "เพิ่มเองในแอป" (src:'app') กลับเข้าผังที่อ่านมาจากไฟล์ CASH FLOW
+     ⚠️ หมวดพวกนี้ไม่มีทางอยู่ในไฟล์ — ถ้าไม่ผสานกลับ กด "สอนระบบ" ครั้งเดียว
+        หมวดที่เพิ่มไว้หายเงียบ ๆ แล้วรายการที่ลงหมวดนั้นกลายเป็นหมวดผี (ยอดหายจากงบ) */
+  function cfcMergeAppCats(fileList, curList) {
+    const out = (fileList || []).slice();
+    const have = {}; out.forEach(m => { have[cfcNorm(m.name)] = 1; });
+    (curList || []).forEach(m => {
+      if (m && m.src === 'app' && !have[cfcNorm(m.name)]) cfcInsertCat(out, m);
+    });
+    return out;
+  }
+
+  /* นับว่าแต่ละหมวดถูกใช้ในกฎที่เรียนไว้กี่ข้อ — ใช้เตือนก่อนลบ/ก่อนทับผัง */
+  function cfcRuleCatCount(rules) {
+    const o = {};
+    Object.keys(rules || {}).forEach(k => {
+      const c = rules[k] && rules[k].cat;
+      if (c) o[c] = (o[c] || 0) + 1;
+    });
+    return o;
+  }
+
   function cfcWithExtraCats(list) {
     const out = (list || []).slice();
     const have = {}; out.forEach(m => { have[m.name] = 1; });
@@ -852,90 +891,215 @@
     );
   }
 
-  /* เพิ่มหมวดใหม่เข้าไปในผังหมวด — เลือกกิจกรรม + กลุ่ม แล้วแทรกต่อท้ายกลุ่มนั้น
-     ★ ลำดับใน master คือลำดับแถวของชีต "สรุปตามหมวด" ⇒ ต้องแทรกให้อยู่ในกลุ่มที่ถูก
-       ไม่ใช่ต่อท้ายสุด ไม่งั้นงบที่ส่งออกจะอ่านไม่เป็นเรื่อง */
-  function CfcAddCatModal({ master, onClose, onSave }) {
-    const [name, setName] = useState('');
-    const [act, setAct] = useState('op');
-    const [group, setGroup] = useState('');
+  /* ── ฟอร์มหมวด (ใช้ร่วมกันทั้ง "เพิ่มใหม่" และ "แก้ไข") ──
+     ★ กลุ่มในงบกรองด้วย กิจกรรม + ฝั่งเงิน (ผังจริงไม่มีกลุ่มไหนปนทั้งรับและจ่าย) */
+  function CfcCatForm({ master, initial, submitLabel, onCancel, onSubmit }) {
+    const [name, setName] = useState(initial ? initial.name : '');
+    const [act, setAct] = useState(initial ? initial.act : 'op');
+    const [flow, setFlow] = useState(initial ? cfcFlowOf(initial) : 'out');
+    const [group, setGroup] = useState(initial ? initial.group : '');
     const [newGroup, setNewGroup] = useState('');
-    const [flow, setFlow] = useState('out');
-    /* ★ กลุ่มในงบแยกฝั่งเงินอยู่แล้ว (ไม่มีกลุ่มไหนปนทั้งรับและจ่าย — ตรวจกับผังจริงแล้ว)
-         ⇒ เลือกกิจกรรม + รับ/จ่าย แล้วต้องเหลือเฉพาะกลุ่มฝั่งนั้น ไม่งั้นเลือกผิดฝั่งได้ง่าย */
     const groups = useMemo(() => [...new Set(master.filter(m => m.act === act && cfcFlowOf(m) === flow).map(m => m.group))].filter(Boolean),
       [master, act, flow]);
-    /* ฝั่ง "รับ" ของกิจกรรมลงทุนยังไม่มีกลุ่มเลย → เด้งไปโหมดตั้งกลุ่มใหม่ให้เอง จะได้ไม่ตัน */
-    useEffect(() => { setGroup(groups[0] || '__new'); setNewGroup(''); }, [act, flow]);   // eslint-disable-line
+    /* ⚠️ ต้องข้ามรอบแรก ไม่งั้นตอนเปิดฟอร์ม "แก้ไข" กลุ่มเดิมจะถูกรีเซ็ตทิ้งทันที */
+    const first = useRef(true);
+    useEffect(() => {
+      if (first.current) { first.current = false; return; }
+      setGroup(groups[0] || '__new'); setNewGroup('');
+    }, [act, flow]);   // eslint-disable-line
+    useEffect(() => { if (!initial && !group) setGroup(groups[0] || '__new'); }, []);   // eslint-disable-line
+
     const gFinal = group === '__new' ? cfcT(newGroup) : group;
     const fmSel = CFC_FLOW_META[flow] || CFC_FLOW_META.out;
-    const dup = master.some(m => cfcNorm(m.name) === cfcNorm(name));
+    const dup = master.some(m => cfcNorm(m.name) === cfcNorm(name) && (!initial || m.name !== initial.name));
     const ok = cfcT(name) && gFinal && !dup;
     const lbl = { fontSize: 12, fontWeight: 700, color: C.mut, display: 'block', marginBottom: 4 };
     const inp = { width: '100%', fontSize: 13, padding: '7px 10px', borderRadius: 9, border: '1px solid ' + C.line };
+    const send = () => ok && onSubmit({ name: cfcT(name), act, group: gFinal, flow });
     return (
-      <Modal open wide title="➕ เพิ่มหมวดใหม่" onClose={onClose}
-        footer={<div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>ยกเลิก</button>
-          <button className="btn btn-primary" disabled={!ok}
-            onClick={() => { onSave({ name: cfcT(name), act, group: gFinal, flow }); onClose(); }}>เพิ่มหมวด</button>
-        </div>}>
-        <div style={{ display: 'grid', gap: 13, padding: '4px 2px' }}>
-          <div>
-            <label style={lbl}>ชื่อหมวด</label>
-            <input autoFocus value={name} onChange={e => setName(e.target.value)} style={inp}
-              placeholder="เช่น ค่าบริการคลาวด์" onKeyDown={e => { if (e.key === 'Enter' && ok) { onSave({ name: cfcT(name), act, group: gFinal, flow }); onClose(); } }} />
-            {dup && <div style={{ fontSize: 11.5, color: C.neg, marginTop: 4 }}>มีหมวดชื่อนี้อยู่แล้ว</div>}
-          </div>
-          <div>
-            <label style={lbl}>เป็นเงินเข้าหรือเงินออก</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {['in', 'out'].map(f => {
-                const meta = CFC_FLOW_META[f];
-                return (
-                  <button key={f} onClick={() => setFlow(f)} style={{
-                    flex: 1, cursor: 'pointer', borderRadius: 10, padding: '8px 6px', fontSize: 13, fontWeight: 700,
-                    border: '1px solid ' + (flow === f ? meta.color : C.line),
-                    background: flow === f ? meta.color : '#fff', color: flow === f ? '#fff' : meta.color,
-                  }}>{meta.mark} {meta.label}</button>
-                );
-              })}
-            </div>
-          </div>
-          <div>
-            <label style={lbl}>อยู่ในกิจกรรมไหน</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {[['op', 'ดำเนินงาน'], ['inv', 'ลงทุน'], ['fin', 'จัดหาเงิน']].map(([k, t]) => (
-                <button key={k} onClick={() => setAct(k)} style={{
+      <div style={{ display: 'grid', gap: 13, padding: '4px 2px' }}>
+        <div>
+          <label style={lbl}>ชื่อหมวด</label>
+          <input autoFocus value={name} onChange={e => setName(e.target.value)} style={inp}
+            placeholder="เช่น ค่าบริการคลาวด์" onKeyDown={e => { if (e.key === 'Enter') send(); }} />
+          {dup && <div style={{ fontSize: 11.5, color: C.neg, marginTop: 4 }}>มีหมวดชื่อนี้อยู่แล้ว</div>}
+        </div>
+        <div>
+          <label style={lbl}>เป็นเงินเข้าหรือเงินออก</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['in', 'out'].map(f => {
+              const meta = CFC_FLOW_META[f];
+              return (
+                <button key={f} onClick={() => setFlow(f)} style={{
                   flex: 1, cursor: 'pointer', borderRadius: 10, padding: '8px 6px', fontSize: 13, fontWeight: 700,
-                  border: '1px solid ' + (act === k ? CFC_ACT_COLOR[k] : C.line),
-                  background: act === k ? CFC_ACT_COLOR[k] : '#fff', color: act === k ? '#fff' : C.ink,
-                }}>{t}</button>
-              ))}
-            </div>
+                  border: '1px solid ' + (flow === f ? meta.color : C.line),
+                  background: flow === f ? meta.color : '#fff', color: flow === f ? '#fff' : meta.color,
+                }}>{meta.mark} {meta.label}</button>
+              );
+            })}
           </div>
-          <div>
-            <label style={lbl}>
-              กลุ่มในงบ (หมวดจะไปต่อท้ายกลุ่มนี้)
-              <span style={{ fontWeight: 600, color: fmSel.color, marginLeft: 6 }}>
-                — เฉพาะ {fmSel.mark} {fmSel.label} · {CFC_ACT_SHORT[act] || ''}
-              </span>
-            </label>
-            <select value={group} onChange={e => setGroup(e.target.value)}
-              style={Object.assign({}, inp, { borderColor: fmSel.color + '55', background: fmSel.bg, color: fmSel.color, fontWeight: 600 })}>
-              {groups.map(g => <option key={g} value={g}>{g}</option>)}
-              <option value="__new">＋ สร้างกลุ่มใหม่…</option>
-            </select>
-            {!groups.length && <div style={{ fontSize: 11.5, color: C.warn, marginTop: 4 }}>
-              ยังไม่มีกลุ่มฝั่ง “{fmSel.label}” ในกิจกรรม{CFC_ACT_SHORT[act] || ''} — ตั้งชื่อกลุ่มใหม่ได้เลย
-            </div>}
-            {group === '__new' && <input value={newGroup} onChange={e => setNewGroup(e.target.value)}
-              placeholder="ชื่อกลุ่มใหม่ เช่น ค่าใช้จ่ายเทคโนโลยี" style={Object.assign({}, inp, { marginTop: 7 })} />}
+        </div>
+        <div>
+          <label style={lbl}>อยู่ในกิจกรรมไหน</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[['op', 'ดำเนินงาน'], ['inv', 'ลงทุน'], ['fin', 'จัดหาเงิน']].map(([k, t]) => (
+              <button key={k} onClick={() => setAct(k)} style={{
+                flex: 1, cursor: 'pointer', borderRadius: 10, padding: '8px 6px', fontSize: 13, fontWeight: 700,
+                border: '1px solid ' + (act === k ? CFC_ACT_COLOR[k] : C.line),
+                background: act === k ? CFC_ACT_COLOR[k] : '#fff', color: act === k ? '#fff' : C.ink,
+              }}>{t}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label style={lbl}>
+            กลุ่มในงบ (หมวดจะไปต่อท้ายกลุ่มนี้)
+            <span style={{ fontWeight: 600, color: fmSel.color, marginLeft: 6 }}>
+              — เฉพาะ {fmSel.mark} {fmSel.label} · {CFC_ACT_SHORT[act] || ''}
+            </span>
+          </label>
+          <select value={group} onChange={e => setGroup(e.target.value)}
+            style={Object.assign({}, inp, { borderColor: fmSel.color + '55', background: fmSel.bg, color: fmSel.color, fontWeight: 600 })}>
+            {groups.map(g => <option key={g} value={g}>{g}</option>)}
+            <option value="__new">＋ สร้างกลุ่มใหม่…</option>
+          </select>
+          {!groups.length && <div style={{ fontSize: 11.5, color: C.warn, marginTop: 4 }}>
+            ยังไม่มีกลุ่มฝั่ง “{fmSel.label}” ในกิจกรรม{CFC_ACT_SHORT[act] || ''} — ตั้งชื่อกลุ่มใหม่ได้เลย
+          </div>}
+          {group === '__new' && <input value={newGroup} onChange={e => setNewGroup(e.target.value)}
+            placeholder="ชื่อกลุ่มใหม่ เช่น ค่าใช้จ่ายเทคโนโลยี" style={Object.assign({}, inp, { marginTop: 7 })} />}
+        </div>
+        <div style={{ fontSize: 11.5, color: C.mut, background: C.soft, borderRadius: 9, padding: '9px 12px', lineHeight: 1.7 }}>
+          หมวดที่เพิ่ม/แก้ที่นี่ <strong>แชร์ให้ทั้งทีมทันที</strong> และมีผลกับงบที่ส่งออก/ดันขึ้นหน้า Cash Flow ทันที ·
+          หมวดที่เพิ่มเองจะ<strong>ไม่หาย</strong>เมื่อกด “สอนระบบจากไฟล์ CASH FLOW” อีกครั้ง
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onCancel}>ยกเลิก</button>
+          <button className="btn btn-primary" disabled={!ok} onClick={send}>{submitLabel}</button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── 🗂 จัดการหมวด — เพิ่ม / แก้ชื่อ / ลบ ได้ในแอป ──
+     ⚠️ ลำดับใน master = ลำดับแถวของชีตงบ ⇒ ทุกการเพิ่ม/ย้ายต้องผ่าน cfcInsertCat
+     ⚠️ เปลี่ยนชื่อ/ลบ ต้องลากกฎที่เรียนไว้ตามไปด้วยเสมอ ไม่งั้นรายการที่เคยลงหมวดนี้
+        กลายเป็น "หมวดผี" — ยอดไม่เข้าบรรทัดไหนในงบ และไม่ถูกนับว่ายังไม่ลงหมวด */
+  function CfcCatManagerModal({ master, rules, onClose, onAdd, onEdit, onDelete }) {
+    const [mode, setMode] = useState('list');     // list | add | edit
+    const [target, setTarget] = useState(null);
+    const [del, setDel] = useState(null);         // { row, n, moveTo }
+    const [q, setQ] = useState('');
+    const use = useMemo(() => cfcRuleCatCount(rules), [rules]);
+    const groups = useMemo(() => {
+      const by = {};
+      master.forEach(m => { const k = m.act + '|' + cfcFlowOf(m) + '|' + m.group; (by[k] = by[k] || []).push(m); });
+      const rank = { op: 0, inv: 1, fin: 2, transfer: 3 };
+      return Object.entries(by).sort((a, b) => {
+        const [aa, af] = a[0].split('|'), [ba, bf] = b[0].split('|');
+        const ra = rank[aa] == null ? 9 : rank[aa], rb = rank[ba] == null ? 9 : rank[ba];
+        if (aa !== ba) return ra - rb;
+        if (af !== bf) return af === 'in' ? -1 : 1;
+        return 0;
+      });
+    }, [master]);
+    const nq = cfcNorm(q);
+    const hit = (m) => !nq || cfcNorm(m.name).indexOf(nq) >= 0 || cfcNorm(m.group).indexOf(nq) >= 0;
+    const shown = groups.map(([k, items]) => [k, items.filter(hit)]).filter(([, items]) => items.length);
+    const nApp = master.filter(m => m.src === 'app').length;
+    const inp = { width: '100%', fontSize: 13, padding: '7px 10px', borderRadius: 9, border: '1px solid ' + C.line };
+
+    if (mode === 'add' || mode === 'edit') {
+      return (
+        <Modal open wide title={mode === 'add' ? '➕ เพิ่มหมวดใหม่' : '✏️ แก้ไขหมวด'} onClose={onClose}>
+          {mode === 'edit' && use[target.name] > 0 && (
+            <div style={{ fontSize: 11.5, color: C.info, background: C.infoBg, borderRadius: 9, padding: '8px 12px', marginBottom: 11, lineHeight: 1.65 }}>
+              หมวดนี้ถูกใช้ในกฎที่ระบบเรียนไว้ <strong>{use[target.name]} ข้อ</strong> — เปลี่ยนชื่อแล้วกฎพวกนี้จะย้ายตามให้อัตโนมัติ
+            </div>
+          )}
+          <CfcCatForm master={master} initial={mode === 'edit' ? target : null}
+            submitLabel={mode === 'add' ? 'เพิ่มหมวด' : 'บันทึกการแก้ไข'}
+            onCancel={() => { setMode('list'); setTarget(null); }}
+            onSubmit={(row) => {
+              if (mode === 'add') onAdd(row); else onEdit(target.name, row);
+              onClose();
+            }} />
+        </Modal>
+      );
+    }
+
+    return (
+      <Modal open wide title="🗂 จัดการหมวดในงบกระแสเงินสด" onClose={onClose}
+        footer={<div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <span style={{ fontSize: 11.5, color: C.mut }}>
+            {master.length} หมวด{nApp ? ' · เพิ่มเองในแอป ' + nApp : ''}
+          </span>
+          <span style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={onClose}>ปิด</button>
+            <button className="btn btn-primary" onClick={() => { setTarget(null); setMode('add'); }}>➕ เพิ่มหมวดใหม่</button>
+          </span>
+        </div>}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <input value={q} onChange={e => setQ(e.target.value)} style={inp} placeholder="ค้นหาชื่อหมวด / กลุ่ม…" />
+          {del && (
+            <div style={{ background: C.negBg, border: '1px solid #f3c8c2', borderRadius: 11, padding: '11px 13px', display: 'grid', gap: 9 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.neg }}>ลบหมวด “{del.row.name}” ?</div>
+              {del.n > 0 ? (
+                <>
+                  <div style={{ fontSize: 12, color: C.ink, lineHeight: 1.7 }}>
+                    หมวดนี้ถูกใช้ในกฎที่เรียนไว้ <strong>{del.n} ข้อ</strong> — ต้องบอกก่อนว่าจะให้รายการพวกนั้นไปไหน
+                    ไม่งั้นยอดจะหายจากงบแบบเงียบ ๆ
+                  </div>
+                  <select value={del.moveTo} onChange={e => setDel(Object.assign({}, del, { moveTo: e.target.value }))} style={inp}>
+                    <option value="">— กลับเป็น “ยังไม่ลงหมวด” (ไปเลือกใหม่เอง) —</option>
+                    {master.filter(m => m.name !== del.row.name).map(m => (
+                      <option key={m.name} value={m.name}>{(CFC_FLOW_META[cfcFlowOf(m)] || {}).mark} {m.name}</option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: C.mut }}>ยังไม่มีรายการไหนลงหมวดนี้ — ลบได้เลย</div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn" onClick={() => setDel(null)}>ยกเลิก</button>
+                <button className="btn" style={{ background: C.neg, borderColor: C.neg, color: '#fff' }}
+                  onClick={() => { onDelete(del.row.name, del.moveTo); onClose(); }}>ลบหมวด</button>
+              </div>
+            </div>
+          )}
+          <div style={{ maxHeight: 430, overflow: 'auto', border: '1px solid ' + C.line, borderRadius: 11 }}>
+            {!shown.length && <div style={{ padding: 18, fontSize: 12.5, color: C.mut, textAlign: 'center' }}>ไม่พบหมวดที่ค้น</div>}
+            {shown.map(([k, items]) => {
+              const [a, f, g] = k.split('|');
+              const meta = CFC_FLOW_META[f] || CFC_FLOW_META.out;
+              return (
+                <div key={k}>
+                  <div style={{ position: 'sticky', top: 0, zIndex: 1, background: meta.bg, color: meta.color,
+                    fontSize: 11.5, fontWeight: 800, padding: '5px 11px', borderBottom: '1px solid ' + C.line }}>
+                    {meta.mark} {meta.label} · {CFC_ACT_SHORT[a] || ''} · {g}
+                  </div>
+                  {items.map(m => (
+                    <div key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 11px', borderBottom: '1px solid ' + C.soft }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.name}
+                          {m.src === 'app' && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: C.primary }}>เพิ่มเอง</span>}
+                        </div>
+                        {use[m.name] > 0 && <div style={{ fontSize: 10.5, color: C.mut }}>ใช้ในกฎที่เรียนไว้ {use[m.name]} ข้อ</div>}
+                      </div>
+                      <button className="btn" style={{ padding: '3px 9px', fontSize: 11.5 }}
+                        onClick={() => { setTarget(m); setMode('edit'); }}>✏️ แก้ไข</button>
+                      <button className="btn" style={{ padding: '3px 9px', fontSize: 11.5, color: C.neg }}
+                        onClick={() => setDel({ row: m, n: use[m.name] || 0, moveTo: '' })}>🗑</button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
           <div style={{ fontSize: 11.5, color: C.mut, background: C.soft, borderRadius: 9, padding: '9px 12px', lineHeight: 1.7 }}>
-            หมวดใหม่จะถูก <strong>แชร์ให้ทั้งทีมทันที</strong> และโผล่ในช่องเลือกหมวดของทุกแถว ·
-            ในไฟล์ที่ส่งออก หมวดนี้จะไปอยู่ในกลุ่มที่เลือก ใต้บรรทัดสุดท้ายของกลุ่มนั้น<br />
-            ⚠️ ถ้ายังต้องเอาไปวางทับในไฟล์ CASH FLOW เดิม อย่าลืมเพิ่มบรรทัดนี้ในไฟล์ด้วย ไม่งั้นแถวจะเลื่อนกัน
+            ลำดับในรายการนี้ = <strong>ลำดับแถวในงบที่ส่งออก</strong> · หมวดที่ติดป้าย “เพิ่มเอง” จะไม่หายเมื่อกด “สอนระบบจากไฟล์ CASH FLOW” อีกครั้ง<br />
+            ⚠️ ถ้ายังต้องเอาไปวางทับในไฟล์ CASH FLOW เดิม อย่าลืมเพิ่ม/ลบบรรทัดนี้ในไฟล์ด้วย ไม่งั้นแถวจะเลื่อนกัน
           </div>
         </div>
       </Modal>
@@ -1487,26 +1651,60 @@
     }
 
     /* เพิ่มหมวดใหม่ — แทรกต่อท้ายกลุ่มที่เลือก (ลำดับใน master = ลำดับแถวของชีตสรุป) */
-    /* แทรกหมวดใหม่ให้อยู่ถูกที่ — ลำดับใน master = ลำดับแถวของชีตงบ
-       1) กลุ่มเดิม → ต่อท้ายกลุ่มนั้น
-       2) กลุ่มใหม่แต่มีของฝั่งเดียวกันอยู่แล้ว → ต่อท้ายบล็อกฝั่งนั้น
-       3) ยังไม่มีของฝั่งนี้ในกิจกรรมนี้เลย → ★ ฝั่ง "รับ" ต้องขึ้นก่อนฝั่ง "จ่าย" เสมอ
-          จึงแทรกไว้หน้าสุดของกิจกรรม (ไม่ใช่ต่อท้าย ไม่งั้นกลุ่มรับไปโผล่ใต้กลุ่มจ่าย) */
+    /* บันทึกผังหมวด (+ กฎที่ต้องย้ายตาม) แล้วบอกผล — ทางออกทางเดียวของทั้ง เพิ่ม/แก้/ลบ */
+    function persistMaster(items, msg, extra) {
+      const at = new Date().toISOString();
+      const next = Object.assign({}, store, { master: { items, at } }, extra || {});
+      return persist(next).then(r => {
+        toast && toast(msg + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error');
+        return r;
+      });
+    }
+    /* กฎที่เรียนไว้เก็บ "ชื่อหมวด" ตรง ๆ ⇒ เปลี่ยนชื่อ/ลบหมวด ต้องกวาดกฎตามทุกครั้ง
+       ไม่งั้นรายการที่เคยลงหมวดนี้กลายเป็นหมวดผี — ยอดไม่เข้าบรรทัดไหนในงบ
+       และไม่ถูกนับว่า "ยังไม่ลงหมวด" ด้วย (เงียบสนิท) */
+    function remapRuleCat(from, to) {
+      const map = {}; let n = 0;
+      Object.keys(rules).forEach(k => {
+        const v = rules[k];
+        if (v && v.cat === from) { n++; if (to) map[k] = Object.assign({}, v, { cat: to }); return; }
+        map[k] = v;
+      });
+      return { map, n };
+    }
+
+    /* หมวดที่เพิ่มในแอปติดธง src:'app' → cfcMergeAppCats ใช้กันไม่ให้หายตอน "สอนระบบ" ใหม่ */
     function saveNewCat({ name, act, group, flow }) {
-      const row = { name, act, group, flow };
-      let at = -1;
-      master.forEach((m, i) => { if (m.act === act && m.group === group) at = i; });
-      if (at < 0) master.forEach((m, i) => { if (m.act === act && cfcFlowOf(m) === flow) at = i; });
-      const items = master.slice();
-      if (at >= 0) items.splice(at + 1, 0, row);
-      else {
-        const first = master.findIndex(m => m.act === act);
-        let last = -1; master.forEach((m, i) => { if (m.act === act) last = i; });
-        if (first < 0) items.push(row);
-        else items.splice(flow === 'in' ? first : last + 1, 0, row);
+      const items = cfcInsertCat(master.slice(), { name, act, group, flow, src: 'app' });
+      persistMaster(items, 'เพิ่มหมวด "' + name + '" แล้ว');
+    }
+
+    function saveCatEdit(oldName, row) {
+      const cur = master.find(m => m.name === oldName);
+      if (!cur) return;
+      const next = Object.assign({}, cur, row);
+      const samePlace = cur.act === row.act && cur.group === row.group && cfcFlowOf(cur) === cfcFlowOf(next);
+      /* ย้ายกิจกรรม/กลุ่ม/ฝั่งเงิน = ต้องเรียงตำแหน่งใหม่ · แก้แค่ชื่อ = แทนที่กับที่ (แถวในงบไม่ขยับ) */
+      const items = samePlace
+        ? master.map(m => (m.name === oldName ? next : m))
+        : cfcInsertCat(master.filter(m => m.name !== oldName), next);
+      const extra = {}; let moved = 0;
+      if (row.name !== oldName) {
+        const r = remapRuleCat(oldName, row.name);
+        moved = r.n;
+        if (moved) extra.rules = { map: r.map, at: new Date().toISOString() };
       }
-      persist(Object.assign({}, store, { master: { items, at: new Date().toISOString() } }))
-        .then(r => toast && toast('เพิ่มหมวด "' + name + '" แล้ว' + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error'));
+      persistMaster(items, 'แก้หมวดเป็น "' + row.name + '" แล้ว' + (moved ? ' · ย้ายกฎที่เรียนไว้ ' + moved + ' ข้อ' : ''), extra);
+    }
+
+    function saveCatDelete(name, moveTo) {
+      const items = master.filter(m => m.name !== name);
+      const r = remapRuleCat(name, moveTo || '');
+      const extra = r.n ? { rules: { map: r.map, at: new Date().toISOString() } } : null;
+      const tail = !r.n ? ''
+        : (moveTo ? ' · ย้ายกฎ ' + r.n + ' ข้อไป "' + moveTo + '"'
+                  : ' · ล้างกฎ ' + r.n + ' ข้อ (รายการกลับเป็นยังไม่ลงหมวด)');
+      persistMaster(items, 'ลบหมวด "' + name + '" แล้ว' + tail, extra);
     }
 
     /* ── นำเข้าไฟล์งบกระทบยอด ── */
@@ -1583,7 +1781,22 @@
         const wb = await cfcReadWorkbook(file);
         const p = cfcParseCashflowWorkbook(wb);
         if (p.error) { setBusy(''); toast && toast(p.error, 'error'); return; }
-        const nextMaster = cfcWithExtraCats(p.master.length ? p.master : master);
+        /* ★ ผังจากไฟล์ทับของเดิม — แต่หมวดที่เพิ่มเองในแอปไม่มีทางอยู่ในไฟล์ ต้องผสานกลับ */
+        const nextMaster = cfcWithExtraCats(cfcMergeAppCats(p.master.length ? p.master : master, master));
+        /* หมวดเดิม (จากไฟล์เก่า) ที่ไฟล์ใหม่ไม่มี "และมีรายการลงไว้แล้ว" = ยอดจะหลุดจากงบ → ถามก่อน */
+        if (p.master.length) {
+          const keep = {}; nextMaster.forEach(m => { keep[cfcNorm(m.name)] = 1; });
+          const used = cfcRuleCatCount(rules);
+          const lost = master.filter(m => !keep[cfcNorm(m.name)] && used[m.name]);
+          if (lost.length) {
+            setBusy('');
+            const list = lost.slice(0, 8).map(m => '• ' + m.name + ' (' + used[m.name] + ' กฎ)').join('\n');
+            const more = lost.length > 8 ? '\n…และอีก ' + (lost.length - 8) + ' หมวด' : '';
+            if (!confirm('ไฟล์นี้ไม่มี ' + lost.length + ' หมวดที่ใช้งานอยู่:\n' + list + more
+              + '\n\nสอนระบบต่อ = หมวดพวกนี้จะหายจากผังงบ และยอดของรายการที่ลงหมวดไว้จะไม่เข้าบรรทัดไหนในงบ\nไปต่อไหม?')) return;
+            setBusy('กำลังเรียนรู้จากไฟล์…');
+          }
+        }
         const canon = cfcCanonBuilder(nextMaster);
         const map = Object.assign({}, rules);
         const at = new Date().toISOString();
@@ -1678,7 +1891,7 @@
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
           uploadedAt: Date.now(),
-          uploadedBy: (typeof cfpCurrentUser === 'function' ? cfpCurrentUser() : '') + ' (จากหน้างบกระทบยอด)',
+          uploadedBy: (typeof cfpCurrentUser === 'function' ? cfpCurrentUser() : '') + ' (จากหน้างบกระทบยอดกระแสเงินสด)',
           stm, summary,
         });
         await WTPData.writeTable(CFP_TABLE, [payload], r => r.id);
@@ -1760,7 +1973,7 @@
         <div style={Object.assign({}, card, { padding: '14px 18px' })}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>🧾 งบกระทบยอด</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>🧾 งบกระทบยอดกระแสเงินสด</div>
               <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>
 ลงรหัส<strong>รายบิลตั้งหนี้</strong>จากรายงานการจ่ายชำระหนี้ + เก็บรายการที่ไม่มีในใบจ่ายจากงบกระทบยอด → เสนอหมวด + จำที่ยืนยันไว้ใช้เดือนถัดไป
                 {synced ? ' · ข้อมูลส่วนกลาง (ทุกคนเห็น)' : ' · ข้อมูลในเครื่อง'}
@@ -1769,7 +1982,7 @@
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {canEdit && <button style={btn()} onClick={() => fileCf.current && fileCf.current.click()}>📚 สอนระบบจากไฟล์ CASH FLOW</button>}
               {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้าไฟล์ EXPRESS</button>}
-              {canEdit && <button style={btn()} title="เพิ่มหมวดใหม่เข้าผังงบกระแสเงินสด" onClick={() => setAddCat(true)}>➕ เพิ่มหมวด</button>}
+              {canEdit && <button style={btn()} title="เพิ่ม / แก้ชื่อ / ลบ หมวดในผังงบกระแสเงินสด" onClick={() => setAddCat(true)}>🗂 จัดการหมวด</button>}
               {canEdit && <button style={btn(true)} title="ส่งขึ้นหน้าพรีเซนต์ Cash Flow ทันที ไม่ต้องดาวน์โหลดแล้วอัปกลับ"
                 onClick={sendToCashflow}>📤 ส่งขึ้นหน้า Cash Flow</button>}
               <button style={btn()} onClick={exportSheet}>⬇️ ส่งออกไฟล์ Excel</button>
@@ -2111,7 +2324,8 @@
           กฎที่เรียนรู้ไว้ {Object.keys(rules).length} ข้อ · หมวดในผังงบ {master.length} รายการ
         </div>
 
-        {addCat && <CfcAddCatModal master={master} onClose={() => setAddCat(false)} onSave={saveNewCat} />}
+        {addCat && <CfcCatManagerModal master={master} rules={rules} onClose={() => setAddCat(false)}
+          onAdd={saveNewCat} onEdit={saveCatEdit} onDelete={saveCatDelete} />}
 
         {teachRes && (
           <Modal open wide title="📚 เรียนรู้จากไฟล์ CASH FLOW แล้ว" onClose={() => setTeachRes(null)}>
@@ -2138,7 +2352,7 @@
 
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
-    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
+    cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();

@@ -81,7 +81,7 @@ function MoneyInput({ value, onChange, placeholder, disabled, autoFocus, style }
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
-      style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: '100%', ...style }}
+      style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: '100%', padding: '5px 9px', fontSize: 12.5, ...style }}
     />
   );
 }
@@ -104,7 +104,7 @@ function DiffBadge({ delta }) {
   );
 }
 
-function DailyBalancePage({ data, setData, toast }) {
+function DailyBalanceEntryPage({ data, setData, toast }) {
   // ── State ─────────────────────────────────────────────────────────
   const [entryDate, setEntryDate] = dbState(todayISO());
   const accounts = data.bankAccounts || [];
@@ -510,7 +510,7 @@ function DailyBalancePage({ data, setData, toast }) {
 
       {/* MAIN accounts (daily-entry required) */}
       <div className="card anim-in" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
-        <div style={{ padding: '10px 16px', background: '#f0f9ff', borderBottom: '1px solid #bfdbfe', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '7px 14px', background: '#f0f9ff', borderBottom: '1px solid #bfdbfe', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>🏦 บัญชีหลัก (หมุนเวียนรายวัน)</div>
           {canEdit && mainTotalCount > 0 && (
             <button className="btn btn-primary btn-sm" onClick={saveAll}>
@@ -518,7 +518,7 @@ function DailyBalancePage({ data, setData, toast }) {
             </button>
           )}
         </div>
-        <table className="tbl" style={{ width: '100%' }}>
+        <table className="tbl tbl-compact" style={{ width: '100%' }}>
           <thead>
             <tr>
               <th style={{ width: 58, textAlign: 'center' }}>#</th>
@@ -651,11 +651,11 @@ function DailyBalancePage({ data, setData, toast }) {
       {/* DORMANT accounts */}
       {dormantRows.length > 0 && (
         <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 16px', background: '#f5f3ff', borderBottom: '1px solid #ddd6fe', display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ padding: '7px 14px', background: '#f5f3ff', borderBottom: '1px solid #ddd6fe', display: 'flex', justifyContent: 'space-between' }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>💰 บัญชีสำรอง (เงินนิ่ง — ฝากประจำ / ค้ำประกัน)</div>
             <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>กรอกเมื่อมีเคลื่อนไหวเท่านั้น</div>
           </div>
-          <table className="tbl" style={{ width: '100%' }}>
+          <table className="tbl tbl-compact" style={{ width: '100%' }}>
             <thead>
               <tr>
                 <th style={{ width: 58, textAlign: 'center' }}>#</th>
@@ -733,4 +733,37 @@ function DailyBalancePage({ data, setData, toast }) {
   );
 }
 
-Object.assign(window, { DailyBalancePage });
+
+// ─── Wrapper: บันทึกยอดธนาคาร + DATA BANK เป็นแท็บเดียวกัน ─────────
+// เมนู "บัญชีธนาคาร" (data_bank) ถูกถอดออกจาก sidebar แล้วย้ายมาเป็นแท็บที่นี่ —
+// สองหน้านี้ทำงานคู่กันตลอด (บันทึกยอดรายวัน ↔ ตั้งค่า/แก้บัญชี) เปิดสลับกันบ่อย
+//   · DataBankPage มาจาก page_data_extras.jsx (โหลดก่อนไฟล์นี้ใน index.html)
+//   · จำแท็บล่าสุดไว้ใน localStorage → กลับเข้าหน้ามาอยู่แท็บเดิม
+const DBAL_TAB_LS_KEY = 'bio-dbal-tab';
+function DailyBalancePage({ data, setData, toast }) {
+  const [tab, setTab] = dbState(() => {
+    try { return localStorage.getItem(DBAL_TAB_LS_KEY) === 'accounts' ? 'accounts' : 'entry'; }
+    catch (_) { return 'entry'; }
+  });
+  const pick = (t) => { setTab(t); try { localStorage.setItem(DBAL_TAB_LS_KEY, t); } catch (_) {} };
+
+  return (
+    <React.Fragment>
+      <div style={{ maxWidth: 1480, margin: '0 auto', width: '100%', padding: '18px 28px 0' }}>
+        <div className="tabnav">
+          <button className={tab === 'entry' ? 'active' : ''} onClick={() => pick('entry')}>
+            บันทึกยอดธนาคาร
+          </button>
+          <button className={tab === 'accounts' ? 'active' : ''} onClick={() => pick('accounts')}>
+            DATA BANK · บัญชีธนาคาร
+          </button>
+        </div>
+      </div>
+      {tab === 'entry'
+        ? <DailyBalanceEntryPage data={data} setData={setData} toast={toast} />
+        : <DataBankPage data={data} setData={setData} toast={toast} />}
+    </React.Fragment>
+  );
+}
+
+Object.assign(window, { DailyBalancePage, DailyBalanceEntryPage });
