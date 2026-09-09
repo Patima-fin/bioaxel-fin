@@ -737,27 +737,54 @@
     return cfcT(l)
       .replace(/^⚠\s*/, '')
       .replace(/\s*\(ไม่มีในผังหมวด — ต้องแก้\)$/, '')
-      .replace(/^(โอนเงินระหว่างบัญชี)\s*\(.*\)$/, '$1');
+      .replace(/^(โอนเงินระหว่างบัญชี)\s*\(.*\)$/, '$1')
+      .replace(/\s*\(ยังได้ยอดไม่ครบทุกบัญชี\)$/, '');
   }
 
   /* ── เงินสดคงเหลือจริง (จากบรรทัดธนาคาร) ราย ym รวมทุกบัญชี ──────────────
      บัญชีที่ไม่มีรายการในเดือนนั้น = ยกปลายงวดเดือนก่อนมา (ไม่งั้นยอดรวมหายเป็นก้อน)
      ใช้เป็นบรรทัด "เงินสดคงเหลือปลายงวด จาก STM" ท้ายงบ = ตัวตรวจกับยอดที่งบคิดได้ */
-  /* ⚠️ ต้องครบทุกบัญชีในทะเบียนถึงจะเป็น "ยอดเงินสดจริง" ได้ — ขาดบัญชีไหนแล้วยังบวกออกมา
-     เป็นตัวเลข = ยอดต่ำกว่าความจริงแบบเงียบ ๆ คนอ่านจะนึกว่าเงินหาย. ขาดเมื่อไร คืน null
-     (แสดงเป็น "–") ดีกว่าโชว์เลขที่ผิด */
-  function cfcStmClosingByYm(hist, months, registry) {
-    const byAcct = {};
-    (hist || []).forEach(g => { const k = cfcAcctKey(g.acctNo, g.acctLabel); (byAcct[k] = byAcct[k] || []).push(g); });
-    Object.keys(byAcct).forEach(k => byAcct[k].sort((a, b) => (a.ym < b.ym ? -1 : 1)));
-    const need = (registry || []).map(b => cfcAcctKey(b.no, b.no));
-    const out = {};
+  /* ⚠️ ต้องได้ยอดของ "ทุกบัญชีในทะเบียน" ถึงจะเป็นยอดเงินสดจริง — บัญชีที่ยังไม่ได้นำเข้า
+     งบกระทบยอดแล้วนับเป็น 0 = ยอดต่ำกว่าความจริงแบบเงียบ ๆ คนอ่านนึกว่าเงินหาย
+     จึงหาจาก 2 แหล่งเรียงกัน: (1) บรรทัดธนาคารที่นำเข้า (แม่นสุด · บัญชีที่ไม่มีรายการ
+     เดือนนั้นยกปลายงวดเดือนก่อนมา) → (2) ยอดคงเหลือรายวันที่คีย์ไว้เอง (`cashflowSnapshots`
+     จากหน้า "บันทึกยอดคงเหลือรายวัน") เอาแถวล่าสุดที่ไม่เกินสิ้นเดือนนั้น
+     ยังขาดอีก = คืนยอดเท่าที่รู้ + ติดธง short เพื่อไปเตือนที่ชื่อบรรทัด (ไม่เว้นว่าง —
+     ผู้ใช้ต้องการเห็นตัวเลขไว้เทียบ แต่ต้องรู้ด้วยว่ายังไม่ครบ) */
+  function cfcStmClosingByYm(hist, months, registry, snaps, manualClosing) {
+    /* เส้นเวลา "ยอดคงเหลือปลายงวด" ต่อบัญชี — รวมจาก 2 ทางที่หน้านี้ตรวจยอดอยู่แล้ว
+       (pri 1 = ยอดจริงจากธนาคารที่คนคีย์เอง ชนะยอดจากไฟล์ของเดือนเดียวกัน) */
+    const tl = {};
+    const push = (k, row) => { if (k && k !== '(ไม่ระบุบัญชี)') (tl[k] = tl[k] || []).push(row); };
+    (hist || []).forEach(g => push(cfcAcctKey(g.acctNo, g.acctLabel), { ym: g.ym, v: g.closingFile, pri: 0 }));
+    Object.keys(manualClosing || {}).forEach(key => {
+      const i = key.lastIndexOf('|'); if (i < 0) return;
+      push(key.slice(0, i), { ym: key.slice(i + 1), v: cfcNum(manualClosing[key]), pri: 1 });
+    });
+    Object.keys(tl).forEach(k => tl[k].sort((a, b) => (a.ym !== b.ym ? (a.ym < b.ym ? -1 : 1) : a.pri - b.pri)));
+    // ตาข่ายสุดท้าย: ยอดคงเหลือรายวันที่คีย์ไว้ (cashflowSnapshots) — แถวล่าสุดที่ไม่เกินสิ้นเดือน
+    const snapByAcct = {};
+    (snaps || []).forEach(s => {
+      const k = cfcAcctKey(s.bankAc || s.Bank_AC, '');
+      if (!k || k === '(ไม่ระบุบัญชี)') return;
+      (snapByAcct[k] = snapByAcct[k] || []).push({ d: String(s.date || '').slice(0, 10), v: cfcNum(s.balance) });
+    });
+    Object.keys(snapByAcct).forEach(k => snapByAcct[k].sort((a, b) => (a.d < b.d ? -1 : 1)));
+    const need = (registry || []).map(b => cfcAcctKey(b.no, b.no)).filter(Boolean);
+    const keys = [...new Set((need.length ? need : Object.keys(snapByAcct)).concat(Object.keys(tl)))];
+    const out = { v: {}, short: {} };
     (months || []).forEach(m => {
-      const closingOf = (k) => { let last = null; (byAcct[k] || []).forEach(g => { if (g.ym <= m) last = g; }); return last; };
-      if (need.length && need.some(k => !closingOf(k))) { out[m] = null; return; }   // ยังนำเข้าไม่ครบทุกบัญชี
-      let s = 0;
-      Object.keys(byAcct).forEach(k => { const last = closingOf(k); if (last) s += last.closingFile; });
-      out[m] = s;
+      const end = m + '-31';
+      let sum = 0, miss = 0;
+      keys.forEach(k => {
+        let last = null; (tl[k] || []).forEach(x => { if (x.ym <= m) last = x; });   // ยกยอดเดือนก่อนมาเอง
+        if (last) { sum += last.v; return; }
+        let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= end) sn = x; });
+        if (sn) { sum += sn.v; return; }
+        miss++;
+      });
+      out.v[m] = sum;
+      if (miss) out.short[m] = miss;
     });
     return out;
   }
@@ -1277,10 +1304,12 @@
          ตรงกับไฟล์ CASH FLOW เดิม: B/F รวม = ต้นงวดของเดือนแรก · อีก 2 แถวเว้นว่าง */
       push(['เงินสดต้นงวดยกมา/Cash B/F'].concat(bf).concat([bf.length ? bf[0] : 0]), 'cash');
       push(['เงินสดคงเหลือปลายงวด/Cash Balance'].concat(bal).concat(['']), 'cash');
-      // ยอดจริงจากบรรทัดธนาคาร — ไว้ตรวจว่างบที่คิดได้ตรงกับเงินในบัญชีจริงไหม
-      //   null = ยังนำเข้างบกระทบยอดไม่ครบทุกบัญชี → เว้นว่าง ห้ามโชว์ยอดที่ขาดบัญชี
-      const st = months.map(m => { const v = (cash.stmClosing || {})[m]; return v == null ? '' : cfcNum(v); });
-      push(['เงินสดคงเหลือปลายงวด จาก STM'].concat(st).concat(['']), 'cash');
+      /* ยอดจริงในบัญชี — ไว้ตรวจว่างบที่คิดได้ตรงกับเงินจริงไหม
+         ⚠️ ถ้ายังได้ยอดไม่ครบทุกบัญชี ต้องเตือนที่ "ชื่อบรรทัด" (ตัวเลขยังโชว์ไว้ให้เทียบ)
+            ไม่งั้นยอดที่ต่ำกว่าความจริงจะดูเหมือนเงินหาย */
+      const st = months.map(m => cfcNum((cash.stmClosing || {})[m]));
+      push(['เงินสดคงเหลือปลายงวด จาก STM' + (cash.stmShort ? ' (ยังได้ยอดไม่ครบทุกบัญชี)' : '')]
+        .concat(st).concat(['']), 'cash');
     }
     push([], 'gap');
     push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —'], 'nsec');
@@ -2052,7 +2081,9 @@
         cell[k] = (cell[k] || 0) + v;
         if (!r.sug.cat) uncodedTot++;
       });
-      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: cfcStmClosingByYm(histCheck, months, bankMaster) };
+      const stmC = cfcStmClosingByYm(histCheck, months, bankMaster, data.cashflowSnapshots, manual.closing);
+      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: stmC.v,
+        stmShort: Object.keys(stmC.short).length > 0 };
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
       return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
@@ -2197,15 +2228,14 @@
         const m0 = allMonths[0];
         let openTotal = opening;
         if (m0 && !sendMonths.has(m0) && oldBf && oldMonthCol[m0] != null) openTotal = cfcNum(oldBf[oldMonthCol[m0]]);
-        const stmCalc = cfcStmClosingByYm(histCheck, allMonths, bankMaster);
-        const stmClosing = {};
+        const stmCalc = cfcStmClosingByYm(histCheck, allMonths, bankMaster, data.cashflowSnapshots, manual.closing);
+        const stmClosing = {}; let stmShort = false;
         allMonths.forEach(m => {
-          stmClosing[m] = (!sendMonths.has(m) && oldStm && oldMonthCol[m] != null)
-            ? cfcNum(oldStm[oldMonthCol[m]])
-            : stmCalc[m];
-          if (stmClosing[m] == null && oldStm && oldMonthCol[m] != null) stmClosing[m] = cfcNum(oldStm[oldMonthCol[m]]);
+          if (!sendMonths.has(m) && oldStm && oldMonthCol[m] != null) { stmClosing[m] = cfcNum(oldStm[oldMonthCol[m]]); return; }
+          stmClosing[m] = stmCalc.v[m];
+          if (stmCalc.short[m]) stmShort = true;
         });
-        const cash = { opening: openTotal, stmClosing };
+        const cash = { opening: openTotal, stmClosing, stmShort };
         const sumAoa = cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash);
         cfcApplyOldColumns(sumAoa, allMonths, new Set(keptMonths), oldRowAll, oldMonthCol);
         const summary = cfpParseSummary(sumAoa);
