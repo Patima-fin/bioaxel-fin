@@ -1235,6 +1235,44 @@
   /* สร้าง AOA ของ "งบกระแสเงินสด" จากยอดราย (หมวด|เดือน)
      แยกออกมานอก component เพื่อให้ทั้งการส่งออกไฟล์และการดันขึ้นหน้า Cash Flow
      (ซึ่งต้องรวมทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก) ใช้ตัวเดียวกัน */
+  /* ★ เดินแถวเงินสด (ต้นงวด → ปลายงวด) — ที่เดียวที่คิดสูตรนี้ ทั้งตอนสร้างงบและตอนทับค่าเดิม
+     ⚠️ ปลายงวด ≠ ต้นงวด + "เงินสดสุทธิ" เฉย ๆ — "เงินสดสุทธิ" นับเฉพาะรายการที่ลงกิจกรรมแล้ว
+        เงินที่ยังไม่เข้ากิจกรรม (โอนระหว่างบัญชี · ยังไม่ลงหมวด · หมวดผี) ก็กระทบเงินในบัญชีจริง
+        ต้องบวกด้วย ไม่งั้นปลายงวดต่ำ/สูงกว่ายอดจริงแบบเงียบ ๆ (เคสจริง ส.ค. ต่าง 15,125)
+        เหลือเท่าไรที่ยังอธิบายไม่ได้ → ลงบรรทัด "ผลต่างที่ยังกระทบยอดไม่ลงตัว" ให้เห็นชัด
+        (ปลายงวดจึงเท่ากับยอดจริงจากธนาคารเสมอ และมีตัวเลขบอกว่าเหลืองานอีกเท่าไร) */
+  function cfcRunCashRows(aoa, months, keepSet, oldCol) {
+    const kinds = aoa.kinds || [];
+    const hdr = aoa.findIndex(r => cfcT(r[0]) === 'รายการ'); if (hdr < 0) return;
+    const n = months.length;
+    const rowOf = (re) => { for (let r = hdr + 1; r < aoa.length; r++) if (re.test(cfcT(aoa[r][0]))) return r; return -1; };
+    const rNet = rowOf(/^เงินสดสุทธิ/), rBf = rowOf(/^เงินสดต้นงวด/),
+      rBal = rowOf(/^เงินสดคงเหลือปลายงวด\//), rStm = rowOf(/^เงินสดคงเหลือปลายงวด จาก STM/);
+    const rPlug = kinds.indexOf('nplug');
+    if (rNet < 0 || rBf < 0 || rBal < 0) return;
+    const extraRows = [];
+    for (let r = hdr + 1; r < aoa.length; r++) if (kinds[r] === 'nitem' || kinds[r] === 'nbad') extraRows.push(r);
+    let run = cfcNum(aoa[rBf][1]);
+    months.forEach((m, i) => {
+      aoa[rBf][i + 1] = run;
+      if (keepSet && keepSet.has(m) && oldCol && oldCol[m] != null) {
+        if (rPlug >= 0) aoa[rPlug][i + 1] = 0;      // เดือนเก่าลงตัวอยู่แล้วในงบเดิม
+        run = cfcNum(aoa[rBal][i + 1]);
+        return;
+      }
+      const ex = extraRows.reduce((a, r) => a + cfcNum(aoa[r][i + 1]), 0);
+      const calc = run + cfcNum(aoa[rNet][i + 1]) + ex;
+      const sv = rStm >= 0 ? aoa[rStm][i + 1] : '';
+      const p = (sv === '' || sv == null) ? 0 : (cfcNum(sv) - calc);
+      if (rPlug >= 0) aoa[rPlug][i + 1] = p;
+      run = calc + p;
+      aoa[rBal][i + 1] = run;
+    });
+    aoa[rBf][n + 1] = cfcNum(aoa[rBf][1]);
+    aoa[rBal][n + 1] = '';
+    if (rPlug >= 0) { let s = 0; for (let i = 0; i < n; i++) s += cfcNum(aoa[rPlug][i + 1]); aoa[rPlug][n + 1] = s; }
+  }
+
   /* ★ ทับคอลัมน์ของ "เดือนที่ไม่ได้ส่ง" ด้วยตัวเลขเดิมของงบ — ทุกแถว ไม่ใช่แค่รายการย่อย
      ⚠️ ทับเฉพาะรายการย่อยไม่พอ: แถว "รวม…" / "กระแสเงินสดสุทธิจาก…" / "เงินสดสุทธิ" ระบบคิดใหม่
         จากผังหมวดปัจจุบัน ซึ่งไม่จำเป็นต้องเท่ากับที่ไฟล์เดิมสรุปไว้ (ของจริงต่าง 5,700 ที่ พ.ค.
@@ -1251,20 +1289,14 @@
       const src = oldByLabel[lab]; if (!src) continue;
       months.forEach((m, i) => { if (keepSet.has(m) && oldCol[m] != null) aoa[r][i + 1] = cfcNum(src[oldCol[m]]); });
     }
-    const rowOf = (re) => { for (let r = hdr + 1; r < aoa.length; r++) if (re.test(cfcT(aoa[r][0]))) return r; return -1; };
-    const rNet = rowOf(/^เงินสดสุทธิ/), rBf = rowOf(/^เงินสดต้นงวด/), rBal = rowOf(/^เงินสดคงเหลือปลายงวด\//);
-    if (rNet >= 0 && rBf >= 0 && rBal >= 0) {
-      let run = cfcNum(aoa[rBf][1]);
-      months.forEach((m, i) => { aoa[rBf][i + 1] = run; run += cfcNum(aoa[rNet][i + 1]); aoa[rBal][i + 1] = run; });
-      aoa[rBf][n + 1] = cfcNum(aoa[rBf][1]); aoa[rBal][n + 1] = '';
-    }
     // ช่อง "รวม" ต้องคิดใหม่หลังทับ (แถวยอดคงเหลือไม่รวม — ผลรวมของยอดคงเหลือไม่มีความหมาย)
     for (let r = hdr + 1; r < aoa.length; r++) {
-      if (kinds[r] === 'cash') continue;
+      if (kinds[r] === 'cash' || kinds[r] === 'nplug') continue;
       let s = 0, any = false;
       for (let i = 0; i < n; i++) { const v = aoa[r][i + 1]; if (v === '' || v == null) continue; any = true; s += cfcNum(v); }
       if (any) aoa[r][n + 1] = s;
     }
+    cfcRunCashRows(aoa, months, keepSet, oldCol);   // เดินต้นงวด/ปลายงวด/ผลต่าง ใหม่ทั้งแถบ
   }
 
   /* ⚠️ `cash` = { opening, stmClosing } → บรรทัดท้ายงบ (ต้นงวดยกมา / ปลายงวด / ปลายงวดจาก STM)
@@ -1301,8 +1333,10 @@
     const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
     push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)/Cash increased (decreased)'].concat(withTotal(net)), 'net');
     if (cash) {
-      const bf = [], bal = []; let run = cfcNum(cash.opening);
-      months.forEach((m, i) => { bf.push(run); run += (net[i] || 0); bal.push(run); });
+      /* ค่าตั้งต้น — ตัวเลขจริงมาจาก cfcRunCashRows() ท้ายฟังก์ชัน (ต้องรอให้บรรทัด
+         "ไม่นับเป็นกิจกรรม" ถูก push ครบก่อน เพราะต้องเอามาบวกด้วย) */
+      const bf = months.map(() => 0), bal = months.map(() => 0);
+      bf[0] = cfcNum(cash.opening);
       /* ★ ช่อง "รวม" ของแถวยอดคงเหลือปล่อยว่าง (ผลรวมของยอดคงเหลือไม่มีความหมาย) —
          ตรงกับไฟล์ CASH FLOW เดิม: B/F รวม = ต้นงวดของเดือนแรก · อีก 2 แถวเว้นว่าง */
       push(['เงินสดต้นงวดยกมา/Cash B/F'].concat(bf).concat([bf.length ? bf[0] : 0]), 'cash');
@@ -1321,7 +1355,11 @@
     const known = new Set(master.map(m => m.name).concat(['โอนเงินระหว่างบัญชี', '(ยังไม่ลงหมวด)']));
     (usedCats || []).filter(c => !known.has(c))
       .forEach(n => push(['   ⚠ ' + n + ' (ไม่มีในผังหมวด — ต้องแก้)'].concat(withTotal(val(n))), 'nbad'));
+    /* บรรทัดสุดท้ายของบล็อกตรวจ: ส่วนที่ยังกระทบยอดกับเงินในบัญชีจริงไม่ลงตัว
+       (= ยอดจริงจากธนาคาร − ต้นงวด − สุทธิ − รายการนอกกิจกรรม) · 0 = ลงตัวหมดแล้ว */
+    if (cash) push(['   ผลต่างที่ยังกระทบยอดไม่ลงตัว (ต้องไล่)'].concat(months.map(() => 0)).concat([0]), 'nplug');
     aoa.kinds = kinds;
+    cfcRunCashRows(aoa, months);
     return aoa;
   }
 
@@ -1419,6 +1457,11 @@
       } else if (k === 'nsec') {
         merges.push({ s: { r, c: 0 }, e: { r, c: nCol - 1 } }); rows[r] = { hpt: 19 };
         xsRow(ws, r, nCol, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.mut } }, alignment: { vertical: 'center' } });
+      } else if (k === 'nplug') {
+        rows[r] = { hpt: 19 };
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.warnBg } }, border: { top: xsB() } });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.warnInk } }, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, ink: XS.warnInk });
       } else if (k === 'nbad') {
         xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.warnBg } }, border: xsBox() });
         xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 10.5, bold: true, color: { rgb: XS.warnInk } } });
@@ -2242,6 +2285,11 @@
         const sumAoa = cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash);
         cfcApplyOldColumns(sumAoa, allMonths, new Set(keptMonths), oldRowAll, oldMonthCol);
         const summary = cfpParseSummary(sumAoa);
+        /* ⚠️ ส่วนที่ยังกระทบยอดกับเงินในบัญชีจริงไม่ลงตัวของ "เดือนที่เพิ่งส่ง" — ต้องบอกทันที
+           ไม่ใช่ให้ไปเจอเองในตาราง (แปลว่ายังมีเงินเข้า/ออกจริงที่ยังไม่เข้าบรรทัดไหนในงบ) */
+        const plugRow = (summary.rows || []).find(r => /ผลต่างที่ยังกระทบยอดไม่ลงตัว/.test(r.label));
+        const plugSent = plugRow ? allMonths.reduce((a, m, i) =>
+          (sendMonths.has(m) ? a + cfcNum(plugRow.vals[i]) : a), 0) : 0;
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
           uploadedAt: Date.now(),
@@ -2256,6 +2304,7 @@
           (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
           ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน' +
           (keptMonths.length ? ' · คงตัวเลขเดิมของอีก ' + keptMonths.length + ' เดือน (' + keptMonths.map(built.monLabel).join(', ') + ')' : '') +
+          (Math.abs(plugSent) > 0.5 ? ' · ⚠️ ยังกระทบยอดไม่ลงตัว ' + cfcMoney(plugSent) + ' บาท (ดูบรรทัด "ผลต่างที่ยังกระทบยอดไม่ลงตัว" ท้ายงบ)' : '') +
           (dupDropped ? ' · ล้างรายการซ้ำจากข้อมูลเก่า (ปี พ.ศ.) ' + dupDropped + ' รายการ' : '') +
           (openMissing.length ? ' · ⚠️ ยังไม่รู้ยอดต้นงวดของ ' + openMissing.length + ' บัญชี (ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนั้น)' : ''),
           openMissing.length ? 'error' : undefined);
