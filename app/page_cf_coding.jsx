@@ -760,7 +760,30 @@
       && window.WTP_CONFIG && WTP_CONFIG.BACKEND === 'supabase');
   }
   function cfcLoadLocal() { try { return JSON.parse(localStorage.getItem(CFC_LS) || 'null') || {}; } catch (e) { return {}; } }
-  function cfcSaveLocal(o) { try { localStorage.setItem(CFC_LS, JSON.stringify(o)); } catch (e) {} }
+  /* ⚠️ cache นี้เคย `catch (e) {}` เงียบ ๆ — พอข้อมูลโตเกินโควตา localStorage การเซฟจะล้มทุกครั้ง
+     แบบไม่มีใครรู้ แล้ว "เปิดหน้าทีต้องรอโหลดจาก server ใหม่ทุกที" (อาการ: หน้านี้โหลดช้ามาก)
+     ตอนนี้ถ้าไม่พอ จะตัด "บรรทัดดิบของเดือนเก่าสุด" ออกทีละชุดแล้วลองใหม่ — เดือนล่าสุด
+     (ที่กำลังทำงานอยู่) กับผังหมวด/กฎ/ค่าที่คีย์เอง ต้องได้ cache เสมอ */
+  const cfcYmOfId = (id) => (String(id).match(/(\d{4}-\d{2})\s*$/) || ['', ''])[1];
+  function cfcSaveLocal(o) {
+    const keys = Object.keys(o);
+    const heavy = keys.filter(k => k.indexOf('lines:') === 0 || k.indexOf('ps:') === 0)
+      .sort((a, b) => (cfcYmOfId(a) < cfcYmOfId(b) ? -1 : cfcYmOfId(a) > cfcYmOfId(b) ? 1 : 0));  // เก่า → ใหม่
+    const rank = {}; heavy.forEach((k, i) => { rank[k] = i; });
+    let drop = 0;
+    for (;;) {
+      const keep = {};
+      keys.forEach(k => { if (rank[k] == null || rank[k] >= drop) keep[k] = o[k]; });
+      try { localStorage.setItem(CFC_LS, JSON.stringify(keep)); return; } catch (e) {
+        if (drop >= heavy.length) {
+          try { localStorage.removeItem(CFC_LS); } catch (_) {}
+          console.warn('[cfc] ข้อมูลใหญ่เกิน localStorage — เก็บ cache ไม่ได้เลย หน้านี้จะต้องโหลดจาก server ทุกครั้ง');
+          return;
+        }
+        drop += Math.max(1, Math.ceil(heavy.length / 4));
+      }
+    }
+  }
 
   /* หมวดที่ไม่ได้อยู่ในงบหน้าแรก แต่ต้องมีให้เลือกเสมอ (บรรทัดธนาคารมีจริง)
      → ผนวกกลับทุกครั้งที่อ่านหมวดมาตรฐานจากไฟล์ CASH FLOW มาทับ */
@@ -851,34 +874,54 @@
 
   /* ★ เรียง "รับ" ขึ้นก่อน "จ่าย" ในแต่ละกิจกรรม + ป้าย ▲รับ/▼จ่าย นำหน้าชื่อกลุ่ม
        เลือกหมวดได้เร็วขึ้นมาก เพราะฝั่งเงินคือสิ่งแรกที่คนดูอยู่แล้ว */
+  /* จัดกลุ่มหมวดสำหรับ dropdown — cache ตาม identity ของ master (ตารางมีได้ 600 แถว
+     ถ้าคิดใหม่ทุกแถวก็วนหมวด ~100 ตัว × 600 ครั้งทุกการ render) */
+  const _cfcGroupCache = new WeakMap();
+  function cfcCatGroups(master) {
+    const hit = _cfcGroupCache.get(master); if (hit) return hit;
+    const by = {};
+    master.forEach(m => {
+      const f = cfcFlowOf(m);
+      const k = m.act + '|' + f + '|' + m.group;
+      (by[k] = by[k] || []).push(m.name);
+    });
+    const rank = { op: 0, inv: 1, fin: 2, transfer: 3 };
+    const out = Object.entries(by).sort((a, b) => {
+      const [aa, af] = a[0].split('|'), [ba, bf] = b[0].split('|');
+      // ⚠️ rank.op = 0 → (rank[aa] || 9) กลายเป็น 9 ทำให้ "ดำเนินงาน" ตกไปท้ายสุด
+      const ra = rank[aa] == null ? 9 : rank[aa], rb = rank[ba] == null ? 9 : rank[ba];
+      if (aa !== ba) return ra - rb;
+      if (af !== bf) return af === 'in' ? -1 : 1;
+      return 0;
+    });
+    _cfcGroupCache.set(master, out);
+    return out;
+  }
   function CfcCatSelect({ value, master, onChange, disabled, width }) {
-    const groups = useMemo(() => {
-      const by = {};
-      master.forEach(m => {
-        const f = cfcFlowOf(m);
-        const k = m.act + '|' + f + '|' + m.group;
-        (by[k] = by[k] || []).push(m.name);
-      });
-      const rank = { op: 0, inv: 1, fin: 2, transfer: 3 };
-      return Object.entries(by).sort((a, b) => {
-        const [aa, af] = a[0].split('|'), [ba, bf] = b[0].split('|');
-        // ⚠️ rank.op = 0 → (rank[aa] || 9) กลายเป็น 9 ทำให้ "ดำเนินงาน" ตกไปท้ายสุด
-        const ra = rank[aa] == null ? 9 : rank[aa], rb = rank[ba] == null ? 9 : rank[ba];
-        if (aa !== ba) return ra - rb;
-        if (af !== bf) return af === 'in' ? -1 : 1;
-        return 0;
-      });
-    }, [master]);
+    const groups = useMemo(() => cfcCatGroups(master), [master]);
     const cur = master.find(m => m.name === value);
     const fm = value ? CFC_FLOW_META[cfcFlowOf(cur || { name: value })] : null;
+    /* ⚠️ ตารางแสดงได้ถึง 600 แถว × หมวด ~100 ตัว = <option> เป็นแสนโหนด — หน้าจะอืดตั้งแต่โหลด
+       และอืดซ้ำทุกครั้งที่พิมพ์ค้นหา. จึงกางรายการหมวด "ตอนจะกดเลือกเท่านั้น"
+       ★ ต้อง flushSync เพราะเบราว์เซอร์เปิด dropdown ทันทีหลังจบ mousedown — ถ้าปล่อยให้
+         React อัปเดตทีหลัง ครั้งแรกจะเห็นแค่ตัวเลือกเดียว */
+    const [ready, setReady] = useState(false);
+    const wake = () => {
+      if (ready) return;
+      try { ReactDOM.flushSync(() => setReady(true)); } catch (e) { setReady(true); }
+    };
     return (
       <select value={value || ''} disabled={disabled} onChange={e => onChange(e.target.value)}
+        onMouseDown={wake} onFocus={wake} onKeyDown={wake} onTouchStart={wake}
         style={{ width: width || 232, maxWidth: '100%', fontSize: 12, padding: '4px 6px', borderRadius: 8,
           border: '1px solid ' + (value ? (fm ? fm.color + '55' : C.line) : '#f0c9c9'),
           background: value ? (fm ? fm.bg : '#fff') : '#fff8f8',
           color: fm ? fm.color : C.ink, fontWeight: value ? 600 : 400 }}>
         <option value="">— ยังไม่ลงหมวด —</option>
-        {groups.map(([k, items]) => {
+        {/* ต้องมี option ของค่าปัจจุบันเสมอ ไม่งั้น <select> จะเด้งกลับเป็นค่าว่าง
+            — ทั้งตอนยังไม่กาง และตอนที่ค่านั้นเป็น "หมวดผี" ที่ไม่มีในผังหมวดแล้ว */}
+        {value && (!ready || !cur) && <option value={value}>{value}</option>}
+        {ready && groups.map(([k, items]) => {
           const [a, f, g] = k.split('|');
           const meta = CFC_FLOW_META[f] || CFC_FLOW_META.out;
           return (
@@ -1342,13 +1385,26 @@
       }).catch(e => console.warn('[cfc] load', e && e.message));
     }, []);
 
+    /* ⚠️ เขียนเฉพาะ "แถวที่เปลี่ยน" — ตารางนี้เก็บบรรทัดดิบเป็นก้อนใหญ่ (1 บัญชี 1 เดือน ≈ 58KB)
+       ถ้าเรียก writeTable ทุกครั้ง = ดาวน์โหลดทั้งตารางแล้วอัปโหลดทุกเดือนซ้ำ ทั้งที่ยืนยันหมวด
+       ไปแค่รายการเดียว (หน้าค้างทุกคลิก). ทุกที่ที่เรียก persist สร้าง object ใหม่ให้ id ที่แก้
+       ⇒ เทียบด้วย identity พอ. ยังไม่เคย sync (server ว่าง) → เขียนเต็มชุดครั้งแรกตามเดิม */
     const persist = (next) => {
+      const prev = store;
       setStore(next); cfcSaveLocal(next);
       if (!cfcCanSync()) return Promise.resolve({ shared: false });
+      const ok = () => { setSynced(true); return { shared: true }; };
+      const fail = e => { console.warn('[cfc] save', e && e.message); return { shared: false, err: e }; };
       const rows = Object.keys(next).map(id => Object.assign({ id }, next[id]));
-      return WTPData.writeTable(CFC_TABLE, rows, r => r.id)
-        .then(() => { setSynced(true); return { shared: true }; })
-        .catch(e => { console.warn('[cfc] save', e && e.message); return { shared: false, err: e }; });
+      if (!synced || typeof WTPData.upsertSheetRows !== 'function') {
+        return WTPData.writeTable(CFC_TABLE, rows, r => r.id).then(ok).catch(fail);
+      }
+      const dirty = rows.filter(r => next[r.id] !== prev[r.id]);
+      const gone = Object.keys(prev).filter(id => !(id in next));
+      if (!dirty.length && !gone.length) return Promise.resolve({ shared: true });
+      return WTPData.upsertSheetRows(CFC_TABLE, dirty, r => r.id)
+        .then(() => (gone.length ? WTPData.forceDeleteRows(CFC_TABLE, gone) : null))
+        .then(ok).catch(fail);
     };
 
     /* ── หมวดมาตรฐาน ── */
@@ -1421,6 +1477,22 @@
         return { no: '', label: cfcT(txt) || '(ไม่ระบุบัญชี)' };
       };
     }, [bankMaster, buckets]);
+
+    /* ⚠️ "หนึ่งบัญชี = หนึ่งชื่อ" — บิลจากใบจ่ายได้ชื่อจากทะเบียน ("SCB 136-268483-9")
+       ส่วนบรรทัดธนาคารได้ชื่อจากหัวไฟล์ EXPRESS ("S/A# SCB 136-268483-9 …") คนละสตริงกัน
+       ปล่อยไว้ = หน้า Cash Flow เห็นเป็น "คนละบัญชี" ต้นงวด/ปลายงวดแตกเป็น 2 ก้อนเงียบ ๆ
+       จับคู่ด้วยเลข 4 ตัวท้าย (เหมือน acctOf) เพราะบางไฟล์อ่านเลขบัญชีได้แค่ 4 ตัวจากชื่อไฟล์ */
+    const acctLabelOf = useMemo(() => {
+      const byTail = {};
+      buckets.forEach(b => {
+        const t = cfcDigits(b.acctNo).slice(-4);
+        if (t && !byTail[t] && b.acctLabel) byTail[t] = b.acctLabel;
+      });
+      return (no, label) => {
+        const t = cfcDigits(no).slice(-4);
+        return (t && byTail[t]) || label || '(ไม่ระบุบัญชี)';
+      };
+    }, [buckets]);
 
     const rows = useMemo(() => {
       const out = [];
@@ -1540,6 +1612,20 @@
         kind === 'still' ? (value ? 'ทำเครื่องหมาย "ไม่มีการเคลื่อนไหว" แล้ว' : 'ยกเลิกเครื่องหมายแล้ว')
           : (kind === 'closing' ? 'บันทึกยอดปลายงวดจริงแล้ว' : 'บันทึกยอดต้นงวดแล้ว'),
         r.shared ? undefined : 'error'));
+    }
+
+    /* ⚠️ ยอดต้นงวดของบัญชี ณ เดือนหนึ่ง — ต้องมาจาก "บรรทัดธนาคาร" เท่านั้น
+       (ลำดับเดียวกับการ์ดภาพรวม: ไฟล์ประกาศ/คำนวณจากแถวแรก > ปลายงวดเดือนก่อน > ค่าที่คีย์เอง)
+       ห้ามให้หน้าปลายทางไปเดาจากคอลัมน์ "ยอดคงเหลือ" ของชีตที่ส่งไป — แถวส่วนใหญ่เป็น
+       บิลรายใบซึ่งไม่มียอดคงเหลือ ปลายทางจะได้ต้นงวด = ยอดจ่ายของบิลใบแรก (เพี้ยนทั้งงบ) */
+    function openingAt(acctNo, acctLabel, ymOf) {
+      const key = cfcAcctKey(acctNo, acctLabel);
+      const g = histCheck.find(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym === ymOf);
+      if (g) return g.opening;
+      const prev = cfcPrevMonth(histCheck, acctNo, ymOf, acctLabel);
+      if (prev) return prev.closingFile;
+      const mo = manual.opening[key + '|' + ymOf];
+      return mo == null ? null : cfcNum(mo);
     }
 
 
@@ -1838,11 +1924,18 @@
       const head = ['ลำดับ', 'บัญชีธนาคาร', 'เลขที่บัญชี', 'วันที่', 'MNE', 'เลขที่เอกสาร', 'ยอดถอน', 'ยอดฝาก',
         'ยอดคงเหลือ', 'สถานะเช็ค', 'หมายเหตุ', 'หมวดเงินรับ-เงินจ่าย', 'ประเภทกิจกรรมทางการเงิน'];
       const stmAoa = [head];
-      rows.forEach((r, i) => stmAoa.push([
-        i + 1, r.acctLabel || '', r.acctNo || '', cfcThaiDate(r.iso), r.mne || '', r.docNo || '',
-        r.out || '', r.in || '', r.balance || '', r.chqStatus || '', r.note || '',
-        r.sug.cat || '', CFC_ACT_TH[r.sug.act] === undefined ? '' : CFC_ACT_TH[r.sug.act],
-      ]));
+      /* acctSeen: ป้ายบัญชีที่ใช้จริงในชีต → เลขบัญชี — ใช้หายอดต้นงวดตอนดันขึ้นหน้า Cash Flow */
+      const acctSeen = {};
+      rows.forEach((r, i) => {
+        const label = acctLabelOf(r.acctNo, r.acctLabel);
+        if (!acctSeen[label]) acctSeen[label] = { no: r.acctNo || '', label };
+        else if (!acctSeen[label].no && r.acctNo) acctSeen[label].no = r.acctNo;
+        stmAoa.push([
+          i + 1, label, r.acctNo || '', cfcThaiDate(r.iso), r.mne || '', r.docNo || '',
+          r.out || '', r.in || '', r.balance || '', r.chqStatus || '', r.note || '',
+          r.sug.cat || '', CFC_ACT_TH[r.sug.act] === undefined ? '' : CFC_ACT_TH[r.sug.act],
+        ]);
+      });
       const cell = {}; let uncodedTot = 0;
       rows.forEach(r => {
         const m = String(r.iso).slice(0, 7), v = r.in - r.out;
@@ -1851,7 +1944,7 @@
         if (!r.sug.cat) uncodedTot++;
       });
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))]);
-      return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell };
+      return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
 
     /* ส่งขึ้นหน้า "พรีเซนต์ Cash Flow" ตรง ๆ — ไม่ต้องดาวน์โหลดแล้วอัปกลับ
@@ -1859,7 +1952,7 @@
          เหมือนกับอัปไฟล์มือเป๊ะ ไม่ต้องมีตัวแปลงชุดที่สอง */
     async function sendToCashflow() {
       if (!rows.length) { toast && toast('ยังไม่มีรายการให้ส่ง'); return; }
-      if (typeof cfpParseStm !== 'function' || typeof cfpParseSummary !== 'function') {
+      if (typeof cfpParseStm !== 'function' || typeof cfpParseSummary !== 'function' || typeof cfpAccountLabel !== 'function') {
         toast && toast('เปิดหน้า "พรีเซนต์ Cash Flow" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
       }
       const miss = rows.filter(r => !r.sug.cat).length;
@@ -1873,20 +1966,51 @@
         /* ★ แทนที่เฉพาะเดือนที่ส่ง — เดือนอื่นที่เคยดันไว้ต้องอยู่ครบ
            (ดันเดือนเดิมซ้ำ = ทับของเดิม ไม่บวกเพิ่ม จึงแก้แล้วดันใหม่ได้เรื่อย ๆ) */
         const sendMonths = new Set(built.months);
-        const kept = ((old.stm && old.stm.txns) || []).filter(t => !sendMonths.has(String(t.iso).slice(0, 7)));
+        const byDisplay = {};   // ป้ายที่ตัวอ่านทำให้ (cfpAccountLabel) → เลขบัญชี/ป้ายดิบ
+        Object.keys(built.acctSeen).forEach(raw => { byDisplay[cfpAccountLabel(raw)] = built.acctSeen[raw]; });
+        /* ★ ซ่อมเดือนเก่าที่เคยดันไว้ตอนที่ป้ายบัญชียังแตกเป็น 2 ชื่อ (บิล vs บรรทัดธนาคาร)
+           — ยุบเข้าป้ายมาตรฐานด้วยเลข 4 ตัวท้าย ไม่งั้นเดือนเก่ายังโชว์เป็นบัญชีผีต่อไป
+             จนกว่าจะไล่ดันใหม่ทุกเดือน */
+        const tail4 = s => { const d = cfcDigits(String(s).split(' · ')[0]); return d.length >= 4 ? d.slice(-4) : ''; };
+        const canonByTail = {}; Object.keys(byDisplay).forEach(d => { const t = tail4(d); if (t) canonByTail[t] = d; });
+        const kept = ((old.stm && old.stm.txns) || [])
+          .filter(t => !sendMonths.has(String(t.iso).slice(0, 7)))
+          .map(t => { const c = canonByTail[tail4(t.account)];
+            return (c && c !== t.account) ? Object.assign({}, t, { account: c }) : t; });
         const allTxns = kept.concat(fresh.txns).sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
-        // ยอดต้นงวดต่อบัญชี = ยอดคงเหลือแถวเก่าสุด − กระแสของแถวนั้น (กติกาเดียวกับตัวอ่าน)
-        const openTrack = {};
-        allTxns.forEach(t => { const p2 = openTrack[t.account]; if (!p2 || t.iso < p2.iso) openTrack[t.account] = t; });
-        const openingByAcct = {}; let opening = 0;
-        Object.keys(openTrack).forEach(k => { const t = openTrack[k]; openingByAcct[k] = t.balance - t.flow; opening += openingByAcct[k]; });
+        /* ⚠️ ยอดต้นงวดต่อบัญชี ห้ามให้ตัวอ่านคำนวณจากคอลัมน์ "ยอดคงเหลือ" ของชีตนี้
+           — หน่วยที่ส่งไปเป็น "บิลรายใบ" ซึ่งไม่มียอดคงเหลือ (ช่องว่าง = 0) ตัวอ่านจะได้
+           ต้นงวด = 0 − กระแสของบิลใบแรก = ยอดจ่ายใบนั้น (เพี้ยนทั้งงบ · พิสูจน์แล้ว)
+           ใช้ยอดจากบรรทัดธนาคาร ณ "เดือนแรกที่บัญชีนั้นมีรายการ" แทน = ตัวเดียวกับการ์ดภาพรวม */
+        const firstYm = {};
+        allTxns.forEach(t => { const m = String(t.iso).slice(0, 7);
+          if (!firstYm[t.account] || m < firstYm[t.account]) firstYm[t.account] = m; });
+        const oldOpen = (old.stm && old.stm.openingByAcct) || {};
+        const openingByAcct = {}; let opening = 0; const openMissing = [];
+        Object.keys(firstYm).forEach(a => {
+          const info = byDisplay[a];
+          let v = info ? openingAt(info.no, info.label, firstYm[a]) : null;
+          // บัญชีที่หน้านี้ไม่รู้จัก (มาจากไฟล์ที่อัปมือบนหน้า Cash Flow) → คงค่าเดิมไว้ ไม่ทับ
+          //   ★ ค่าเดิมอาจถูกเก็บไว้ใต้ป้ายเก่า (ก่อนยุบชื่อบัญชี) และอาจแตกเป็นหลายก้อน
+          //     จากบั๊กเดิม → รวมทุกก้อนที่เลข 4 ตัวท้ายตรงกัน
+          if (v == null) {
+            const t = tail4(a); let sum = null;
+            Object.keys(oldOpen).forEach(k => { if (k === a || (t && tail4(k) === t)) sum = (sum || 0) + cfcNum(oldOpen[k]); });
+            v = sum == null ? cfcNum(fresh.openingByAcct[a]) : sum;
+            if (info) openMissing.push(a);
+          }
+          openingByAcct[a] = v; opening += v;
+        });
         const stm = { txns: allTxns, opening, openingByAcct };
         // งบสรุปต้องคิดใหม่จาก "ทุกเดือนที่มี" ไม่ใช่เฉพาะเดือนที่เพิ่งส่ง
         const allMonths = [...new Set(allTxns.map(t => String(t.iso).slice(0, 7)))].sort();
+        /* ตัวอ่านตั้งชื่อแถวที่ไม่มีหมวดว่า "(ไม่ระบุหมวด)" แต่บรรทัดตรวจในงบชื่อ "(ยังไม่ลงหมวด)"
+           ไม่แปลงชื่อ = บรรทัดตรวจโชว์ 0 ทั้งที่มีรายการค้างอยู่จริง */
+        const catOf = c => (!c || c === '(ไม่ระบุหมวด)') ? '(ยังไม่ลงหมวด)' : c;
         const cell = {};
-        allTxns.forEach(t => { const k = (t.category || '(ยังไม่ลงหมวด)') + '|' + String(t.iso).slice(0, 7);
+        allTxns.forEach(t => { const k = catOf(t.category) + '|' + String(t.iso).slice(0, 7);
           cell[k] = (cell[k] || 0) + (t.flow || 0); });
-        const usedCats = [...new Set(allTxns.map(t => t.category).filter(Boolean))];
+        const usedCats = [...new Set(allTxns.map(t => catOf(t.category)))];
         const summary = cfpParseSummary(cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats));
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
@@ -1900,7 +2024,9 @@
         const replaced = ((old.stm && old.stm.txns) || []).length - kept.length;
         toast && toast('ส่งขึ้นหน้า Cash Flow แล้ว · เดือน ' + built.months.join(', ') + ' ' +
           (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
-          ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน');
+          ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน' +
+          (openMissing.length ? ' · ⚠️ ยังไม่รู้ยอดต้นงวดของ ' + openMissing.length + ' บัญชี (ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนั้น)' : ''),
+          openMissing.length ? 'error' : undefined);
       } catch (e) { setBusy(''); toast && toast('ส่งไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }
     }
 
@@ -1926,8 +2052,12 @@
       cfcStyleDetail(ws2, stmAoa);
       XLSX.utils.book_append_sheet(wb, ws2, 'รายละเอียดทุกรายการ');
 
-      /* ── ชีต 3: ตรวจยอดรายบัญชี ── */
-      const sum = cfcAcctSummary(rows);
+      /* ── ชีต 3: ตรวจยอดรายบัญชี ──
+         ⚠️ ต้องคิดจาก "บรรทัดธนาคาร" (acctCheck = cfcAcctSummary(bankScoped)) เท่านั้น
+            — `rows` เป็นบิลรายใบที่เกลี่ยยอดแล้วและไม่มีคอลัมน์ยอดคงเหลือ เอามาหา
+            ยกมา/ปลายงวดไม่ได้ (กติกาเดียวกับการ์ดภาพรวมบนหน้าจอ) */
+      const sum = acctCheck.map(g => Object.assign({}, g,
+        { uncoded: uncodedByAcct[cfcAcctKey(g.acctNo, g.acctLabel)] || 0 }));
       const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'],
         ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง · ' + scope + ' · สร้าง ' + stamp], [],
         ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ต้นงวดที่คีย์', 'ต่างจากที่คีย์', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'ปลายงวดจริง (คีย์)', 'ไฟล์ขาด', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
@@ -1946,7 +2076,7 @@
       s3.push(['รวมทุกบัญชี', '', '', sum.reduce((a, g) => a + g.opening, 0), '', '', '', '',
         sum.reduce((a, g) => a + g.inSum, 0), sum.reduce((a, g) => a + g.outSum, 0),
         sum.reduce((a, g) => a + g.closingCalc, 0), sum.reduce((a, g) => a + g.closingFile, 0),
-        sum.reduce((a, g) => a + g.diff, 0), '', '', rows.length, uncodedTot]);
+        sum.reduce((a, g) => a + g.diff, 0), '', '', sum.reduce((a, g) => a + g.n, 0), uncodedTot]);
       const ws3 = XLSX.utils.aoa_to_sheet(s3);
       ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }];
       cfcStyleCheck(ws3, s3, [5, 7, 12, 14]);   // คอลัมน์ "ต่าง…" ทั้ง 4 ช่อง

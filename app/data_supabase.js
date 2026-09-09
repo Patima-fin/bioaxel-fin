@@ -487,6 +487,30 @@
     }, function (err) { console.warn('[WTP Supabase] forceDeleteRows ล้มเหลว:', err && err.message); });
   };
 
+  /* ── upsertSheetRows: เขียน "เฉพาะแถวที่ส่งมา" ───────────────────────────
+   *   ต่างจาก writeTable ตรงที่ ไม่ selectAll ทั้งตารางก่อน และไม่ลบแถวที่ไม่ได้ส่งมา
+   *   ⚠️ ใช้กับตารางก้อนใหญ่ที่แก้ทีละส่วน (cfCoding: 1 เดือน 1 บัญชี = 1 แถว ~58KB —
+   *      ยืนยันหมวด 1 รายการแล้วเรียก writeTable = ดาวน์โหลด+อัปโหลดบรรทัดดิบทุกเดือนซ้ำทั้งตาราง
+   *      หน้าจอค้างทุกคลิก). ลบแถวใช้ forceDeleteRows แยกต่างหาก.
+   *   คืน Promise<{ok,count}>. */
+  WTPData.upsertSheetRows = function (entity, rows, idOf) {
+    if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
+    var recs = (rows || []).map(function (r) {
+      var id = idOf ? idOf(r) : (r && r.id);
+      return { id: String(id == null ? '' : id), data: r };
+    }).filter(function (x) { return x.id && x.id !== 'undefined'; });
+    if (!recs.length) return Promise.resolve({ ok: true, count: 0 });
+    return sb.from(entity).upsert(recs).then(chk).then(function () {
+      try {
+        var m = _currentMeta();
+        sb.from('audit_log').insert([{ username: m.user, display_name: m.displayName, role: m.role,
+          action: 'upsertSheetRows', entity: entity, summary: entity + ': เขียน ' + recs.length + ' แถว' }])
+          .then(function () {}, function () {});
+      } catch (_) {}
+      return { ok: true, count: recs.length };
+    });
+  };
+
   /* ── writeTable: เขียนทั้งตาราง (full sync) สำหรับ analytics on-demand (P&L/Budget นำเข้า) ──
    *   rows = แถวของแอป, idOf(row)→id (natural key เช่น code / dept|acct).
    *   upsert ทุกแถว + ลบ id ที่หายไปจากชุดใหม่. ต้อง login (RLS: เขียน=staff/manager).

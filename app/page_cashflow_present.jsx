@@ -271,7 +271,10 @@
       const balance = cfpNum(at(cells, COL.balance)), flow = deposit - withdraw;
       const category = String(at(cells, COL.category) || '').trim(), activity = String(at(cells, COL.activity) || '').trim();
       // รูปแบบ (B): จำแถวเก่าสุดต่อบัญชี เพื่อคำนวณยอดต้นงวด (ไม่มี "ยอดยกมา")
-      if (hasAcctCol && COL.balance >= 0) { const p = openTrack[acct]; if (!p || iso < p.iso) openTrack[acct] = { iso, bal: balance, flow }; }
+      //  ⚠️ ต้องเป็นแถวที่ "มี" ยอดคงเหลือจริงเท่านั้น — ช่องว่างไม่ใช่ยอด 0 (ชีตที่ดันมาจาก
+      //     หน้างบกระทบยอดมีแถวบิลรายใบที่ไม่มีคอลัมน์นี้ ⇒ ต้นงวดจะกลายเป็นยอดจ่ายของบิลใบแรก)
+      const balBlank = (at(cells, COL.balance) === '' || at(cells, COL.balance) == null);
+      if (hasAcctCol && COL.balance >= 0 && !balBlank) { const p = openTrack[acct]; if (!p || iso < p.iso) openTrack[acct] = { iso, bal: balance, flow }; }
       txns.push({
         account: acct, iso, month: cfpMonth(iso),
         docNo: String(at(cells, COL.doc) || '').trim(), note: String(at(cells, COL.note) || '').trim(),
@@ -1554,5 +1557,5 @@
   /* ★ เปิดตัวอ่าน + ค่าคงที่ให้หน้า #cf_coding เรียกข้ามไฟล์ได้ — หน้านั้นสร้าง AOA
      รูปเดียวกับไฟล์ที่คนอัปมือ แล้วส่งผ่านตัวอ่านชุดนี้ ⇒ ข้อมูลที่ลงเอยเหมือนกัน
      เป๊ะกับการ "ส่งออกแล้วอัปกลับ" โดยไม่ต้องเขียนตัวแปลงซ้ำ (กันสูตรสองชุดเพี้ยนกัน) */
-  Object.assign(window, { cfpParseStm, cfpParseSummary, CFP_TABLE, CFP_ROW_ID, cfpCurrentUser });
+  Object.assign(window, { cfpParseStm, cfpParseSummary, cfpAccountLabel, CFP_TABLE, CFP_ROW_ID, cfpCurrentUser });
 })();
