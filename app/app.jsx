@@ -50,7 +50,6 @@ const PAGE_GROUPS = [
   ] },
   { key: 'reports', label: 'รายงาน / วิเคราะห์', items: [
     ['cf_coding',         'งบกระทบยอด',             'chart'],
-    ['cashflow_forecast', 'ประมาณการรายรับ-รายจ่าย', 'chart'],
     ['recurring',         'ค่าใช้จ่ายประจำ',        'forecast'],
     ['debt',              'ภาระหนี้ทั้งหมด',        'money'],
     ['debt_ledger',       'Debt Ledger · ดอกเบี้ย', 'money'],
@@ -236,10 +235,12 @@ function App() {
     setCurrentUser(null);
   };
 
-  const [route, setRoute] = aState(() => {
+  // hash → route key · คีย์ที่ไม่รู้จัก (เช่น bookmark ของหน้าที่ถอดออกแล้ว) → home
+  const routeFromHash = () => {
     const h = window.location.hash.replace(/^#/, '');
-    return h || 'home';
-  });
+    return PAGE_KEY_SET.has(h) ? h : 'home';
+  };
+  const [route, setRoute] = aState(routeFromHash);
   const [data, setData] = aState(() => WTPData.load());
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const { push: pushToast, node: toastNode } = useToasts();
@@ -552,7 +553,7 @@ function App() {
   }, [data.receipts, data.invoices]);
 
   aEffect(() => {
-    const onHash = () => setRoute(window.location.hash.replace(/^#/, '') || 'daily');
+    const onHash = () => setRoute(routeFromHash());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -663,7 +664,6 @@ function App() {
     warroom1: { label: 'War Room — รายรับ (หน้า 1)', title: 'Revenue Collection', icon: 'receivables' },
     warroom2: { label: 'War Room — รายปี (หน้า 2)', title: 'Annual Cash Flow', icon: 'forecast' },
     cashflow: { label: 'Weekly Forecast', title: 'Weekly Forecast', icon: 'chart' },
-    cashflow_forecast: { label: 'ประมาณการรายรับ-รายจ่าย', title: 'Cash Flow Forecast', icon: 'chart' },
     recurring: { label: 'ค่าใช้จ่ายประจำ', title: 'Recurring Expenses', icon: 'forecast' },
     cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
     cf_coding:   { label: 'งบกระทบยอด', title: 'Reconciliation Statement', icon: 'chart' },
@@ -699,7 +699,6 @@ function App() {
     case 'warroom1':       page = <WarRoomPage1 data={data} setData={setData} toast={pushToast} />; break;
     case 'warroom2':       page = <WarRoomPage2 data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow':       page = <CashFlowDashboard data={data} setData={setData} toast={pushToast} />; break;
-    case 'cashflow_forecast': page = <CashFlowForecastPage data={data} setData={setData} toast={pushToast} />; break;
     case 'recurring':      page = <RecurringExpensesPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cf_coding':      page = <CfCodingPage data={data} setData={setData} toast={pushToast} />; break;
