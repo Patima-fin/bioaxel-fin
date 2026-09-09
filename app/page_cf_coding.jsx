@@ -1920,7 +1920,11 @@
          ใช้ชุดนี้ร่วมกัน จะได้ไม่มีสูตรสองชุดที่เพี้ยนจากกันทีหลัง */
     function buildSheets() {
       const months = [...new Set(rows.map(r => String(r.iso).slice(0, 7)))].sort();
-      const monLabel = (m) => { const p2 = m.split('-'); return (CFC_MONTH_TH[+p2[1]] || p2[1]) + ' ' + (Number(p2[0]) + 543 - 2500); };
+      // ★ กันข้อมูลเก่าที่ ym เป็นปี พ.ศ. ('2569-05') → ป้ายจะกลายเป็น "พ.ค. 612"
+      const monLabel = (m) => {
+        const p2 = String(m).split('-'); const y = Number(p2[0]);
+        return (CFC_MONTH_TH[+p2[1]] || p2[1]) + ' ' + ((y > 2400 ? y : y + 543) - 2500);
+      };
       const head = ['ลำดับ', 'บัญชีธนาคาร', 'เลขที่บัญชี', 'วันที่', 'MNE', 'เลขที่เอกสาร', 'ยอดถอน', 'ยอดฝาก',
         'ยอดคงเหลือ', 'สถานะเช็ค', 'หมายเหตุ', 'หมวดเงินรับ-เงินจ่าย', 'ประเภทกิจกรรมทางการเงิน'];
       const stmAoa = [head];
@@ -1973,10 +1977,27 @@
              จนกว่าจะไล่ดันใหม่ทุกเดือน */
         const tail4 = s => { const d = cfcDigits(String(s).split(' · ')[0]); return d.length >= 4 ? d.slice(-4) : ''; };
         const canonByTail = {}; Object.keys(byDisplay).forEach(d => { const t = tail4(d); if (t) canonByTail[t] = d; });
-        const kept = ((old.stm && old.stm.txns) || [])
-          .filter(t => !sendMonths.has(String(t.iso).slice(0, 7)))
-          .map(t => { const c = canonByTail[tail4(t.account)];
-            return (c && c !== t.account) ? Object.assign({}, t, { account: c }) : t; });
+        /* ⚠️ ต้องยุบ พ.ศ. → ค.ศ. "ก่อน" กรองเดือน — ข้อมูลเก่าที่อัปมือไว้เก็บ iso เป็นปี พ.ศ.
+           ('2569-05-05') ⇒ เทียบกับเดือนที่กำลังส่ง ('2026-05') ไม่มีวันตรง ดันซ้ำเท่าไรก็
+           ไม่ทับของเดิม กลายเป็น "เดือนเดียวกันมี 2 คอลัมน์ ยอดเบิ้ล" + ป้ายเดือนเป็น "612" */
+        const rawOld = (old.stm && old.stm.txns) || [];
+        const healed = (typeof cfpFixEraTxns === 'function' ? cfpFixEraTxns(rawOld) : rawOld)
+          .map((t, i) => {
+            const c = canonByTail[tail4(t.account)];
+            const row = (c && c !== t.account) ? Object.assign({}, t, { account: c }) : t;
+            return { row, wasBE: String(t.iso) !== String(rawOld[i] && rawOld[i].iso) };
+          });
+        /* ★ ล้างของซ้ำที่บั๊กเดิมทิ้งไว้: แถวปี พ.ศ. ที่ตรงกับแถวปี ค.ศ. ทุกอย่าง (บัญชี·วัน·
+           เลขเอกสาร·ยอด) = รายการเดียวกันที่เคยถูกนับ 2 ครั้งเพราะปีคนละศักราช → ทิ้งฝั่ง พ.ศ.
+           ทิ้งเฉพาะแถวที่ "ถูกแปลงศักราช" เท่านั้น ของเดิมที่เป็น ค.ศ. อยู่แล้วไม่แตะ */
+        const dupKey = t => [t.account, String(t.iso).slice(0, 10), t.docNo || '',
+          Math.round((t.flow || 0) * 100)].join('|');
+        const ceKeys = new Set(); healed.forEach(h => { if (!h.wasBE) ceKeys.add(dupKey(h.row)); });
+        let dupDropped = 0;
+        const kept = healed.filter(h => {
+          if (h.wasBE && ceKeys.has(dupKey(h.row))) { dupDropped++; return false; }
+          return !sendMonths.has(String(h.row.iso).slice(0, 7));
+        }).map(h => h.row);
         const allTxns = kept.concat(fresh.txns).sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
         /* ⚠️ ยอดต้นงวดต่อบัญชี ห้ามให้ตัวอ่านคำนวณจากคอลัมน์ "ยอดคงเหลือ" ของชีตนี้
            — หน่วยที่ส่งไปเป็น "บิลรายใบ" ซึ่งไม่มียอดคงเหลือ (ช่องว่าง = 0) ตัวอ่านจะได้
@@ -1986,10 +2007,22 @@
         allTxns.forEach(t => { const m = String(t.iso).slice(0, 7);
           if (!firstYm[t.account] || m < firstYm[t.account]) firstYm[t.account] = m; });
         const oldOpen = (old.stm && old.stm.openingByAcct) || {};
+        /* เดือนแรกสุดยังไม่ได้นำเข้างบกระทบยอด แต่เดือนถัด ๆ ไปมี → เดินถอยหลัง:
+           ต้นงวด(เดือนแรก) = ต้นงวด(เดือนที่รู้) − ผลรวมกระแสของทุกแถวก่อนเดือนนั้น */
+        const openingBack = (info, ym0, acctName) => {
+          const key = cfcAcctKey(info.no, info.label);
+          const known = histCheck.filter(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym > ym0)
+            .sort((x, y) => (x.ym < y.ym ? -1 : 1))[0];
+          if (!known) return null;
+          const before = allTxns.reduce((s, t) => (t.account === acctName && String(t.iso).slice(0, 7) < known.ym
+            ? s + (t.flow || 0) : s), 0);
+          return known.opening - before;
+        };
         const openingByAcct = {}; let opening = 0; const openMissing = [];
         Object.keys(firstYm).forEach(a => {
           const info = byDisplay[a];
           let v = info ? openingAt(info.no, info.label, firstYm[a]) : null;
+          if (v == null && info) v = openingBack(info, firstYm[a], a);
           // บัญชีที่หน้านี้ไม่รู้จัก (มาจากไฟล์ที่อัปมือบนหน้า Cash Flow) → คงค่าเดิมไว้ ไม่ทับ
           //   ★ ค่าเดิมอาจถูกเก็บไว้ใต้ป้ายเก่า (ก่อนยุบชื่อบัญชี) และอาจแตกเป็นหลายก้อน
           //     จากบั๊กเดิม → รวมทุกก้อนที่เลข 4 ตัวท้ายตรงกัน
@@ -2025,6 +2058,7 @@
         toast && toast('ส่งขึ้นหน้า Cash Flow แล้ว · เดือน ' + built.months.join(', ') + ' ' +
           (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
           ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน' +
+          (dupDropped ? ' · ล้างรายการซ้ำจากข้อมูลเก่า (ปี พ.ศ.) ' + dupDropped + ' รายการ' : '') +
           (openMissing.length ? ' · ⚠️ ยังไม่รู้ยอดต้นงวดของ ' + openMissing.length + ' บัญชี (ยังไม่ได้นำเข้างบกระทบยอดของบัญชีนั้น)' : ''),
           openMissing.length ? 'error' : undefined);
       } catch (e) { setBusy(''); toast && toast('ส่งไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }

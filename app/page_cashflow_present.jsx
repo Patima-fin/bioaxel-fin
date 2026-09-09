@@ -59,7 +59,15 @@
     if (v == null || v === '') return '';
     if (typeof v === 'number' && isFinite(v) && v > 1000) {
       const dt = new Date(Math.round((v - 25569) * 86400 * 1000));
-      if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+      /* ⚠️ ชีต "รวมทุกบัญชี" ที่ทำมือเก็บวันที่เป็น Excel serial ของปี พ.ศ. (244354 = 5 ม.ค. 2569)
+         → serial นั้นแปลงตรง ๆ ได้ปี ค.ศ. 2569 ⇒ ต้องผ่านกฎรวม "ปี > 2400 = พ.ศ. → ลบ 543"
+         เหมือน path อื่น ไม่ใช่ return ทางลัดตั้งแต่ตรงนี้ (เดิม iso ที่เก็บไว้เป็น 2569-xx
+         ทั้งชุด → เดือนไม่ตรงกับข้อมูลที่ดันมาใหม่ ป้ายเดือนออกมาเป็น "612") */
+      if (!isNaN(dt.getTime())) {
+        const yy = dt.getUTCFullYear();
+        if (yy <= 2400) return dt.toISOString().slice(0, 10);
+        return String(yy - 543).padStart(4, '0') + dt.toISOString().slice(4, 10);
+      }
     }
     let s = String(v).trim();
     const era = cfpEraHint || 'auto';
@@ -387,9 +395,29 @@
     return { ok: false, gap, miss, extra, missSum, extraSum, explained, rest: gap - explained };
   }
 
+  /* ⚠️ ข้อมูลเก่าที่อัปไว้ก่อนแก้บั๊ก BE serial มี `iso` เป็นปี พ.ศ. ("2569-05-05")
+     ⇒ เดือนไม่ตรงกับข้อมูลใหม่ (2026-05), เรียงลำดับผิด, ป้ายเดือนเพี้ยน.
+     ยุบเป็น ค.ศ. ทุกทางที่อ่านเข้ามา — ทั้งตอนสร้าง model และตอน merge ที่หน้า #cf_coding */
+  function cfpFixEraIso(iso) {
+    const s = String(iso || '');
+    const y = +s.slice(0, 4);
+    return (y > 2400) ? String(y - 543) + s.slice(4) : s;
+  }
+  function cfpFixEraTxns(txns) {
+    let n = 0;
+    const out = (txns || []).map(t => {
+      const iso = cfpFixEraIso(t.iso);
+      if (iso === t.iso) return t;
+      n++;
+      return Object.assign({}, t, { iso, month: cfpMonth(iso) });
+    });
+    if (n) console.warn('[cfp] แปลงวันที่ พ.ศ. → ค.ศ. ' + n + ' รายการ (ข้อมูลเก่าก่อนแก้บั๊ก)');
+    return out;
+  }
+
   /* ---------- build model ---------- */
   function cfpBuildModel(stm, summary) {
-    const txns = stm.txns || [];
+    const txns = cfpFixEraTxns(stm.txns);
     const monthsSet = {};
     txns.forEach(t => { if (t.month && t.actKey !== 'transfer' && t.actKey !== 'other') monthsSet[t.month] = true; });
     const months = Object.keys(monthsSet).map(Number).sort((a, b) => a - b);
@@ -1557,5 +1585,5 @@
   /* ★ เปิดตัวอ่าน + ค่าคงที่ให้หน้า #cf_coding เรียกข้ามไฟล์ได้ — หน้านั้นสร้าง AOA
      รูปเดียวกับไฟล์ที่คนอัปมือ แล้วส่งผ่านตัวอ่านชุดนี้ ⇒ ข้อมูลที่ลงเอยเหมือนกัน
      เป๊ะกับการ "ส่งออกแล้วอัปกลับ" โดยไม่ต้องเขียนตัวแปลงซ้ำ (กันสูตรสองชุดเพี้ยนกัน) */
-  Object.assign(window, { cfpParseStm, cfpParseSummary, cfpAccountLabel, CFP_TABLE, CFP_ROW_ID, cfpCurrentUser });
+  Object.assign(window, { cfpParseStm, cfpParseSummary, cfpAccountLabel, cfpFixEraTxns, CFP_TABLE, CFP_ROW_ID, cfpCurrentUser });
 })();
