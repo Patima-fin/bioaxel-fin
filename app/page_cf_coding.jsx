@@ -1,5 +1,5 @@
 /* =====================================================================
- * ลงรหัสงบกระแสเงินสด (#cf_coding) — BIOAXEL
+ * งบกระทบยอด (#cf_coding) — BIOAXEL  (เดิมชื่อ "ลงรหัสงบกระแสเงินสด" · route/ตาราง/prefix ยังเป็น cf_coding/cfc เหมือนเดิม)
  * ---------------------------------------------------------------------
  *  "โต๊ะทำงาน" ที่รับ **ข้อมูลดิบ** จากไฟล์ EXPRESS แล้วช่วยจับคู่ "หมวด +
  *  ประเภทกิจกรรม" ให้ทีละบรรทัด — ผลลัพธ์ = ชีต "รวมทุกบัญชี" ที่เอาไปวางใน
@@ -1678,7 +1678,7 @@
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
           uploadedAt: Date.now(),
-          uploadedBy: (typeof cfpCurrentUser === 'function' ? cfpCurrentUser() : '') + ' (จากหน้าลงรหัส)',
+          uploadedBy: (typeof cfpCurrentUser === 'function' ? cfpCurrentUser() : '') + ' (จากหน้างบกระทบยอด)',
           stm, summary,
         });
         await WTPData.writeTable(CFP_TABLE, [payload], r => r.id);
@@ -1760,7 +1760,7 @@
         <div style={Object.assign({}, card, { padding: '14px 18px' })}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>🧾 ลงรหัสงบกระแสเงินสด</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: C.ink }}>🧾 งบกระทบยอด</div>
               <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>
 ลงรหัส<strong>รายบิลตั้งหนี้</strong>จากรายงานการจ่ายชำระหนี้ + เก็บรายการที่ไม่มีในใบจ่ายจากงบกระทบยอด → เสนอหมวด + จำที่ยืนยันไว้ใช้เดือนถัดไป
                 {synced ? ' · ข้อมูลส่วนกลาง (ทุกคนเห็น)' : ' · ข้อมูลในเครื่อง'}
