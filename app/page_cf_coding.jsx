@@ -982,6 +982,94 @@
     _cfcGroupCache.set(master, out);
     return out;
   }
+  /* 🏦 เลือกบัญชีให้ใบสำคัญจ่ายที่เอกสารไม่ได้บอกบัญชีต้นทาง
+     ★ ต้องโชว์ "บรรทัดธนาคารที่น่าจะเป็นรายการเดียวกัน" คู่กันเสมอ — ใบพวกนี้ไม่มีเลขเช็ค
+       ตัวจับคู่อัตโนมัติจึงมองไม่เห็น ถ้าคนไม่เห็นตัวเลือกนี้ จะเผลอปล่อยให้นับเงินซ้ำ 2 รอบ */
+  function CfcAcctFixModal({ rows, banks, value, onSave, onClose, canEdit }) {
+    const targets = useMemo(() => rows.filter(r => !cfcDigits(r.acctNo) || r.acctPicked), [rows]);
+    const bankLines = useMemo(() => rows.filter(r => r.src === 'bank'), [rows]);
+    const [map, setMap] = useState(() => Object.assign({}, value));
+    const [bulk, setBulk] = useState('');
+    const nrm = v => cfcT(v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const gap = (a, b) => Math.abs((Date.parse(a + 'T00:00:00') - Date.parse(b + 'T00:00:00')) / 86400000);
+    const dupOf = (r) => {
+      const amt = Math.abs(r.out || r.in); if (!amt) return [];
+      return bankLines.filter(L => Math.abs(Math.abs(L.out || L.in) - amt) < 0.02 && gap(L.iso, r.iso) <= 3
+        && ((L.out > 0) === (r.out > 0)));
+    };
+    const set = (k, v) => setMap(m => { const n = Object.assign({}, m); if (v) n[k] = v; else delete n[k]; return n; });
+    const left = targets.filter(r => !map[nrm(r.psNo || r.docNo)]).length;
+    const th = { padding: '7px 9px', color: C.mut, background: C.soft, position: 'sticky', top: 0, whiteSpace: 'nowrap' };
+    return (
+      <Modal open wide title="🏦 เลือกบัญชีให้รายการที่ไม่มีเลขบัญชี" onClose={onClose}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontSize: 12.5, color: C.mut, background: C.soft, borderRadius: 9, padding: '9px 12px', lineHeight: 1.8 }}>
+            ใบพวกนี้มาจาก <strong>รายงานอนุมัติจ่าย</strong> (AV/AE) ซึ่งไฟล์ต้นทาง<strong>ไม่มีคอลัมน์บัญชีที่จ่ายออก</strong>
+            หรือใบ PS ที่เว้นช่อง ธนาคาร ไว้ · เลือกบัญชีให้ครบ ยอดถึงจะเข้าการ์ดตรวจยอดรายบัญชีถูกต้อง<br />
+            ⚠️ ถ้ารายการไหน<strong>ซ้ำกับบรรทัดธนาคาร</strong>ที่นำเข้ามาแล้ว ให้เลือก ซ้ำ — ตัดใบนี้ออก ไม่งั้นเงินก้อนเดียวถูกนับ 2 รอบ
+          </div>
+          {!!targets.length && canEdit && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, flexWrap: 'wrap' }}>
+              <span style={{ color: C.mut }}>ตั้งให้ทุกใบที่ยังไม่ได้เลือก ({left}):</span>
+              <select value={bulk} onChange={e => setBulk(e.target.value)} style={{ fontSize: 12.5, padding: '5px 8px', borderRadius: 8, border: '1px solid ' + C.line }}>
+                <option value="">— เลือกบัญชี —</option>
+                {banks.map(b => <option key={b.no} value={b.no}>{b.bank + ' ' + b.no}</option>)}
+              </select>
+              <button style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 700, border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 8, padding: '5px 12px' }}
+                disabled={!bulk} onClick={() => { const n = Object.assign({}, map);
+                  targets.forEach(r => { const k = nrm(r.psNo || r.docNo); if (!n[k]) n[k] = cfcDigits(bulk); }); setMap(n); }}>ตั้งทั้งหมด</button>
+            </div>
+          )}
+          <div style={{ maxHeight: '52vh', overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 10 }}>
+            <table className="tbl tbl-compact" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+              <thead><tr>
+                <th style={th}>วันที่</th>
+                <th style={th}>เลขที่เอกสาร</th>
+                <th style={th}>ผู้รับเงิน / รายการ</th>
+                <th style={Object.assign({}, th, { textAlign: 'right' })}>ยอด</th>
+                <th style={th}>บัญชีที่จ่ายออก</th>
+              </tr></thead>
+              <tbody>
+                {!targets.length && <tr><td colSpan={5} style={{ padding: 22, textAlign: 'center', color: C.mut }}>ไม่มีรายการที่ขาดเลขบัญชี 🎉</td></tr>}
+                {targets.map((r, i) => {
+                  const k = nrm(r.psNo || r.docNo);
+                  const dups = dupOf(r);
+                  return (
+                    <tr key={k + '|' + i} style={{ borderTop: '1px solid ' + C.line }}>
+                      <td style={{ padding: '6px 9px', whiteSpace: 'nowrap' }}>{cfcThaiDate(r.iso)}</td>
+                      <td style={{ padding: '6px 9px', whiteSpace: 'nowrap', fontFamily: 'ui-monospace,monospace' }}>{r.psNo || r.docNo}</td>
+                      <td style={{ padding: '6px 9px', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.note}>
+                        {r.pvPayee || r.payee || r.note || '—'}
+                        {!!dups.length && <div style={{ fontSize: 11.5, color: C.warn }}>
+                          ⚠️ ยอดตรงกับบรรทัดธนาคาร {dups.length} รายการ ({dups.slice(0, 2).map(d => cfcThaiDate(d.iso) + ' · ' + (d.acctLabel || d.acctNo)).join(' / ')})
+                        </div>}
+                      </td>
+                      <td style={{ padding: '6px 9px', textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{cfcMoney(Math.abs(r.out || r.in))}</td>
+                      <td style={{ padding: '6px 9px' }}>
+                        <select value={map[k] || ''} disabled={!canEdit} onChange={e => set(k, e.target.value)}
+                          style={{ fontSize: 12, padding: '4px 6px', borderRadius: 8, minWidth: 210,
+                            border: '1px solid ' + (map[k] ? C.line : '#f0c9c9'), background: map[k] ? '#fff' : '#fff8f8' }}>
+                          <option value="">— ยังไม่เลือก —</option>
+                          {banks.map(b => <option key={b.no} value={cfcDigits(b.no)}>{b.bank + ' ' + b.no}</option>)}
+                          <option value="dup">↩︎ ซ้ำกับบรรทัดธนาคาร — ตัดใบนี้ออก</option>
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button style={{ cursor: 'pointer', fontSize: 13, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 14px' }} onClick={onClose}>ปิด</button>
+            {canEdit && <button style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, border: 'none', background: C.primary, color: '#fff', borderRadius: 9, padding: '7px 16px' }}
+              onClick={() => onSave(map)}>บันทึก</button>}
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   function CfcCatSelect({ value, master, onChange, disabled, width }) {
     const groups = useMemo(() => cfcCatGroups(master), [master]);
     const cur = master.find(m => m.name === value);
@@ -1559,6 +1647,7 @@
     const [teachRes, setTeachRes] = useState(null);
     const [addCat, setAddCat] = useState(false);
     const [pushAsk, setPushAsk] = useState(false);   // หน้าต่างยืนยัน "จะดันเดือนไหน"
+    const [acctAsk, setAcctAsk] = useState(false);   // หน้าต่างเลือกบัญชีให้รายการที่ไม่มีเลขบัญชี
     const fileBank = useRef(null), fileCf = useRef(null);
 
     /* ── โหลดจากส่วนกลาง ── */
@@ -1603,6 +1692,11 @@
     }, [store.master]);
     const catAct = useMemo(() => { const o = {}; master.forEach(m => { o[m.name] = m.act; }); return o; }, [master]);
     const rules = useMemo(() => (store.rules && store.rules.map) || {}, [store.rules]);
+    /* ⚠️ ใบสำคัญจ่ายที่เอกสารไม่บอกบัญชีต้นทาง (ใบอนุมัติจ่าย AV/AE · ใบ PS ที่เว้นช่องธนาคาร)
+       — ปล่อยว่างไม่ได้ ต้องให้คนเลือก. เก็บเป็น "เลขที่เอกสาร → เลขบัญชี" (หรือ 'dup' = ซ้ำกับ
+       บรรทัดธนาคาร ให้ตัดใบทิ้ง). sync ทั้งทีมเหมือนกฎหมวด · ห้ามเขียนกลับลง pvVouchers
+       (เอกสารไม่ได้บอก เขียนไปคือปลอมข้อมูลให้ทุกหน้าที่ใช้ร่วมกัน) */
+    const acctFix = useMemo(() => (store.acctFix && store.acctFix.map) || {}, [store.acctFix]);
     const engine = useMemo(() => cfcBuildEngine(rules, catAct), [rules, catAct]);
 
     /* ── บรรทัดดิบทั้งหมดที่นำเข้าไว้ ── */
@@ -1696,7 +1790,14 @@
         const amt = Math.abs(v.cheque || v.cash || v.gross);
         cfcCoverKeys(v).forEach(k => covered.set(k, amt));
         const made = [];
+        const fix = acctFix[dk];
+        if (fix === 'dup') { vEntries.push({ v: v, rows: [], dropped: true, manualDup: true }); return; }
         cfcVoucherToRows(v, acctOf).forEach((r, i) => {
+          if (fix && !cfcDigits(r.acctNo)) {          // คนเลือกบัญชีให้แล้ว
+            const b = bankMaster.find(x => cfcDigits(x.no).slice(-4) === cfcDigits(fix).slice(-4));
+            r = Object.assign({}, r, { acctNo: cfcDigits(fix),
+              acctLabel: acctLabelOf(fix, b ? b.bank + ' ' + b.no : r.acctLabel), acctPicked: true });
+          }
           if (acct && cfcDigits(r.acctNo) !== cfcDigits(acct)) return;
           const row = Object.assign({}, r, {
             key: 'ps|' + v.doc + '|' + i, bucketId: bucketId, balance: '', pv: null, bills: [],
@@ -1775,7 +1876,7 @@
         : (Number(a.idx || 0) - Number(b.idx || 0)))));
       sorted.dupPaired = dupPaired;
       return sorted;
-    }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf]);
+    }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf, acctFix, acctLabelOf, bankMaster]);
 
     const stat = useMemo(() => {
       const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [],
@@ -2655,7 +2756,8 @@
             {stat.orphan > 0 && <div>⚠️ <strong>{stat.orphan} รายการ</strong> ลงหมวดที่<strong>ไม่มีในงบหน้าแรกแล้ว</strong> ({stat.orphanNames.slice(0, 3).join(' · ')}{stat.orphanNames.length > 3 ? ' และอีก ' + (stat.orphanNames.length - 3) : ''}) — ยอดจะไม่เข้าบรรทัดไหนในชีตสรุป ให้เพิ่มหมวดนี้กลับในไฟล์ CASH FLOW แล้วกด "สอนระบบ" ใหม่ หรือเลือกหมวดใหม่ให้รายการเหล่านี้</div>}
             {stat.suspect > 0 && <div>⚠️ <strong>{stat.suspect} รายการ</strong> เลขเช็คคล้ายใบสำคัญจ่ายในระบบแต่ <strong>ยอดไม่ตรง</strong> — ไม่ผูกให้โดยตั้งใจ (ของจริงเคยมีเลขเช็คพิมพ์ตกหลักแล้วไปชนใบอื่น) กดขยายแถวเพื่อดูใบที่ใกล้เคียง</div>}
             {stat.dup > 0 && <div>✅ ตัด <strong>{stat.dup} ใบอนุมัติจ่าย</strong> ที่ซ้ำกับบรรทัดธนาคารออกแล้ว (รวม {cfcMoney(stat.dupSum)}) — ใบพวกนี้ไม่มีเลขเช็ค/บัญชีต้นทาง ตัวจับคู่ปกติจึงมองไม่เห็น ถ้าไม่ตัดจะถูกนับเงินซ้ำ 2 รอบ</div>}
-            {stat.noAcct > 0 && <div>ℹ️ <strong>{stat.noAcct} รายการ</strong> <strong>ไม่มีเลขบัญชี</strong> (รวม {cfcMoney(stat.noAcctSum)}) — มาจากใบสำคัญจ่ายที่เอกสารต้นทางไม่ได้บอกว่าจ่ายจากบัญชีไหน (ใบอนุมัติจ่าย AV/AE ไม่มีคอลัมน์นี้เลย · ใบ PS บางใบเว้นช่อง “ธนาคาร”) — ยอดยังเข้างบครบ แต่จะไม่ถูกนับเป็นของบัญชีใดในการ์ดตรวจยอด</div>}
+            {stat.noAcct > 0 && <div>⚠️ <strong>{stat.noAcct} รายการ</strong> <strong>ไม่มีเลขบัญชี</strong> (รวม {cfcMoney(stat.noAcctSum)}) — ใบสำคัญจ่ายที่เอกสารต้นทางไม่ได้บอกว่าจ่ายจากบัญชีไหน (ใบอนุมัติจ่าย AV/AE ไม่มีคอลัมน์นี้เลย · ใบ PS บางใบเว้นช่องธนาคาร) · <strong>บางใบอาจซ้ำกับบรรทัดธนาคารที่นำเข้ามาแล้ว</strong>{' '}
+              <button onClick={() => setAcctAsk(true)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1px solid ' + C.warn, background: '#fff', color: C.warn, borderRadius: 8, padding: '2px 10px' }}>🏦 เลือกบัญชี / ตัดใบซ้ำ</button></div>}
             {stat.noPv > 0 && <div>ℹ️ {stat.noPv} รายการจ่ายออก ยังไม่พบใบสำคัญจ่ายที่ตรงกัน — ลงไฟล์ "รายงานการจ่ายชำระหนี้" + "รายงานอนุมัติจ่าย" ของเดือนนั้นที่หน้า <strong>ใบสำคัญจ่าย</strong> ก่อน</div>}
           </div>
         )}
@@ -2786,6 +2888,12 @@
 
         {addCat && <CfcCatManagerModal master={master} rules={rules} onClose={() => setAddCat(false)}
           onAdd={saveNewCat} onEdit={saveCatEdit} onDelete={saveCatDelete} />}
+
+        {acctAsk && <CfcAcctFixModal rows={rows} banks={bankMaster} value={acctFix} canEdit={canEdit}
+          onClose={() => setAcctAsk(false)}
+          onSave={(m) => { setAcctAsk(false);
+            persist(Object.assign({}, store, { acctFix: { map: m, at: new Date().toISOString() } }))
+              .then(r => toast && toast('บันทึกบัญชีของใบสำคัญจ่ายแล้ว' + (r.shared ? ' · แชร์ทั้งทีม' : ' · บันทึกในเครื่อง'), r.shared ? undefined : 'error')); }} />}
 
         {/* ⚠️ ยืนยัน "จะดันเดือนไหน" ก่อนเสมอ — ผู้ใช้เคยดันผิดเดือนเพราะไม่ทันดูตัวกรองด้านบน
             เลือกเดือนในนี้ = เปลี่ยนตัวกรองของหน้าไปเลย ตัวเลขสรุปในกล่องจึงเป็นของเดือนนั้นจริง ๆ */}
