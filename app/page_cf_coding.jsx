@@ -775,17 +775,31 @@
     Object.keys(snapByAcct).forEach(k => snapByAcct[k].sort((a, b) => (a.d < b.d ? -1 : 1)));
     const need = (registry || []).map(b => cfcAcctKey(b.no, b.no)).filter(Boolean);
     const keys = [...new Set((need.length ? need : Object.keys(snapByAcct)).concat(Object.keys(tl)))];
-    const out = { v: {}, short: {} };
-    (months || []).forEach(m => {
-      const end = m + '-31';
-      let sum = 0, miss = 0, hit = 0;
+    const hasLines = {};   // "บัญชีนี้มีบรรทัดเดินบัญชีของเดือนนั้นจริงไหม" (เข้างบผ่านรายการ)
+    (hist || []).forEach(g => { hasLines[cfcAcctKey(g.acctNo, g.acctLabel) + '|' + g.ym] = true; });
+    const closeAt = (k, m) => {
+      let last = null; (tl[k] || []).forEach(x => { if (x.ym <= m) last = x; });
+      if (last) return last.v;
+      let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= m + '-31') sn = x; });
+      return sn ? sn.v : null;
+    };
+    const out = { v: {}, short: {}, noLine: {} };
+    (months || []).forEach((m, mi) => {
+      const prevM = mi > 0 ? months[mi - 1] : null;
+      let sum = 0, miss = 0, hit = 0, noLine = 0;
       keys.forEach(k => {
-        let last = null; (tl[k] || []).forEach(x => { if (x.ym <= m) last = x; });   // ยกยอดเดือนก่อนมาเอง
-        if (last) { sum += last.v; hit++; return; }
-        let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= end) sn = x; });
-        if (sn) { sum += sn.v; hit++; return; }
-        miss++;
+        const cur = closeAt(k, m);
+        if (cur == null) { miss++; return; }
+        sum += cur; hit++;
+        /* ⚠️ บัญชีที่ "รู้ยอดคงเหลือ" แต่ยังไม่ได้นำเข้ารายการเดินบัญชีของเดือนนั้น
+           → เงินขยับจริงแต่ไม่มีบรรทัดไหนในงบรองรับ ต้องแยกออกมาเป็นบรรทัดของตัวเอง
+           ไม่งั้นไปกองรวมใน "ผลต่างที่ยังกระทบยอดไม่ลงตัว" ก้อนเดียวแล้วไล่ไม่ได้ */
+        if (!hasLines[k + '|' + m] && prevM) {
+          const prev = closeAt(k, prevM);
+          if (prev != null) noLine += cur - prev;
+        }
       });
+      out.noLine[m] = noLine;
       /* ⚠️ ไม่รู้ยอดสักบัญชี = **null (ไม่รู้)** ห้ามคืน 0 — ตัวเดินแถวเงินสดจะเข้าใจว่า
          "เงินในบัญชีเหลือศูนย์จริง" แล้วโยนส่วนต่างมหาศาลลงบรรทัดผลต่าง (เจอตอน regression) */
       out.v[m] = hit ? sum : null;
@@ -1452,7 +1466,15 @@
       .forEach(n => push(['   ⚠ ' + n + ' (ไม่มีในผังหมวด — ต้องแก้)'].concat(withTotal(val(n))), 'nbad'));
     /* บรรทัดสุดท้ายของบล็อกตรวจ: ส่วนที่ยังกระทบยอดกับเงินในบัญชีจริงไม่ลงตัว
        (= ยอดจริงจากธนาคาร − ต้นงวด − สุทธิ − รายการนอกกิจกรรม) · 0 = ลงตัวหมดแล้ว */
-    if (cash) push(['   ผลต่างที่ยังกระทบยอดไม่ลงตัว (ต้องไล่)'].concat(months.map(() => 0)).concat([0]), 'nplug');
+    if (cash) {
+      /* แยก "ส่วนที่อธิบายได้" ออกจากผลต่างก้อนเดียว — ไม่งั้นผู้ใช้เห็นเลขล้านเดียวโดด ๆ
+         แล้วกดดูก็ไม่มีอะไรให้ดู (ผู้ใช้ทักตรง ๆ 2026-09-10) */
+      const cutV = months.map(m => cfcNum((cash.cutByYm || {})[m]));
+      const nlV = months.map(m => cfcNum((cash.noLineByYm || {})[m]));
+      if (cutV.some(v => v)) push(['   ตัดออกเอง (ไม่เกี่ยวข้อง / คีย์ผิดในระบบ)'].concat(withTotal(cutV)), 'nitem');
+      if (nlV.some(v => v)) push(['   บัญชีที่ยังไม่ได้นำเข้ารายการเดินบัญชี (ยอดขยับแต่ไม่มีรายการ)'].concat(withTotal(nlV)), 'nitem');
+      push(['   ผลต่างที่ยังกระทบยอดไม่ลงตัว (ต้องไล่)'].concat(months.map(() => 0)).concat([0]), 'nplug');
+    }
     aoa.kinds = kinds;
     cfcRunCashRows(aoa, months);
     return aoa;
@@ -2305,8 +2327,12 @@
       });
       const stmC = cfcStmClosingByYm(histCheck, months, bankMaster, data.cashflowSnapshots, manual.closing);
       const solid = {}; months.forEach(m => { if (stmC.v[m] != null && !stmC.short[m]) solid[m] = true; });
+      const cutByYm = {};
+      (rows.cut || []).forEach(r => { const m = String(r.iso).slice(0, 7);
+        cutByYm[m] = (cutByYm[m] || 0) + ((r.in || 0) - (r.out || 0)); });
       const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: stmC.v,
-        stmShort: Object.keys(stmC.short).length > 0, stmSolid: solid };
+        stmShort: Object.keys(stmC.short).length > 0, stmSolid: solid,
+        cutByYm: cutByYm, noLineByYm: stmC.noLine };
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
       return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
@@ -2459,7 +2485,12 @@
         });
         const stmSolid = {};
         allMonths.forEach(m => { if (stmClosing[m] != null && (!sendMonths.has(m) || !stmCalc.short[m])) stmSolid[m] = true; });
-        const cash = { opening: openTotal, stmClosing, stmShort, stmSolid };
+        /* เฉพาะ "เดือนที่ส่งจริง" — เดือนเก่ายกค่าเดิมมาทั้งคอลัมน์อยู่แล้ว ใส่ไปจะซ้อนกัน */
+        const cutByYm = {}, noLineByYm = {};
+        (rows.cut || []).forEach(r => { const m = String(r.iso).slice(0, 7);
+          if (sendMonths.has(m)) cutByYm[m] = (cutByYm[m] || 0) + ((r.in || 0) - (r.out || 0)); });
+        allMonths.forEach(m => { if (sendMonths.has(m)) noLineByYm[m] = stmCalc.noLine[m] || 0; });
+        const cash = { opening: openTotal, stmClosing, stmShort, stmSolid, cutByYm, noLineByYm };
         const sumAoa = cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash);
         cfcApplyOldColumns(sumAoa, allMonths, new Set(keptMonths), oldRowAll, oldMonthCol);
         const summary = cfpParseSummary(sumAoa);
@@ -3027,6 +3058,6 @@
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
-    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
+    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
