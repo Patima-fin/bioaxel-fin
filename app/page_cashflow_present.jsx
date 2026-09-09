@@ -317,7 +317,7 @@
     /* ★ AOA ที่หน้า #cf_coding สร้างเอง แนบ `kinds` มาให้ (ชนิดของแต่ละแถวตอน push แถว)
          → ใช้ของจริง ไม่ต้องเดา. ไฟล์ที่คนอัปเองไม่มี kinds → ตกไปใช้ "ย่อหน้า" */
     const KIND2TYPE = { sec: 'section', grp: 'group', item: 'leaf', gsum: 'subtotal',
-      anet: 'net', net: 'grand', cash: 'grand', nsec: 'group', nitem: 'leaf', nbad: 'leaf' };
+      anet: 'net', net: 'grand', cash: 'grand', nsec: 'group', nitem: 'leaf', nbad: 'leaf', nplug: 'leaf' };
     const kinds = (aoa && aoa.kinds) || null;
     const actOf = l => /ดำเนินงาน/.test(l) ? 'op' : /ลงทุน/.test(l) ? 'inv' : /จัดหา/.test(l) ? 'fin' : null;
     for (let i = headerIdx + 1; i < aoa.length; i++) {

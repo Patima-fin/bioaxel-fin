@@ -778,15 +778,17 @@
     const out = { v: {}, short: {} };
     (months || []).forEach(m => {
       const end = m + '-31';
-      let sum = 0, miss = 0;
+      let sum = 0, miss = 0, hit = 0;
       keys.forEach(k => {
         let last = null; (tl[k] || []).forEach(x => { if (x.ym <= m) last = x; });   // ยกยอดเดือนก่อนมาเอง
-        if (last) { sum += last.v; return; }
+        if (last) { sum += last.v; hit++; return; }
         let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= end) sn = x; });
-        if (sn) { sum += sn.v; return; }
+        if (sn) { sum += sn.v; hit++; return; }
         miss++;
       });
-      out.v[m] = sum;
+      /* ⚠️ ไม่รู้ยอดสักบัญชี = **null (ไม่รู้)** ห้ามคืน 0 — ตัวเดินแถวเงินสดจะเข้าใจว่า
+         "เงินในบัญชีเหลือศูนย์จริง" แล้วโยนส่วนต่างมหาศาลลงบรรทัดผลต่าง (เจอตอน regression) */
+      out.v[m] = hit ? sum : null;
       if (miss) out.short[m] = miss;
     });
     return out;
@@ -1262,7 +1264,8 @@
       }
       const ex = extraRows.reduce((a, r) => a + cfcNum(aoa[r][i + 1]), 0);
       const calc = run + cfcNum(aoa[rNet][i + 1]) + ex;
-      const sv = rStm >= 0 ? aoa[rStm][i + 1] : '';
+      const solid = !aoa.stmSolid || aoa.stmSolid[m];
+      const sv = (rStm >= 0 && solid) ? aoa[rStm][i + 1] : '';
       const p = (sv === '' || sv == null) ? 0 : (cfcNum(sv) - calc);
       if (rPlug >= 0) aoa[rPlug][i + 1] = p;
       run = calc + p;
@@ -1344,9 +1347,12 @@
       /* ยอดจริงในบัญชี — ไว้ตรวจว่างบที่คิดได้ตรงกับเงินจริงไหม
          ⚠️ ถ้ายังได้ยอดไม่ครบทุกบัญชี ต้องเตือนที่ "ชื่อบรรทัด" (ตัวเลขยังโชว์ไว้ให้เทียบ)
             ไม่งั้นยอดที่ต่ำกว่าความจริงจะดูเหมือนเงินหาย */
-      const st = months.map(m => cfcNum((cash.stmClosing || {})[m]));
+      const st = months.map(m => { const v = (cash.stmClosing || {})[m]; return v == null ? '' : cfcNum(v); });
       push(['เงินสดคงเหลือปลายงวด จาก STM' + (cash.stmShort ? ' (ยังได้ยอดไม่ครบทุกบัญชี)' : '')]
         .concat(st).concat(['']), 'cash');
+      /* ⚠️ เดือนที่ได้ยอด "ไม่ครบทุกบัญชี" ยังโชว์เลขไว้ให้เทียบ แต่ **ห้ามเอาไปคิดปลายงวด/ผลต่าง**
+         (ยอดบางส่วนไม่ใช่ยอดจริงทั้งพอร์ต จะกลายเป็นผลต่างปลอมก้อนใหญ่) */
+      aoa.stmSolid = cash.stmSolid || null;
     }
     push([], 'gap');
     push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —'], 'nsec');
@@ -1683,11 +1689,13 @@
            ไฟล์ 291 ที่โยนเข้าหน้านี้เป็นแค่ตัวเสริมเฉพาะใบที่ยังไม่มีในระบบ */
       const covered = new Map();    // key → ยอดเงินของใบนั้น (ไว้เทียบยอดก่อนตัดบรรทัดธนาคารทิ้ง)
       const seenDoc = new Set();
+      const vEntries = [];          // { v, rows } — ยังไม่ push ทันที ต้องรอเทียบกับบรรทัดธนาคารก่อน
       const addVoucher = (v, srcTag, bucketId) => {
         const dk = norm(v.doc); if (!dk || seenDoc.has(dk)) return;
         seenDoc.add(dk);
         const amt = Math.abs(v.cheque || v.cash || v.gross);
         cfcCoverKeys(v).forEach(k => covered.set(k, amt));
+        const made = [];
         cfcVoucherToRows(v, acctOf).forEach((r, i) => {
           if (acct && cfcDigits(r.acctNo) !== cfcDigits(acct)) return;
           const row = Object.assign({}, r, {
@@ -1696,8 +1704,9 @@
             matchText: [r.memo, r.payee].filter(Boolean).join(' '),
           });
           row.sug = engine(row);
-          out.push(row);
+          made.push(row);
         });
+        vEntries.push({ v: v, rows: made });
       };
       (data.pvVouchers || []).forEach(pv => {
         const v = cfcPvToVoucher(pv);
@@ -1708,6 +1717,7 @@
       psBuckets.filter(b => !ym || b.ym === ym).forEach(b =>
         (b.vouchers || []).forEach(v => addVoucher(v, 'file', b.id)));
       /* (ข) งบกระทบยอด — เอาเฉพาะบรรทัดที่ "ไม่มีใน 291" (เงินเข้า/โอน/ค่าธรรมเนียม/ใบอนุมัติจ่าย) */
+      const bankRows = [];
       const sel = buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct));
       sel.forEach(b => (b.lines || []).forEach(L => {
         // ลงรหัสจากบิลในใบจ่ายไปแล้ว → ไม่ต้องเอาบรรทัดธนาคารมาซ้ำ
@@ -1728,21 +1738,55 @@
         });
         row.sug = engine(row);
         row.src = 'bank';
-        out.push(row);
+        bankRows.push(row);
       }));
+      /* ⚠️⚠️ ใบ "อนุมัติจ่าย" (AV/AE) ไม่มี เลขเช็ค · บิลย่อย · บัญชีต้นทาง เลย (ไฟล์ต้นทางไม่มีคอลัมน์)
+         ⇒ `cfcCoverKeys` จับคู่กับบรรทัดธนาคารไม่ได้ → **เงินก้อนเดียวถูกนับ 2 รอบ**
+            (ใบอนุมัติจ่าย 1 + บรรทัดธนาคารอีก 1) ยอดจ่ายเกินจริง งบเลยกระทบยอดไม่ลงตัว
+         จับคู่เพิ่มด้วย "ยอดตรง + วันใกล้กัน + ทิศเดียวกัน" แล้วตัดใบอนุมัติจ่ายทิ้ง เก็บบรรทัด
+         ธนาคารไว้ (มีเลขบัญชี = เป็นตัวแทนเงินสดที่ถูกต้องกว่า) พร้อมยกชื่อผู้รับจากใบมาให้
+         ⚠️ เจอมากกว่า 1 ใบที่เข้าเกณฑ์ = กำกวม → ไม่เดา เก็บไว้ทั้งคู่ให้คนตัดสิน */
+      const dayGap = (a, b) => Math.abs((Date.parse(a + 'T00:00:00') - Date.parse(b + 'T00:00:00')) / 86400000);
+      const dupPaired = [];
+      vEntries.forEach(e => {
+        const v = e.v;
+        if (!/อนุมัติจ่าย/.test(v.docSrc || '')) return;
+        if (v.chqNo || (v.bills && v.bills.length)) return;
+        const amt = Math.abs(v.cheque || v.cash || v.gross);
+        if (!amt || !v.iso) return;
+        const cand = bankRows.filter(L => !L.apvDoc && L.out > 0
+          && Math.abs(L.out - amt) < 0.02 && dayGap(L.iso, v.iso) <= 3);
+        if (cand.length !== 1) return;
+        const L = cand[0];
+        L.apvDoc = v.doc;                                  // ธงว่าบรรทัดนี้ = ใบอนุมัติจ่ายใบไหน
+        if (!L.pvPayee) L.pvPayee = v.payee;
+        L.matchHow = L.matchHow || 'apv';
+        L.matchText = [L.memo, L.payee, L.pvPayee, v.memo].filter(Boolean).join(' ');
+        L.sug = engine(L);                                 // เสนอหมวดใหม่หลังได้ชื่อผู้รับเพิ่ม
+        e.dropped = true;
+        dupPaired.push({ doc: v.doc, amt: amt, iso: v.iso, payee: v.payee });
+      });
+      vEntries.forEach(e => { if (!e.dropped) e.rows.forEach(r => out.push(r)); });
+      bankRows.forEach(r => out.push(r));
+      out.dupPaired = dupPaired;
       // เรียงแบบเดียวกับชีต "รวมทุกบัญชี": วันที่ → บัญชี → ลำดับเดิมในไฟล์
-      return out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
+      const sorted = out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
         : (a.acctNo !== b.acctNo ? String(a.acctNo).localeCompare(String(b.acctNo))
         : (Number(a.idx || 0) - Number(b.idx || 0)))));
+      sorted.dupPaired = dupPaired;
+      return sorted;
     }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf]);
 
     const stat = useMemo(() => {
-      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [] };
+      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [],
+        noAcct: 0, noAcctSum: 0, dup: (rows.dupPaired || []).length,
+        dupSum: (rows.dupPaired || []).reduce((a, x) => a + x.amt, 0) };
       const known = new Set(master.map(m => m.name));
       rows.forEach(r => {
         // หมวดที่เคยลงไว้ แต่ตอนนี้ไม่มีในงบหน้าแรกแล้ว → ยอดจะหายจากชีตสรุป ต้องเตือน
         if (r.sug.cat && !known.has(r.sug.cat)) { s.orphan++; if (s.orphanNames.indexOf(r.sug.cat) < 0) s.orphanNames.push(r.sug.cat); }
         s[r.sug.tier]++; s.inSum += r.in; s.outSum += r.out;
+        if (!cfcDigits(r.acctNo)) { s.noAcct++; s.noAcctSum += (r.out || 0) + (r.in || 0); }
         if (r.matchHow === 'suspect') s.suspect++;
         else if (!r.pv && r.out > 0) s.noPv++;
       });
@@ -2129,8 +2173,9 @@
         if (!r.sug.cat) uncodedTot++;
       });
       const stmC = cfcStmClosingByYm(histCheck, months, bankMaster, data.cashflowSnapshots, manual.closing);
+      const solid = {}; months.forEach(m => { if (stmC.v[m] != null && !stmC.short[m]) solid[m] = true; });
       const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: stmC.v,
-        stmShort: Object.keys(stmC.short).length > 0 };
+        stmShort: Object.keys(stmC.short).length > 0, stmSolid: solid };
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
       return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
@@ -2281,7 +2326,9 @@
           stmClosing[m] = stmCalc.v[m];
           if (stmCalc.short[m]) stmShort = true;
         });
-        const cash = { opening: openTotal, stmClosing, stmShort };
+        const stmSolid = {};
+        allMonths.forEach(m => { if (stmClosing[m] != null && (!sendMonths.has(m) || !stmCalc.short[m])) stmSolid[m] = true; });
+        const cash = { opening: openTotal, stmClosing, stmShort, stmSolid };
         const sumAoa = cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash);
         cfcApplyOldColumns(sumAoa, allMonths, new Set(keptMonths), oldRowAll, oldMonthCol);
         const summary = cfpParseSummary(sumAoa);
@@ -2603,10 +2650,12 @@
         )}
 
         {/* แถบเตือน */}
-        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0) && (
+        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0 || stat.noAcct > 0 || stat.dup > 0) && (
           <div style={Object.assign({}, card, { padding: '10px 16px', borderColor: '#f0dcb0', background: C.warnBg, fontSize: 12.5, color: C.warn })}>
             {stat.orphan > 0 && <div>⚠️ <strong>{stat.orphan} รายการ</strong> ลงหมวดที่<strong>ไม่มีในงบหน้าแรกแล้ว</strong> ({stat.orphanNames.slice(0, 3).join(' · ')}{stat.orphanNames.length > 3 ? ' และอีก ' + (stat.orphanNames.length - 3) : ''}) — ยอดจะไม่เข้าบรรทัดไหนในชีตสรุป ให้เพิ่มหมวดนี้กลับในไฟล์ CASH FLOW แล้วกด "สอนระบบ" ใหม่ หรือเลือกหมวดใหม่ให้รายการเหล่านี้</div>}
             {stat.suspect > 0 && <div>⚠️ <strong>{stat.suspect} รายการ</strong> เลขเช็คคล้ายใบสำคัญจ่ายในระบบแต่ <strong>ยอดไม่ตรง</strong> — ไม่ผูกให้โดยตั้งใจ (ของจริงเคยมีเลขเช็คพิมพ์ตกหลักแล้วไปชนใบอื่น) กดขยายแถวเพื่อดูใบที่ใกล้เคียง</div>}
+            {stat.dup > 0 && <div>✅ ตัด <strong>{stat.dup} ใบอนุมัติจ่าย</strong> ที่ซ้ำกับบรรทัดธนาคารออกแล้ว (รวม {cfcMoney(stat.dupSum)}) — ใบพวกนี้ไม่มีเลขเช็ค/บัญชีต้นทาง ตัวจับคู่ปกติจึงมองไม่เห็น ถ้าไม่ตัดจะถูกนับเงินซ้ำ 2 รอบ</div>}
+            {stat.noAcct > 0 && <div>ℹ️ <strong>{stat.noAcct} รายการ</strong> <strong>ไม่มีเลขบัญชี</strong> (รวม {cfcMoney(stat.noAcctSum)}) — มาจากใบสำคัญจ่ายที่เอกสารต้นทางไม่ได้บอกว่าจ่ายจากบัญชีไหน (ใบอนุมัติจ่าย AV/AE ไม่มีคอลัมน์นี้เลย · ใบ PS บางใบเว้นช่อง “ธนาคาร”) — ยอดยังเข้างบครบ แต่จะไม่ถูกนับเป็นของบัญชีใดในการ์ดตรวจยอด</div>}
             {stat.noPv > 0 && <div>ℹ️ {stat.noPv} รายการจ่ายออก ยังไม่พบใบสำคัญจ่ายที่ตรงกัน — ลงไฟล์ "รายงานการจ่ายชำระหนี้" + "รายงานอนุมัติจ่าย" ของเดือนนั้นที่หน้า <strong>ใบสำคัญจ่าย</strong> ก่อน</div>}
           </div>
         )}
