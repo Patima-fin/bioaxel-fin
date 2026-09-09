@@ -807,16 +807,42 @@
     });
     return out;
   }
-  /* ต้นงวดรวมทุกบัญชี ณ เดือนหนึ่ง (ลำดับเดียวกับการ์ดภาพรวม: ไฟล์เดือนนั้น > ปลายงวดเดือนก่อน) */
-  function cfcOpeningTotalAt(hist, ym0) {
+  /* ⚠️ ต้นงวดรวมทุกบัญชี ณ เดือนหนึ่ง — **ต้องได้เลขเดียวกับคอลัมน์ "ต้นงวด · ในระบบ" ของการ์ด
+       ตรวจยอดเป๊ะ ๆ** (ผู้ใช้ชี้เอง 2026-09-10: ต้องเท่ากับ 5,834,332.82 = ผลรวมทุกบัญชีในการ์ด)
+     ลำดับเดียวกับการ์ด: ไฟล์ประกาศ/คำนวณของเดือนนั้น > ปลายงวดเดือนก่อน (ไฟล์ หรือยอดจริงที่คีย์เอง)
+       > **ยอดต้นงวดที่คีย์เอง (`manual.opening`)** > ยอดคงเหลือรายวันก่อนขึ้นเดือน
+     ⚠️ เดิมดูแค่ `hist` (ไฟล์ธนาคาร) ⇒ บัญชีที่ป้ายว่า "คีย์เอง" นับเป็น 0 หายไปทั้งก้อน */
+  function cfcOpeningTotalAt(hist, ym0, registry, snaps, manualOpen, manualClose) {
     const byAcct = {};
-    (hist || []).forEach(g => { (byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] = byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] || []).push(g); });
+    (hist || []).forEach(g => { const k = cfcAcctKey(g.acctNo, g.acctLabel); (byAcct[k] = byAcct[k] || []).push(g); });
+    const mc = {};      // ยอดปลายงวดจริงที่คีย์เอง (ใช้เป็น "ปลายงวดเดือนก่อน" ได้)
+    Object.keys(manualClose || {}).forEach(key => {
+      const i = key.lastIndexOf('|'); if (i < 0) return;
+      (mc[key.slice(0, i)] = mc[key.slice(0, i)] || []).push({ ym: key.slice(i + 1), v: cfcNum(manualClose[key]) });
+    });
+    const snapByAcct = {};
+    (snaps || []).forEach(s2 => {
+      const k = cfcAcctKey(s2.bankAc || s2.Bank_AC, '');
+      if (!k || k === '(ไม่ระบุบัญชี)') return;
+      (snapByAcct[k] = snapByAcct[k] || []).push({ d: String(s2.date || '').slice(0, 10), v: cfcNum(s2.balance) });
+    });
+    Object.keys(snapByAcct).forEach(k => snapByAcct[k].sort((a, b) => (a.d < b.d ? -1 : 1)));
+    const need = (registry || []).map(b => cfcAcctKey(b.no, b.no)).filter(Boolean);
+    const keys = [...new Set(need.concat(Object.keys(byAcct)))];
+    const p = ym0.split('-'); const py = +p[0], pm = +p[1];
+    const prevYm = (pm === 1 ? (py - 1) + '-12' : py + '-' + String(pm - 1).padStart(2, '0'));
     let s = 0;
-    Object.keys(byAcct).forEach(k => {
-      const cur = byAcct[k].find(g => g.ym === ym0);
-      if (cur) { s += cur.opening; return; }
-      let prev = null; byAcct[k].forEach(g => { if (g.ym < ym0 && (!prev || g.ym > prev.ym)) prev = g; });
-      if (prev) s += prev.closingFile;
+    keys.forEach(k => {
+      const cur = (byAcct[k] || []).find(g => g.ym === ym0);
+      if (cur) { s += cur.opening; return; }                                   // ไฟล์ของเดือนนั้น
+      let prev = null;
+      (byAcct[k] || []).forEach(g => { if (g.ym < ym0 && (!prev || g.ym > prev.ym)) prev = { ym: g.ym, v: g.closingFile }; });
+      (mc[k] || []).forEach(x => { if (x.ym < ym0 && (!prev || x.ym >= prev.ym)) prev = x; });
+      if (prev) { s += prev.v; return; }                                       // ปลายงวดเดือนก่อน
+      const mo = (manualOpen || {})[k + '|' + ym0];
+      if (mo != null) { s += cfcNum(mo); return; }                             // ต้นงวดที่คีย์เอง
+      let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= prevYm + '-31') sn = x; });
+      if (sn) s += sn.v;                                                       // ยอดคงเหลือรายวัน
     });
     return s;
   }
@@ -2330,7 +2356,7 @@
       const cutByYm = {};
       (rows.cut || []).forEach(r => { const m = String(r.iso).slice(0, 7);
         cutByYm[m] = (cutByYm[m] || 0) + ((r.in || 0) - (r.out || 0)); });
-      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: stmC.v,
+      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0], bankMaster, data.cashflowSnapshots, manual.opening, manual.closing), stmClosing: stmC.v,
         stmShort: Object.keys(stmC.short).length > 0, stmSolid: solid,
         cutByYm: cutByYm, noLineByYm: stmC.noLine };
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
@@ -2473,9 +2499,14 @@
            · ต้นงวดของเดือนแรก = ค่าเดิมถ้าเดือนแรกไม่ได้อยู่ในรอบที่ส่ง
            · "จาก STM" = ยอดจริงจากบรรทัดธนาคาร (เฉพาะเดือนที่ส่ง) · เดือนเก่าใช้ค่าเดิม */
         const oldBf = oldRowBy(/เงินสด.*ต้นงวด/), oldStm = oldRowBy(/เงินสด.*ปลายงวด.*STM/);
+        /* ⚠️ ต้นงวดของเดือนแรก ต้องเท่ากับคอลัมน์ "ต้นงวด · ในระบบ" ของการ์ดตรวจยอด (รวมทุกบัญชี
+           ในทะเบียน) — `opening` ที่รวมจาก openingByAcct นับเฉพาะบัญชีที่ "มีรายการ" เท่านั้น
+           บัญชีที่รู้แค่ยอดที่คีย์เองจะหายไปทั้งก้อน (ของจริงหาย ~2.79 ล้าน) */
         const m0 = allMonths[0];
-        let openTotal = opening;
+        let openTotal;
         if (m0 && !sendMonths.has(m0) && oldBf && oldMonthCol[m0] != null) openTotal = cfcNum(oldBf[oldMonthCol[m0]]);
+        else if (m0) openTotal = cfcOpeningTotalAt(histCheck, m0, bankMaster, data.cashflowSnapshots, manual.opening, manual.closing);
+        else openTotal = opening;
         const stmCalc = cfcStmClosingByYm(histCheck, allMonths, bankMaster, data.cashflowSnapshots, manual.closing);
         const stmClosing = {}; let stmShort = false;
         allMonths.forEach(m => {
@@ -3058,6 +3089,6 @@
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
-    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
+    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
   });
 })();
