@@ -752,15 +752,18 @@
      ยังขาดอีก = คืนยอดเท่าที่รู้ + ติดธง short เพื่อไปเตือนที่ชื่อบรรทัด (ไม่เว้นว่าง —
      ผู้ใช้ต้องการเห็นตัวเลขไว้เทียบ แต่ต้องรู้ด้วยว่ายังไม่ครบ) */
   function cfcStmClosingByYm(hist, months, registry, snaps, manualClosing) {
-    /* เส้นเวลา "ยอดคงเหลือปลายงวด" ต่อบัญชี — รวมจาก 2 ทางที่หน้านี้ตรวจยอดอยู่แล้ว
-       (pri 1 = ยอดจริงจากธนาคารที่คนคีย์เอง ชนะยอดจากไฟล์ของเดือนเดียวกัน) */
+    /* เส้นเวลา "ยอดคงเหลือปลายงวด" ต่อบัญชี = คอลัมน์ "ปลายงวด" ของการ์ดตรวจยอดเป๊ะ ๆ
+       ⚠️ แถวนี้ชื่อ "จาก STM" ⇒ **ปลายงวดจากไฟล์ (`closingFile`) ต้องมาก่อน** ·
+          "ปลายงวดจริง (คีย์เอง)" เป็นแค่ตัวสำรองตอนไม่มีไฟล์ (pri ต่ำกว่า)
+          เอาค่าที่คีย์มาทับไฟล์เมื่อไร = ยอดจะต่างจากที่การ์ดโชว์ ด้วยส่วนที่ "ไฟล์ขาด"
+          (ของจริงต่าง 15,125 ที่ ส.ค. → ผู้ใช้ทักว่าผิด) */
     const tl = {};
     const push = (k, row) => { if (k && k !== '(ไม่ระบุบัญชี)') (tl[k] = tl[k] || []).push(row); };
-    (hist || []).forEach(g => push(cfcAcctKey(g.acctNo, g.acctLabel), { ym: g.ym, v: g.closingFile, pri: 0 }));
     Object.keys(manualClosing || {}).forEach(key => {
       const i = key.lastIndexOf('|'); if (i < 0) return;
-      push(key.slice(0, i), { ym: key.slice(i + 1), v: cfcNum(manualClosing[key]), pri: 1 });
+      push(key.slice(0, i), { ym: key.slice(i + 1), v: cfcNum(manualClosing[key]), pri: 0 });
     });
+    (hist || []).forEach(g => push(cfcAcctKey(g.acctNo, g.acctLabel), { ym: g.ym, v: g.closingFile, pri: 1 }));
     Object.keys(tl).forEach(k => tl[k].sort((a, b) => (a.ym !== b.ym ? (a.ym < b.ym ? -1 : 1) : a.pri - b.pri)));
     // ตาข่ายสุดท้าย: ยอดคงเหลือรายวันที่คีย์ไว้ (cashflowSnapshots) — แถวล่าสุดที่ไม่เกินสิ้นเดือน
     const snapByAcct = {};
@@ -1506,6 +1509,7 @@
     const [open, setOpen] = useState({});          // docNo → เปิดดูบิลย่อย
     const [teachRes, setTeachRes] = useState(null);
     const [addCat, setAddCat] = useState(false);
+    const [pushAsk, setPushAsk] = useState(false);   // หน้าต่างยืนยัน "จะดันเดือนไหน"
     const fileBank = useRef(null), fileCf = useRef(null);
 
     /* ── โหลดจากส่วนกลาง ── */
@@ -2096,8 +2100,7 @@
       if (typeof cfpParseStm !== 'function' || typeof cfpParseSummary !== 'function' || typeof cfpAccountLabel !== 'function') {
         toast && toast('เปิดหน้า "พรีเซนต์ Cash Flow" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
       }
-      const miss = rows.filter(r => !r.sug.cat).length;
-      if (miss && !confirm('ยังมี ' + miss + ' รายการที่ยังไม่ลงหมวด — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ\\n\\nส่งขึ้นหน้า Cash Flow เลยไหม? (เดือนอื่นที่เคยส่งไว้ไม่หาย)')) return;
+      setPushAsk(false);
       setBusy('กำลังส่งขึ้นหน้า Cash Flow…');
       try {
         const built = buildSheets();
@@ -2343,7 +2346,7 @@
               {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้าไฟล์ EXPRESS</button>}
               {canEdit && <button style={btn()} title="เพิ่ม / แก้ชื่อ / ลบ หมวดในผังงบกระแสเงินสด" onClick={() => setAddCat(true)}>🗂 จัดการหมวด</button>}
               {canEdit && <button style={btn(true)} title="ส่งขึ้นหน้าพรีเซนต์ Cash Flow ทันที ไม่ต้องดาวน์โหลดแล้วอัปกลับ"
-                onClick={sendToCashflow}>📤 ส่งขึ้นหน้า Cash Flow</button>}
+                onClick={() => setPushAsk(true)}>📤 ส่งขึ้นหน้า Cash Flow</button>}
               <button style={btn()} onClick={exportSheet}>⬇️ ส่งออกไฟล์ Excel</button>
             </div>
           </div>
@@ -2685,6 +2688,39 @@
 
         {addCat && <CfcCatManagerModal master={master} rules={rules} onClose={() => setAddCat(false)}
           onAdd={saveNewCat} onEdit={saveCatEdit} onDelete={saveCatDelete} />}
+
+        {/* ⚠️ ยืนยัน "จะดันเดือนไหน" ก่อนเสมอ — ผู้ใช้เคยดันผิดเดือนเพราะไม่ทันดูตัวกรองด้านบน
+            เลือกเดือนในนี้ = เปลี่ยนตัวกรองของหน้าไปเลย ตัวเลขสรุปในกล่องจึงเป็นของเดือนนั้นจริง ๆ */}
+        {pushAsk && (
+          <Modal open title="📤 ส่งขึ้นหน้า Cash Flow" onClose={() => setPushAsk(false)}>
+            <div style={{ display: 'grid', gap: 12, minWidth: 340 }}>
+              <div style={{ fontSize: 13, color: C.mut }}>เลือกเดือนที่จะส่ง — เดือนอื่นที่เคยส่งไว้จะคงตัวเลขเดิมไว้ ไม่ถูกคิดใหม่</div>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.ink }}>เดือนที่จะส่ง</span>
+                <select value={ym} onChange={e => setYm(e.target.value)}
+                  style={{ fontSize: 15, fontWeight: 700, padding: '9px 10px', borderRadius: 10, border: '2px solid ' + C.primary, color: C.primaryD }}>
+                  <option value="">ทุกเดือน ({allYms.length} เดือน)</option>
+                  {allYms.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </label>
+              <div style={{ background: C.soft, borderRadius: 10, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.9, color: C.ink }}>
+                จะส่ง <strong>{rows.length}</strong> รายการ
+                {acct ? <> · เฉพาะบัญชี <strong>{acct}</strong></> : <> · ทุกบัญชี</>}
+                <br />ยังไม่ลงหมวด <strong style={{ color: stat.new ? C.neg : C.pos }}>{stat.new}</strong> รายการ
+                {stat.new > 0 && <span style={{ color: C.neg }}> — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ</span>}
+              </div>
+              {acct && <div style={{ fontSize: 12, color: C.warn, background: C.warnBg, borderRadius: 8, padding: '8px 10px' }}>
+                ⚠️ ตัวกรอง “บัญชี” เปิดอยู่ — จะส่งเฉพาะบัญชีนี้ ถ้าต้องการทั้งเดือนให้ปิดตัวกรองบัญชีก่อน
+              </div>}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button style={btn()} onClick={() => setPushAsk(false)}>ยกเลิก</button>
+                <button style={btn(true)} disabled={!rows.length} onClick={sendToCashflow}>
+                  📤 ส่ง {ym ? 'เดือน ' + ym : 'ทุกเดือน'}
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
 
         {teachRes && (
           <Modal open wide title="📚 เรียนรู้จากไฟล์ CASH FLOW แล้ว" onClose={() => setTeachRes(null)}>
