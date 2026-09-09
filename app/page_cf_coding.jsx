@@ -722,6 +722,38 @@
     });
   }
 
+  /* ── เงินสดคงเหลือจริง (จากบรรทัดธนาคาร) ราย ym รวมทุกบัญชี ──────────────
+     บัญชีที่ไม่มีรายการในเดือนนั้น = ยกปลายงวดเดือนก่อนมา (ไม่งั้นยอดรวมหายเป็นก้อน)
+     ใช้เป็นบรรทัด "เงินสดคงเหลือปลายงวด จาก STM" ท้ายงบ = ตัวตรวจกับยอดที่งบคิดได้ */
+  function cfcStmClosingByYm(hist, months) {
+    const byAcct = {};
+    (hist || []).forEach(g => { (byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] = byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] || []).push(g); });
+    Object.keys(byAcct).forEach(k => byAcct[k].sort((a, b) => (a.ym < b.ym ? -1 : 1)));
+    const out = {};
+    (months || []).forEach(m => {
+      let s = 0;
+      Object.keys(byAcct).forEach(k => {
+        let last = null; byAcct[k].forEach(g => { if (g.ym <= m) last = g; });
+        if (last) s += last.closingFile;
+      });
+      out[m] = s;
+    });
+    return out;
+  }
+  /* ต้นงวดรวมทุกบัญชี ณ เดือนหนึ่ง (ลำดับเดียวกับการ์ดภาพรวม: ไฟล์เดือนนั้น > ปลายงวดเดือนก่อน) */
+  function cfcOpeningTotalAt(hist, ym0) {
+    const byAcct = {};
+    (hist || []).forEach(g => { (byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] = byAcct[cfcAcctKey(g.acctNo, g.acctLabel)] || []).push(g); });
+    let s = 0;
+    Object.keys(byAcct).forEach(k => {
+      const cur = byAcct[k].find(g => g.ym === ym0);
+      if (cur) { s += cur.opening; return; }
+      let prev = null; byAcct[k].forEach(g => { if (g.ym < ym0 && (!prev || g.ym > prev.ym)) prev = g; });
+      if (prev) s += prev.closingFile;
+    });
+    return s;
+  }
+
   /* ปลายงวดของ "เดือนก่อนหน้าที่มีข้อมูล" ของบัญชีนั้น (ไม่จำเป็นต้องเป็น ym-1 —
      เดือนที่ไม่มีไฟล์ให้ข้ามไป) · ym ว่าง = เอาเดือนล่าสุดเท่าที่มี */
   function cfcPrevMonth(hist, acctNo, ym, acctLabel) {
@@ -1152,7 +1184,10 @@
   /* สร้าง AOA ของ "งบกระแสเงินสด" จากยอดราย (หมวด|เดือน)
      แยกออกมานอก component เพื่อให้ทั้งการส่งออกไฟล์และการดันขึ้นหน้า Cash Flow
      (ซึ่งต้องรวมทุกเดือน ไม่ใช่เฉพาะเดือนที่เลือก) ใช้ตัวเดียวกัน */
-  function cfcSummaryAoa(master, months, cell, monLabel, usedCats) {
+  /* ⚠️ `cash` = { opening, stmClosing } → บรรทัดท้ายงบ (ต้นงวดยกมา / ปลายงวด / ปลายงวดจาก STM)
+       ต้องมีให้เหมือนไฟล์ CASH FLOW เดิม ไม่งั้นงบจบห้วน ๆ ที่บรรทัด "เงินสดสุทธิ"
+       ★ 3 แถวนี้อยู่ "ต่อจากบรรทัดเงินสดสุทธิทันที" เหมือนในไฟล์ — index แถวเหนือขึ้นไปไม่ขยับ */
+  function cfcSummaryAoa(master, months, cell, monLabel, usedCats, cash) {
     /* ★ kinds[i] = ชนิดของแถวที่ i — ใช้ตอนจัดสีในไฟล์ Excel เท่านั้น
          สร้างตรงจุดที่ push แถว จะได้ไม่มีตัวเดาชนิดจาก "ช่องว่างหน้าข้อความ" ซ้อนอีกชุด */
     const kinds = [];
@@ -1181,7 +1216,17 @@
       push([], 'gap');
     });
     const net = months.map((m, i) => ['op', 'inv', 'fin'].reduce((a, k) => a + ((actNet[k] || [])[i] || 0), 0));
-    push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)'].concat(withTotal(net)), 'net');
+    push(['เงินสดสุทธิ เพิ่มขึ้น (ลดลง)/Cash increased (decreased)'].concat(withTotal(net)), 'net');
+    if (cash) {
+      const bf = [], bal = []; let run = cfcNum(cash.opening);
+      months.forEach((m, i) => { bf.push(run); run += (net[i] || 0); bal.push(run); });
+      const last = a => (a.length ? a[a.length - 1] : 0);
+      push(['เงินสดต้นงวดยกมา/Cash B/F'].concat(bf).concat([bf.length ? bf[0] : 0]), 'cash');
+      push(['เงินสดคงเหลือปลายงวด/Cash Balance'].concat(bal).concat([last(bal)]), 'cash');
+      // ยอดจริงจากบรรทัดธนาคาร — ไว้ตรวจว่างบที่คิดได้ตรงกับเงินในบัญชีจริงไหม
+      const st = months.map(m => cfcNum((cash.stmClosing || {})[m]));
+      push(['เงินสดคงเหลือปลายงวด จาก STM'].concat(st).concat([last(st)]), 'cash');
+    }
     push([], 'gap');
     push(['— รายการที่ไม่นับเป็นกิจกรรม (ไว้ตรวจ ไม่ต้องวางในงบ) —'], 'nsec');
     push(['   โอนเงินระหว่างบัญชี (ควรเป็น 0 เมื่อรวมทุกบัญชี)'].concat(withTotal(val('โอนเงินระหว่างบัญชี'))), 'nitem');
@@ -1273,6 +1318,11 @@
         xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: 'CDE7D8' } }, border: { top: xsB('medium'), bottom: xsB('medium') } });
         xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 11, bold: true, color: { rgb: XS.brandD } }, alignment: { vertical: 'center' } });
         for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, sz: 11 });
+      } else if (k === 'cash') {
+        rows[r] = { hpt: 20 };
+        xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: 'DDF0E3' } }, border: { bottom: xsB() } });
+        xsCell(ws, r, 0, { font: { name: XS_FONT, sz: 11, bold: true, color: { rgb: XS.brandD } }, alignment: { vertical: 'center' } });
+        for (let c = 1; c < nCol; c++) xsMoney(ws, r, c, { bold: true, sz: 11, ink: XS.ink });
       } else if (k === 'net') {
         rows[r] = { hpt: 24 };
         xsRow(ws, r, nCol, { fill: { patternType: 'solid', fgColor: { rgb: XS.brand } },
@@ -1947,7 +1997,8 @@
         cell[k] = (cell[k] || 0) + v;
         if (!r.sug.cat) uncodedTot++;
       });
-      const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))]);
+      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0]), stmClosing: cfcStmClosingByYm(histCheck, months) };
+      const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
       return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
 
@@ -2044,7 +2095,10 @@
         allTxns.forEach(t => { const k = catOf(t.category) + '|' + String(t.iso).slice(0, 7);
           cell[k] = (cell[k] || 0) + (t.flow || 0); });
         const usedCats = [...new Set(allTxns.map(t => catOf(t.category)))];
-        const summary = cfpParseSummary(cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats));
+        /* บรรทัดท้ายงบ: ต้นงวด = ค่าที่คิดไว้ข้างบน (ครอบคลุมทุกบัญชี ทุกที่มาของยอด)
+           · "จาก STM" = ยอดคงเหลือจริงจากบรรทัดธนาคาร ไว้ตรวจกับยอดที่งบคิดได้ */
+        const cash = { opening, stmClosing: cfcStmClosingByYm(histCheck, allMonths) };
+        const summary = cfpParseSummary(cfcSummaryAoa(master, allMonths, cell, built.monLabel, usedCats, cash));
         const payload = Object.assign({}, old, {
           id: (typeof CFP_ROW_ID === 'string' ? CFP_ROW_ID : 'current'),
           uploadedAt: Date.now(),

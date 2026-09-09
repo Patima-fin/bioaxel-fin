@@ -314,21 +314,42 @@
       return out;
     }
     const nMonths = out.monthLabels.length; let curAct = null;
+    /* ★ AOA ที่หน้า #cf_coding สร้างเอง แนบ `kinds` มาให้ (ชนิดของแต่ละแถวตอน push แถว)
+         → ใช้ของจริง ไม่ต้องเดา. ไฟล์ที่คนอัปเองไม่มี kinds → ตกไปใช้ "ย่อหน้า" */
+    const KIND2TYPE = { sec: 'section', grp: 'group', item: 'leaf', gsum: 'subtotal',
+      anet: 'net', net: 'grand', cash: 'grand', nsec: 'group', nitem: 'leaf', nbad: 'leaf' };
+    const kinds = (aoa && aoa.kinds) || null;
+    const actOf = l => /ดำเนินงาน/.test(l) ? 'op' : /ลงทุน/.test(l) ? 'inv' : /จัดหา/.test(l) ? 'fin' : null;
     for (let i = headerIdx + 1; i < aoa.length; i++) {
-      const row = aoa[i] || []; const label = String(row[0] || '').trim(); if (!label) continue;
+      const row = aoa[i] || []; const raw = row[0] == null ? '' : String(row[0]);
+      const label = raw.trim(); if (!label) continue;
       const vals = []; let hasVal = false;
       for (let k = 1; k <= nMonths; k++) { const n = cfpNum(row[k]); vals.push(n); if (n !== 0) hasVal = true; }
       const total = cfpNum(row[nMonths + 1]); if (total !== 0) hasVal = true;
-      let type = 'leaf', actKey = curAct;
-      if (/^กระแสเงินสดจากกิจกรรม/.test(label)) { type = 'section'; actKey = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null; curAct = actKey; }
-      else if (/^กระแสเงินสดสุทธิจากกิจกรรม/.test(label)) { type = 'net'; const k = /ดำเนินงาน/.test(label) ? 'op' : /ลงทุน/.test(label) ? 'inv' : /จัดหา/.test(label) ? 'fin' : null; if (k) out.actNet[k] = total; }
-      else if (/เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(label)) { type = 'grand'; out.net = total; }
-      else if (/เงินสด.*ต้นงวด/.test(label)) { type = 'grand'; out.opening = total; }
-      else if (/เงินสด.*ปลายงวด/.test(label)) { type = 'grand'; out.ending = total; }
+      // ── ค่าสรุป: อ่านจาก "ชื่อแถว" อย่างเดียว ไม่เกี่ยวกับว่าแถวนั้นถูกจัดเป็นชนิดไหน ──
+      const isSec = /^กระแสเงินสดจากกิจกรรม/.test(label), isActNet = /^กระแสเงินสดสุทธิจากกิจกรรม/.test(label);
+      if (isSec) curAct = actOf(label);
+      if (isActNet) { const k = actOf(label); if (k) out.actNet[k] = total; }
+      if (/เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(label)) out.net = total;
+      else if (/เงินสด.*ต้นงวด/.test(label)) out.opening = total;
+      else if (/เงินสด.*ปลายงวด/.test(label)) out.ending = total;
+      // ── ชนิดแถว ──
+      let type;
+      const kind = kinds ? kinds[i] : null;
+      if (kind && KIND2TYPE[kind]) type = KIND2TYPE[kind];
+      else if (isSec) type = 'section';
+      else if (isActNet) type = 'net';
+      else if (/เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น|เงินสด.*(ต้นงวด|ปลายงวด)/.test(label)) type = 'grand';
       else if (/^รวม/.test(label)) type = 'subtotal';
-      else if (!hasVal) type = 'group';
-      else type = 'leaf';
-      out.rows.push({ label, vals, total, type, actKey });
+      else {
+        /* ⚠️ ห้ามเดาว่า "ยอดเป็น 0 ทุกเดือน = หัวข้อกลุ่ม" — รายการย่อยที่ยังไม่มียอด
+           (เช่น "ชำระคืนเงินกู้ - ZICO", "เจาะจงไม่ได้") จะกลายเป็นหัวข้อสีเขียวกางได้
+           และ **ตัวเลขทั้งแถวถูกซ่อน** (`emptyVals`). ใช้ "ย่อหน้า" แทน — ทั้งไฟล์ CASH FLOW
+           จริงและ AOA ที่เราสร้าง ย่อหน้ารายการย่อย 6 ช่อง / หัวข้อกลุ่ม 1-5 ช่อง */
+        const ind = raw.length - raw.replace(/^\s+/, '').length;
+        type = ind >= 6 ? 'leaf' : (ind > 0 ? 'group' : (hasVal ? 'leaf' : 'group'));
+      }
+      out.rows.push({ label, vals, total, type, actKey: curAct });
     }
     return out;
   }
