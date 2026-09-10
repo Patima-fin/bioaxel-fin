@@ -1683,6 +1683,23 @@
   }
 
   /* ══════════════ หน้าหลัก ══════════════ */
+  /* ── ชิปหมวดของแท็บ "มั่นใจ" — เฉพาะหมวดที่ยังมีรายการมั่นใจรอยืนยัน พร้อมจำนวน
+     ยืนยันหมดแล้วชิปหายไปเอง ⇒ เห็นทันทีว่า "เหลือนิดเดียว" (พอร์ตจาก WTP 2026-09-11)
+     เรียงจำนวนมาก → น้อย (เท่ากันเรียงตามลำดับผังหมวด) · ชื่อย่อตัด "เงินสดจ่าย/รับ (เกี่ยวกับ/จากการ)" ออกให้อ่านเร็ว ── */
+  const cfcShortCat = (s) => {
+    const t = cfcT(s).replace(/^เงินสด(จ่าย|รับ)\s*-?\s*(เกี่ยวกับ|จากการ|จาก)?\s*-?\s*/, '').trim() || cfcT(s);
+    return t.length > 28 ? t.slice(0, 27) + '…' : t;
+  };
+  function cfcAutoCatChips(rows, master) {
+    const by = {};
+    (rows || []).forEach(r => { if (r.sug && r.sug.tier === 'auto' && r.sug.cat) by[r.sug.cat] = (by[r.sug.cat] || 0) + 1; });
+    const order = {}, byName = {};
+    (master || []).forEach((m, i) => { if (order[m.name] == null) { order[m.name] = i; byName[m.name] = m; } });
+    const rank = (cat) => (order[cat] == null ? 1e9 : order[cat]);
+    return Object.keys(by).map(cat => ({ cat, n: by[cat], short: cfcShortCat(cat), flow: cfcFlowOf(byName[cat] || { name: cat }) }))
+      .sort((a, b) => (b.n - a.n) || (rank(a.cat) - rank(b.cat)));
+  }
+
   function CfCodingPage({ data, setData, toast }) {
     const canEdit = typeof WTPAuth !== 'undefined' && WTPAuth.can ? WTPAuth.can('canEdit') : true;
     const [store, setStore] = useState(() => cfcLoadLocal());
@@ -1698,6 +1715,10 @@
     const [pushAsk, setPushAsk] = useState(false);   // หน้าต่างยืนยัน "จะดันเดือนไหน"
     const [acctAsk, setAcctAsk] = useState(false);   // หน้าต่างเลือกบัญชีให้รายการที่ไม่มีเลขบัญชี
     const [cutAsk, setCutAsk] = useState(false);     // หน้าต่างดู/เอากลับรายการที่ตัดออก
+    const [codeF, setCodeF] = useState('');          // ชิปหมวดที่เลือกในแท็บ "มั่นใจ": '' (ดูทั้งหมด) | 'c:<หมวด>'
+    // ภาพรวมธนาคาร กางตารางรายบัญชีไหม — ค่าเริ่ม = พับ (บัญชีเยอะเกะกะ · ผู้ใช้ขอ 2026-09-11) · จำในเครื่องต่อคน
+    const [ovOpen, setOvOpen] = useState(() => { try { return localStorage.getItem('bio-cfcode-ov') === '1'; } catch (e) { return false; } });
+    const toggleOv = () => { const n = !ovOpen; setOvOpen(n); try { localStorage.setItem('bio-cfcode-ov', n ? '1' : '0'); } catch (e) {} };
     const fileBank = useRef(null), fileCf = useRef(null);
 
     /* ── โหลดจากส่วนกลาง ── */
@@ -2070,15 +2091,28 @@
       return { all, tot, loaded, carried, gapBreak, fileShort, fileOk, openMismatch, total: bankMaster.length, missingActive };
     }, [acctCheck, histCheck, bankMaster, ym, manual, uncodedByAcct]);
 
+    /* ── ชิปหมวด — มีเฉพาะแท็บ "มั่นใจ": เฉพาะหมวดที่ยังมีรายการมั่นใจรอยืนยัน (พร้อมจำนวน) + "ดูทั้งหมด"
+       กดชิป = กรองหมวดนั้น แล้ว "ยืนยันที่กรองอยู่" ทีเดียว · ยืนยันหมดแล้วชิปหายเอง ⇒ เห็นทันทีว่าเหลือกี่หมวด
+       ★ ผู้ใช้ไม่อยากเห็นเครื่องมือกลุ่มตลอด — เอาเฉพาะตอนดูรายการที่มั่นใจ (พอร์ตจาก WTP 2026-09-11)
+         ⇒ ออกจากแท็บ "มั่นใจ" = ล้างตัวกรองหมวด (ปุ่มแท็บ) · ตัวเลขบนแท็บยังนับทั้งหมดเหมือนเดิม */
+    const codeChips = useMemo(() => cfcAutoCatChips(rows, master), [rows, master]);
+    const codeRows = useMemo(() => {
+      if (!codeF || tab !== 'auto' || codeF.indexOf('c:') !== 0) return rows;
+      const c = codeF.slice(2);
+      return rows.filter(r => r.sug.cat === c);
+    }, [rows, codeF, tab]);
     const shown = useMemo(() => {
       const needle = cfcNorm(q);
-      return rows.filter(r => {
+      return codeRows.filter(r => {
         if (tab !== 'all' && r.sug.tier !== tab) return false;
         if (tab === 'all' && q === '' ) return true;
         if (!needle) return true;
         return cfcNorm([r.docNo, r.note, r.pvPayee, r.sug.cat, r.pv && r.pv.PL_PV_No].join(' ')).includes(needle);
       });
-    }, [rows, tab, q]);
+    }, [codeRows, tab, q]);
+    /* ปุ่มยืนยันทั้งก้อน — มีเฉพาะแท็บ "มั่นใจ": ยืนยันเฉพาะที่ระบบมั่นใจ + มีหมวดแล้ว + ที่แสดงอยู่ (ตามหมวด/คำค้นที่กรอง)
+       ⚠️ ห้ามมีในแท็บ "ทั้งหมด" — ปุ่มเดียวจะยืนยันรวมรายการที่ระบบยังไม่มั่นใจไปด้วย */
+    const pendingShown = useMemo(() => (tab === 'auto' ? shown.filter(r => r.sug.tier === 'auto' && r.sug.cat) : []), [shown, tab]);
 
     /* ── เขียนกฎ (= การยืนยันของคน) ── */
     function learn(nextRulesMap, msg) {
@@ -2122,11 +2156,16 @@
       setExcluded(row, why);
     }
 
-    function acceptAllAuto() {
+    /* ยืนยันทั้งก้อน (แท็บ "มั่นใจ") — เฉพาะที่แสดงอยู่ตามชิปหมวด/คำค้น · กฎชุดเดียวเขียนครั้งเดียว
+       คีย์ที่เรียน = doc / text / memo เหมือนปุ่ม "ยืนยันที่ระบบมั่นใจทั้งหมด" เดิม (ไม่ดันกฎคู่ค้าแบบยกก้อน) */
+    function confirmShown() {
       if (!canEdit) return;
-      const cand = rows.filter(r => r.sug.tier === 'auto' && r.sug.cat);
+      const cand = pendingShown;
       if (!cand.length) { toast && toast('ไม่มีรายการที่ระบบมั่นใจรออยู่'); return; }
-      if (!confirm('ยืนยันหมวดที่ระบบเสนอ ' + cand.length + ' รายการ (เฉพาะที่ขึ้นว่า "มั่นใจ")?\nยืนยันแล้วระบบจะจำไว้ใช้กับเดือนถัดไป')) return;
+      const cats = [...new Set(cand.map(r => r.sug.cat))];
+      if (!confirm('ยืนยันหมวดที่ระบบเสนอ ' + cand.length + ' รายการที่แสดงอยู่ (เฉพาะที่ขึ้นว่า "มั่นใจ")?'
+        + '\nหมวด: ' + cats.slice(0, 5).join(' · ') + (cats.length > 5 ? ' และอีก ' + (cats.length - 5) + ' หมวด' : '')
+        + '\nยืนยันแล้วระบบจะจำไว้ใช้กับเดือนถัดไป')) return;
       const map = Object.assign({}, rules);
       const who = (typeof WTPAuth !== 'undefined' && WTPAuth.currentUser && WTPAuth.currentUser()) || null;
       const by = who ? (who.displayName || who.username) : '', at = new Date().toISOString();
@@ -2137,7 +2176,8 @@
         const mk2 = cfcNorm(r.memo || '');
         if (mk2.length > 3) map['memo:' + mk2] = { cat: r.sug.cat, n: ((map['memo:' + mk2] && map['memo:' + mk2].cat === r.sug.cat ? Number(map['memo:' + mk2].n) || 1 : 0) + 1), by, at };
       });
-      learn(map, 'ยืนยัน ' + cand.length + ' รายการแล้ว');
+      learn(map, 'ยืนยัน ' + cand.length + ' รายการ (' + cats.length + ' หมวด) แล้ว');
+      if (codeF) setCodeF('');
     }
 
     /* เพิ่มหมวดใหม่ — แทรกต่อท้ายกลุ่มที่เลือก (ลำดับใน master = ลำดับแถวของชีตสรุป) */
@@ -2661,33 +2701,72 @@
           </div>
         </div>
 
-        {/* KPI + ตัวกรองสถานะ */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {/* KPI + ตัวกรองสถานะ · ปุ่มยืนยันทั้งก้อน + แถบชิปหมวด (ด้านล่าง) โผล่เฉพาะแท็บ "มั่นใจ" (ผู้ใช้ไม่อยากเห็นตลอด) */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           {[['all', 'ทั้งหมด', stat.n, C.mut], ['locked', CFC_TIER.locked.label, stat.locked, C.pos],
             ['auto', CFC_TIER.auto.label, stat.auto, C.info], ['ask', CFC_TIER.ask.label, stat.ask, C.warn],
             ['new', CFC_TIER.new.label, stat.new, C.neg]].map(([k, label, n, col]) => (
-            <button key={k} onClick={() => setTab(k)} style={{
+            <button key={k} onClick={() => { setTab(k); if (k !== 'auto') setCodeF(''); }} style={{
               cursor: 'pointer', border: '1px solid ' + (tab === k ? col : C.line), background: tab === k ? col : '#fff',
               color: tab === k ? '#fff' : C.ink, borderRadius: 12, padding: '8px 16px', fontSize: 13, fontWeight: 700,
             }}>{label} <span style={{ opacity: .8 }}>{n}</span></button>
           ))}
-          {canEdit && stat.auto > 0 && (
-            <button onClick={acceptAllAuto} style={Object.assign({}, btn(true), { marginLeft: 'auto' })}>
-              ✅ ยืนยันที่ระบบมั่นใจทั้งหมด ({stat.auto})
+          {canEdit && pendingShown.length > 0 && (
+            <button onClick={confirmShown} title="ยืนยันหมวดที่ระบบเสนอให้ทุกรายการที่มั่นใจและแสดงอยู่ตอนนี้" style={Object.assign({}, btn(true), { marginLeft: 'auto' })}>
+              ✅ {codeF || cfcT(q) ? 'ยืนยันที่กรองอยู่ ' : 'ยืนยันที่มั่นใจทั้งหมด '}{pendingShown.length} รายการ
             </button>
           )}
         </div>
+
+        {/* แถบชิปหมวดของแท็บ "มั่นใจ" — เฉพาะหมวดที่ยังเหลือรายการ (ยืนยันหมด = ชิปหาย) + "ดูทั้งหมด" */}
+        {tab === 'auto' && (() => {
+          const autoN = codeChips.reduce((a, c) => a + c.n, 0);
+          const doneF = codeF && !codeChips.some(c => codeF === 'c:' + c.cat);   // ยืนยันทีละแถวจนหมดหมวดที่เลือกอยู่
+          const chip = (on) => ({ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, padding: '4px 5px 4px 11px',
+            fontSize: 12.5, fontWeight: 600, border: '1px solid ' + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : C.ink });
+          const badge = (on) => ({ borderRadius: 999, padding: '1px 8px', fontSize: 11.5, fontWeight: 800, background: on ? 'rgba(255,255,255,.22)' : C.soft, color: on ? '#fff' : C.primaryD });
+          return (
+            <div style={Object.assign({}, card, { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', padding: '8px 10px',
+              maxHeight: 142, overflowY: 'auto' })}>{/* ต้นเดือนมีหลายสิบหมวด — เลื่อนในแถบ ไม่ดันตารางลงไปไกล */}
+              {!codeChips.length && !doneF
+                ? <span style={{ fontSize: 12.5, color: C.pos, fontWeight: 700 }}>✓ ยืนยันรายการที่มั่นใจครบแล้ว</span>
+                : <Fragment>
+                  <span style={{ fontSize: 12, color: C.mut, fontWeight: 700, marginRight: 2 }}>รายการที่มั่นใจ เหลือ {codeChips.length} หมวด · {autoN} รายการ</span>
+                  <button onClick={() => setCodeF('')} style={chip(!codeF)}>ดูทั้งหมด <span style={badge(!codeF)}>{autoN}</span></button>
+                  {codeChips.map(c => {
+                    const on = codeF === 'c:' + c.cat, fm = CFC_FLOW_META[c.flow] || CFC_FLOW_META.out;
+                    return (
+                      <button key={c.cat} onClick={() => setCodeF(on ? '' : 'c:' + c.cat)} style={chip(on)}
+                        title={c.cat + ' — มั่นใจ ' + c.n + ' รายการ' + (on ? ' (กดอีกครั้ง = ดูทั้งหมด)' : '')}>
+                        <span style={{ color: on ? '#fff' : fm.color, fontSize: 10 }}>{fm.mark}</span>
+                        <span>{c.short}</span>
+                        <span style={badge(on)}>{c.n}</span>
+                      </button>
+                    );
+                  })}
+                  {doneF && <span style={Object.assign(chip(true), { cursor: 'default', background: C.pos, borderColor: C.pos, paddingRight: 11 })}>
+                    ✓ {cfcShortCat(codeF.slice(2))} · ยืนยันครบแล้ว</span>}
+                </Fragment>}
+            </div>
+          );
+        })()}
 
         {/* ── ภาพรวมธนาคาร ────────────────────────────────────────────────────
              ⚠️ รอบก่อนยัด "ตัวเลข + ช่องกรอก + คำอธิบายยาว" ซ้อนกันในเซลล์เดียว
                 → แต่ละแถวสูงไม่เท่ากัน ขอบช่องกรอกไม่ตรงแนว อ่านยาก (ผู้ใช้ตีกลับ 2 รอบ)
              โครงนี้: จับคู่ "ระบบ ↔ ที่คีย์" เป็น 2 คอลัมน์ย่อยใต้หัวเดียวกัน ทั้งต้นงวด
              และปลายงวด → ทุกเซลล์เป็นตัวเลขบรรทัดเดียว ชิดขวาตรงแนวกันหมด
-             ไม่ตรงกัน = ช่องที่คีย์เป็นสีแดง + ชิปสถานะบอกจำนวน (ไม่ต้องมีข้อความยาวในเซลล์) */}
+             ไม่ตรงกัน = ช่องที่คีย์เป็นสีแดง + ชิปสถานะบอกจำนวน (ไม่ต้องมีข้อความยาวในเซลล์)
+             พับ/กางได้ (กดหัวการ์ด) — ค่าเริ่มพับ แต่ยังเห็นยอดรวม + ชิปสถานะ (ขาดไฟล์/ไม่ตรงยอด) ครบ (2026-09-11) */}
         {buckets.length > 0 && (
           <div style={Object.assign({}, card, { padding: 0, overflow: 'hidden' })}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'baseline', justifyContent: 'space-between', padding: '13px 18px 9px' }}>
-              <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink }}>🏦 ภาพรวมธนาคาร</div>
+              <button onClick={toggleOv} aria-expanded={ovOpen} title={ovOpen ? 'ซ่อนตารางรายบัญชี' : 'แสดงตารางรายบัญชี'}
+                style={{ cursor: 'pointer', border: 'none', background: 'transparent', padding: 0, fontFamily: 'inherit', fontSize: 14.5, fontWeight: 800, color: C.ink,
+                  display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ display: 'inline-block', fontSize: 10, color: C.mut, transition: 'transform .15s', transform: ovOpen ? 'rotate(90deg)' : 'none' }}>▶</span>
+                🏦 ภาพรวมธนาคาร
+              </button>
               <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12.5, color: C.mut }}>
                 <span>รับรวม <strong style={{ color: C.pos, fontVariantNumeric: 'tabular-nums', fontSize: 13.5 }}>{cfcMoney(overview.tot.inSum)}</strong></span>
                 <span>จ่ายรวม <strong style={{ color: C.neg, fontVariantNumeric: 'tabular-nums', fontSize: 13.5 }}>{cfcMoney(overview.tot.outSum)}</strong></span>
@@ -2703,8 +2782,12 @@
               {overview.openMismatch > 0 && <CfcChip tone="bad">ต้นงวดไม่ตรงที่คีย์ {overview.openMismatch}</CfcChip>}
               {overview.fileShort > 0 && <CfcChip tone="bad">ไม่ตรงยอดธนาคาร {overview.fileShort}</CfcChip>}
               {overview.fileShort === 0 && overview.fileOk > 0 && <CfcChip tone="ok">ตรงยอดธนาคาร {overview.fileOk}</CfcChip>}
+              <button onClick={toggleOv} style={{ marginLeft: 'auto', cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.primaryD,
+                borderRadius: 8, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                {ovOpen ? '▴ ซ่อนรายบัญชี' : '▾ ดูรายบัญชี (' + overview.all.length + ')'}</button>
             </div>
 
+            {ovOpen && <Fragment>
             <div style={{ overflowX: 'auto' }}>
               <table className="tbl tbl-compact" style={{ width: '100%', minWidth: 1090, fontVariantNumeric: 'tabular-nums' }}>
                 <thead>
@@ -2839,6 +2922,7 @@
               คอลัมน์คู่ = <strong style={{ color: C.mut }}>ในระบบ</strong> (จากไฟล์ / ยกมาจากเดือนก่อน) เทียบกับ <strong style={{ color: C.mut }}>ที่คีย์จากสมุดบัญชี</strong> — ช่องคีย์ขึ้นสีแดงเมื่อไม่ตรง แล้วชิปสถานะบอกจำนวนที่ต่าง<br />
               ใต้ต้นงวดบอกที่มา + ผลเทียบกับเดือนก่อน (✓ / ✗) · บัญชีที่เดือนนั้นไม่มีรายการ ติ๊ก “ไม่มีการเคลื่อนไหว” แล้วจะไม่เตือน
             </div>
+            </Fragment>}
           </div>
         )}
 
@@ -2911,6 +2995,9 @@
                               <div style={{ fontSize: 10.5, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <span style={{ color: fm.color, fontWeight: 700 }}>{fm.mark} {fm.label}</span>
                                 <span style={{ color: CFC_ACT_COLOR[r.sug.act] || C.mut }}>{CFC_ACT_TH[r.sug.act] || '(ไม่นับเป็นกิจกรรม)'}</span>
+                                {tab === 'auto' && r.sug.tier === 'auto' && codeF !== 'c:' + r.sug.cat &&
+                                  <button onClick={() => setCodeF('c:' + r.sug.cat)} title="กรองเฉพาะรายการที่มั่นใจของหมวดนี้ แล้วยืนยันทั้งหมวดได้ทีเดียว"
+                                    style={{ cursor: 'pointer', border: 'none', background: 'transparent', padding: 0, fontSize: 10.5, color: C.primary, fontWeight: 700 }}>🔍 กรองหมวดนี้</button>}
                               </div>
                             );
                           })()}
@@ -3089,6 +3176,6 @@
   window.CfCodingPage = CfCodingPage;
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
-    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED,
+    cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED, cfcAutoCatChips, cfcShortCat,
   });
 })();
