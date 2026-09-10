@@ -1067,12 +1067,19 @@
     const kept = (existingProjects || []).filter(p => { const c = String(p['Contract No.'] || p.code || '').trim(); return c && !inFile.has(c); });
     const merged = [...outRows, ...kept];
 
-    // โครงการหายไป: เลขสัญญาจริงที่เคยมี แต่ไม่อยู่ในไฟล์ใหม่ (synthetic ไม่นับ)
+    // โครงการที่ "ไม่อยู่ในไฟล์นี้" (ถูกคงไว้ด้านบน) — นับโครงที่ยังไม่มีเลขสัญญา (WS-/XL-) ด้วย
+    // ★ เดิมข้าม synthetic → โครงรอลงนามที่วิศวกรลบ/เปลี่ยนชื่อในไฟล์ ค้างในระบบเงียบ ๆ
+    //   (เคสจริง 2026-09-10: ไฟล์ Main all70 เหลือ 7 โครง แต่เว็บยังโชว์ FY70 = 12)
+    //   preselect = ไม่มีเลขสัญญา + ไฟล์นี้มีชีตปีงบนั้น → หน้าสรุปติ๊กรอไว้ ผู้ใช้กดลบเอง
+    const fileYears = new Set(mainSheets.map(_yr));
     (existingProjects || []).forEach(p => {
       const c = String(p['Contract No.'] || p.code || '').trim();
-      if (!c || inFile.has(c) || /^(XL|WS)-/i.test(c)) return;
+      if (!c || inFile.has(c)) return;
+      const synthetic = /^(XL|WS)-/i.test(c);
+      const fy = deriveFy(p);
       const nm = String(p['พื้นที่'] || p.name || '').trim();
-      diff.missing.push({ code: c, name: c + (nm ? ' · ' + nm : '') });
+      diff.missing.push({ id: p.id || null, code: c, name: synthetic ? (nm || '(ไม่มีชื่อ)') : c + (nm ? ' · ' + nm : ''),
+        fy, synthetic, preselect: synthetic && fileYears.has(String(fy)), contract: contractAmtOf(p) });
     });
 
     return { merged, diff, stats: { totalCols: colOrder.length + 1, totalRows: outRows.length, cancelledCount, ghostCount, newCount, preservedCount, keptCount: kept.length,

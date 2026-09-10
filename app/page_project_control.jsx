@@ -676,7 +676,7 @@ function PcExportModal({ rows, scopeLabel, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // PROJECT DRAWER (right slide-out) — detail + editable Finance Master
 // ═══════════════════════════════════════════════════════════════════════════
-function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
+function PcDrawer({ row, canEdit, onClose, onSaveFinance, onDelete }) {
   const [tab, setTab] = pcSt('overview');
   const U = PCU;
   const Field = ({ label, value, mono }) => (
@@ -815,6 +815,13 @@ function PcDrawer({ row, canEdit, onClose, onSaveFinance }) {
           )}
           {tab === 'finance' && <PcFinanceEditor row={row} canEdit={canEdit} onSave={onSaveFinance} />}
         </div>
+        {/* footer: ลบโครงการ — โชว์เฉพาะเมื่อส่ง onDelete มา (ลืมต่อสาย = ไม่มีปุ่ม ไม่ใช่ปุ่มตาย) */}
+        {onDelete && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px', background: '#fff', borderTop: '1px solid #e6ecf4' }}>
+            <span style={{ flex: 1, fontSize: 10.5, color: '#94a3b8', lineHeight: 1.45 }}>ลบเฉพาะในระบบ · ถ้าโครงการนี้ยังอยู่ในไฟล์ Excel จะกลับมาตอนอัปโหลดครั้งถัดไป</span>
+            <button onClick={() => onDelete(row)} style={{ ...pcBtn, flex: '0 0 auto', background: '#fff', color: '#b91c1c', border: '1px solid #fca5a5', padding: '0 14px' }}>🗑 ลบโครงการนี้</button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -994,15 +1001,35 @@ function PcAdvancedFilter({ rows, conds, mode, onApply, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // UPLOAD DIFF (แจ้งเตือนความเปลี่ยนแปลงหลัง upload Excel)
 // ═══════════════════════════════════════════════════════════════════════════
-function PcUploadDiff({ diff, stats, onClose }) {
+function PcUploadDiff({ diff, stats, onClose, onDelete }) {
+  const missing = diff.missing || [];
   const groups = [
     { key: 'signed', icon: '✍️', label: 'ลงนามใหม่', color: '#2e8b4a', bg: '#dceaff', items: diff.signed || [], hint: 'เปลี่ยนจาก “รอลงนาม” → มีเลขสัญญาจริง' },
     { key: 'added', icon: '➕', label: 'โครงการใหม่', color: '#15803d', bg: '#dcfce7', items: diff.added || [], hint: 'เลขสัญญาที่ไม่เคยมีในระบบ' },
     { key: 'cancelled', icon: '🔴', label: 'ยกเลิกเพิ่ม', color: '#b91c1c', bg: '#fee2e2', items: diff.cancelled || [], hint: 'เพิ่งถูกตั้งสถานะยกเลิกในไฟล์นี้' },
-    { key: 'missing', icon: '➖', label: 'โครงการหายไป', color: '#b45309', bg: '#ffedd5', items: diff.missing || [], hint: 'มีในระบบเดิม แต่ไม่อยู่ในไฟล์ใหม่ (ยังคงเก็บไว้ ไม่ลบ)' },
+    { key: 'missing', icon: '➖', label: 'ไม่อยู่ในไฟล์', color: '#b45309', bg: '#ffedd5', items: missing,
+      hint: onDelete ? 'มีในระบบเดิม แต่ไม่อยู่ในไฟล์นี้ — ถ้าไม่ลบจะค้างอยู่ในระบบ · ติ๊กโครงการที่ไม่มีเลขสัญญาไว้ให้แล้ว ตรวจก่อนกดลบ'
+        : 'มีในระบบเดิม แต่ไม่อยู่ในไฟล์นี้ (ยังคงเก็บไว้ ไม่ลบ)' },
   ];
-  const [open, setOpen] = pcSt(groups.find(g => g.items.length) ? groups.find(g => g.items.length).key : null);
+  // ลบได้เฉพาะเมื่อมีสิทธิ์ (onDelete) + แถวมี id · ติ๊กรอเฉพาะ preselect (ไม่มีเลขสัญญา + ไฟล์มีชีตปีงบนั้น)
+  const deletable = onDelete ? missing.filter(it => it.id) : [];
+  const [pick, setPick] = pcSt(() => new Set(deletable.filter(it => it.preselect).map(it => String(it.id))));
+  const firstOpen = deletable.length ? 'missing' : (groups.find(g => g.items.length) || {}).key || null;
+  const [open, setOpen] = pcSt(firstOpen);
   const nothing = groups.every(g => !g.items.length);
+  const allPicked = deletable.length > 0 && deletable.every(it => pick.has(String(it.id)));
+  const togglePick = (id) => setPick(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const doDelete = () => {
+    const chosen = deletable.filter(it => pick.has(String(it.id)));
+    if (!chosen.length) return;
+    const real = chosen.filter(it => !it.synthetic).length;
+    const list = chosen.slice(0, 12).map(it => '• ' + (it.synthetic ? '(ไม่มีเลข) ' : '') + it.name + (it.fy ? '  · FY' + it.fy : '')).join('\n');
+    if (!window.confirm('ลบ ' + chosen.length + ' โครงการที่ไม่อยู่ในไฟล์ออกจากระบบ?\n\n' + list +
+      (chosen.length > 12 ? '\n…และอีก ' + (chosen.length - 12) + ' รายการ' : '') +
+      (real ? '\n\n⚠️ มี ' + real + ' รายการที่มีเลขสัญญาจริง — แน่ใจว่าเลิกใช้แล้ว' : '') +
+      '\n\nFinance Master (LG / ผู้รับโอนสิทธิ์) ไม่ถูกลบ')) return;
+    onDelete(chosen.map(it => it.id));
+  };
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(8,18,34,.42)', zIndex: 720, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(560px,96vw)', maxHeight: '84vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(13,31,58,.28)', overflow: 'hidden' }}>
@@ -1030,18 +1057,35 @@ function PcUploadDiff({ diff, stats, onClose }) {
               {open === g.key && (
                 <div style={{ padding: '4px 12px 10px' }}>
                   <div style={{ fontSize: 10.5, color: '#94a3b8', margin: '2px 0 8px' }}>{g.hint}</div>
-                  {g.items.map((it, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid #f1f5f9', fontSize: 11.5 }}>
-                      <span className="num" style={{ color: 'var(--brand-700)', fontWeight: 600, minWidth: 76, flex: '0 0 auto' }}>{/^(XL|WS)-/i.test(it.code) ? '(ไม่มีเลข)' : it.code}</span>
-                      <span style={{ color: 'var(--ink-900)' }}>{it.name.replace(/^[A-Z0-9\-]+ · /, '')}{it.prev ? <span style={{ color: '#94a3b8' }}> · เดิม {it.prev}</span> : ''}</span>
-                    </div>
-                  ))}
+                  {g.key === 'missing' && deletable.length > 0 && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0 6px', borderBottom: '1px solid #eef2f7', fontSize: 11, fontWeight: 700, color: '#475569', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={allPicked} ref={el => { if (el) el.indeterminate = !allPicked && pick.size > 0; }}
+                        onChange={() => setPick(allPicked ? new Set() : new Set(deletable.map(it => String(it.id))))} style={{ margin: 0 }} />
+                      เลือกทั้งหมด ({deletable.length})
+                    </label>
+                  )}
+                  {g.items.map((it, i) => {
+                    const canPick = g.key === 'missing' && !!onDelete && !!it.id;
+                    const Row = canPick ? 'label' : 'div';
+                    return (
+                      <Row key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: '1px solid #f1f5f9', fontSize: 11.5, cursor: canPick ? 'pointer' : 'default' }}>
+                        {canPick && <input type="checkbox" checked={pick.has(String(it.id))} onChange={() => togglePick(String(it.id))} style={{ margin: 0, flex: '0 0 auto' }} />}
+                        <span className="num" style={{ color: 'var(--brand-700)', fontWeight: 600, minWidth: 76, flex: '0 0 auto' }}>{/^(XL|WS)-/i.test(it.code) ? '(ไม่มีเลข)' : it.code}</span>
+                        <span style={{ color: 'var(--ink-900)', flex: 1, minWidth: 0 }}>{it.name.replace(/^[A-Z0-9\-]+ · /, '')}{it.prev ? <span style={{ color: '#94a3b8' }}> · เดิม {it.prev}</span> : ''}</span>
+                        {g.key === 'missing' && it.fy ? <span className="num" style={{ flex: '0 0 auto', fontSize: 10, fontWeight: 700, color: '#b45309', background: '#fff7ed', borderRadius: 100, padding: '1px 7px' }}>FY{it.fy}</span> : null}
+                      </Row>
+                    );
+                  })}
                 </div>
               )}
             </div>
           ))}
         </div>
-        <div style={{ padding: '12px 18px', borderTop: '1px solid #eef2f7', textAlign: 'right' }}>
+        <div style={{ padding: '12px 18px', borderTop: '1px solid #eef2f7', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+          {deletable.length > 0 && (
+            <button onClick={doDelete} disabled={!pick.size} style={{ ...pcBtn, marginRight: 'auto', border: 'none', padding: '0 16px', background: pick.size ? '#dc2626' : '#f1f5f9', color: pick.size ? '#fff' : '#94a3b8', cursor: pick.size ? 'pointer' : 'not-allowed' }}>
+              🗑 ลบ {pick.size} โครงการที่ไม่อยู่ในไฟล์</button>
+          )}
           <button onClick={onClose} style={{ ...pcBtn, background: 'var(--brand-600)', color: '#fff', border: 'none', padding: '0 20px' }}>รับทราบ</button>
         </div>
       </div>
@@ -1064,6 +1108,8 @@ function pcLoadState() {
 
 function ProjectControlPage({ data, setData, toast }) {
   const canEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
+  const canDelete = window.WTPAuth ? window.WTPAuth.can('canDelete') : false;
+  const isSupabase = !!(window.WTP_CONFIG && WTP_CONFIG.BACKEND === 'supabase');
   const [fy, setFy] = pcSt([]);
   const [statusFilter, setStatusFilter] = pcSt(null);
   const [searchInput, setSearchInput] = pcSt('');
@@ -1129,6 +1175,35 @@ function ProjectControlPage({ data, setData, toast }) {
     toast && toast('บันทึก Finance Master แล้ว · ' + contractNo);
   };
 
+  // ── ลบโครงการ (canDelete = manager) ────────────────────────────────────────
+  // ต้องลบ 2 ที่: data.projects (sync ทั้งทีม) + snapshot ในเครื่อง (bio-proj-control-v2)
+  // ★ ลบแค่ data.projects ไม่พอ — baseProjects ยึด snapshot เมื่อยาวกว่า/เท่ากับของ sync
+  //   → โครงที่ลบจะเด้งกลับบนเครื่องนี้ทันที
+  const deleteProjects = (ids) => {
+    const del = new Set((ids || []).filter(x => x != null && x !== '').map(String));
+    if (!del.size) return;
+    const keep = (arr) => (arr || []).filter(p => !del.has(String(p.id)));
+    const snap = PCU.loadLocalProjects();
+    if (snap) { const next = keep(snap); PCU.saveLocalProjects(next); setLocalProjects(next.length ? next : null); }
+    const total = (data.projects || []).length;
+    setData(d => ({ ...d, projects: keep(d.projects) }));
+    // เกราะ mass-delete ใน pushDiff ปัดคำสั่งลบชุดใหญ่ทิ้งเงียบ ๆ → ยิงลบตรงช่วยเฉพาะชุดใหญ่ (แบบเดียวกับ #invoices)
+    if (window.WTPData && WTPData.forceDeleteRows && total >= 10 && del.size > Math.max(8, total * 0.5)) {
+      setTimeout(() => { try { WTPData.forceDeleteRows('projects', [...del]); } catch (_) {} }, 60);
+    }
+    toast && toast('ลบโครงการแล้ว ' + del.size + ' รายการ');
+  };
+  const deleteFromDrawer = (row) => {
+    // แถวซ้ำที่ dedupeProjectRows ยุบไว้ใช้เลขสัญญาเดียวกัน → ลบให้หมด ไม่งั้นตัวที่ซ่อนอยู่โผล่ขึ้นมาแทน
+    const code = String(row.contractNo || '').trim();
+    const ids = baseProjects.filter(p => String(p.id) === String(row.id) || (code && String(p['Contract No.'] || p.code || '').trim() === code)).map(p => p.id);
+    if (!ids.length) { toast && toast('ไม่พบแถวต้นทางของโครงการนี้'); return; }
+    if (!window.confirm('ลบโครงการนี้ออกจากระบบ?\n\n' + (row.site || code) + (row.fy ? '  · FY' + row.fy : '') +
+      '\n\n• ถ้ายังอยู่ในไฟล์ Excel จะกลับมาตอนอัปโหลดครั้งถัดไป\n• Finance Master (LG / ผู้รับโอนสิทธิ์) ไม่ถูกลบ')) return;
+    deleteProjects(ids);
+    setDrawerRow(null);
+  };
+
   const onUpload = async (file) => {
     if (!file) return;
     setBusy(true); setUploadInfo({ status: 'loading', msg: 'กำลังอ่านไฟล์ ' + file.name + '…' });
@@ -1158,6 +1233,13 @@ function ProjectControlPage({ data, setData, toast }) {
   // มานับคอลัมน์เพื่อยืนยัน — ชัวร์กว่า debounce/row-diff sync · ใช้ทั้งตอน upload + ปุ่ม
   const pushProjectsToSheet = async (rows, stats) => {
     if (!rows || !rows.length) return;
+    // BIO = Supabase: setData() ตอนอัปโหลดบันทึกขึ้นระบบแล้ว (jsonb ทั้งแถว คอลัมน์ครบ) ไม่มีชีทให้ดัน
+    // (ส่วนล่างเป็นมรดก Water POG — เดิม BIO ขึ้นแดง "ยังไม่ได้ตั้งค่า APPS_SCRIPT_URL" ทุกครั้งที่อัปโหลด)
+    if (isSupabase) {
+      setUploadInfo({ status: 'ok', msg: '✅ ' + (stats ? 'อัปเดต ' + stats.totalRows + ' โครงการ · ' : '') + 'บันทึกขึ้นระบบแล้ว' });
+      setTimeout(() => setUploadInfo(null), 6000);
+      return;
+    }
     const url = window.WTP_CONFIG && WTP_CONFIG.APPS_SCRIPT_URL;
     if (!url) { setUploadInfo({ status: 'err', msg: 'ยังไม่ได้ตั้งค่า APPS_SCRIPT_URL' }); return; }
     setUploadInfo({ status: 'loading', msg: 'กำลังดันข้อมูลขึ้น Google Sheet…' });
@@ -1236,10 +1318,12 @@ function ProjectControlPage({ data, setData, toast }) {
               <div className="num" style={{ fontSize: 12, fontWeight: 700 }}>{topRows.length.toLocaleString()} / {allProjects.length.toLocaleString()}</div>
             </div>
             {canEdit && <>
-              <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={e => onUpload(e.target.files[0])} />
-              <button disabled={busy} onClick={forcePushFull} title="ดันข้อมูลคอลัมน์เต็มจากเครื่องนี้ขึ้น Google Sheet (ใช้เมื่องวดงานยังไม่ขึ้นให้ทีม) — ต้องเคย Upload Excel บนเครื่องนี้ก่อน"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 12px', borderRadius: 9, border: '1px solid rgba(255,255,255,.4)', background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy ? .7 : 1 }}>
-                ⬆️ ดันคอลัมน์เต็มขึ้นชีท</button>
+              <input ref={fileRef} type="file" accept=".xlsx,.xlsm" style={{ display: 'none' }} onChange={e => onUpload(e.target.files[0])} />
+              {!isSupabase && (
+                <button disabled={busy} onClick={forcePushFull} title="ดันข้อมูลคอลัมน์เต็มจากเครื่องนี้ขึ้น Google Sheet (ใช้เมื่องวดงานยังไม่ขึ้นให้ทีม) — ต้องเคย Upload Excel บนเครื่องนี้ก่อน"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 36, padding: '0 12px', borderRadius: 9, border: '1px solid rgba(255,255,255,.4)', background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy ? .7 : 1 }}>
+                  ⬆️ ดันคอลัมน์เต็มขึ้นชีท</button>
+              )}
               <button disabled={busy} onClick={() => fileRef.current.click()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 36, padding: '0 14px', borderRadius: 9, border: 'none', background: '#0e9f9a', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy ? .7 : 1 }}>
                 <PcI.upload size={15} style={busy ? { animation: 'pcspin 1s linear infinite' } : {}} />{busy ? 'กำลังอ่าน…' : 'Upload Excel'}</button>
             </>}
@@ -1269,9 +1353,10 @@ function ProjectControlPage({ data, setData, toast }) {
       <div style={{ marginBottom: 8 }}><PcGridToolbar allCols={allCols} state={gridState} setState={setGridState} rows={topRows} visibleColObjs={visibleColObjs} scopeLabel={scopeLabel} onAdvanced={() => setAdvOpen(true)} advCount={advConds.length} /></div>
       <PcGrid rows={topRows} allCols={allCols} state={gridState} setState={setGridState} onOpenRow={setDrawerRow} />
 
-      {drawerRow && <PcDrawer row={drawerRow} canEdit={canEdit} onClose={() => setDrawerRow(null)} onSaveFinance={saveFinance} />}
+      {drawerRow && <PcDrawer row={drawerRow} canEdit={canEdit} onClose={() => setDrawerRow(null)} onSaveFinance={saveFinance} onDelete={canDelete ? deleteFromDrawer : null} />}
       {advOpen && <PcAdvancedFilter rows={allProjects} conds={advConds} mode={advMode} onApply={(c, m) => { setAdvConds(c); setAdvMode(m); setAdvOpen(false); }} onClose={() => setAdvOpen(false)} />}
-      {diffModal && <PcUploadDiff diff={diffModal.diff} stats={diffModal.stats} onClose={() => setDiffModal(null)} />}
+      {diffModal && <PcUploadDiff diff={diffModal.diff} stats={diffModal.stats} onClose={() => setDiffModal(null)}
+        onDelete={canDelete ? (ids) => { deleteProjects(ids); setDiffModal(null); } : null} />}
 
       {uploadInfo && (() => {
         const c = uploadInfo.status === 'ok' ? '#16a34a' : uploadInfo.status === 'err' ? '#dc2626' : 'var(--brand-600)';
