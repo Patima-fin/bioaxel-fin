@@ -181,6 +181,11 @@
       for (let j = 1; j <= n; j++) { if (a[i - 1] === b[j - 1]) { cur[j] = prev[j - 1] + 1; if (cur[j] > best) best = cur[j]; } } prev = cur; }
     return best;
   }
+  // ★ ชื่อตรงเป๊ะ (ยุบช่องว่างซ้ำ/NBSP · ละตินไม่สนตัวพิมพ์เล็กใหญ่) — ใช้ตัดสินก่อนตัวเทียบ "คล้ายกัน" เสมอ
+  function cfpSameCatName(a, b) {
+    const norm = x => String(x == null ? '' : x).replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+    const na = norm(a); return !!na && na === norm(b);
+  }
   function cfpStmtMatch(catName, leafLabel) {
     const a = cfpStripCat(catName), b = cfpStripCat(leafLabel);
     if (!a || !b) return false;
@@ -216,12 +221,16 @@
   function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, strict) {
     const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
     const sameDir = c => !dir || ((c.net >= 0 ? 1 : -1) === dir);
-    const cats = leafLabel ? act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c)) : [];
+    // ★ 1) ชื่อหมวดตรงเป๊ะกับชื่อบรรทัด = ตัวมันเอง ไม่ต้องเดา (ไม่กรองทิศทางเงิน — ชื่อตรงแล้วยอดจะบวกหรือลบก็คือหมวดนี้)
+    const exactCats = leafLabel ? act.catList.filter(c => cfpSameCatName(c.name, leafLabel)) : [];
+    const exact = exactCats.length > 0;
+    // 2) ไม่มีชื่อตรง → ค่อยเทียบแบบ "คล้ายกัน" (ไฟล์เก่าที่เขียนชื่อคนละสไตล์กับหน้างบ)
+    const cats = exact ? exactCats : (leafLabel ? act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c)) : []);
     const matched = cats.length > 0;
     const src = matched ? cats : (strict ? [] : act.catList.filter(sameDir));
     let txns = []; src.forEach(c => { txns = txns.concat(c.txns); });
     if (monthNum) txns = txns.filter(t => t.month === monthNum);
-    return { txns, matched, cats: cats.map(c => c.name) };
+    return { txns, matched, exact, cats: cats.map(c => c.name) };
   }
 
   /* ---------- parse STM ----------
@@ -576,7 +585,10 @@
         if (m[r.label]) return;
         const act = model.acts[r.actKey];
         const dir = r.total > 0 ? 1 : r.total < 0 ? -1 : 0;
-        const guess = act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && !claimed.has(keyOf(r.actKey, c.name))).map(c => c.name) : [];
+        const free = c => !claimed.has(keyOf(r.actKey, c.name));
+        const exact = act ? act.catList.filter(c => cfpSameCatName(c.name, r.label) && free(c)).map(c => c.name) : [];
+        const guess = exact.length ? exact
+          : (act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && free(c)).map(c => c.name) : []);
         guess.forEach(n => claimed.add(keyOf(r.actKey, n)));
         m[r.label] = guess;
       });
@@ -1383,6 +1395,7 @@
       const txns = res.txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
       let sub;
       if (isActNet) sub = 'ทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม');
+      else if (res.exact) sub = 'หมวด: ' + res.cats.join(', ');
       else if (res.matched) sub = '⚙ เดาหมวดอัตโนมัติ (ยังไม่ได้ตั้ง — กด "จัดหมวด" เพื่อยืนยัน): ' + res.cats.join(', ');
       else sub = 'ยังไม่ได้จับคู่หมวด — กดปุ่ม "⚙ จัดหมวด" เพื่อเลือกหมวด STM ของบรรทัดนี้';
       setModal({ title: row.label, subtitle: sub + ' · ' + txns.length + ' รายการ' + mlab, txns });
