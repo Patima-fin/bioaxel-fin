@@ -1685,11 +1685,9 @@
   /* ══════════════ หน้าหลัก ══════════════ */
   /* ── ชิปหมวดของแท็บ "มั่นใจ" — เฉพาะหมวดที่ยังมีรายการมั่นใจรอยืนยัน พร้อมจำนวน
      ยืนยันหมดแล้วชิปหายไปเอง ⇒ เห็นทันทีว่า "เหลือนิดเดียว" (พอร์ตจาก WTP 2026-09-11)
-     เรียงจำนวนมาก → น้อย (เท่ากันเรียงตามลำดับผังหมวด) · ชื่อย่อตัด "เงินสดจ่าย/รับ (เกี่ยวกับ/จากการ)" ออกให้อ่านเร็ว ── */
-  const cfcShortCat = (s) => {
-    const t = cfcT(s).replace(/^เงินสด(จ่าย|รับ)\s*-?\s*(เกี่ยวกับ|จากการ|จาก)?\s*-?\s*/, '').trim() || cfcT(s);
-    return t.length > 28 ? t.slice(0, 27) + '…' : t;
-  };
+     เรียงจำนวนมาก → น้อย (เท่ากันเรียงตามลำดับผังหมวด) · ตัดแค่คำนำหน้าที่ทุกหมวดมีเหมือนกัน "เงินสดจ่าย/รับ (เกี่ยวกับ/จากการ)"
+     ⚠️ ห้ามตัดท้ายชื่อ — หลายหมวดชื่อเหมือนกันต่างแค่ประเภทย่อยท้ายสุด · เคยตัดที่ 28 ตัวอักษรแล้วผู้ใช้แยกไม่ออก (WTP 2026-09-11) ── */
+  const cfcShortCat = (s) => cfcT(s).replace(/^เงินสด(จ่าย|รับ)\s*-?\s*(เกี่ยวกับ|จากการ|จาก)?\s*-?\s*/, '').trim() || cfcT(s);
   function cfcAutoCatChips(rows, master) {
     const by = {};
     (rows || []).forEach(r => { if (r.sug && r.sug.tier === 'auto' && r.sug.cat) by[r.sug.cat] = (by[r.sug.cat] || 0) + 1; });
@@ -2722,12 +2720,14 @@
         {tab === 'auto' && (() => {
           const autoN = codeChips.reduce((a, c) => a + c.n, 0);
           const doneF = codeF && !codeChips.some(c => codeF === 'c:' + c.cat);   // ยืนยันทีละแถวจนหมดหมวดที่เลือกอยู่
+          // ชื่อเต็มยาวได้ — maxWidth 100% ให้ตัดบรรทัดในชิปเองบนจอแคบ แทนที่จะล้นแถบ
           const chip = (on) => ({ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, padding: '4px 5px 4px 11px',
-            fontSize: 12.5, fontWeight: 600, border: '1px solid ' + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : C.ink });
+            fontSize: 12.5, fontWeight: 600, border: '1px solid ' + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : C.ink,
+            maxWidth: '100%', textAlign: 'left' });
           const badge = (on) => ({ borderRadius: 999, padding: '1px 8px', fontSize: 11.5, fontWeight: 800, background: on ? 'rgba(255,255,255,.22)' : C.soft, color: on ? '#fff' : C.primaryD });
           return (
             <div style={Object.assign({}, card, { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', padding: '8px 10px',
-              maxHeight: 142, overflowY: 'auto' })}>{/* ต้นเดือนมีหลายสิบหมวด — เลื่อนในแถบ ไม่ดันตารางลงไปไกล */}
+              maxHeight: 176, overflowY: 'auto' })}>{/* ต้นเดือนมีหลายสิบหมวด — เลื่อนในแถบ ไม่ดันตารางลงไปไกล */}
               {!codeChips.length && !doneF
                 ? <span style={{ fontSize: 12.5, color: C.pos, fontWeight: 700 }}>✓ ยืนยันรายการที่มั่นใจครบแล้ว</span>
                 : <Fragment>
