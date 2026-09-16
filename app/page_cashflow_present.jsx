@@ -403,6 +403,65 @@
     const ya = (a.match(/\d{2,4}\s*$/) || [''])[0].trim(), yb = (b.match(/\d{2,4}\s*$/) || [''])[0].trim();
     return ((ya && ya === yb) ? a.replace(/\s*\d{2,4}\s*$/, '') : a) + '–' + b;
   }
+  /* เทียบ "รายเดือน": STM (op+inv+fin ของเดือนนั้น) ↔ แถวสุทธิของงบสรุปคอลัมน์เดือนเดียวกัน
+   *  → ป้ายไม่ต้องเดาว่า "มาจากการจัดหมวด" อีก บอกได้ว่าต่างที่เดือนไหน เท่าไร (กดดูต่อได้)
+   */
+  function cfpGapByMonth(model, grand) {
+    const s = model.summary || {};
+    const sumByM = {};
+    (s.monthLabels || []).forEach((lb, i) => {
+      const m = cfpMonthNumOfLabel(lb); if (!m) return;
+      sumByM[m] = { col: i, label: cfpCeText(lb), val: (grand && grand.vals) ? (grand.vals[i] || 0) : 0 };
+    });
+    const stmByM = {}; (model.monthly || []).forEach(x => { stmByM[x.m] = x.net; });
+    const all = [...new Set(Object.keys(sumByM).map(Number).concat(Object.keys(stmByM).map(Number)))].sort((a, b) => a - b);
+    return all.map(m => {
+      const sv = sumByM[m] ? sumByM[m].val : null, tv = stmByM[m] != null ? stmByM[m] : null;
+      return {
+        m, label: (sumByM[m] && sumByM[m].label) || CFP_MONTHS[m] || String(m),
+        col: sumByM[m] ? sumByM[m].col : -1, sum: sv, stm: tv,
+        diff: (sv == null || tv == null) ? null : (sv - tv),
+      };
+    });
+  }
+  /* ต่างในเดือนนั้น "มาจากหมวดไหน" — ยอดรายหมวดจากรายการจริง ↔ บรรทัดในงบเดือนนั้น
+   *  ⚠️ บล็อกท้ายงบ "— รายการที่ไม่นับเป็นกิจกรรม —" (โอนระหว่างบัญชี · ยังไม่ลงหมวด ·
+   *     ⚠ หมวดที่ไม่มีในผัง · ผลต่างที่ยังกระทบยอดไม่ลงตัว) ถูกตัวอ่านติด actKey ของกิจกรรม
+   *     สุดท้ายไว้ (curAct ไม่ถูกรีเซ็ต) → ต้องตัดออกก่อนเทียบ ไม่งั้นนับซ้ำ; คืนแยกเป็น
+   *     `outside` ให้ดู เพราะ "หมวดที่ STM มีแต่งบไม่มีบรรทัด" จะไปโผล่ตรงนั้นพอดี
+   */
+  function cfpCatGapOfMonth(model, m, col) {
+    const stm = {};
+    (model.allTxns || []).forEach(t => {
+      if (t.month !== m || t.actKey === 'transfer' || t.actKey === 'other') return;
+      const k = t.category || '(ไม่ระบุหมวด)';
+      stm[k] = (stm[k] || 0) + (t.flow || 0);
+    });
+    const sum = {}, outside = []; let after = false;
+    ((model.summary && model.summary.rows) || []).forEach(r => {
+      if (/ไม่นับเป็นกิจกรรม/.test(r.label)) { after = true; return; }
+      const v = col >= 0 ? cfpNum((r.vals || [])[col]) : 0;
+      if (after) { if (v) outside.push({ name: r.label, val: v }); return; }
+      if (r.type !== 'leaf') return;
+      sum[r.label] = (sum[r.label] || 0) + v;
+    });
+    const key = n => String(n == null ? '' : n).replace(/\s+/g, ' ').trim().toLowerCase();  // \s ครอบ NBSP อยู่แล้ว
+    const sumKey = {}; Object.keys(sum).forEach(n => { const k = key(n); sumKey[k] = (sumKey[k] || 0) + sum[n]; });
+    const rows = [], seen = {};
+    Object.keys(stm).forEach(n => {
+      const k = key(n); seen[k] = 1;
+      const sv = sumKey[k] == null ? null : sumKey[k];
+      const diff = (sv || 0) - stm[n];
+      if (Math.abs(diff) > 1) rows.push({ name: n, stm: stm[n], sum: sv, diff });
+    });
+    Object.keys(sumKey).forEach(k => {
+      if (seen[k] || Math.abs(sumKey[k]) <= 1) return;
+      const name = Object.keys(sum).filter(n => key(n) === k)[0] || k;
+      rows.push({ name, stm: null, sum: sumKey[k], diff: sumKey[k] });
+    });
+    rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+    return { rows, outside };
+  }
   function cfpNetGap(model) {
     const s = model.summary; if (!s || s.net == null) return null;
     const gap = s.net - model.net;
@@ -422,7 +481,7 @@
       : [];
     const missSum = miss.reduce((a, x) => a + x.val, 0), extraSum = extra.reduce((a, x) => a + x.val, 0);
     const explained = missSum - extraSum;            // ส่วนต่างที่อธิบายได้ด้วยเดือนที่ไม่ตรงกัน
-    return { ok: false, gap, miss, extra, missSum, extraSum, explained, rest: gap - explained };
+    return { ok: false, gap, miss, extra, missSum, extraSum, explained, rest: gap - explained, byMonth: cfpGapByMonth(model, grand) };
   }
 
   /* ⚠️ ข้อมูลเก่าที่อัปไว้ก่อนแก้บั๊ก BE serial มี `iso` เป็นปี พ.ศ. ("2569-05-05")
@@ -759,6 +818,8 @@
   /* ป้ายกระทบยอด STM ↔ งบสรุป (ใต้การ์ด KPI) — ตรง = บรรทัดเดียว, ต่าง = บอกสาเหตุ + วิธีแก้
    *  บรรทัดแนะนำวิธีแก้เป็น no-print/no-present (ไม่รกตอนพรีเซนต์/ปรินต์ให้ผู้บริหาร) */
   function CfpReconBadge({ model }) {
+    const [open, setOpen] = useState(false);
+    const [pick, setPick] = useState(null);
     const g = cfpNetGap(model);
     if (!g) return null;
     const wrap = ok => ({ fontSize: 12, color: ok ? C.pos : '#b8860b', marginBottom: 16, padding: '9px 14px', background: ok ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block', maxWidth: '100%', lineHeight: 1.55 });
@@ -766,25 +827,96 @@
     const missTxt = g.miss.map(x => x.label).join(', '), extraTxt = g.extra.map(x => x.label).join(', ');
     const full = Math.abs(g.rest) < 1;                        // เดือนที่ไม่ตรงกันอธิบายส่วนต่างได้ทั้งก้อน
     const stmRange = cfpMonthRange(model.months), sumRange = cfpLabelRange(model.monthLabels || []);
+    const offM = (g.byMonth || []).filter(x => x.diff == null || Math.abs(x.diff) > 1);
+    const worst = offM.filter(x => x.diff != null).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
     let head, fix;
     if (g.miss.length && full) {
       head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — งบสรุปมีเดือน ' + missTxt + ' แต่ชีตรายการ (STM) ยังไม่มี';
       fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' ในชีตรายการ (เช่น “รวมทุกบัญชี”) แล้วอัปโหลดไฟล์ใหม่ — หรือถ้าเดือนนั้นยังไม่ปิดงบ ให้ตัดคอลัมน์เดือนนั้นออกจากงบสรุป';
     } else if (g.miss.length) {
       head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือน ' + missTxt + ' มีในงบสรุปแต่ยังไม่มีในรายการ (อธิบายได้ ' + cfpFmtB(g.explained) + ' · เหลือต่าง ' + cfpFmtB(g.rest) + ')';
-      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' แล้วอัปโหลดใหม่ · ส่วนที่เหลือ ' + cfpFmtB(g.rest) + ' มักมาจากการจัดกิจกรรม/หมวดไม่ตรง — เทียบทีละบรรทัดที่แท็บ 📑 งบกระแสเงินสด → ⚙ จัดหมวด';
+      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' แล้วอัปโหลดใหม่ · ส่วนที่เหลือ ' + cfpFmtB(g.rest) + ' ให้กดดูรายละเอียดด้านล่าง ว่าต่างที่เดือนไหน/หมวดไหน';
     } else if (g.extra.length) {
       head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — ชีตรายการมีเดือน ' + extraTxt + ' แต่งบสรุปยังไม่มีคอลัมน์เดือนนั้น';
-      fix = 'แก้: อัปเดตชีตงบสรุปให้ครบถึงเดือน ' + extraTxt + ' แล้วอัปโหลดใหม่' + (full ? '' : ' · เหลือต่าง ' + cfpFmtB(g.rest) + ' ให้ดูการจัดหมวดที่แท็บ 📑 → ⚙ จัดหมวด');
+      fix = 'แก้: อัปเดตชีตงบสรุปให้ครบถึงเดือน ' + extraTxt + ' แล้วอัปโหลดใหม่' + (full ? '' : ' · เหลือต่าง ' + cfpFmtB(g.rest) + ' ให้กดดูรายละเอียดด้านล่าง');
     } else {
-      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือนครอบเท่ากันทั้ง 2 ฝั่ง แต่ยอดสุทธิไม่ตรง';
-      fix = 'แก้: ส่วนต่างมาจากการจัดกิจกรรม/หมวด — เทียบทีละบรรทัดที่แท็บ 📑 งบกระแสเงินสด → ⚙ จัดหมวด (บรรทัดที่ขึ้น ⚠ ต่าง)';
+      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือนครอบเท่ากันทั้ง 2 ฝั่ง แต่ยอดสุทธิไม่ตรง'
+        + (worst ? ' · ต่างมากสุดเดือน ' + worst.label + ' (' + cfpFmtB(worst.diff) + ')' : '')
+        + (offM.length > 1 ? ' · ไม่ตรง ' + offM.length + ' เดือน' : '');
+      fix = 'กด “ดูว่าต่างที่เดือนไหน” ด้านล่าง → กดที่เดือนเพื่อดูรายหมวด. หมวดที่ STM มีแต่ “ไม่มีบรรทัดนี้ในงบ” = หมวดที่ไม่อยู่ในผังหมวด (ยอดตกไปอยู่บล็อกท้ายงบ ไม่เข้ากิจกรรม) — แก้หมวดที่หน้ากระทบยอดกระแสเงินสด แล้วดันเดือนนั้นขึ้นมาใหม่';
     }
+    const det = pick != null ? cfpCatGapOfMonth(model, pick, ((g.byMonth || []).find(x => x.m === pick) || {}).col) : null;
+    const thR = { padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: C.mut, whiteSpace: 'nowrap' };
+    const tdR = { padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
     return (
       <div style={wrap(false)}>
         <div>{head}</div>
         <div style={{ fontWeight: 500, opacity: .85, marginTop: 2 }}>STM {cfpFmtB(model.net)}{stmRange ? ' (' + stmRange + ')' : ''} · งบสรุป {cfpFmtB(model.summary.net)}{sumRange ? ' (' + sumRange + ')' : ''}</div>
         {fix && <div className="no-print no-present" style={{ fontSize: 11, fontWeight: 500, color: '#a8620a', marginTop: 4 }}>{fix}</div>}
+        {(g.byMonth || []).length > 0 &&
+          <div className="no-print no-present" style={{ marginTop: 6 }}>
+            <button onClick={() => setOpen(!open)} style={{ fontSize: 11.5, fontWeight: 700, color: '#a8620a', background: '#fff', border: '1px solid #f0d6a8', borderRadius: 8, padding: '3px 10px', cursor: 'pointer' }}>
+              {open ? '▾ ซ่อนรายละเอียด' : '🔎 ดูว่าต่างที่เดือนไหน'}
+            </button>
+          </div>}
+        {open &&
+          <div className="no-print no-present" style={{ marginTop: 8, background: '#fff', border: '1px solid #f0d6a8', borderRadius: 10, padding: '4px 2px', maxWidth: 760, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 600, color: C.mut }}>เดือน</th>
+                  <th style={thR}>STM (รายการจริง)</th><th style={thR}>งบสรุป</th><th style={thR}>ต่าง</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(g.byMonth || []).map(x => {
+                  const bad = x.diff == null || Math.abs(x.diff) > 1;
+                  const on = pick === x.m;
+                  const out = [
+                    <tr key={'m' + x.m} onClick={() => setPick(on ? null : x.m)} title="กดดูว่าหมวดไหนทำให้ต่าง"
+                      style={{ cursor: 'pointer', background: on ? '#fffaf0' : undefined, borderTop: '1px solid ' + C.line }}>
+                      <td style={{ padding: '4px 8px', fontWeight: 600, color: C.ink }}>{(on ? '▾ ' : '▸ ') + x.label}</td>
+                      <td style={tdR}>{x.stm == null ? '— ไม่มีรายการ' : cfpFmtB(x.stm)}</td>
+                      <td style={tdR}>{x.sum == null ? '— ไม่มีคอลัมน์' : cfpFmtB(x.sum)}</td>
+                      <td style={Object.assign({}, tdR, { fontWeight: 700, color: bad ? C.neg : C.pos })}>{x.diff == null ? '?' : (bad ? cfpFmtB(x.diff) : 'ตรง')}</td>
+                    </tr>,
+                  ];
+                  if (on && det) out.push(
+                    <tr key={'d' + x.m}>
+                      <td colSpan={4} style={{ padding: '2px 8px 10px', background: '#fffdf7' }}>
+                        {det.rows.length === 0
+                          ? <div style={{ fontSize: 11.5, color: C.mut }}>เดือนนี้ยอดรายหมวดตรงกันทุกหมวด (ส่วนต่างมาจากบรรทัดท้ายงบ)</div>
+                          : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                            <thead><tr>
+                              <th style={{ padding: '3px 8px', textAlign: 'left', color: C.mut, fontWeight: 600 }}>หมวด</th>
+                              <th style={thR}>STM</th><th style={thR}>งบ</th><th style={thR}>ต่าง</th>
+                            </tr></thead>
+                            <tbody>
+                              {det.rows.slice(0, 12).map((r, i2) => (
+                                <tr key={i2} style={{ borderTop: '1px solid ' + C.line }}>
+                                  <td style={{ padding: '3px 8px', color: C.ink }}>
+                                    {r.name}
+                                    {r.sum == null && <span style={{ color: C.neg, fontWeight: 600 }}> · ไม่มีบรรทัดนี้ในงบ</span>}
+                                    {r.stm == null && <span style={{ color: '#a8620a', fontWeight: 600 }}> · ไม่มีรายการใน STM</span>}
+                                  </td>
+                                  <td style={tdR}>{r.stm == null ? '—' : cfpFmtB(r.stm)}</td>
+                                  <td style={tdR}>{r.sum == null ? '—' : cfpFmtB(r.sum)}</td>
+                                  <td style={Object.assign({}, tdR, { fontWeight: 700 })}>{cfpFmtB(r.diff)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>}
+                        {det.outside.length > 0 &&
+                          <div style={{ fontSize: 11, color: C.mut, marginTop: 5 }}>
+                            ท้ายงบ (ไม่นับเป็นกิจกรรม): {det.outside.map(o => o.name + ' ' + cfpFmtB(o.val)).join(' · ')}
+                          </div>}
+                      </td>
+                    </tr>);
+                  return out;
+                })}
+              </tbody>
+            </table>
+          </div>}
       </div>
     );
   }
