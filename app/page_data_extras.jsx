@@ -2402,7 +2402,7 @@ function APPlanBulk({ aps, apPlansByVchno, bankAccounts, onBulkPlan, onCancelPla
 }
 
 // Amount input: formatted display (2,000.00) when not focused; raw number when editing
-function AmountInput({ value, onChange, label, required }) {
+function AmountInput({ value, onChange, label, required, hiStyle }) {
   const [focused, setFocused] = dxState(false);
   const [raw, setRaw] = dxState('');
   const numVal = parseNum(value);
@@ -2417,8 +2417,8 @@ function AmountInput({ value, onChange, label, required }) {
           value={focused ? raw : display}
           onChange={e => setRaw(e.target.value)}
           onFocus={e => { setFocused(true); setRaw(numVal === 0 ? '' : String(numVal)); setTimeout(() => e.target.select(), 0); }}
-          onBlur={() => { onChange(parseNum(raw)); setFocused(false); }}
-          style={{ textAlign: 'right', paddingRight: 26, fontWeight: 600, fontFamily: 'ui-monospace', color: numVal < 0 ? 'var(--bad)' : 'inherit' }}
+          onBlur={() => { onChange(String(raw).trim() === '' ? '' : parseNum(raw)); setFocused(false); }}
+          style={{ textAlign: 'right', paddingRight: 26, fontWeight: 600, fontFamily: 'ui-monospace', color: numVal < 0 ? 'var(--bad)' : 'inherit', ...(hiStyle || {}) }}
         />
         <span style={{ position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-400)', pointerEvents: 'none' }}></span>
       </div>
@@ -2427,9 +2427,100 @@ function AmountInput({ value, onChange, label, required }) {
 }
 
 // ─── AP Edit Modal — 3-col grid, highlight due date + netpayment ─────────────
-function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
+// • ใบที่นำเข้าจากไฟล์ (EXPRESS) → ดูอย่างเดียว (แก้ได้แค่ วันที่ใบสำคัญ / วันครบกำหนด)
+// • ใบ "ตั้งหนี้ลอย" (vchno ขึ้นต้น FLOAT-) → เพิ่มเองในระบบ ไม่มีไฟล์ต้นทาง จึงแก้ได้ทุกช่อง
+//   (ชื่อเจ้าหนี้ / ยอด / หมายเหตุ / วันที่) และแก้ "แผนจ่าย" ที่โชว์ Bank Daily ไปพร้อมกัน
+const _AP_DUE_HI   = { background: 'color-mix(in oklch, oklch(65% 0.2 55) 10%, transparent)', border: '1px solid color-mix(in oklch, oklch(65% 0.2 55) 32%, transparent)', color: 'oklch(42% 0.2 55)', fontWeight: 700 };
+const _AP_TOTAL_HI = { background: 'color-mix(in oklch, var(--bad) 9%, transparent)', border: '1px solid color-mix(in oklch, var(--bad) 28%, transparent)', color: 'var(--bad)', fontWeight: 700 };
+const _AP_RO_BOX   = { minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', cursor: 'default', userSelect: 'text', color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)' };
+const _AP_IN_BOX   = { minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-200)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, width: '100%', fontFamily: 'inherit', boxSizing: 'border-box', background: 'var(--panel, #ffffff)', color: 'var(--ink-800)' };
+const _AP_TAG_EDIT = { color: 'var(--brand-600)', fontSize: 10, fontWeight: 700 };
+const _AP_NUM_FIELDS   = new Set(['Amount', 'VAT', 'net_new', 'Less_Ret', 'WHT_EXT', 'netpayment']);
+const _AP_FLOAT_FIELDS = ['vchdate', 'docno', 'refno', 'refcode', 'due2', 'cust_name', 'acct_no',
+  'dpt_code', 'dpt_name', 'jobcode', 'jobname', 'remark',
+  'Amount', 'VAT', 'net_new', 'Less_Ret', 'WHT_EXT', 'netpayment'];
+// แปลงค่าวันที่ (ISO / DD/MM/YYYY / พ.ศ.) → ISO YYYY-MM-DD สำหรับ <input type=date>
+const _apISO = (v) => {
+  const d = parseDue(v);
+  if (!d || isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+
+/* ★ ช่องกรอกของป๊อปอัปนี้ประกาศไว้ "นอก" APEditModal โดยตั้งใจ —
+ *   ถ้าประกาศข้างใน ตัวคอมโพเนนต์จะเป็นตัวใหม่ทุกครั้งที่ setState (พิมพ์ 1 ตัวอักษร)
+ *   React จะ unmount/mount ช่องใหม่ → เคอร์เซอร์หลุดทุกตัวอักษร */
+function _ApTextF({ draft, setDraft, fkey, label, hint, span, editable, rows }) {
+  const v = draft[fkey];
+  const str = (v === null || v === undefined) ? '' : String(v);
+  return (
+    <div className="field" style={{ gridColumn: span ? `span ${span}` : 'auto' }}>
+      <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>
+        {label}{editable && <span style={_AP_TAG_EDIT}>✎ แก้ได้</span>}
+      </label>
+      {editable
+        ? (rows > 1
+            ? <textarea rows={rows} value={str} onChange={e => setDraft(d => ({ ...d, [fkey]: e.target.value }))}
+                style={{ ..._AP_IN_BOX, resize: 'vertical' }} />
+            : <input value={str} onChange={e => setDraft(d => ({ ...d, [fkey]: e.target.value }))}
+                style={{ ..._AP_IN_BOX, height: 34 }} />)
+        : <div style={_AP_RO_BOX}>{str === '' ? '—' : str}</div>}
+      {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
+    </div>
+  );
+}
+
+// ช่องยอดเงิน — อ่านอย่างเดียว หรือกรอกได้ (ตั้งหนี้ลอย)
+function _ApAmtF({ draft, setDraft, fkey, label, editable, highlight }) {
+  const value = draft[fkey];
+  if (editable) {
+    return <AmountInput value={value} label={label + ' ✎'} hiStyle={highlight ? _AP_TOTAL_HI : null}
+      onChange={n => setDraft(d => ({ ...d, [fkey]: n }))} />;
+  }
+  const display = (value === null || value === undefined || value === '') ? '—' : fmtNum(parseNum(value), 2);
+  return (
+    <div className="field">
+      <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>{label}</label>
+      <div style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '0 28px 0 10px', fontSize: 13, fontFamily: 'ui-monospace', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative', cursor: 'default', userSelect: 'text', color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...(highlight ? _AP_TOTAL_HI : {}) }}>
+        {display}
+        <span style={{ position: 'absolute', right: 8, fontSize: 11, color: highlight ? 'color-mix(in oklch, var(--bad) 55%, transparent)' : 'var(--ink-400)' }}></span>
+      </div>
+    </div>
+  );
+}
+
+// ช่องวันที่ที่ "แก้ได้" — ปฏิทินกดเลือก (กรณี EXPRESS ตั้งมาผิด แก้เองได้เลย ไม่ต้องรออัปไฟล์ใหม่)
+function _ApDateF({ draft, setDraft, fkey, label, editable, highlight }) {
+  const iso = _apISO(draft[fkey]);
+  const hi  = highlight === 'due' ? _AP_DUE_HI : {};
+  return (
+    <div className="field">
+      <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>
+        {label}{editable && <span style={_AP_TAG_EDIT}>✎ แก้ได้</span>}
+      </label>
+      {editable
+        ? <input type="date" value={iso} onChange={e => setDraft(d => ({ ...d, [fkey]: e.target.value }))}
+            style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-200)', padding: '0 10px', fontSize: 13, width: '100%', cursor: 'pointer', fontFamily: 'inherit', boxSizing: 'border-box', ...hi }} />
+        : <div style={{ minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...hi }}>{draft[fkey] ? (fmtDate(draft[fkey]) || draft[fkey]) : '—'}</div>}
+    </div>
+  );
+}
+
+function APEditModal({ row, onClose, onSave, onDelete, canEdit, plans, bankAccounts }) {
   const [draft, setDraft]             = dxState(null);
+  const [plan, setPlan]               = dxState({ payDate: '', bankAc: '' });
   const [confirmDelete, setConfirm]   = dxState(false);
+  const planList = plans || [];
+  // แผนจ่ายที่ "แก้ตรงนี้ได้" = มีงวดเดียวและยังไม่จ่ายจริง (หลายงวด/จ่ายแล้ว → ไปแก้ที่ปุ่มวางแผนจ่าย)
+  const onePlan  = (planList.length === 1 && !planList[0].actual) ? planList[0] : null;
+  // บัญชีที่ยังใช้งาน — เกณฑ์เดียวกับป๊อปอัป "ตั้งหนี้ลอย"
+  const banks = dxMemo(() => (bankAccounts || [])
+    .filter(b => { const t = String(b.accountType || b.account_type || '').toLowerCase(); return t !== 'closed' && t !== 'dormant'; })
+    .map(b => {
+      const ac = b.Bank_AC || b.bankAc || b.bank_ac || b.accountNo || b.account_no || '';
+      const nm = b.BANK_NAME || b.bankName || b.bank_name || '';
+      return { value: ac, label: ac ? `${nm} · ${ac}` : (nm || '— ไม่ทราบบัญชี —') };
+    })
+    .filter(o => o.value), [bankAccounts]);
   dxEffect(() => {
     if (row) {
       const d = { ...row };
@@ -2444,9 +2535,14 @@ function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
     } else {
       setDraft(null);
     }
+    setPlan(onePlan ? { payDate: _apISO(onePlan.date), bankAc: onePlan.bankAc || '' } : { payDate: '', bankAc: '' });
     setConfirm(false);
   }, [row]);
   if (!row || !draft) return null;
+
+  const isFloat  = isFloatingAp(row);
+  const editable = !!canEdit && isFloat;      // ตั้งหนี้ลอย = แก้ได้ทุกช่อง
+  const fp = { draft, setDraft };             // props ร่วมของทุกช่อง
 
   const Hdr = ({ label, icon }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--brand-700)', paddingBottom: 6, borderBottom: '1px solid var(--ink-100)', gridColumn: '1 / -1', marginTop: 4 }}>
@@ -2454,61 +2550,42 @@ function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
     </div>
   );
 
-  // highlight styles — applied LAST to override base styles
-  const dueStyle   = { background: 'color-mix(in oklch, oklch(65% 0.2 55) 10%, transparent)', border: '1px solid color-mix(in oklch, oklch(65% 0.2 55) 32%, transparent)', color: 'oklch(42% 0.2 55)', fontWeight: 700 };
-  const totalStyle = { background: 'color-mix(in oklch, var(--bad) 9%, transparent)',           border: '1px solid color-mix(in oklch, var(--bad) 28%, transparent)',           color: 'var(--bad)',          fontWeight: 700 };
+  const changed = (k) => {
+    if (k === 'vchdate' || k === 'due2') return _apISO(draft[k]) !== _apISO(row[k]);
+    if (_AP_NUM_FIELDS.has(k)) {
+      const a = draft[k], b = row[k];
+      const aBlank = (a === null || a === undefined || a === ''), bBlank = (b === null || b === undefined || b === '');
+      if (aBlank !== bBlank) return true;
+      return Math.abs(parseNum(a) - parseNum(b)) > 0.004;
+    }
+    return String(draft[k] == null ? '' : draft[k]) !== String(row[k] == null ? '' : row[k]);
+  };
+  const planDirty  = !!onePlan && editable && (plan.payDate !== _apISO(onePlan.date) || String(plan.bankAc || '') !== String(onePlan.bankAc || ''));
+  const datesDirty = canEdit && (changed('vchdate') || changed('due2'));
+  const floatDirty = editable && (_AP_FLOAT_FIELDS.some(changed) || planDirty);
+  const dirty      = editable ? floatDirty : datesDirty;
+  // ตั้งหนี้ลอยต้องมีชื่อเจ้าหนี้ + ยอด > 0 เสมอ (ยอดนี้ไปโชว์ที่ Bank Daily)
+  const invalid    = editable && (!String(draft.cust_name || '').trim() || !(parseNum(draft.netpayment) > 0));
 
-  const F = ({ fkey, label, hint, span, highlight }) => {
-    const v = draft[fkey];
-    const display = (v === null || v === undefined || v === '') ? '—' : String(v);
-    return (
-      <div className="field" style={{ gridColumn: span ? `span ${span}` : 'auto' }}>
-        <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>{label}</label>
-        <div style={{ minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', cursor: 'default', userSelect: 'text', color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...(highlight === 'due' ? dueStyle : {}) }}>{display}</div>
-        {hint && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
-      </div>
-    );
-  };
-
-  const ROAmount = ({ value, label, highlight }) => {
-    const numVal = parseNum(value);
-    const display = (value === null || value === undefined || value === '') ? '—' : fmtNum(numVal, 2);
-    return (
-      <div className="field">
-        <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>{label}</label>
-        <div style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '0 28px 0 10px', fontSize: 13, fontFamily: 'ui-monospace', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative', cursor: 'default', userSelect: 'text', color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...(highlight ? totalStyle : {}) }}>
-          {display}
-          <span style={{ position: 'absolute', right: 8, fontSize: 11, color: highlight ? 'color-mix(in oklch, var(--bad) 55%, transparent)' : 'var(--ink-400)' }}></span>
-        </div>
-      </div>
-    );
-  };
-
-  // แปลงค่าวันที่ (ISO / DD/MM/YYYY / พ.ศ.) → ISO YYYY-MM-DD สำหรับ <input type=date>
-  const toISOInput = (v) => {
-    const d = parseDue(v);
-    if (!d || isNaN(d)) return '';
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  };
-  // ช่องวันที่ที่ "แก้ได้" — ปฏิทินกดเลือก (กรณี EXPRESS ตั้งมาผิด แก้เองได้เลย ไม่ต้องรออัปไฟล์ใหม่)
-  const DateF = ({ fkey, label, highlight }) => {
-    const iso = toISOInput(draft[fkey]);
-    const hi = highlight === 'due' ? dueStyle : {};
-    return (
-      <div className="field">
-        <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {label}{canEdit && <span style={{ color: 'var(--brand-600)', fontSize: 10, fontWeight: 700 }}>✎ แก้ได้</span>}
-        </label>
-        {canEdit
-          ? <input type="date" value={iso} onChange={e => setDraft(d => ({ ...d, [fkey]: e.target.value }))}
-              style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-150)', padding: '0 10px', fontSize: 13, width: '100%', cursor: 'pointer', fontFamily: 'inherit', ...hi }} />
-          : <div style={{ minHeight: 34, borderRadius: 7, border: '1px solid var(--ink-100)', padding: '6px 10px', fontSize: 13, lineHeight: 1.5, color: 'var(--ink-700)', background: 'var(--ink-25, #f9fafb)', ...hi }}>{draft[fkey] ? (fmtDate(draft[fkey]) || draft[fkey]) : '—'}</div>}
-      </div>
-    );
-  };
-  const datesDirty = canEdit && (toISOInput(draft.vchdate) !== toISOInput(row.vchdate) || toISOInput(draft.due2) !== toISOInput(row.due2));
-  const saveDates = () => {
-    onSave && onSave({ ...row, vchdate: draft.vchdate, due2: draft.due2 });   // เปลี่ยนเฉพาะ 2 วันที่ ฟิลด์อื่นคงเดิม
+  const doSave = () => {
+    if (!onSave) return;
+    if (!editable) {
+      onSave({ ...row, vchdate: draft.vchdate, due2: draft.due2 });   // นำเข้าจากไฟล์ — เปลี่ยนเฉพาะ 2 วันที่
+      return;
+    }
+    if (invalid) return;
+    const next = { ...row };
+    _AP_FLOAT_FIELDS.forEach(k => {
+      const v = draft[k];
+      if (_AP_NUM_FIELDS.has(k)) next[k] = (v === null || v === undefined || v === '') ? '' : parseNum(v);
+      else next[k] = typeof v === 'string' ? v.trim() : v;
+    });
+    /* ตอนสร้างใบลอย Amount = netpayment (ไม่มี VAT/หัก ณ ที่จ่าย) — ถ้ายังเท่ากันอยู่และ
+       ผู้ใช้แก้แต่ยอดสุทธิ ให้ Amount ขยับตามด้วย จะได้ไม่ค้างเลขเก่าไว้หลอกตา */
+    if (changed('netpayment') && !changed('Amount') && Math.abs(parseNum(row.Amount) - parseNum(row.netpayment)) < 0.005) {
+      next.Amount = next.netpayment;
+    }
+    onSave(next, onePlan ? { id: onePlan.id, payDate: plan.payDate, bankAc: plan.bankAc } : null);
   };
 
   return (
@@ -2525,47 +2602,84 @@ function APEditModal({ row, onClose, onSave, onDelete, canEdit }) {
             : <button className="btn btn-ghost" style={{ color: 'var(--bad)', marginRight: 'auto' }} onClick={() => setConfirm(true)} title="ลบรายการนี้ออกจากเจ้าหนี้คงค้าง"><Icon name="trash" size={13} /> ลบรายการ</button>
           )}
           <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
-          {canEdit && <button className="btn btn-primary" onClick={saveDates} disabled={!datesDirty}><Icon name="check" size={13} /> บันทึกวันที่</button>}
+          {canEdit && <button className="btn btn-primary" onClick={doSave} disabled={!dirty || invalid}>
+            <Icon name="check" size={13} /> {editable ? 'บันทึกการแก้ไข' : 'บันทึกวันที่'}
+          </button>}
         </>}>
         {canEdit && (
           <div style={{ fontSize: 12, color: 'var(--ink-600)', background: 'color-mix(in oklch, var(--brand-500) 7%, transparent)', border: '1px solid color-mix(in oklch, var(--brand-500) 22%, transparent)', borderRadius: 8, padding: '8px 12px', marginBottom: 12, lineHeight: 1.55 }}>
-            ✎ แก้ <strong>วันที่ใบสำคัญ</strong> / <strong>วันครบกำหนด</strong> ได้เลย (กรณี EXPRESS ตั้งมาผิด) แล้วกด "บันทึกวันที่" — ไม่ต้องรออัปไฟล์ใหม่. ฟิลด์อื่นแก้ได้จากการนำเข้าไฟล์เท่านั้น.
+            {editable
+              ? <>🏷 <strong>ตั้งหนี้ลอย</strong> — ใบนี้เพิ่มเองในระบบ (ไม่มีไฟล์ต้นทาง) จึง <strong>แก้ได้ทุกช่อง</strong> ทั้งชื่อเจ้าหนี้ · ยอดเงิน · หมายเหตุ · วันที่ แล้วกด "บันทึกการแก้ไข" — ยอด/ชื่อที่แก้จะอัปเดต <strong>แผนจ่ายที่ Bank Daily</strong> ให้อัตโนมัติ. เลขที่ <code>{draft.vchno}</code> แก้ไม่ได้ (ใช้ผูกกับแผนจ่าย)</>
+              : <>✎ แก้ <strong>วันที่ใบสำคัญ</strong> / <strong>วันครบกำหนด</strong> ได้เลย (กรณี EXPRESS ตั้งมาผิด) แล้วกด "บันทึกวันที่" — ไม่ต้องรออัปไฟล์ใหม่. ฟิลด์อื่นแก้ได้จากการนำเข้าไฟล์เท่านั้น.</>}
+          </div>
+        )}
+        {editable && invalid && (
+          <div style={{ fontSize: 12, color: 'var(--bad)', background: 'color-mix(in oklch, var(--bad) 8%, transparent)', border: '1px solid color-mix(in oklch, var(--bad) 26%, transparent)', borderRadius: 8, padding: '7px 12px', marginBottom: 12 }}>
+            ต้องมี <strong>ชื่อเจ้าหนี้</strong> และ <strong>ยอดสุทธิมากกว่า 0</strong> ถึงจะบันทึกได้ (ยอดนี้ไปโชว์ที่ Bank Daily)
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px 16px' }}>
 
           <Hdr label="ข้อมูลเอกสาร" icon="invoice" />
           {/* บรรทัด 1: วันที่ | vchno | docno */}
-          <DateF fkey="vchdate" label="วันที่ใบสำคัญ" />
-          <F fkey="vchno"   label="vchno · ใบสำคัญ" />
-          <F fkey="docno"   label="docno (col B)" />
+          <_ApDateF {...fp} fkey="vchdate" label="วันที่ใบสำคัญ" editable={!!canEdit} />
+          <_ApTextF {...fp} fkey="vchno"   label="vchno · ใบสำคัญ" hint={isFloat ? 'เลขอ้างอิงของใบลอย — แก้ไม่ได้' : undefined} />
+          <_ApTextF {...fp} fkey="docno"   label="docno (col B)" editable={editable} />
           {/* บรรทัด 2: refno | refcode | due (highlight, แก้ได้) */}
-          <F fkey="refno"   label="refno · เลขที่อ้างอิง" />
-          <F fkey="refcode" label="refcode" />
-          <DateF fkey="due2" label="วันครบกำหนด" highlight="due" />
+          <_ApTextF {...fp} fkey="refno"   label="refno · เลขที่อ้างอิง" editable={editable} />
+          <_ApTextF {...fp} fkey="refcode" label="refcode" editable={editable} />
+          <_ApDateF {...fp} fkey="due2"    label="วันครบกำหนด" editable={!!canEdit} highlight="due" />
 
           <Hdr label="เจ้าหนี้ (VENDOR)" icon="money" />
-          <F fkey="cust_name" label="ชื่อเจ้าหนี้" span={2} />
-          <F fkey="acct_no"   label="รหัสเจ้าหนี้" />
+          <_ApTextF {...fp} fkey="cust_name" label="ชื่อเจ้าหนี้" span={2} editable={editable} />
+          <_ApTextF {...fp} fkey="acct_no"   label="รหัสเจ้าหนี้" editable={editable} />
 
           <Hdr label="แผนก / โครงการ" icon="forecast" />
-          <F fkey="dpt_code" label="รหัสแผนก" />
-          <F fkey="dpt_name" label="ชื่อแผนก" />
-          <F fkey="jobcode"  label="Job Code" />
-          <F fkey="jobname"  label="ชื่องาน" span={3} />
+          <_ApTextF {...fp} fkey="dpt_code" label="รหัสแผนก" editable={editable} />
+          <_ApTextF {...fp} fkey="dpt_name" label="ชื่อแผนก" editable={editable} />
+          <_ApTextF {...fp} fkey="jobcode"  label="Job Code" editable={editable} />
+          <_ApTextF {...fp} fkey="jobname"  label="ชื่องาน" span={3} editable={editable} />
 
           <Hdr label="ยอดเงิน (AMOUNTS)" icon="coin" />
           {/* บรรทัด 1: Amount | VAT | net_new */}
-          <ROAmount value={draft.Amount}     label="Amount · ยอดก่อนหัก" />
-          <ROAmount value={draft.VAT}        label="VAT · ภาษีมูลค่าเพิ่ม" />
-          <ROAmount value={draft.net_new}    label="net_new · รวม VAT" />
+          <_ApAmtF {...fp} fkey="Amount"     label="Amount · ยอดก่อนหัก" editable={editable} />
+          <_ApAmtF {...fp} fkey="VAT"        label="VAT · ภาษีมูลค่าเพิ่ม" editable={editable} />
+          <_ApAmtF {...fp} fkey="net_new"    label="net_new · รวม VAT" editable={editable} />
           {/* บรรทัด 2: Less_Ret | WHT_EXT | netpayment (highlight) */}
-          <ROAmount value={draft.Less_Ret}   label="Less_Ret · หักประกัน" />
-          <ROAmount value={draft.WHT_EXT}    label="WHT_EXT · ภาษีหัก ณ จ่าย" />
-          <ROAmount value={draft.netpayment} label="netpayment · ยอดสุทธิ" highlight />
+          <_ApAmtF {...fp} fkey="Less_Ret"   label="Less_Ret · หักประกัน" editable={editable} />
+          <_ApAmtF {...fp} fkey="WHT_EXT"    label="WHT_EXT · ภาษีหัก ณ จ่าย" editable={editable} />
+          <_ApAmtF {...fp} fkey="netpayment" label="netpayment · ยอดสุทธิ" editable={editable} highlight />
+
+          {/* แผนจ่ายที่โชว์ Bank Daily — แก้ได้เฉพาะใบลอยที่มีงวดเดียวและยังไม่จ่ายจริง */}
+          {editable && planList.length > 0 && <Hdr label="แผนจ่าย (Bank Daily)" icon="forecast" />}
+          {editable && onePlan && (
+            <>
+              <div className="field">
+                <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>วันที่คาดจ่าย<span style={_AP_TAG_EDIT}>✎ แก้ได้</span></label>
+                <input type="date" value={plan.payDate} onChange={e => setPlan(p => ({ ...p, payDate: e.target.value }))}
+                  style={{ height: 34, borderRadius: 7, border: '1px solid var(--ink-200)', padding: '0 10px', fontSize: 13, width: '100%', cursor: 'pointer', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+              </div>
+              <div className="field" style={{ gridColumn: 'span 2' }}>
+                <label style={{ fontSize: 12, color: 'var(--ink-500)', display: 'flex', alignItems: 'center', gap: 6 }}>บัญชีที่จะจ่าย<span style={_AP_TAG_EDIT}>✎ แก้ได้</span></label>
+                <select value={plan.bankAc} onChange={e => setPlan(p => ({ ...p, bankAc: e.target.value }))} style={{ ..._AP_IN_BOX, height: 34, cursor: 'pointer' }}>
+                  <option value="">— เลือกบัญชี —</option>
+                  {banks.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+                  {plan.bankAc && !banks.some(b => b.value === plan.bankAc) && <option value={plan.bankAc}>{plan.bankAc}</option>}
+                </select>
+              </div>
+              <div className="muted" style={{ gridColumn: '1 / -1', fontSize: 11.5, marginTop: -2 }}>
+                ยอดที่ Bank Daily จะเท่ากับ <strong>netpayment</strong> ด้านบนเสมอ — แก้ยอดตรงนั้นแล้วกดบันทึก ยอดในวันนั้นจะขยับตาม
+              </div>
+            </>
+          )}
+          {editable && planList.length > 0 && !onePlan && (
+            <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--ink-600)', background: 'color-mix(in oklch, var(--warn) 8%, transparent)', border: '1px solid color-mix(in oklch, var(--warn) 25%, transparent)', borderRadius: 8, padding: '8px 12px', lineHeight: 1.55 }}>
+              ใบนี้มีแผนจ่าย {planList.length} งวด{planList.some(p => p.actual) ? ' (มีงวดที่จ่ายจริงแล้ว)' : ''} — แก้ยอดที่นี่จะ <strong>ไม่</strong> ขยับงวดที่วางไว้ ให้ไปแก้ที่ปุ่ม "วางแผนจ่าย" ในตาราง
+            </div>
+          )}
 
           <Hdr label="หมายเหตุ" icon="edit" />
-          <F fkey="remark" label="remark · คำอธิบาย" span={3} />
+          <_ApTextF {...fp} fkey="remark" label="remark · คำอธิบาย" span={3} editable={editable} rows={editable ? 2 : 1} />
         </div>
       </Modal>
     </>
@@ -4092,17 +4206,50 @@ function DataPayablePage({ data, setData, toast }) {
     );
   };
 
-  const save = (row) => {
+  /* บันทึกจากป๊อปอัป AP — ใบลอยแก้ได้ทุกช่อง จึงต้องลาก "แผนจ่าย" ที่ผูกกันตามไปด้วย
+     (เกณฑ์ผูกเดียวกับ floatPlanImpact: forecastEntries.REF_DOC === payables.vchno)
+     planPatch = {id, payDate, bankAc} → มีเฉพาะตอนใบลอยมีแผนงวดเดียวที่ยังไม่จ่ายจริง
+     งวดที่จ่ายจริงแล้วไม่แตะเลย — เป็นเงินที่ออกจริง ไม่ใช่แค่แผน */
+  const save = (row, planPatch) => {
     const stamped = dxStampMeta(row);
-    setData(d => ({
-      ...d,
-      payables: stamped.id
-        ? d.payables.map(x => x.id === stamped.id ? stamped : x)
-        : [{ ...stamped, id: WTPData.newId() }, ...d.payables],
-    }));
+    const ref     = String(stamped.vchno || '').trim();
+    const isFloat = isFloatingAp(stamped);
+    setData(d => {
+      const next = {
+        ...d,
+        payables: stamped.id
+          ? d.payables.map(x => x.id === stamped.id ? stamped : x)
+          : [{ ...stamped, id: WTPData.newId() }, ...d.payables],
+      };
+      if (isFloat && ref) {
+        const desc = `จ่าย ${String(stamped.cust_name || '').trim()} (${ref}) ${FLOAT_AP_TAG}`;
+        const amt  = parseNum(stamped.netpayment);
+        next.forecastEntries = (d.forecastEntries || []).map(f => {
+          if (String(f.EXPENSE_TYPE || '').toUpperCase() !== 'AP') return f;
+          if (String(f.REF_DOC || '').trim() !== ref) return f;
+          if (_feIsActual(f)) return f;                       // จ่ายจริงไปแล้ว — ไม่แตะ
+          const nf = { ...f, DESCRIPTION: desc };
+          if (planPatch && planPatch.id === f.id) {           // งวดเดียว → ยอด/วันที่/บัญชี ตามที่แก้
+            nf.AMOUNT = String(-Math.abs(amt));
+            if (planPatch.payDate) nf.PAYMENT_DATE = planPatch.payDate;
+            nf.Bank_AC = planPatch.bankAc || null;
+          }
+          return nf;
+        });
+      }
+      return next;
+    });
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     setEdit(null);
-    toast('บันทึกข้อมูลแล้ว');
+    // ข้อความต้องตรงกับที่ทำจริง: ยอดงวดขยับตามเฉพาะตอนมีแผนงวดเดียว (planPatch)
+    const planRows = isFloat && ref
+      ? (data.forecastEntries || []).filter(f => String(f.EXPENSE_TYPE || '').toUpperCase() === 'AP'
+          && String(f.REF_DOC || '').trim() === ref && !_feIsActual(f))
+      : [];
+    toast(!isFloat ? 'บันทึกข้อมูลแล้ว'
+      : planPatch ? 'บันทึกการแก้ไขแล้ว · อัปเดตแผนจ่ายที่ Bank Daily ให้ด้วย'
+      : planRows.length ? 'บันทึกการแก้ไขแล้ว · ยอดงวดที่วางแผนไว้ไม่ขยับ — แก้ได้ที่ปุ่มวางแผนจ่าย'
+      : 'บันทึกการแก้ไขแล้ว');
   };
 
   // ── ลบ AP → ต้องลบ "แผนจ่ายที่ผูกกัน" ของใบลอยไปด้วยเสมอ ────────────────────
@@ -4906,7 +5053,8 @@ function DataPayablePage({ data, setData, toast }) {
       )}
 
       {/* Edit / view modal */}
-      <APEditModal row={edit} onClose={() => setEdit(null)} onSave={save} onDelete={remove} canEdit={canEdit} />
+      <APEditModal row={edit} onClose={() => setEdit(null)} onSave={save} onDelete={remove} canEdit={canEdit}
+        plans={edit ? (apPlansByVchno[String(edit.vchno || '').trim()] || []) : []} bankAccounts={data.bankAccounts} />
     </div>
   );
 }
