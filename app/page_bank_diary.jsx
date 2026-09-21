@@ -2992,15 +2992,13 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
         </table>
       </div>
 
-      {/* ── ท้ายใบ (จุดตัดรูป) ── */}
+      {/* ── ท้ายใบ (จุดตัดรูป) — ข้อความเดียวฝั่งซ้าย เหมือนใบของ POG
+             ★ ห้ามเติมยอดรวมฝั่งขวากลับมา (เตยเคาะ 2026-09-21): ตารางมีคอลัมน์ "รวม" อยู่แล้ว ── */}
       <div data-capture-end="1" style={{ padding: pad('10px 16px'),
         borderTop: '1px solid ' + (T.net < 0 ? '#f3d6d2' : SK.head),
-        background: T.net < 0 ? '#fdf8f7' : SK.mint, display: 'flex', justifyContent: 'space-between',
-        gap: 10, flexWrap: 'wrap', fontSize: fz(11.5), color: 'var(--ink-600)' }}>
-        <span>สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · ณ {fmtDate(today)}</span>
-        <span style={{ fontWeight: 800, fontSize: fz(12.5), color: T.net < 0 ? SK.red : SK.navy }}>
-          เงินคงเหลือสุทธิรวม {fmtMoney(T.net)}
-        </span>
+        background: T.net < 0 ? '#fdf8f7' : SK.mint,
+        fontSize: fz(11.5), color: 'var(--ink-600)' }}>
+        สรุป {rows.length} บัญชี · ช่วง “{periodLabel}”{periodEnd < '9999' ? ' (ถึง ' + fmtDate(periodEnd) + ')' : ''} · ณ {fmtDate(today)}
       </div>
     </div>
   );
