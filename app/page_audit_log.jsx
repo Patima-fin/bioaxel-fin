@@ -70,6 +70,7 @@ const AL_ENTITY_PAGE = {
   cashflowSnapshots: 'daily_balance', followUpsLog: 'iv_report', users: 'users',
   bankReconLines: 'bank_recon', bankReconState: 'bank_recon', bankReconBook: 'bank_recon', bankReconMatch: 'bank_recon',
   stsServiceFee: 'sts_calc', stsPendingCalc: 'sts_workflow', stsCalcResult: 'sts_workflow',
+  guarantees: 'guarantees',
 };
 // entity ที่ไม่มีหน้าเมนูตรง ๆ → ชื่อไทยอ่านง่าย (สุดท้ายค่อย fallback เป็นคีย์ดิบ)
 const AL_ENTITY_FALLBACK = { manualOverrides: 'ค่าปรับแต่ง/แก้มือ (Overrides)', presence: 'สถานะออนไลน์' };

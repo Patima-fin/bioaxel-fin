@@ -518,6 +518,7 @@ const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
     coin:        <><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></>,
     copy:        <><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></>,
     info:        <><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></>,
+    shield:      <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></>,
   };
   const p = paths[name] || <circle cx="12" cy="12" r="9"/>;
   return (

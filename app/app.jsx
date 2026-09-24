@@ -63,6 +63,7 @@ const PAGE_GROUPS = [
   ] },
   { key: 'manage', label: 'จัดการข้อมูล', items: [
     ['projects',      'โครงการ',          'projects'],
+    ['guarantees',    'หลักค้ำประกันสัญญา', 'shield'],
     ['invoices',      'ลูกหนี้คงค้าง',    'invoice'],
     ['checks',        'เช็คจ่ายล่วงหน้า', 'money'],
     ['data_forecast', 'ประมาณการรายจ่าย', 'forecast'],
@@ -678,6 +679,7 @@ function App() {
     sts_calc:      { label: 'STS Calculator',          title: 'STS Encompass Fee Calculator', icon: 'money' },
     sts_workflow:  { label: 'STS Workflow',             title: 'STS Workflow · review queue',  icon: 'invoice' },
     projects: { label: 'จัดการโครงการ', title: 'Projects', icon: 'projects' },
+    guarantees: { label: 'หลักค้ำประกันสัญญา', title: 'Contract Guarantee Tracking', icon: 'shield' },
     invoices: { label: 'ใบแจ้งหนี้', title: 'Invoices', icon: 'invoice' },
     checks:    { label: 'เช็คจ่ายล่วงหน้า', title: 'Checks', icon: 'money' },
     data_forecast: { label: 'ประมาณการนอกระบบ', title: 'Forecast Entries', icon: 'forecast' },
@@ -704,6 +706,7 @@ function App() {
     case 'cashflow_present': page = <CashFlowPresentPage data={data} setData={setData} toast={pushToast} />; break;
     case 'cf_coding':      page = <CfCodingPage data={data} setData={setData} toast={pushToast} />; break;
     case 'projects':       page = <ProjectControlPage data={data} setData={setData} toast={pushToast} />; break;
+    case 'guarantees':     page = <GuaranteePage data={data} setData={setData} toast={pushToast} />; break;
     case 'investor':       page = <InvestorDashboard data={data} setData={setData} toast={pushToast} />; break;
     case 'invoices':       page = <InvoicesPage data={data} setData={setData} toast={pushToast} />; break;
     case 'debt':           page = <DebtPage data={data} setData={setData} toast={pushToast} />; break;

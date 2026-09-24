@@ -71,7 +71,8 @@
                        'debtEvents', 'users', 'cashflowSnapshots',
                        'followUpsLog', 'manualOverrides',
                        'bankReconLines', 'bankReconState',
-                       'bankReconBook', 'bankReconMatch'];
+                       'bankReconBook', 'bankReconMatch',
+                       'guarantees'];
   var ALL_TABLES = CRUD_ENTITIES.concat(['presence']);   // 25 ตาราง อ่านทั้งหมดตอน load
   var TABLE_SET  = {}; ALL_TABLES.forEach(function (t) { TABLE_SET[t] = true; });
 
