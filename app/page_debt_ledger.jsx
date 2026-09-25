@@ -219,6 +219,81 @@ function debtGrossPrincipal(master, events) {
   return base + draw;
 }
 
+// ── ช่วงสัญญา: สัญญาแรก + ต่อสัญญา (renewals) ──────────────────────────────────
+// สัญญานักลงทุน (WCI) อายุสั้น (เช่น 6 เดือน) ต้องต่อสัญญาทุกครั้งที่ครบ — เก็บเป็น array ใน master
+//   master.renewals = [{ id, no, startDate, endDate, months, increase, label, note, prevMaturity, by, at }]
+//   master.firstTermEnd = วันครบของสัญญาแรก (จำไว้ตอนต่อครั้งแรก เพราะ maturityDate ถูกเลื่อนไปแล้ว)
+// ช่วงเป็นแบบ [start, end) เหมือน buildAutoSchedule — วันครบ = วันเริ่มช่วงถัดไป
+const DEBT_FIRST_TERM_LABEL = 'สัญญาปีแรก';
+const DEBT_OVERDUE_TERM_LABEL = 'เลยวันครบสัญญา (ยังไม่ต่อสัญญา)';
+function debtStartOf(master) {
+  return (master && (master.startDate || master.receiveDate || master.drawdownDate)) || '';
+}
+// บวกเดือนแบบคงวันที่ (31 ม.ค. + 1 เดือน = 28/29 ก.พ. ไม่เด้งไป มี.ค.)
+function debtAddMonthsISO(iso, n) {
+  if (!iso || !n) return iso || '';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  const t = (y * 12 + (m - 1)) + Number(n);
+  const ny = Math.floor(t / 12), nm = t % 12 + 1;
+  const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+// จำนวนเดือนเต็มระหว่าง 2 วัน (21/08/2023 → 21/02/2024 = 6)
+function debtMonthsBetween(a, b) {
+  if (!a || !b) return 0;
+  const [y1, m1, d1] = a.slice(0, 10).split('-').map(Number);
+  const [y2, m2, d2] = b.slice(0, 10).split('-').map(Number);
+  let n = (y2 - y1) * 12 + (m2 - m1);
+  if (d2 < d1 && debtAddMonthsISO(a, n) !== b.slice(0, 10)) n -= 1;
+  return Math.max(0, n);
+}
+function debtRenewals(master) {
+  return ((master && master.renewals) || []).filter(r => r && r.startDate)
+    .slice().sort((a, b) => a.startDate.localeCompare(b.startDate));
+}
+// คืน [{ label, start, end, months, increase, renewal }] เรียงตามเวลา (ช่วงแรก = สัญญาเดิม)
+function debtTerms(master) {
+  if (!master) return [];
+  const start = debtStartOf(master);
+  const rens = debtRenewals(master);
+  const firstEnd = rens.length ? (master.firstTermEnd || rens[0].startDate) : (master.maturityDate || '');
+  const terms = [];
+  if (start) terms.push({
+    label: master.firstTermLabel || DEBT_FIRST_TERM_LABEL, start, end: firstEnd,
+    months: debtMonthsBetween(start, firstEnd), increase: 0, renewal: null,
+  });
+  rens.forEach(r => terms.push({
+    label: r.label || `ต่อสัญญาครั้งที่ ${r.no || ''}`.trim(), start: r.startDate, end: r.endDate || '',
+    months: Number(r.months) || debtMonthsBetween(r.startDate, r.endDate), increase: Number(r.increase) || 0, renewal: r,
+  }));
+  return terms;
+}
+// ช่วงสัญญาที่ "วัน iso" ตกอยู่ · เลยวันครบช่วงสุดท้ายแล้ว = ยังไม่ได้ต่อสัญญา
+function debtTermLabelAt(terms, iso) {
+  if (!terms || !terms.length || !iso) return '';
+  let t = null;
+  for (const x of terms) if (x.start <= iso) t = x;
+  if (!t) return '';
+  const last = terms[terms.length - 1];
+  if (t === last && last.end && iso >= last.end) return DEBT_OVERDUE_TERM_LABEL;
+  return t.label;
+}
+// วันเริ่มของแถวดอกเบี้ย — แถวที่สร้างหลังมีฟีเจอร์นี้เก็บ periodStart ไว้ · แถวเก่าใช้วันที่ 1 ของเดือน
+// (เดือนแรกของสัญญา = วันเริ่มสัญญา)
+function debtRowPeriodStart(row, master) {
+  if (row && row.periodStart) return row.periodStart;
+  const ym = `${row.year}-${String(row.month).padStart(2, '0')}`;
+  const start = debtStartOf(master);
+  return (start && start.slice(0, 7) === ym) ? start : `${ym}-01`;
+}
+// โชว์ป้ายช่วงสัญญาไหม — สัญญาที่เคยต่อ หรือสัญญานักลงทุน (WCI) · สัญญาธนาคารทั่วไปไม่ต้อง (รก)
+function debtShowTermLabels(master) {
+  if (!master) return false;
+  if (debtRenewals(master).length) return true;
+  if (master.debtCategory === 'WCI') return true;
+  return typeof debtGroupOf === 'function' && debtGroupOf(master) === 'invest';
+}
+
 // ── Auto interest schedule (Phase A — read-only เทียบกับของเดิม) ─────────────
 // คำนวณตารางดอกเบี้ยรายเดือนสดจาก สัญญา + events ตาม config การคิดวันต่อสัญญา
 const _dayMs = 86400000;
@@ -275,6 +350,12 @@ function buildAutoSchedule(master, events, asOf, cfg) {
   let cur = _monthStartStr(_addMonthStr(start, 1));
   while (cur < end) { bset.add(cur); cur = _monthStartStr(_addMonthStr(cur, 1)); }
   evs.forEach(e => bset.add(e.date));
+  // แบ่งแถวที่รอยต่อช่วงสัญญาด้วย (วันเริ่มต่อสัญญา + วันครบช่วงสุดท้าย) → เดือนที่ต่อสัญญากลางเดือน
+  // ได้ 2 แถว (เช่น ก.พ. 20 วัน "สัญญาปีแรก" + 9 วัน "ต่อสัญญาครั้งที่ 1") · ดอกเบี้ยรวมเท่าเดิม ไม่นับวันซ้ำ
+  debtTerms(master).forEach(t => {
+    if (t.start > start && t.start < end) bset.add(t.start);
+    if (t.end && t.end > start && t.end < end) bset.add(t.end);
+  });
   const bounds = [...bset].filter(d => d >= start && d <= end).sort();
 
   // แยกเป็น 1 แถว/ช่วงเงินต้น (เดือนปกติ = 1 แถว · เดือนที่คืน/เบิกกลางเดือน = หลายแถว)
@@ -990,6 +1071,143 @@ function PrincipalEventModal({ open, kind, master, editEvent, onClose, onSave })
   );
 }
 
+// ── ต่อสัญญา modal — สัญญาเดิม เลขเดิม เลื่อนวันครบออกไป (+ เพิ่มทุนพร้อมต่อได้) ──────────
+function RenewContractModal({ open, master, onClose, onSave }) {
+  const [start,  setStart]  = React.useState('');
+  const [months, setMonths] = React.useState(6);
+  const [end,    setEnd]    = React.useState('');
+  const [endTouched, setEndTouched] = React.useState(false);
+  const [increase, setIncrease] = React.useState(0);
+  const [label,  setLabel]  = React.useState('');
+  const [labelTouched, setLabelTouched] = React.useState(false);
+  const [note,   setNote]   = React.useState('');
+  const terms = React.useMemo(() => debtTerms(master), [master]);
+  const nextNo = debtRenewals(master).length + 1;
+  const suggestLabel = (inc) => `ต่อสัญญาครั้งที่ ${nextNo}` + ((Number(inc) || 0) > 0 ? ' แบบเพิ่มทุน' : '');
+
+  React.useEffect(() => {
+    if (!open || !master) return;
+    const last = terms[terms.length - 1];
+    const m = Number(master.termMonths) || (last && last.months) || 6;
+    const s = master.maturityDate || new Date().toISOString().slice(0, 10);
+    setStart(s); setMonths(m); setEnd(debtAddMonthsISO(s, m)); setEndTouched(false);
+    setIncrease(0); setLabel(suggestLabel(0)); setLabelTouched(false); setNote('');
+  }, [open, master]);
+
+  if (!open || !master) return null;
+  const onStart  = (v) => { setStart(v);  if (!endTouched) setEnd(debtAddMonthsISO(v, months)); };
+  const onMonths = (v) => { const n = Math.max(0, Number(v) || 0); setMonths(n); if (!endTouched) setEnd(debtAddMonthsISO(start, n)); };
+  const onInc    = (v) => { setIncrease(v); if (!labelTouched) setLabel(suggestLabel(v)); };
+  const valid = start && end && end > start;
+  const Lbl = ({ children }) => <label style={{ fontSize: 11, color: 'var(--ink-500)', display: 'block', marginBottom: 3, fontWeight: 600 }}>{children}</label>;
+  const beforeStart = master.maturityDate && start && start !== master.maturityDate;
+
+  return (
+    <Modal open={open} maxWidth={620} title={`ต่อสัญญา · ${master.contractNo}`} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={!valid}
+          onClick={() => onSave && onSave({ startDate: start, endDate: end, months, increase: Number(increase) || 0, label, note })}>
+          <Icon name="check" size={14} /> บันทึกต่อสัญญา
+        </button>
+      </>}>
+      <div style={{ fontSize: 12, color: 'var(--ink-500)', marginBottom: 12, lineHeight: 1.6 }}>
+        สัญญาเดิม <strong>เลขเดิม</strong> — แค่เลื่อนวันครบออกไป · ดอกเบี้ยเดือนที่ต่อสัญญาจะแบ่งเป็น 2 แถว (ก่อน/หลังวันต่อ)
+        และหมายเหตุของแต่ละเดือนจะบอกว่าอยู่ช่วงสัญญาไหน
+        {master.maturityDate && <> · วันครบปัจจุบัน <strong>{fmtDate(master.maturityDate)}</strong></>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 10 }}>
+        <div>
+          <Lbl>วันเริ่มต่อสัญญา</Lbl>
+          <input className="input" type="date" value={start} onChange={e => onStart(e.target.value)} />
+        </div>
+        <div>
+          <Lbl>ระยะเวลา (เดือน)</Lbl>
+          <input className="input" type="number" min="0" value={months} onChange={e => onMonths(e.target.value)} />
+        </div>
+        <div>
+          <Lbl>วันครบสัญญาใหม่</Lbl>
+          <input className="input" type="date" value={end} onChange={e => { setEnd(e.target.value); setEndTouched(true); }} />
+        </div>
+      </div>
+      {beforeStart && (
+        <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '6px 10px', marginBottom: 10 }}>
+          ⚠ วันเริ่มต่อสัญญาไม่ตรงกับวันครบเดิม ({fmtDate(master.maturityDate)}) — ปกติต่อสัญญาจะเริ่มวันเดียวกับวันครบเดิม
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <Lbl>เพิ่มทุนพร้อมต่อสัญญา (บาท)</Lbl>
+          <NumberInput className="input" value={increase} digits={2} onChange={onInc} />
+          <div style={{ fontSize: 10.5, color: 'var(--ink-400)', marginTop: 3 }}>ไม่มี = 0 · มี = บันทึกเป็น "เบิกเพิ่ม" วันเริ่มต่อสัญญา</div>
+        </div>
+        <div>
+          <Lbl>ชื่อช่วงสัญญา (ขึ้นในหมายเหตุ)</Lbl>
+          <input className="input" value={label} onChange={e => { setLabel(e.target.value); setLabelTouched(true); }}
+            placeholder="เช่น ต่อสัญญาครั้งที่ 1 ปีที่1" />
+        </div>
+      </div>
+      <div>
+        <Lbl>หมายเหตุ</Lbl>
+        <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="(ไม่บังคับ)" />
+      </div>
+    </Modal>
+  );
+}
+
+// แผง "ช่วงสัญญา" ในแท็บคืนเงินต้น — สัญญาแรก + ทุกครั้งที่ต่อ
+function DebtTermsPanel({ master, canEdit, onRenew, onUndo }) {
+  const terms = debtTerms(master);
+  if (!terms.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const curLabel = debtTermLabelAt(terms, today);
+  const th = { padding: '6px 12px', fontSize: 10, fontWeight: 700, color: 'var(--ink-400)', textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid var(--line, #e2e8f0)', whiteSpace: 'nowrap' };
+  const td = { padding: '6px 12px', fontSize: 12, fontVariantNumeric: 'tabular-nums' };
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>📜 ช่วงสัญญา</span>
+        <span style={{ background: 'var(--brand-50, #eff6ff)', color: 'var(--brand-700)', borderRadius: 20, padding: '1px 9px', fontSize: 11, fontWeight: 700 }}>
+          ต่อแล้ว {terms.length - 1} ครั้ง
+        </span>
+        {master.status === 'Active' && curLabel && (
+          <span style={{ fontSize: 11.5, color: curLabel === DEBT_OVERDUE_TERM_LABEL ? 'var(--bad)' : 'var(--ink-500)' }}>
+            ตอนนี้: <strong>{curLabel}</strong>
+          </span>
+        )}
+        {canEdit && onUndo && terms.length > 1 && (
+          <button onClick={() => { const l = terms[terms.length - 1]; if (confirm(`ยกเลิก "${l.label}" (${fmtDate(l.start)} – ${fmtDate(l.end)})?\nวันครบจะกลับเป็นวันเดิม${l.increase > 0 ? ' และลบรายการเพิ่มทุน ' + fmtNum(l.increase, 2) : ''}`)) onUndo(master); }}
+            style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px', borderRadius: 7, cursor: 'pointer', border: '1px solid #fecaca', background: '#fff', color: '#dc2626' }}>
+            ↩ ยกเลิกการต่อครั้งล่าสุด
+          </button>
+        )}
+      </div>
+      <div style={{ borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr style={{ background: 'var(--ink-50, #f8fafc)' }}>
+            <th style={{ ...th, textAlign: 'left' }}>ช่วงสัญญา</th>
+            <th style={{ ...th, textAlign: 'left' }}>ตั้งแต่</th>
+            <th style={{ ...th, textAlign: 'left' }}>ครบ</th>
+            <th style={{ ...th, textAlign: 'right' }}>ระยะเวลา</th>
+            <th style={{ ...th, textAlign: 'right' }}>เพิ่มทุน</th>
+          </tr></thead>
+          <tbody>
+            {terms.map((t, i) => (
+              <tr key={i} style={{ borderTop: i ? '1px solid var(--ink-50, #f1f5f9)' : 'none' }}>
+                <td style={{ ...td, fontWeight: 600 }}>{t.label}</td>
+                <td style={td}>{fmtDate(t.start)}</td>
+                <td style={td}>{t.end ? fmtDate(t.end) : '—'}</td>
+                <td style={{ ...td, textAlign: 'right' }}>{t.months ? t.months + ' เดือน' : '—'}</td>
+                <td style={{ ...td, textAlign: 'right', color: t.increase > 0 ? '#b45309' : 'var(--ink-300)' }}>{t.increase > 0 ? '+' + fmtNum(t.increase, 2) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Rollover modal — close current + create new contract(s) ─────────────────
 // 3 modes:
 //   transfer — เปลี่ยนชื่อผู้กู้  (1 new = old fields, new borrowerName)
@@ -1289,6 +1507,88 @@ function RolloverModal({ open, master, onClose, onSave }) {
 }
 
 // ── Shared mutation hook — used by both pages ───────────────────────────────
+// แปลงผล buildAutoSchedule → แถว debtLedger โดยคงสถานะจ่าย/override เดิมรายเดือน (ใช้ทั้ง adopt + ต่อสัญญา)
+// ★ ต้องใช้ id เดิมซ้ำ (แถวใหม่ = update ทับที่เดิม) ห้ามแจก newId() รัวทั้งตาราง —
+//   ไม่งั้น diff ของ sync = ลบเก่าทั้งหมด + เพิ่มใหม่ทั้งหมด แล้วโดน "เกราะกัน mass-delete"
+//   ใน data_supabase.pushDiff ปัด deleteIds ทิ้งเงียบ ๆ (เงื่อนไข: ลบ > max(8, 50% ของทั้งตาราง))
+//   ส่วน upsert ยังไหลต่อ → แถวเก่าค้างบน server + แถวใหม่เข้าไป = ตารางดอกเบี้ยเบิ้ล 2 เท่า
+//   (โดนจริงมาแล้ว: สัญญาที่แถวเป็นเกินครึ่งของทั้ง debtLedger → 37 แถว กลายเป็น 74)
+// เดือนที่ "จำนวนแถวเท่าเดิม 1:1" → ยกสถานะจ่าย (รวมรอบจ่าย payments[]) + override มาทั้งแถวเหมือนเดิม
+// เดือนที่ "แตกแถวใหม่" (เช่น ต่อสัญญากลางเดือน) → เอารอบจ่ายเดิมทั้งเดือนมาเกลี่ยใส่แถวใหม่ตามลำดับ
+//   (ยอดดอกรวมของเดือนเท่าเดิม → เดือนที่จ่ายครบแล้วยังจ่ายครบ ไม่กลายเป็นค้างครึ่งเดือน)
+function _materializeAutoRows(master, mNow, sched, ledgerRows) {
+  const oldRowsByMonth = {};
+  (ledgerRows || []).forEach(r => {
+    const isMarker = /คืนเงิน|เบิก|ชำระต้น/.test(String(r.note || r.paymentNote || ''));
+    if (isMarker) return;
+    const k = `${r.year}-${r.month}`;
+    (oldRowsByMonth[k] || (oldRowsByMonth[k] = [])).push(r);
+  });
+  const newCount = {};
+  sched.rows.forEach(row => { const k = `${row.year}-${row.month}`; newCount[k] = (newCount[k] || 0) + 1; });
+  const idPool = {};
+  Object.keys(oldRowsByMonth).forEach(k => { idPool[k] = oldRowsByMonth[k].map(r => r.id).filter(Boolean); });
+  // คิวรอบจ่ายของเดือนที่แตกแถว (เกลี่ยตามลำดับ)
+  const payQueue = {};
+  const seen = {};
+  const newRows = sched.rows.map(row => {
+    const k = `${row.year}-${row.month}`;
+    const olds = (oldRowsByMonth[k] || []).slice()
+      .sort((a, b) => (a.periodStart || '').localeCompare(b.periodStart || ''));
+    const i = seen[k] = (seen[k] || 0) + 1;
+    // จำนวนแถวเท่าเดิม → จับคู่ตามลำดับ (แถวที่ i ของเดือน = แถวเดิมที่ i)
+    const sameShape = olds.length === newCount[k];
+    const old = sameShape ? olds[i - 1] : (olds.find(r => r.paymentDate) || olds[0] || {});
+    const pool = idPool[k];
+    const nr = {
+      // เดือนเดิมมีอยู่แล้ว → ใช้ id เดิม (เดือนที่แตกหลายแถวก็หยิบจากคิวทีละใบ) · ไม่มีค่อยออกใหม่
+      id: (pool && pool.length) ? pool.shift() : WTPData.newId(),
+      contractNo: master.contractNo, contractId: master.id,   // ผูก id ด้วย → แก้ชื่อสัญญาแล้วไม่หลุด
+      year: row.year, month: row.month,
+      periodStart: row.periodStart, periodEnd: row.periodEnd,  // ใช้หาป้ายช่วงสัญญา
+      principal: row.principal, interestRate: Number(mNow.interestRate) || 0,
+      days: row.days, interestAmount: row.interest, outstanding: row.balanceAfter,
+      paymentDate: '', paidBy: old.paidBy || '', paidAt: old.paidAt || '', paymentNote: old.paymentNote || '',
+      auto: true,
+    };
+    if (sameShape || (!olds.length)) {
+      nr.paymentDate = old.paymentDate || '';
+      if (Array.isArray(old.payments) && old.payments.length) nr.payments = old.payments;
+      if (old.interestOverride != null && old.interestOverride !== '') {
+        nr.interestOverride = old.interestOverride; nr.overrideBy = old.overrideBy || '';
+        nr.overrideAt = old.overrideAt || ''; nr.overrideNote = old.overrideNote || '';
+      }
+      return nr;
+    }
+    // เดือนแตกแถว → เกลี่ยรอบจ่าย
+    if (!payQueue[k]) {
+      payQueue[k] = olds.flatMap(r => interestPayments(r).map(p => ({
+        date: p.date || '', amount: Number(p.amount) || 0, note: p.note || '', by: p.by || '', at: p.at || '',
+      }))).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      payQueue[k].idx = 0;
+    }
+    const q = payQueue[k];
+    q.idx++;
+    const isLast = q.idx === newCount[k];
+    let need = row.interest;
+    const got = [];
+    while (q.length && (isLast || need > 0.005)) {
+      const p = q[0];
+      const take = isLast ? p.amount : Math.min(p.amount, need);
+      if (take > 0.005) got.push({ ...p, amount: take });
+      p.amount -= take; need -= take;
+      if (p.amount <= 0.005) q.shift();
+    }
+    const paid = got.reduce((s, p) => s + p.amount, 0);
+    if (got.length) {
+      nr.payments = got;
+      if (paid >= row.interest - 0.01) nr.paymentDate = got[got.length - 1].date || old.paymentDate || '';
+    }
+    return nr;
+  });
+  return newRows;
+}
+
 function useDebtContractActions(setData, toast) {
   const session = (() => {
     try { return JSON.parse(localStorage.getItem('bio-session') || 'null'); } catch (_) { return null; }
@@ -1548,41 +1848,7 @@ function useDebtContractActions(setData, toast) {
         const sched = buildAutoSchedule({ ...mNow, balance: newBal }, events, today, { method: cfg.method, dayCount: cfg.dayCount, endCap: cap });
         // SAFETY: ถ้าคำนวณไม่ได้/ไม่มีแถว → ยกเลิก ไม่แตะข้อมูลเดิม (กันตารางหาย)
         if (sched.error || !sched.rows.length) { msg = 'ERR:' + (sched.error || 'ไม่มีงวดที่คำนวณได้'); updated = null; return d; }
-        // เก็บสถานะจ่าย/override เดิมรายเดือน (แถว interest จริง — ไม่เอา marker) + คิว id เดิมรายเดือน
-        // ★ ต้องใช้ id เดิมซ้ำ (แถวใหม่ = update ทับที่เดิม) ห้ามแจก newId() รัวทั้งตาราง —
-        //   ไม่งั้น diff ของ sync = ลบเก่าทั้งหมด + เพิ่มใหม่ทั้งหมด แล้วโดน "เกราะกัน mass-delete"
-        //   ใน data_supabase.pushDiff ปัด deleteIds ทิ้งเงียบ ๆ (เงื่อนไข: ลบ > max(8, 50% ของทั้งตาราง))
-        //   ส่วน upsert ยังไหลต่อ → แถวเก่าค้างบน server + แถวใหม่เข้าไป = ตารางดอกเบี้ยเบิ้ล 2 เท่า
-        //   (โดนจริงมาแล้ว: สัญญาที่แถวเป็นเกินครึ่งของทั้ง debtLedger → 37 แถว กลายเป็น 74)
-        const oldByMonth = {};
-        const idPool = {};
-        (ledgerRows || []).forEach(r => {
-          const isMarker = /คืนเงิน|เบิก|ชำระต้น/.test(String(r.note || r.paymentNote || ''));
-          if (isMarker) return;
-          const k = `${r.year}-${r.month}`;
-          if (!oldByMonth[k] || r.paymentDate) oldByMonth[k] = r;
-          if (r.id) (idPool[k] || (idPool[k] = [])).push(r.id);
-        });
-        const newRows = sched.rows.map(row => {
-          const k = `${row.year}-${row.month}`;
-          const old = oldByMonth[k] || {};
-          const pool = idPool[k];
-          const nr = {
-            // เดือนเดิมมีอยู่แล้ว → ใช้ id เดิม (เดือนที่แตกหลายแถวก็หยิบจากคิวทีละใบ) · ไม่มีค่อยออกใหม่
-            id: (pool && pool.length) ? pool.shift() : WTPData.newId(),
-            contractNo: master.contractNo, contractId: master.id,   // ผูก id ด้วย → แก้ชื่อสัญญาแล้วไม่หลุด
-            year: row.year, month: row.month,
-            principal: row.principal, interestRate: Number(mNow.interestRate) || 0,
-            days: row.days, interestAmount: row.interest, outstanding: row.balanceAfter,
-            paymentDate: old.paymentDate || '', paidBy: old.paidBy || '', paidAt: old.paidAt || '', paymentNote: old.paymentNote || '',
-            auto: true,
-          };
-          if (old.interestOverride != null && old.interestOverride !== '') {
-            nr.interestOverride = old.interestOverride; nr.overrideBy = old.overrideBy || '';
-            nr.overrideAt = old.overrideAt || ''; nr.overrideNote = old.overrideNote || '';
-          }
-          return nr;
-        });
+        const newRows = _materializeAutoRows(master, mNow, sched, ledgerRows);
         const otherRows = (d.debtLedger || []).filter(r => !debtRowMatchesContract(r, master));
         const masters = (d.debtMaster || []).map(m => m.id === master.id
           ? { ...m, balance: newBal, interestCalc: { method: cfg.method, dayCount: cfg.dayCount, autoMode: true, adoptedBy: username, adoptedAt: at } }
@@ -1655,6 +1921,97 @@ function useDebtContractActions(setData, toast) {
       });
       syncAfter(updated);
       toast(newStatus === 'Close' ? 'ปิดสัญญาแล้ว' : 'เปิดสัญญากลับเป็น Active แล้ว');
+    },
+    // ต่อสัญญา (สัญญาเดิม เลขเดิม) — เลื่อนวันครบออกไป + จำช่วงสัญญาไว้ใน master.renewals
+    // + เพิ่มทุนพร้อมต่อได้ (สร้างรายการ "เบิกเพิ่ม" ณ วันเริ่มต่อสัญญา ผูก renewalId ไว้ลบคืนได้)
+    // สัญญาที่เปิดคำนวณอัตโนมัติ → สร้างตารางดอกเบี้ยใหม่ทันที ให้แถวแบ่งที่วันต่อสัญญา
+    renewContract(master, { startDate, endDate, months, increase, label, note }) {
+      const at = new Date().toISOString();
+      const today = at.slice(0, 10);
+      let updated, msg = '';
+      setData(d => {
+        const mNow = (d.debtMaster || []).find(m => m.id === master.id) || master;
+        const prev = debtRenewals(mNow);
+        const renewal = {
+          id: WTPData.newId(), no: prev.length + 1,
+          startDate, endDate, months: Number(months) || debtMonthsBetween(startDate, endDate),
+          increase: Number(increase) || 0, label: (label || '').trim() || `ต่อสัญญาครั้งที่ ${prev.length + 1}`,
+          note: (note || '').trim(), prevMaturity: mNow.maturityDate || '', by: username, at,
+        };
+        let events = d.debtEvents || [];
+        if (renewal.increase > 0) {
+          events = [...events, {
+            id: WTPData.newId(), contractId: mNow.id, contractNo: mNow.contractNo,
+            eventType: 'drawdown', eventDate: startDate, amount: renewal.increase,
+            note: `เพิ่มทุนพร้อม${renewal.label}`, renewalId: renewal.id,
+            recordedBy: username, recordedAt: at,
+          }];
+        }
+        const patched = {
+          ...mNow,
+          renewals: [...(mNow.renewals || []), renewal],
+          firstTermEnd: mNow.firstTermEnd || (prev.length ? '' : (mNow.maturityDate || startDate)),
+          termMonths: mNow.termMonths || renewal.months,
+          maturityDate: endDate,
+          editedBy: username, editedAt: at,
+        };
+        patched.balance = recalcBalance(patched, events);
+        let ledger = d.debtLedger || [];
+        msg = `ต่อสัญญา ${mNow.contractNo} ถึง ${fmtDate(endDate)} แล้ว` + (renewal.increase > 0 ? ` · เพิ่มทุน ${fmtNum(renewal.increase, 2)}` : '');
+        const ic = mNow.interestCalc || {};
+        if (ic.autoMode && patched.status === 'Active') {
+          const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
+          if (!sched.error && sched.rows.length) {
+            const rows = _materializeAutoRows(mNow, patched, sched, mine);
+            ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
+            msg += ' · คำนวณตารางดอกเบี้ยใหม่แล้ว';
+          } else {
+            msg += ' · (ตารางดอกเบี้ยยังไม่อัปเดต: ' + (sched.error || 'ไม่มีงวด') + ')';
+          }
+        }
+        updated = { ...d, debtEvents: events, debtLedger: ledger,
+          debtMaster: (d.debtMaster || []).map(m => m.id === mNow.id ? patched : m) };
+        return updated;
+      });
+      syncAfter(updated);
+      toast(msg);
+    },
+    // ยกเลิกการต่อสัญญาครั้งล่าสุด (คีย์ผิด) — คืนวันครบเดิม + ลบรายการเพิ่มทุนที่มากับการต่อครั้งนั้น
+    undoLastRenewal(master) {
+      const at = new Date().toISOString();
+      const today = at.slice(0, 10);
+      let updated, msg = '';
+      setData(d => {
+        const mNow = (d.debtMaster || []).find(m => m.id === master.id) || master;
+        const rens = debtRenewals(mNow);
+        if (!rens.length) { msg = 'ไม่มีการต่อสัญญาให้ยกเลิก'; updated = null; return d; }
+        const last = rens[rens.length - 1];
+        const events = (d.debtEvents || []).filter(e => e.renewalId !== last.id);
+        const left = (mNow.renewals || []).filter(r => r.id !== last.id);
+        const patched = {
+          ...mNow, renewals: left,
+          maturityDate: last.prevMaturity || (left.length ? left[left.length - 1].endDate : (mNow.firstTermEnd || mNow.maturityDate)),
+          firstTermEnd: left.length ? mNow.firstTermEnd : '',
+          editedBy: username, editedAt: at,
+        };
+        patched.balance = recalcBalance(patched, events);
+        let ledger = d.debtLedger || [];
+        const ic = mNow.interestCalc || {};
+        if (ic.autoMode && patched.status === 'Active') {
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
+          if (!sched.error && sched.rows.length) {
+            const rows = _materializeAutoRows(mNow, patched, sched, ledger.filter(r => debtRowMatchesContract(r, mNow)));
+            ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
+          }
+        }
+        msg = `ยกเลิก "${last.label}" แล้ว · วันครบกลับเป็น ${fmtDate(patched.maturityDate)}`;
+        updated = { ...d, debtEvents: events, debtLedger: ledger,
+          debtMaster: (d.debtMaster || []).map(m => m.id === mNow.id ? patched : m) };
+        return updated;
+      });
+      if (updated) syncAfter(updated);
+      toast(msg);
     },
     doRollover(master, { mode, closeDate, reason, newContracts }) {
       const at = new Date().toISOString();
@@ -1729,6 +2086,8 @@ const XL = {
   totVal:     { font: { bold: true }, fill: { fgColor: { rgb: 'FFF3D6' } }, alignment: { horizontal: 'right', vertical: 'center' }, border: XL_BORDER },
   paid:       { font: { color: { rgb: '1E8E5A' } }, alignment: { horizontal: 'center', vertical: 'center' }, border: XL_BORDER },
   due:        { font: { color: { rgb: 'C0392B' }, bold: true }, alignment: { horizontal: 'center', vertical: 'center' }, border: XL_BORDER },
+  infoLbl:    { font: { bold: true, color: { rgb: '1E3A5F' } }, fill: { fgColor: { rgb: 'EAF1F8' } }, alignment: { horizontal: 'left', vertical: 'center' }, border: XL_BORDER },
+  infoVal:    { alignment: { vertical: 'center' }, border: XL_BORDER },
 };
 function xlSet(ws, r, c, style) {
   const addr = XLSX.utils.encode_cell({ r, c });
@@ -1748,170 +2107,297 @@ function principalInOut(events) {
   return { inSum, outSum };
 }
 
+const DEBT_EXPORT_COMPANY = 'บริษัท ไบโอแอ็กซ์เซลล์ จำกัด';
+const DEBT_WHT_RATE = 0.15;   // ภาษีหัก ณ ที่จ่ายดอกเบี้ย (นักลงทุนบุคคลธรรมดา — ตามไฟล์ตารางคำนวณดอกเบี้ย WCI ของเตย)
+const TH_MONTH_FULL = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+const FMT_PCT2 = '0.00%';
+const FMT_NEG  = '#,##0.00;(#,##0.00);"-"';   // ติดลบในวงเล็บ + ศูนย์เป็นขีด (แบบไฟล์เตย)
+const XL_LINK = { font: { color: { rgb: '0563C1' }, underline: true } };
+// ชื่อชีทที่ Excel ยอม (≤31 ตัว ห้าม \/?*[]:) + ไม่ซ้ำ
+function _debtSheetName(m, used) {
+  let name = (m.contractNo || m.borrowerName || 'sheet').replace(/[\\\/\?\*\[\]\:]/g, '_').slice(0, 31);
+  let n = 1; const base = name;
+  while (used.has(name) || name === 'สรุปทั้งหมด') { n++; name = (base.slice(0, 28) + '_' + n).slice(0, 31); }
+  used.add(name);
+  return name;
+}
+// ลิงก์ภายในไฟล์ไปชีทอื่น (xlsx-js-style เขียน <hyperlink location="…"> ให้ — ทดสอบแล้ว)
+function _xlLinkTo(ws, r, c, sheetName, tip) {
+  const cell = xlSet(ws, r, c, XL_LINK);
+  cell.l = { Target: "#'" + String(sheetName).replace(/'/g, "''") + "'!A1", Tooltip: tip || ('ไปที่ชีท ' + sheetName) };
+}
+const _xlFmt = (ws, r, c, z) => { const cell = ws[XLSX.utils.encode_cell({ r, c })]; if (cell && cell.t === 'n') cell.z = z; };
+
+// แถวตารางดอกเบี้ยแบบไฟล์เตย: งวด (เดือนเดียวกันใช้เลขเดียวกัน) · Installment = ยอดที่จ่ายจริงในวันนั้น
+// (ลงที่แถวสุดท้ายที่จ่ายในรอบนั้น) · Principal paid = Installment − ดอกเบี้ย · Outstanding = เงินต้น + ดอกค้างสะสม
+function _debtStatementRows(rows, m) {
+  // รอบจ่ายทั้งหมด → รวมยอดต่อ "วันจ่าย" แล้วลงที่แถวล่าสุดที่มีรอบนั้น
+  const instByRow = new Array(rows.length).fill(0);
+  const dateByRow = new Array(rows.length).fill('');
+  const lastRowOfDate = {}, sumOfDate = {};
+  rows.forEach((r, i) => interestPayments(r).forEach(p => {
+    const d = p.date || r.paymentDate || '';
+    sumOfDate[d] = (sumOfDate[d] || 0) + (Number(p.amount) || 0);
+    lastRowOfDate[d] = i;
+  }));
+  Object.keys(sumOfDate).forEach(d => { const i = lastRowOfDate[d]; instByRow[i] += sumOfDate[d]; dateByRow[i] = dateByRow[i] ? dateByRow[i] + ', ' + fmtDate(d) : (d ? fmtDate(d) : ''); });
+  let seq = 0, prevYm = '', accrued = 0;
+  return rows.map((r, i) => {
+    const ym = r.year + '-' + r.month;
+    if (ym !== prevYm) { seq++; prevYm = ym; }
+    const interest = effectiveInterest(r);
+    const inst = instByRow[i];
+    accrued += interest - inst;
+    const principal = Number(r.principal) || 0;
+    return { r, seq, interest, inst, principalPaid: inst - interest, outstanding: principal + accrued, payDate: dateByRow[i] };
+  });
+}
+
 // ── Per-contract Excel export (one sheet per contract) ──────────────────────
+// ทำหน้าตาให้เหมือนไฟล์ "01.ตารางคำนวณดอกเบี้ยนักลงทุน WCI.xlsx" ของเตย:
+//   หน้าสรุป (แบบชีท WCI-ดอกเบี้ย) — คลิกเลขที่สัญญา → ไปชีทของสัญญานั้น
+//   ชีทสัญญา — หัวข้อมูลสัญญา + ตาราง Month/งวด/Year/Principal/Int. rate/Days/Int. amount/Installment/
+//   Principal paid/Outstanding/Payment Date/หมายเหตุ(ช่วงสัญญา)/ภาษีหัก ณ ที่จ่าย/ยอดจ่ายสุทธิ + ลิงก์กลับหน้าสรุป
 function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, mode /* 'detail' | 'summary' */ }) {
   if (typeof XLSX === 'undefined') { alert('SheetJS ยังไม่โหลด'); return; }
   eventsByContract = eventsByContract || {};
   const wb = XLSX.utils.book_new();
-  // Sheet 1: สรุป — เพิ่มคอลัมน์ เบิกเพิ่ม / คืนเงินต้นแล้ว / คงเหลือเงินต้น
+  const SUMMARY = 'สรุปทั้งหมด';
+  const used = new Set();
+  const sheetKey = (m) => m.id || m.contractNo;
+  const sheetOf = {};
+  if (mode === 'detail') masters.forEach(m => { sheetOf[sheetKey(m)] = _debtSheetName(m, used); });
+  const seqOf = (m, i) => { const mm = String(m.contractNo || '').match(/^(\d{1,3})-/); return mm ? Number(mm[1]) : i + 1; };
+  const sortRows = (rows, m) => rows.slice().sort((a, b) =>
+    (Number(a.year) || 0) - (Number(b.year) || 0) ||
+    (Number(a.month) || 0) - (Number(b.month) || 0) ||
+    debtRowPeriodStart(a, m).localeCompare(debtRowPeriodStart(b, m)));
+
+  // ── Sheet 1: สรุป (แบบชีท WCI-ดอกเบี้ย) ──
+  const SC = 19; // คอลัมน์สุดท้าย (A–T)
   const summary = [
-    ['สรุปดอกเบี้ยทุกสัญญา', '', '', '', '', '', '', '', '', '', ''],
-    ['หมวด', 'เลขที่สัญญา', 'ผู้กู้/เจ้าหนี้', 'วงเงิน', 'เบิกเพิ่มรวม', 'คืนเงินต้นแล้ว', 'คงเหลือเงินต้น', 'อัตรา %/ปี', 'ดอกเบี้ยรวม', 'จ่ายแล้ว', 'ค้างชำระ'],
+    [DEBT_EXPORT_COMPANY],
+    ['สรุปการรับ การจ่าย และดอกเบี้ยทุกสัญญา' + (mode === 'detail' ? '   (คลิกเลขที่สัญญาเพื่อไปที่ชีทของสัญญานั้น)' : '')],
+    ['ลำดับที่', 'เลขที่สัญญา', 'ชื่อผู้ใช้กู้ยืม', 'หมวด', 'สถานะสัญญา', 'วันที่สัญญาฉบับล่าสุด', '', '', '', 'ครบสัญญา', '',
+      'วันที่รับเงิน', 'วันที่จ่ายเงินคืน', 'ยอดรับ', 'ยอดจ่าย', 'ยอดคงเหลือ', 'อัตรา/ปี', 'ดอกเบี้ยรวม', 'ดอกเบี้ยจ่ายแล้ว', 'ดอกเบี้ยค้างชำระ'],
+    ['', '', '', '', '', 'เริ่มต้น', 'สิ้นสุด', 'ระยะเวลา(เดือน)', 'ระยะเวลา(วัน)', 'เดือน', 'ปี', '', '', '', '', '', '', '', '', ''],
   ];
-  masters.forEach(m => {
+  const tot = { rec: 0, pay: 0, bal: 0, int: 0, paid: 0 };
+  masters.forEach((m, i) => {
     const rows = ledgerByContract[m.contractNo] || [];
     const total = rows.reduce((s, r) => s + effectiveInterest(r), 0);
     const paid  = rows.reduce((s, r) => s + interestPaid(r), 0);
-    const { inSum, outSum } = principalInOut(eventsByContract[m.contractNo]);
-    const principal = Number(m.principalAmount) || 0;
+    const evs = (eventsByContract[m.contractNo] || []).slice().sort((a, b) => (a.eventDate || '').localeCompare(b.eventDate || ''));
+    const { inSum, outSum } = principalInOut(evs);
+    const rec = (Number(m.principalAmount) || 0) + inSum;
+    const bal = m.status === 'Close' ? 0 : Math.max(0, rec - outSum);
+    const terms = debtTerms(m);
+    const last = terms[terms.length - 1] || {};
+    const endD = last.end || m.maturityDate || '';
+    const recDates = [debtStartOf(m), ...evs.filter(e => e.eventType === 'drawdown').map(e => e.eventDate)].filter(Boolean).map(fmtDate).join(', ');
+    const payDates = evs.filter(e => e.eventType === 'repayment').map(e => fmtDate(e.eventDate)).join(', ');
     summary.push([
-      m.debtCategory || '', m.contractNo || '', m.borrowerName || '',
-      principal, inSum, outSum, Math.max(0, principal + inSum - outSum),
-      (Number(m.interestRate) || 0) * 100,
-      total, paid, total - paid,
+      seqOf(m, i), m.contractNo || '', m.borrowerName || '', m.debtCategory || '',
+      m.status === 'Close' ? 'Close' : 'Active',
+      last.start ? fmtDate(last.start) : '', endD ? fmtDate(endD) : '',
+      last.months || '', (last.start && endD) ? _daysBetween(last.start, endD) : '',
+      endD ? Number(endD.slice(5, 7)) : '', endD ? Number(endD.slice(0, 4)) : '',
+      recDates, payDates, rec, outSum, bal, Number(m.interestRate) || 0, total, paid, total - paid,
     ]);
+    tot.rec += rec; tot.pay += outSum; tot.bal += bal; tot.int += total; tot.paid += paid;
   });
+  const sumFirst = 4, sumLast = summary.length - 1;
+  summary.push(['ยอดรวมทั้งหมด', '', '', '', '', '', '', '', '', '', '', '', '', tot.rec, tot.pay, tot.bal, '', tot.int, tot.paid, tot.int - tot.paid]);
+  summary.push(['ข้อมูล ณ ' + fmtDate(new Date().toISOString().slice(0, 10))]);
   const wsS = XLSX.utils.aoa_to_sheet(summary);
-  wsS['!cols'] = [10,18,28,14,13,14,14,10,14,14,14].map(w => ({ wch: w }));
-  wsS['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 10 } }];
-  wsS['!rows'] = [{ hpt: 24 }, { hpt: 30 }];
-  applyColFmt(wsS, { 3: FMT_BAHT, 4: FMT_BAHT, 5: FMT_BAHT, 6: FMT_BAHT, 7: FMT_PCT, 8: FMT_MONEY, 9: FMT_MONEY, 10: FMT_MONEY }, 2, summary.length - 1);
-  // ── สไตล์: หัวเรื่อง / หัวคอลัมน์ / ข้อมูล zebra + คอลัมน์เงินชิดขวา + ค้างชำระแดง ──
-  xlRow(wsS, 0, 0, 10, XL.title);
-  xlRow(wsS, 1, 0, 10, XL.th);
-  xlBody(wsS, 2, summary.length - 1, 0, 10);
-  for (let r = 2; r < summary.length; r++) {
-    for (const c of [3, 4, 5, 6, 7, 8, 9, 10]) xlSet(wsS, r, c, { alignment: { horizontal: 'right', vertical: 'center' } });
-    if ((Number(summary[r][10]) || 0) > 0) xlSet(wsS, r, 10, { font: { color: { rgb: 'C0392B' }, bold: true } });
+  wsS['!cols'] = [8, 22, 28, 10, 10, 12, 12, 10, 10, 8, 8, 24, 16, 15, 15, 15, 9, 15, 15, 15].map(w => ({ wch: w }));
+  const sm = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: SC } }, { s: { r: 1, c: 0 }, e: { r: 1, c: SC } },
+    { s: { r: 2, c: 5 }, e: { r: 2, c: 8 } }, { s: { r: 2, c: 9 }, e: { r: 2, c: 10 } },
+    { s: { r: sumLast + 1, c: 0 }, e: { r: sumLast + 1, c: 12 } },
+  ];
+  [0, 1, 2, 3, 4, 11, 12, 13, 14, 15, 16, 17, 18, 19].forEach(c => sm.push({ s: { r: 2, c }, e: { r: 3, c } }));
+  wsS['!merges'] = sm;
+  wsS['!rows'] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 22 }, { hpt: 22 }];
+  applyColFmt(wsS, { 13: FMT_MONEY, 14: FMT_MONEY, 15: FMT_MONEY, 16: FMT_PCT2, 17: FMT_MONEY, 18: FMT_MONEY, 19: FMT_MONEY }, sumFirst, sumLast + 1);
+  xlRow(wsS, 0, 0, SC, XL.title);
+  xlRow(wsS, 1, 0, SC, XL.band);
+  xlRow(wsS, 2, 0, SC, XL.th); xlRow(wsS, 3, 0, SC, XL.th);
+  if (sumLast >= sumFirst) xlBody(wsS, sumFirst, sumLast, 0, SC);
+  for (let r = sumFirst; r <= sumLast; r++) {
+    for (const c of [0, 3, 4, 5, 6, 7, 8, 9, 10, 16]) xlSet(wsS, r, c, XL.ctr);
+    if ((Number(summary[r][19]) || 0) > 0.005) xlSet(wsS, r, 19, { font: { color: { rgb: 'C0392B' }, bold: true } });
+    if (summary[r][4] === 'Close') xlSet(wsS, r, 4, { font: { color: { rgb: '64748B' } } });
+    if (mode === 'detail') _xlLinkTo(wsS, r, 1, sheetOf[sheetKey(masters[r - sumFirst])]);
   }
-  XLSX.utils.book_append_sheet(wb, wsS, 'สรุปทั้งหมด');
+  xlRow(wsS, sumLast + 1, 0, SC, XL.totVal);
+  xlSet(wsS, sumLast + 2, 0, { font: { italic: true, color: { rgb: '64748B' } } });
+  XLSX.utils.book_append_sheet(wb, wsS, SUMMARY);
 
   if (mode === 'detail') {
-    masters.forEach(m => {
-      const rows = (ledgerByContract[m.contractNo] || []).slice().sort((a, b) =>
-        (Number(a.year) || 0) - (Number(b.year) || 0) ||
-        (Number(a.month) || 0) - (Number(b.month) || 0)
-      );
+    masters.forEach((m, mi) => {
+      const rows = sortRows(ledgerByContract[m.contractNo] || [], m);
       const myEvents = (eventsByContract[m.contractNo] || []).slice()
         .sort((a, b) => (a.eventDate || '').localeCompare(b.eventDate || ''));
+      const draws = myEvents.filter(e => e.eventType === 'drawdown');
       const { inSum, outSum } = principalInOut(myEvents);
       const principal = Number(m.principalAmount) || 0;
-      const balance   = Math.max(0, principal + inSum - outSum);
+      const balance   = m.status === 'Close' ? 0 : Math.max(0, principal + inSum - outSum);
       const totEff  = rows.reduce((s, r) => s + effectiveInterest(r), 0);
       const totPaid = rows.reduce((s, r) => s + interestPaid(r), 0);
+      const terms = debtTerms(m);
+      const showTerms = debtShowTermLabels(m);   // นักลงทุน → ขึ้นป้ายช่วงสัญญา + ภาษีหัก ณ ที่จ่าย
+      const wht = showTerms;
+      const termMonths = Number(m.termMonths) || (terms[0] && terms[0].months) || '';
+      const drawDates = draws.map(e => fmtDate(e.eventDate)).join(', ');
+      const LAST = wht ? 13 : 11;   // A–N (มีภาษี) · A–L
 
       const aoa = [];
-      // ── หัวเรื่อง ──
-      aoa.push([m.borrowerName + ' · ' + m.contractNo + ' · ' + (m.debtCategory || '') +
-        ' · อัตรา ' + ((Number(m.interestRate) || 0) * 100).toFixed(2) + '%/ปี']);
-      aoa.push([]);
-      // ── บล็อกสรุปเงินต้น/ดอกเบี้ย ──
-      aoa.push(['วงเงิน', 'เบิกเพิ่มรวม', 'คืนเงินต้นแล้ว', 'คงเหลือเงินต้น', 'ดอกเบี้ยรวม', 'จ่ายแล้ว', 'ค้างชำระ']);
-      const sumValRow = aoa.length;
-      aoa.push([principal, inSum, outSum, balance, totEff, totPaid, totEff - totPaid]);
-      aoa.push([]);
+      // ── หัวเอกสาร + ข้อมูลสัญญา (ตำแหน่งแบบไฟล์เตย: ป้าย A · ค่า D · ป้าย G · ค่า H · ป้าย K · ค่า L) ──
+      aoa.push([DEBT_EXPORT_COMPANY, '', '', '', '', '', '', '', '', '', '← กลับหน้าสรุป']);
+      const infoStart = aoa.length;
+      const L = (a, b, c, d, e, f) => ['' + a, '', '', b, '', '', c || '', d == null ? '' : d, '', '', e || '', f == null ? '' : f];
+      aoa.push(L(showTerms ? 'ชื่อนักลงทุน' : 'ผู้กู้/เจ้าหนี้', m.borrowerName || '', 'หมวด', m.debtCategory || '', 'ลำดับที่', seqOf(m, mi)));
+      aoa.push(L(showTerms ? 'วันที่รับเงินลงทุน' : 'วันที่รับเงินกู้', debtStartOf(m) ? fmtDate(debtStartOf(m)) : '',
+        'วันที่เพิ่มทุน', drawDates || '-', 'เลขที่สัญญา', m.contractNo || ''));
+      aoa.push(L('วงเงินกู้', principal, 'จำนวนเงินเพิ่มทุน', inSum, 'คงเหลือเงินต้น', balance));
+      aoa.push(L('อัตราดอกเบี้ย/ปี', Number(m.interestRate) || 0, 'วันครบสัญญา', m.maturityDate ? fmtDate(m.maturityDate) : '-',
+        'สถานะ', m.status === 'Close' ? 'ปิดแล้ว' + (m.closedDate ? ' ' + fmtDate(m.closedDate) : '') : 'Active'));
+      aoa.push(L('ระยะเวลากู้', termMonths ? termMonths + ' เดือน' : '-', 'ต่อสัญญาแล้ว', Math.max(0, terms.length - 1) + ' ครั้ง',
+        'ดอกเบี้ยค้างชำระ', totEff - totPaid));
+      const infoEnd = aoa.length - 1;
+
       // ── ตารางดอกเบี้ยรายเดือน ──
-      aoa.push(['ตารางดอกเบี้ยรายเดือน']);
-      aoa.push(['เดือน', 'ปี', 'เงินต้น', 'อัตรา %/ปี', 'จำนวนวัน', 'ดอกเบี้ย (ระบบคำนวณ)', 'ดอกเบี้ย (Override)', 'ดอกเบี้ยจริง', 'คงเหลือ', 'วันจ่าย', 'หมายเหตุ Override', 'หมายเหตุ']);
+      const head = ['Month', '', 'Year', 'Principal', 'Int. rate', 'Days', 'Int. amount', 'Installment', 'Principal paid', 'Outstanding', 'Payment Date', 'หมายเหตุ'];
+      if (wht) head.push('ภาษีหัก ณ ที่จ่าย ' + Math.round(DEBT_WHT_RATE * 100) + '%', 'ยอดจ่ายสุทธิ');
+      aoa.push(head);
       const schedStart = aoa.length;
-      rows.forEach(r => {
-        const computed = Number(r.interestAmount) || 0;
-        const override = r.interestOverride != null && r.interestOverride !== '' ? Number(r.interestOverride) : '';
-        aoa.push([
-          TH_MONTH[Number(r.month)] || r.month, Number(r.year) || r.year,
-          Number(r.principal) || 0,
-          (Number(r.interestRate) || 0) * 100,
-          Number(r.days) || '',
-          computed, override, effectiveInterest(r),
-          Number(r.outstanding) || 0,
-          r.paymentDate ? fmtDate(r.paymentDate) : (interestPaid(r) > 0 ? 'บางส่วน' : 'ค้าง'),
-          r.overrideNote || '',
-          r.note || '',
-        ]);
+      const st = _debtStatementRows(rows, m);
+      let sumDays = 0, sumInt = 0, sumInst = 0;
+      st.forEach(x => {
+        const r = x.r;
+        const note = [showTerms ? debtTermLabelAt(terms, debtRowPeriodStart(r, m)) : '', r.note || '',
+          r.overrideNote ? 'ปรับยอด: ' + r.overrideNote : ''].filter(Boolean).join(' · ');
+        const row = [
+          TH_MONTH_FULL[Number(r.month)] || r.month, x.seq, Number(r.year) || r.year,
+          Number(r.principal) || 0, Number(r.interestRate) || 0, Number(r.days) || '',
+          x.interest, x.inst, x.principalPaid, x.outstanding, x.payDate, note,
+        ];
+        if (wht) row.push(x.inst ? x.inst * DEBT_WHT_RATE : 0, x.inst ? x.inst * (1 - DEBT_WHT_RATE) : 0);
+        aoa.push(row);
+        sumDays += Number(r.days) || 0; sumInt += x.interest; sumInst += x.inst;
       });
       const schedEnd = aoa.length - 1;
-      aoa.push(['', '', '', '', '', '', 'รวม', totEff]);
-      aoa.push(['', '', '', '', '', '', 'จ่ายแล้ว', totPaid]);
-      aoa.push(['', '', '', '', '', '', 'ค้างชำระ', totEff - totPaid]);
-      const totRowStart = schedEnd + 1;
+      const totRow = ['รวม', '', '', '', '', sumDays, sumInt, sumInst, '', '', '', 'ดอกเบี้ยค้างชำระ ' + fmtNum(sumInt - sumInst, 2)];
+      if (wht) totRow.push(sumInst * DEBT_WHT_RATE, sumInst * (1 - DEBT_WHT_RATE));
+      aoa.push(totRow);
+      const totRowIdx = aoa.length - 1;
+
+      // ── ช่วงสัญญา (สัญญาแรก + ต่อสัญญา) ──
+      let termStart = -1, termEnd = -1;
+      if (terms.length > 1) {
+        aoa.push([]);
+        aoa.push(['ช่วงสัญญา']);
+        aoa.push(['ช่วงสัญญา', '', '', 'ตั้งแต่', 'ครบ', 'ระยะเวลา (เดือน)', 'เพิ่มทุน', 'หมายเหตุ']);
+        termStart = aoa.length;
+        terms.forEach(t => aoa.push([t.label, '', '', fmtDate(t.start), t.end ? fmtDate(t.end) : '', t.months || '',
+          t.increase || '', (t.renewal && t.renewal.note) || '']));
+        termEnd = aoa.length - 1;
+      }
 
       // ── รายการคืน/เบิกเงินต้น ──
       let evStart = -1, evEnd = -1;
       if (myEvents.length) {
         aoa.push([]);
         aoa.push(['รายการรับ/คืนเงินต้น']);
-        aoa.push(['วันที่', 'ประเภท', 'จำนวนเงิน', 'คงเหลือเงินต้น (หลังรายการ)', 'หมายเหตุ']);
+        aoa.push(['วันที่', '', '', 'ประเภท', 'จำนวนเงิน', 'คงเหลือเงินต้น', 'หมายเหตุ']);
         evStart = aoa.length;
         let run = principal;
         myEvents.forEach(e => {
           const amt = Number(e.amount) || 0;
           run += (e.eventType === 'repayment' ? -1 : 1) * amt;
-          aoa.push([
-            fmtDate(e.eventDate),
-            e.eventType === 'repayment' ? 'คืนเงินต้น' : 'รับเงินกู้/เบิกเพิ่ม',
-            (e.eventType === 'repayment' ? -1 : 1) * amt,
-            Math.max(0, run),
-            e.note || '',
-          ]);
+          aoa.push([fmtDate(e.eventDate), '', '', e.eventType === 'repayment' ? 'คืนเงินต้น' : 'รับเงิน/เพิ่มทุน',
+            (e.eventType === 'repayment' ? -1 : 1) * amt, Math.max(0, run), e.note || '']);
         });
         evEnd = aoa.length - 1;
       }
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // A–I กว้างคงที่ 14.5, J–L (วันจ่าย/หมายเหตุ) ตามเนื้อหา
-      ws['!cols'] = [14.5,14.5,14.5,14.5,14.5,14.5,14.5,14.5,14.5,12,18,16].map(w => ({ wch: w }));
-      const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }];        // หัวเรื่อง
-      merges.push({ s: { r: schedStart - 2, c: 0 }, e: { r: schedStart - 2, c: 11 } }); // แถบ "ตารางดอกเบี้ยรายเดือน"
-      if (evStart >= 0) merges.push({ s: { r: evStart - 2, c: 0 }, e: { r: evStart - 2, c: 4 } }); // แถบ "รายการรับ/คืนเงินต้น"
-      ws['!merges'] = merges;
-      // จัด number format ให้ทุกส่วน
-      applyColFmt(ws, { 0: FMT_BAHT, 1: FMT_BAHT, 2: FMT_BAHT, 3: FMT_BAHT, 4: FMT_MONEY, 5: FMT_MONEY, 6: FMT_MONEY }, sumValRow, sumValRow);
-      applyColFmt(ws, { 2: FMT_BAHT, 3: FMT_PCT, 5: FMT_MONEY, 6: FMT_MONEY, 7: FMT_MONEY, 8: FMT_BAHT }, schedStart, schedEnd);
-      applyColFmt(ws, { 7: FMT_MONEY }, totRowStart, totRowStart + 2);
-      if (evStart >= 0) applyColFmt(ws, { 2: FMT_BAHT, 3: FMT_BAHT }, evStart, evEnd);
-
-      // ── สไตล์ (สี/เส้น/ฟอนต์) ───────────────────────────────────────────────
-      const rowH = {};
-      rowH[0] = { hpt: 26 };                       // หัวเรื่อง
-      xlRow(ws, 0, 0, 11, XL.title);
-      // บล็อกสรุปเงินต้น/ดอกเบี้ย
-      xlRow(ws, sumValRow - 1, 0, 6, XL.thSum);
-      xlRow(ws, sumValRow, 0, 6, XL.sumVal);
-      xlSet(ws, sumValRow, 6, (totEff - totPaid) > 0 ? XL.sumValDue : XL.sumVal); // ค้างชำระ
-      // แถบ + หัวตารางดอกเบี้ยรายเดือน
-      rowH[schedStart - 2] = { hpt: 22 };
-      xlRow(ws, schedStart - 2, 0, 11, XL.band);
-      xlRow(ws, schedStart - 1, 0, 11, XL.th);
-      // ข้อมูลตารางดอกเบี้ย — zebra + เน้นสถานะวันจ่าย
-      xlBody(ws, schedStart, schedEnd, 0, 11);
-      for (let r = schedStart; r <= schedEnd; r++) {
-        // เดือน / ปี / จำนวนวัน — จัดกึ่งกลาง
-        for (const c of [0, 1, 4]) xlSet(ws, r, c, XL.ctr);
-        const cell = ws[XLSX.utils.encode_cell({ r, c: 9 })];
-        xlSet(ws, r, 9, (cell && cell.v === 'ค้าง') ? XL.due : XL.paid);
+      ws['!cols'] = [12, 5, 7, 15, 9, 7, 13, 13, 14, 15, 13, 28, 13, 13].slice(0, LAST + 1).map(w => ({ wch: w }));
+      const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, { s: { r: 0, c: 10 }, e: { r: 0, c: LAST } },
+        { s: { r: schedStart - 1, c: 0 }, e: { r: schedStart - 1, c: 1 } },       // หัว Month กินช่องงวด
+        { s: { r: totRowIdx, c: 0 }, e: { r: totRowIdx, c: 4 } },
+      ];
+      for (let r = infoStart; r <= infoEnd; r++) {
+        merges.push({ s: { r, c: 0 }, e: { r, c: 2 } }, { s: { r, c: 3 }, e: { r, c: 5 } }, { s: { r, c: 7 }, e: { r, c: 9 } }, { s: { r, c: 11 }, e: { r, c: LAST } });
       }
-      // แถวรวม/จ่ายแล้ว/ค้างชำระ
-      for (let r = totRowStart; r <= totRowStart + 2; r++) { xlSet(ws, r, 6, XL.totLabel); xlSet(ws, r, 7, XL.totVal); }
-      // บล็อกรายการรับ/คืนเงินต้น
+      if (termStart >= 0) {
+        merges.push({ s: { r: termStart - 2, c: 0 }, e: { r: termStart - 2, c: LAST } });
+        for (let r = termStart - 1; r <= termEnd; r++) merges.push({ s: { r, c: 0 }, e: { r, c: 2 } }, { s: { r, c: 7 }, e: { r, c: LAST } });
+      }
       if (evStart >= 0) {
-        rowH[evStart - 2] = { hpt: 22 };
-        xlRow(ws, evStart - 2, 0, 4, XL.band);
-        xlRow(ws, evStart - 1, 0, 4, XL.th);
-        xlBody(ws, evStart, evEnd, 0, 4);
+        merges.push({ s: { r: evStart - 2, c: 0 }, e: { r: evStart - 2, c: LAST } });
+        for (let r = evStart - 1; r <= evEnd; r++) merges.push({ s: { r, c: 0 }, e: { r, c: 2 } }, { s: { r, c: 6 }, e: { r, c: LAST } });
+      }
+      ws['!merges'] = merges;
+
+      // ── number format ──
+      _xlFmt(ws, infoStart + 2, 3, FMT_MONEY); _xlFmt(ws, infoStart + 2, 7, FMT_MONEY); _xlFmt(ws, infoStart + 2, 11, FMT_MONEY);
+      _xlFmt(ws, infoStart + 3, 3, FMT_PCT2);  _xlFmt(ws, infoStart + 4, 11, FMT_MONEY);
+      const moneyCols = { 3: FMT_MONEY, 4: FMT_PCT2, 6: FMT_MONEY, 7: FMT_NEG, 8: FMT_NEG, 9: FMT_MONEY };
+      if (wht) { moneyCols[12] = FMT_NEG; moneyCols[13] = FMT_NEG; }
+      applyColFmt(ws, moneyCols, schedStart, schedEnd);
+      applyColFmt(ws, { 6: FMT_MONEY, 7: FMT_MONEY, 12: FMT_MONEY, 13: FMT_MONEY }, totRowIdx, totRowIdx);
+      if (termStart >= 0) applyColFmt(ws, { 6: FMT_MONEY }, termStart, termEnd);
+      if (evStart >= 0) applyColFmt(ws, { 4: FMT_MONEY, 5: FMT_MONEY }, evStart, evEnd);
+
+      // ── สไตล์ ──
+      const rowH = { 0: { hpt: 26 } };
+      xlRow(ws, 0, 0, LAST, XL.title);
+      _xlLinkTo(ws, 0, 10, SUMMARY, 'กลับไปหน้าสรุปทั้งหมด');
+      xlSet(ws, 0, 10, { font: { color: { rgb: 'FFFFFF' }, underline: true, bold: true }, alignment: { horizontal: 'right', vertical: 'center' } });
+      for (let r = infoStart; r <= infoEnd; r++) {
+        for (let c = 0; c <= LAST; c++) xlSet(ws, r, c, [0, 1, 2, 6, 10].includes(c) ? XL.infoLbl : XL.infoVal);
+      }
+      xlSet(ws, infoStart, 3, { font: { bold: true, sz: 12 } });
+      if (totEff - totPaid > 0.005) xlSet(ws, infoStart + 4, 11, { font: { bold: true, color: { rgb: 'C0392B' } } });
+      if (m.status === 'Active' && m.maturityDate && m.maturityDate <= new Date().toISOString().slice(0, 10)) {
+        xlSet(ws, infoStart + 3, 7, { font: { bold: true, color: { rgb: 'C0392B' } } }); // เลยวันครบ ยังไม่ต่อ
+      }
+      rowH[schedStart - 1] = { hpt: 22 };
+      xlRow(ws, schedStart - 1, 0, LAST, XL.th);
+      if (schedEnd >= schedStart) xlBody(ws, schedStart, schedEnd, 0, LAST);
+      for (let r = schedStart; r <= schedEnd; r++) {
+        for (const c of [1, 2, 4, 5, 10]) xlSet(ws, r, c, XL.ctr);
+        const x = st[r - schedStart];
+        if (x.inst > 0) {                                        // แถวที่มีการจ่าย → เน้นเขียวอ่อน
+          for (let c = 0; c <= LAST; c++) xlSet(ws, r, c, { fill: { fgColor: { rgb: 'EAF7EF' } } });
+          xlSet(ws, r, 7, { font: { bold: true, color: { rgb: '1E8E5A' } } });
+        }
+        const t = ws[XLSX.utils.encode_cell({ r, c: 11 })];
+        if (t && String(t.v).indexOf(DEBT_OVERDUE_TERM_LABEL) === 0) xlSet(ws, r, 11, { font: { color: { rgb: 'C0392B' }, bold: true } });
+      }
+      xlRow(ws, totRowIdx, 0, LAST, XL.totVal);
+      xlSet(ws, totRowIdx, 0, XL.totLabel);
+      if (termStart >= 0) {
+        xlRow(ws, termStart - 2, 0, LAST, XL.band); rowH[termStart - 2] = { hpt: 22 };
+        xlRow(ws, termStart - 1, 0, LAST, XL.th);
+        xlBody(ws, termStart, termEnd, 0, LAST);
+        for (let r = termStart; r <= termEnd; r++) for (const c of [3, 4, 5]) xlSet(ws, r, c, XL.ctr);
+      }
+      if (evStart >= 0) {
+        xlRow(ws, evStart - 2, 0, LAST, XL.band); rowH[evStart - 2] = { hpt: 22 };
+        xlRow(ws, evStart - 1, 0, LAST, XL.th);
+        xlBody(ws, evStart, evEnd, 0, LAST);
         for (let r = evStart; r <= evEnd; r++) {
-          // วันที่ / ประเภท — จัดกึ่งกลาง
-          for (const c of [0, 1]) xlSet(ws, r, c, XL.ctr);
-          const cell = ws[XLSX.utils.encode_cell({ r, c: 2 })];
-          if (cell && (Number(cell.v) || 0) < 0) xlSet(ws, r, 2, { font: { color: { rgb: 'C0392B' } } });
+          xlSet(ws, r, 0, XL.ctr); xlSet(ws, r, 3, XL.ctr);
+          const cell = ws[XLSX.utils.encode_cell({ r, c: 4 })];
+          if (cell && (Number(cell.v) || 0) < 0) xlSet(ws, r, 4, { font: { color: { rgb: 'C0392B' } } });
         }
       }
       ws['!rows'] = Object.keys(rowH).reduce((arr, k) => { arr[k] = rowH[k]; return arr; }, []);
-
-      // sanitize sheet name (max 31 chars, no special chars)
-      let name = (m.contractNo || m.borrowerName || 'sheet').replace(/[\\\/\?\*\[\]\:]/g, '_').slice(0, 31);
-      let n = 1, base = name;
-      while (wb.SheetNames.includes(name)) { n++; name = (base.slice(0, 28) + '_' + n).slice(0, 31); }
-      XLSX.utils.book_append_sheet(wb, ws, name);
+      XLSX.utils.book_append_sheet(wb, ws, sheetOf[sheetKey(m)]);
     });
   }
 
@@ -1920,6 +2406,7 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
     : 'debt_interest_summary_') + new Date().toISOString().slice(0, 10) + '.xlsx';
   XLSX.writeFile(wb, filename);
 }
+
 
 // ── ฟอร์มเติมข้อมูลสัญญาที่ขาด (โผล่ในแบนเนอร์เตือนของแผงคำนวณอัตโนมัติ) ──────
 function MissingFieldsEditor({ master, onSave }) {
@@ -1967,7 +2454,9 @@ function MissingFieldsEditor({ master, onSave }) {
 function InterestSchedulePopup({ master, ledgerRows, events, onClose,
     onSavePayments, onSaveInterestPayments, onClearPayment, onOverrideInterest,
     onAddPrincipalEvent, onEditEvent, onDeleteEvent, onDeleteLedgerRow, onAddLedgerRow,
-    onAdoptAuto, onSetAutoMode, onSaveMasterFields, onRollover, onSetContractStatus, canEdit }) {
+    onAdoptAuto, onSetAutoMode, onSaveMasterFields, onRollover, onSetContractStatus,
+    onRenewContract, onUndoRenewal, canEdit }) {
+  const [renewOpen,   setRenewOpen]   = React.useState(false); // ต่อสัญญา (เลื่อนวันครบ)
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [overrideRow, setOverrideRow] = React.useState(null);
@@ -2013,6 +2502,10 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   const totalInterest = sortedRows.reduce((s, r) => s + effectiveInterest(r), 0);
   const totalPaid     = sortedRows.reduce((s, r) => s + interestPaid(r), 0);
   const outstanding   = totalInterest - totalPaid;
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const terms = debtTerms(master);
+  const showTerms = debtShowTermLabels(master);
+  const termOf = (r) => showTerms ? debtTermLabelAt(terms, debtRowPeriodStart(r, master)) : '';
   const cat = master.debtCategory || 'อื่นๆ';
   const color = DL_CATEGORY_COLOR[cat] || '#525252';
   const bg    = DL_CATEGORY_BG[cat]    || '#f5f5f5';
@@ -2110,6 +2603,18 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           </div>
         </div>
 
+        {/* แถบข้อมูลสัญญา — วันเริ่ม / วันครบ / ช่วงสัญญาปัจจุบัน */}
+        {(debtStartOf(master) || master.maturityDate) && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', margin: '-6px 0 12px', fontSize: 11.5, color: 'var(--ink-500)' }}>
+            {debtStartOf(master) && <span>เริ่ม <strong style={{ color: 'var(--ink-700)' }}>{fmtDate(debtStartOf(master))}</strong></span>}
+            {master.maturityDate && <span>ครบสัญญา <strong style={{ color: master.status === 'Active' && todayISO >= master.maturityDate ? 'var(--bad)' : 'var(--ink-700)' }}>{fmtDate(master.maturityDate)}</strong></span>}
+            {terms.length > 1 && <span>ต่อสัญญาแล้ว <strong style={{ color: 'var(--ink-700)' }}>{terms.length - 1} ครั้ง</strong></span>}
+            {showTerms && master.status === 'Active' && debtTermLabelAt(terms, todayISO) && (
+              <span>ตอนนี้: <strong style={{ color: '#5b21b6' }}>{debtTermLabelAt(terms, todayISO)}</strong></span>
+            )}
+          </div>
+        )}
+
         {/* แท็บใน popup — segmented control เด่นชัดแต่กระชับ (ไม่ยืดเต็มกว้าง) */}
         <div style={{ display: 'inline-flex', gap: 4, marginBottom: 12, background: 'var(--ink-100, #eef1f6)', borderRadius: 9, padding: 3, border: '1px solid var(--line)' }}>
           {[
@@ -2155,6 +2660,14 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                        border: '1.5px solid #fde68a', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 600 }}>
               ↑ เบิกเพิ่ม
             </button>
+            {onRenewContract && (
+              <button onClick={() => setRenewOpen(true)}
+                title="ต่อสัญญาเดิม (เลขเดิม) — เลื่อนวันครบออกไป + เพิ่มทุนพร้อมต่อได้"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 16, cursor: 'pointer',
+                         border: '1.5px solid #c4b5fd', background: '#f5f3ff', color: '#5b21b6', fontSize: 12, fontWeight: 600 }}>
+                📅 ต่อสัญญา
+              </button>
+            )}
             <button onClick={() => onRollover && setRolloverOpen(true)}
               title="ปิดสัญญานี้ + ทำสัญญาใหม่ (เปลี่ยนชื่อ / ปรับวงเงิน / แยกสัญญา)"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 16, cursor: 'pointer',
@@ -2202,6 +2715,10 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
               <span style={{ marginLeft: 'auto' }}>เหตุผล: <em>{master.closedReason}</em></span>
             )}
           </div>
+        )}
+
+        {drawerTab === 'principal' && (
+          <DebtTermsPanel master={master} canEdit={canEdit} onUndo={onUndoRenewal} />
         )}
 
         {/* Drawdown/repayment events */}
@@ -2303,6 +2820,18 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
 
         {/* ── แท็บ "ดอกเบี้ย": ตัวกรอง + ตารางดอกเบี้ยรายเดือน + เทียบคำนวณ ── */}
         {drawerTab === 'interest' && (<>
+        {master.status === 'Active' && master.maturityDate && todayISO >= master.maturityDate && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10, padding: '8px 12px', borderRadius: 10,
+                        background: '#fef2f2', border: '1px solid #fecaca', fontSize: 12, color: '#991b1b' }}>
+            <span>⚠ สัญญาครบกำหนด <strong>{fmtDate(master.maturityDate)}</strong> แล้ว — ยังไม่ได้บันทึกต่อสัญญา
+              (ดอกเบี้ยหลังวันครบยังคิดต่อ และหมายเหตุขึ้นว่า "{DEBT_OVERDUE_TERM_LABEL}")</span>
+            {canEdit && onRenewContract && (
+              <button onClick={() => setRenewOpen(true)} className="btn btn-primary" style={{ marginLeft: 'auto', fontSize: 12, padding: '4px 12px' }}>
+                📅 ต่อสัญญา
+              </button>
+            )}
+          </div>
+        )}
         {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <div className="tabnav">
@@ -2415,7 +2944,12 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                           <span>จ่าย {fmtNum(paidAmt, 2)} / ค้าง {fmtNum(remain, 2)}{roundCount > 1 && <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}> · {roundCount} รอบ</span>}</span>
                         ) : 'ค้าง'}
                       </td>
-                      <td style={{ fontSize: 11, color: 'var(--ink-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }} title={r.note || r.paymentNote || ''}>
+                      <td style={{ fontSize: 11, color: 'var(--ink-500)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }} title={[termOf(r), r.note || r.paymentNote || ''].filter(Boolean).join(' · ')}>
+                        {termOf(r) && (
+                          <span style={{ display: 'inline-block', marginRight: 5, padding: '0 7px', borderRadius: 10, fontSize: 10.5, fontWeight: 600,
+                                         background: termOf(r) === DEBT_OVERDUE_TERM_LABEL ? '#fef2f2' : '#f5f3ff',
+                                         color: termOf(r) === DEBT_OVERDUE_TERM_LABEL ? '#b91c1c' : '#5b21b6' }}>{termOf(r)}</span>
+                        )}
                         {r.note || r.paymentNote || ''}
                       </td>
                       {canEdit && (
@@ -2681,6 +3215,12 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           }
           setEvtModal(null);
         }}
+      />
+      <RenewContractModal
+        open={renewOpen}
+        master={master}
+        onClose={() => setRenewOpen(false)}
+        onSave={(payload) => { onRenewContract && onRenewContract(master, payload); setRenewOpen(false); }}
       />
       <RolloverModal
         open={rolloverOpen}
@@ -3368,16 +3908,19 @@ function DebtLedgerPage({ data, setData, toast }) {
   const canEdit    = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
 
   const summaryByContract = React.useMemo(() => buildInterestByContract(allLedger), [allLedger]);
+  // คีย์ = contractNo ของสัญญา แต่จับคู่แถวด้วย debtRowMatchesContract (contractId ก่อน) — เดิม group ด้วย
+  // contractNo ของแถวเอง → รายการเบิกเพิ่มที่ลงไว้ก่อนแก้เลขสัญญา (เติม prefix "01-") หลุดจาก Excel
+  // (ไฟล์ส่งออกขึ้น "เบิกเพิ่มรวม 0" ทั้งที่ตารางดอกเบี้ยมีเงินต้นเพิ่มจริง)
   const ledgerByContract  = React.useMemo(() => {
     const m = {};
-    allLedger.forEach(r => { (m[r.contractNo] = m[r.contractNo] || []).push(r); });
+    masters.forEach(ms => { m[ms.contractNo] = allLedger.filter(r => debtRowMatchesContract(r, ms)); });
     return m;
-  }, [allLedger]);
+  }, [allLedger, masters]);
   const eventsByContract  = React.useMemo(() => {
     const m = {};
-    allEvents.forEach(e => { if (e.contractNo) (m[e.contractNo] = m[e.contractNo] || []).push(e); });
+    masters.forEach(ms => { m[ms.contractNo] = allEvents.filter(e => debtRowMatchesContract(e, ms)); });
     return m;
-  }, [allEvents]);
+  }, [allEvents, masters]);
   // แถวดอกเบี้ยที่ "หลุดจากสัญญา" (contractNo/contractId ไม่ match สัญญาไหนเลย) — สำหรับเครื่องมือซ่อม
   const orphanGroups = React.useMemo(() => computeDebtOrphans(allLedger, masters), [allLedger, masters]);
   const orphanRowCount = orphanGroups.reduce((s, g) => s + g.count, 0);
@@ -3505,7 +4048,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   const actions = useDebtContractActions(setData, toast);
   const { savePayments, saveInterestPayments, clearPayment, overrideInterest, addPrincipalEvent,
           editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow, relinkOrphans,
-          adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus } = actions;
+          adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus, renewContract, undoLastRenewal } = actions;
 
   // Refresh selectedMaster from store (so popup reflects latest state)
   React.useEffect(() => {
@@ -3732,6 +4275,8 @@ function DebtLedgerPage({ data, setData, toast }) {
         onSaveMasterFields={saveMasterFields}
         onRollover={doRollover}
         onSetContractStatus={setContractStatus}
+        onRenewContract={renewContract}
+        onUndoRenewal={undoLastRenewal}
         canEdit={canEdit}
       />
 

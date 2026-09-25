@@ -1430,6 +1430,8 @@ function DebtPage({ data, setData, toast }) {
           onSaveMasterFields={actions.saveMasterFields}
           onRollover={actions.doRollover}
           onSetContractStatus={actions.setContractStatus}
+          onRenewContract={actions.renewContract}
+          onUndoRenewal={actions.undoLastRenewal}
           canEdit={canEdit}
         />
       )}
