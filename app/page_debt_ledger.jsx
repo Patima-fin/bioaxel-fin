@@ -2117,7 +2117,7 @@ const XL_LINK = { font: { color: { rgb: '0563C1' }, underline: true } };
 function _debtSheetName(m, used) {
   let name = (m.contractNo || m.borrowerName || 'sheet').replace(/[\\\/\?\*\[\]\:]/g, '_').slice(0, 31);
   let n = 1; const base = name;
-  while (used.has(name) || name === 'สรุปทั้งหมด' || name === 'รายงานดอกเบี้ยรายเดือน') { n++; name = (base.slice(0, 28) + '_' + n).slice(0, 31); }
+  while (used.has(name) || name === 'สรุปทั้งหมด' || name === 'รายงานดอกเบี้ยรายเดือน' || name === 'timeline-รับและคืนเงิน' || name === 'ครบสัญญา') { n++; name = (base.slice(0, 28) + '_' + n).slice(0, 31); }
   used.add(name);
   return name;
 }
@@ -2316,6 +2316,157 @@ function _debtMonthlyReportSheet(masters, ledgerByContract, eventsByContract, se
   return ws;
 }
 
+// กระแสเงินต้นรายเดือนของทุกสัญญา: [{ym, rec, pay, notes[]}] — รับ = วันเริ่มสัญญา + เพิ่มทุน · จ่าย = คืนเงินต้น
+function _debtPrincipalFlows(masters, eventsByContract, seqOf) {
+  const byYm = {};
+  const add = (d, f, amt, note) => {
+    const k = d.slice(0, 7);
+    const x = byYm[k] || (byYm[k] = { ym: k, rec: 0, pay: 0, notes: [] });
+    x[f] += amt; x.notes.push(note);
+  };
+  masters.forEach((m, i) => {
+    const seq = seqOf(m, i);
+    const who = String(m.borrowerName || '').trim().replace(/\s+/g, ' ');
+    const start = debtStartOf(m);
+    if (start && Number(m.principalAmount)) add(start, 'rec', Number(m.principalAmount), `รับเงินต้น สัญญา ${seq} ${who}`);
+    (eventsByContract[m.contractNo] || []).forEach(e => {
+      if (!e.eventDate) return;
+      const amt = Number(e.amount) || 0;
+      if (e.eventType === 'repayment') add(e.eventDate, 'pay', amt, `คืนเงินต้น สัญญา ${seq} ${who}`);
+      else add(e.eventDate, 'rec', amt, `เพิ่มทุน สัญญา ${seq} ${who}`);
+    });
+  });
+  return byYm;
+}
+
+// ── ชีท "timeline-รับและคืนเงิน" (แบบไฟล์เตย) ─────────────────────────────────
+// ซ้าย: รายเดือน ตั้งแต่เดือนแรกที่รับเงินถึงเดือนปัจจุบัน (รับ / จ่าย / คงเหลือสะสม / หมายเหตุ) · ขวา: รวมรายปี
+function _debtTimelineSheet(masters, eventsByContract, seqOf) {
+  const flows = _debtPrincipalFlows(masters, eventsByContract, seqOf);
+  const keys = Object.keys(flows).sort();
+  const nowK = new Date().toISOString().slice(0, 7);
+  const aoa = [
+    [DEBT_EXPORT_COMPANY],
+    ['TIMELINE - รับและคืนเงินต้น'],
+    [],
+    ['เดือนที่', 'ปี', 'เดือน', 'รับ', 'จ่าย', 'คงเหลือ', 'หมายเหตุ', '', 'ปี (ค.ศ.)', 'รับรวม', 'จ่ายรวม', 'คงเหลือ ณ สิ้นปี'],
+  ];
+  const first = 4;
+  const years = {};
+  if (keys.length) {
+    const lastK = keys[keys.length - 1] > nowK ? keys[keys.length - 1] : nowK;
+    let [y, mo] = keys[0].split('-').map(Number);
+    let bal = 0;
+    for (;;) {
+      const k = `${y}-${String(mo).padStart(2, '0')}`;
+      const f = flows[k] || { rec: 0, pay: 0, notes: [] };
+      bal += f.rec - f.pay;
+      aoa.push([mo, y, TH_MONTH_FULL[mo], f.rec, f.pay, bal, f.notes.join(' · ')]);
+      const yy = years[y] || (years[y] = { rec: 0, pay: 0, bal: 0 });
+      yy.rec += f.rec; yy.pay += f.pay; yy.bal = bal;
+      if (k >= lastK) break;
+      mo++; if (mo > 12) { mo = 1; y++; }
+    }
+  }
+  const last = aoa.length - 1;
+  // ตารางรายปี (คอลัมน์ I–L) วางทับแถวเดียวกับรายเดือน
+  const ys = Object.keys(years).sort();
+  const put = (r, row) => { while (aoa.length <= r) aoa.push([]); const cur = aoa[r]; while (cur.length < 8) cur.push(''); cur.length = 8; cur.push(...row); };
+  ys.forEach((y, i) => put(first + i, [Number(y), years[y].rec, years[y].pay, years[y].bal]));
+  const totRec = ys.reduce((s, y) => s + years[y].rec, 0), totPay = ys.reduce((s, y) => s + years[y].pay, 0);
+  const yTot = first + ys.length;
+  put(yTot, ['ผลรวมทั้งหมด', totRec, totPay, totRec - totPay]);
+  let tRow = -1;
+  if (last >= first) { aoa.push(['รวม', '', '', totRec, totPay, totRec - totPay]); tRow = aoa.length - 1; }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [8, 7, 12, 15, 15, 16, 46, 3, 11, 15, 15, 16].map(w => ({ wch: w }));
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 11 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } }];
+  ws['!rows'] = [{ hpt: 24 }, { hpt: 22 }, null, { hpt: 24 }];
+  xlRow(ws, 0, 0, 11, XL.title);
+  xlRow(ws, 1, 0, 11, XL.band);
+  xlRow(ws, 3, 0, 6, XL.th); xlRow(ws, 3, 8, 11, XL.th);
+  if (last >= first) {
+    xlBody(ws, first, last, 0, 6);
+    applyColFmt(ws, { 3: FMT_NEG, 4: FMT_NEG, 5: FMT_MONEY }, first, tRow);
+    for (let r = first; r <= last; r++) {
+      [0, 1].forEach(c => xlSet(ws, r, c, XL.ctr));
+      if (aoa[r][3]) xlSet(ws, r, 3, { font: { bold: true, color: { rgb: '1E8E5A' } } });
+      if (aoa[r][4]) xlSet(ws, r, 4, { font: { bold: true, color: { rgb: 'C0392B' } } });
+      if (aoa[r][3] || aoa[r][4]) xlSet(ws, r, 6, { fill: { fgColor: { rgb: 'FFF7E0' } } });
+    }
+    xlRow(ws, tRow, 0, 6, XL.totVal); xlSet(ws, tRow, 0, XL.totLabel);
+  }
+  if (ys.length) {
+    xlBody(ws, first, yTot - 1, 8, 11);
+    for (let r = first; r < yTot; r++) xlSet(ws, r, 8, XL.ctr);
+    xlRow(ws, yTot, 8, 11, XL.totVal); xlSet(ws, yTot, 8, XL.totLabel);
+    applyColFmt(ws, { 9: FMT_NEG, 10: FMT_NEG, 11: FMT_MONEY }, first, yTot);
+  }
+  return ws;
+}
+
+// ── ชีท "ครบสัญญา" — สัญญาที่ยังเดินอยู่ ครบกำหนดเดือนไหน (แบบไฟล์เตย) ──────────────
+// เฉพาะ Active · วันครบ = maturityDate (หลังต่อสัญญาคือวันครบช่วงล่าสุด) · ยอด = เงินต้นคงเหลือ
+// แสดงปีปัจจุบัน + ปีถัดไป ครบ 12 เดือน (ขยายถ้ามีสัญญาครบไกลกว่านั้น) · สัญญาที่เลยวันครบแล้วแยกไว้บนสุด
+function _debtMaturitySheet(masters, seqOf) {
+  const today = new Date().toISOString().slice(0, 10);
+  const nowY = Number(today.slice(0, 4));
+  const act = masters.map((m, i) => ({ m, seq: seqOf(m, i) })).filter(x => x.m.status === 'Active');
+  const label = (x) => `${x.seq}. ${String(x.m.borrowerName || '').trim().replace(/\s+/g, ' ')} (${x.m.contractNo})`;
+  const overdue = act.filter(x => x.m.maturityDate && x.m.maturityDate < today.slice(0, 7) + '-01');
+  const noDate = act.filter(x => !x.m.maturityDate);
+  const upcoming = act.filter(x => x.m.maturityDate && x.m.maturityDate >= today.slice(0, 7) + '-01');
+  const maxY = Math.max(nowY + 1, ...upcoming.map(x => Number(x.m.maturityDate.slice(0, 4))));
+  const aoa = [[DEBT_EXPORT_COMPANY], ['สรุปสัญญาที่ครบกำหนด แบ่งรายเดือน (เฉพาะสัญญาที่ยัง Active)'], [],
+    ['เดือนที่', 'ปี', 'เดือน', 'จำนวนสัญญา', 'จำนวนเงินรวม', 'หมายเหตุ']];
+  const kinds = ['title', 'band', 'blank', 'th'];
+  const push = (row, k) => { aoa.push(row); kinds.push(k); };
+  if (overdue.length) {
+    push(['', '', 'เลยวันครบแล้ว (ยังไม่ต่อสัญญา)', overdue.length, overdue.reduce((s, x) => s + debtDisplayBalance(x.m), 0),
+      overdue.map(x => label(x) + ' ครบ ' + fmtDate(x.m.maturityDate)).join(' · ')], 'over');
+  }
+  let gCnt = 0, gAmt = 0;
+  for (let y = nowY; y <= maxY; y++) {
+    let yc = 0, ya = 0;
+    for (let mo = 1; mo <= 12; mo++) {
+      const k = `${y}-${String(mo).padStart(2, '0')}`;
+      const list = upcoming.filter(x => x.m.maturityDate.slice(0, 7) === k);
+      const amt = list.reduce((s, x) => s + debtDisplayBalance(x.m), 0);
+      yc += list.length; ya += amt;
+      push([mo, mo === 1 ? y : '', TH_MONTH_FULL[mo], list.length, amt,
+        list.map(x => label(x) + ' ครบ ' + fmtDate(x.m.maturityDate)).join(' · ')], k === today.slice(0, 7) ? 'now' : (list.length ? 'hit' : 'row'));
+    }
+    push(['', `รวมปี ${y}`, '', yc, ya, ''], 'tot');
+    gCnt += yc; gAmt += ya;
+  }
+  push(['', 'รวมทั้งหมด', '', gCnt, gAmt, ''], 'tot');
+  if (noDate.length) push(['', '', 'ไม่ได้ระบุวันครบ', noDate.length, noDate.reduce((s, x) => s + debtDisplayBalance(x.m), 0), noDate.map(label).join(' · ')], 'over');
+  push([], 'blank');
+  push(['ข้อมูล ณ ' + fmtDate(today)], 'note');
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [8, 12, 26, 12, 17, 70].map(w => ({ wch: w }));
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }];
+  kinds.forEach((k, r) => {
+    if (k === 'title') xlRow(ws, r, 0, 5, XL.title);
+    else if (k === 'band') xlRow(ws, r, 0, 5, XL.band);
+    else if (k === 'th') xlRow(ws, r, 0, 5, XL.th);
+    else if (k === 'row' || k === 'hit' || k === 'now') {
+      xlRow(ws, r, 0, 5, XL.cell); [0, 1, 3].forEach(c => xlSet(ws, r, c, XL.ctr));
+      if (k === 'hit') xlRow(ws, r, 0, 5, { fill: { fgColor: { rgb: 'FFF7E0' } } });
+      if (k === 'now') xlRow(ws, r, 0, 5, { fill: { fgColor: { rgb: 'DCE8F4' } }, font: { bold: true } });
+    }
+    else if (k === 'tot') { xlRow(ws, r, 0, 5, XL.totVal); xlSet(ws, r, 1, XL.totLabel); xlSet(ws, r, 3, XL.ctr); }
+    else if (k === 'over') { xlRow(ws, r, 0, 5, { ...XL.cell, fill: { fgColor: { rgb: 'FDECEA' } }, font: { bold: true, color: { rgb: 'C0392B' } } }); xlSet(ws, r, 3, XL.ctr); }
+    else if (k === 'note') xlSet(ws, r, 0, { font: { italic: true, color: { rgb: '64748B' } } });
+    if (['row', 'hit', 'now', 'tot', 'over'].includes(k)) { _xlFmt(ws, r, 4, FMT_NEG); _xlFmt(ws, r, 3, '0;-0;"-"'); }
+  });
+  ws['!merges'] = merges;
+  ws['!rows'] = [{ hpt: 24 }, { hpt: 22 }, null, { hpt: 24 }];
+  return ws;
+}
+
 // ── Per-contract Excel export (one sheet per contract) ──────────────────────
 // ทำหน้าตาให้เหมือนไฟล์ "01.ตารางคำนวณดอกเบี้ยนักลงทุน WCI.xlsx" ของเตย:
 //   หน้าสรุป (แบบชีท WCI-ดอกเบี้ย) — คลิกเลขที่สัญญา → ไปชีทของสัญญานั้น
@@ -2399,6 +2550,8 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
   // รายงานสรุปดอกเบี้ยรายเดือน (แยกตามชื่อผู้กู้) — ชีทที่ 2 ของโหมดแยกสัญญา + โหมดรายงานรายเดือน
   if (mode === 'detail' || mode === 'monthly') {
     XLSX.utils.book_append_sheet(wb, _debtMonthlyReportSheet(masters, ledgerByContract, eventsByContract, seqOf), 'รายงานดอกเบี้ยรายเดือน');
+    XLSX.utils.book_append_sheet(wb, _debtTimelineSheet(masters, eventsByContract, seqOf), 'timeline-รับและคืนเงิน');
+    XLSX.utils.book_append_sheet(wb, _debtMaturitySheet(masters, seqOf), 'ครบสัญญา');
   }
 
   if (mode === 'detail') {
@@ -3855,8 +4008,8 @@ function ExportOptionsModal({ open, masters, summaryByContract, ledgerByContract
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
           {[
             { k: 'summary', icon: '📊', title: 'สรุปอย่างเดียว', desc: '1 sheet · 1 แถวต่อสัญญา · เร็ว เหมาะกับรายงานภาพรวม' },
-            { k: 'detail',  icon: '📑', title: 'แยกแต่ละสัญญา', desc: 'สรุป + รายงานรายเดือน + 1 sheet ต่อสัญญา · คลิกเลขที่สัญญาไปชีทได้' },
-            { k: 'monthly', icon: '📅', title: 'รายงานดอกเบี้ยรายเดือน', desc: 'สรุป + รายงานแยกตามชื่อผู้กู้ รายปี/รายเดือน (ดอกเบี้ยคงค้าง/จ่าย · เงินต้นรับ/คืน)' },
+            { k: 'detail',  icon: '📑', title: 'แยกแต่ละสัญญา', desc: 'สรุป + รายงาน 3 ชีท + 1 sheet ต่อสัญญา · คลิกเลขที่สัญญาไปชีทได้' },
+            { k: 'monthly', icon: '📅', title: 'รายงาน (ไม่แยกสัญญา)', desc: 'สรุป + ดอกเบี้ยรายเดือนแยกตามชื่อผู้กู้ + timeline รับ-คืนเงิน + ครบสัญญารายเดือน' },
           ].map(o => {
             const active = mode === o.k;
             return (
