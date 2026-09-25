@@ -1950,7 +1950,9 @@ function useDebtContractActions(setData, toast) {
         const patched = {
           ...mNow,
           renewals: [...(mNow.renewals || []), renewal],
-          firstTermEnd: mNow.firstTermEnd || (prev.length ? '' : (mNow.maturityDate || startDate)),
+          // สัญญาแรกจบ = วันเริ่มต่อครั้งแรกเสมอ (ช่วงต่อกันไม่มีช่องว่าง) — ไม่ใช้ maturityDate เดิม เพราะตอนบันทึก
+          // ย้อนหลัง maturityDate ในระบบอาจเป็นวันครบของช่วงล่าสุดไปแล้ว
+          firstTermEnd: mNow.firstTermEnd || (prev.length ? '' : startDate),
           termMonths: mNow.termMonths || renewal.months,
           maturityDate: endDate,
           editedBy: username, editedAt: at,
@@ -1959,9 +1961,11 @@ function useDebtContractActions(setData, toast) {
         let ledger = d.debtLedger || [];
         msg = `ต่อสัญญา ${mNow.contractNo} ถึง ${fmtDate(endDate)} แล้ว` + (renewal.increase > 0 ? ` · เพิ่มทุน ${fmtNum(renewal.increase, 2)}` : '');
         const ic = mNow.interestCalc || {};
-        if (ic.autoMode && patched.status === 'Active') {
+        if (ic.autoMode) {
           const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
-          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
+          // สัญญาปิดแล้ว → จบที่วันคืนจริง (กติกาเดียวกับ adoptAutoMode) · Active → ถึงสิ้นเดือนนี้
+          const cap = patched.status !== 'Active' ? _closedEndDate(patched, events, mine) : null;
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: cap });
           if (!sched.error && sched.rows.length) {
             const rows = _materializeAutoRows(mNow, patched, sched, mine);
             ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
@@ -1998,10 +2002,12 @@ function useDebtContractActions(setData, toast) {
         patched.balance = recalcBalance(patched, events);
         let ledger = d.debtLedger || [];
         const ic = mNow.interestCalc || {};
-        if (ic.autoMode && patched.status === 'Active') {
-          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
+        if (ic.autoMode) {
+          const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
+          const cap = patched.status !== 'Active' ? _closedEndDate(patched, events, mine) : null;
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: cap });
           if (!sched.error && sched.rows.length) {
-            const rows = _materializeAutoRows(mNow, patched, sched, ledger.filter(r => debtRowMatchesContract(r, mNow)));
+            const rows = _materializeAutoRows(mNow, patched, sched, mine);
             ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
           }
         }
@@ -3008,9 +3014,17 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14,
                         padding: '8px 12px', borderRadius: 10, background: '#f8fafc', border: '1px solid var(--ink-100)' }}>
             <span style={{ fontSize: 11.5, color: 'var(--ink-500)', fontWeight: 600 }}>🔒 สัญญานี้ปิดแล้ว</span>
+            {onRenewContract && (
+              <button onClick={() => setRenewOpen(true)}
+                title="บันทึกประวัติการต่อสัญญาย้อนหลัง (ไม่เปิดสัญญากลับ)"
+                style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 16, cursor: 'pointer',
+                         border: '1.5px solid #c4b5fd', background: '#f5f3ff', color: '#5b21b6', fontSize: 12, fontWeight: 600 }}>
+                📅 บันทึกต่อสัญญาย้อนหลัง
+              </button>
+            )}
             <button onClick={() => { if (onSetContractStatus && confirm(`เปิดสัญญา ${master.contractNo} กลับเป็น Active?`)) onSetContractStatus(master, 'Active'); }}
               title="เปิดสัญญากลับเป็น Active"
-              style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 16, cursor: 'pointer',
+              style={{ marginLeft: onRenewContract ? 0 : 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 16, cursor: 'pointer',
                        border: '1.5px solid #86efac', background: '#f0fdf4', color: '#166534', fontSize: 12, fontWeight: 600 }}>
               🔓 เปิดสัญญากลับ
             </button>
