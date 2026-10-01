@@ -355,17 +355,16 @@ function buildAutoSchedule(master, events, asOf, cfg) {
   if (!start)      missing.push('วันเริ่ม/วันรับเงิน');
   if (!rate)       missing.push('อัตราดอกเบี้ย');
   if (!principal0) missing.push('เงินต้น');
-  // วันจบ: โหมดเทียบใช้ endCap · Active = สิ้นเดือนปัจจุบันเสมอ (เลยกำหนดแล้วก็เดินดอกต่อ และไม่ปั่น
-  // แถวล่วงหน้าเกินเดือนนี้แม้ยังไม่ถึงวันครบสัญญา — ไม่งั้น "ดอกเบี้ยค้างจ่าย" จะบวมด้วยดอกในอนาคต)
-  // · Close = maturityDate/closedDate
-  let end = cfg.endCap
-          || (master.status === 'Active' ? _monthEndStr(asOf) : (master.maturityDate || master.closedDate || ''));
+  // วันจบ: โหมดเทียบใช้ endCap · มิฉะนั้น maturityDate · Active เอาสิ้นเดือนปัจจุบัน · Close เอา closedDate
+  let end = cfg.endCap || master.maturityDate
+          || (master.status === 'Active' ? _monthEndStr(asOf) : (master.closedDate || ''));
   if (!end) missing.push('วันครบสัญญา');
   if (missing.length) return { rows: [], total: 0, error: 'ข้อมูลไม่ครบ', missing };
+  // Active เลยกำหนด → เดินดอกถึงเดือนปัจจุบัน (เฉพาะตอนไม่ได้อยู่โหมดเทียบ)
+  if (master.status === 'Active' && !cfg.endCap) { const me = _monthEndStr(asOf); if (me > end) end = me; }
   if (start >= end) return { rows: [], total: 0, error: 'วันเริ่ม ≥ วันสิ้นสุดงวด', missing: [], start, end };
 
-  // ไทม์ไลน์เงินต้นจาก events (เฉพาะที่อยู่ระหว่างสัญญา — นับวันเดียวกับวันเริ่มสัญญาด้วย:
-  // เบิกเพิ่ม/คืนวันแรกต้องมีผลตั้งแต่วันแรก ไม่งั้นเงินต้นในตารางไม่ตรงกับการ์ด "เงินต้นรวม (เบิก)")
+  // ไทม์ไลน์เงินต้นจาก events (เฉพาะที่อยู่ระหว่างสัญญา)
   const evs = (events || [])
     .filter(e => (e.contractId === master.id || e.contractNo === master.contractNo) && e.eventDate)
     .map(e => ({ date: e.eventDate, delta: (e.eventType === 'repayment' ? -1 : 1) * (Number(e.amount) || 0) }))
@@ -400,11 +399,8 @@ function buildAutoSchedule(master, events, asOf, cfg) {
     let days = method === '30/360' ? _thirty360(a, b) : _daysBetween(a, b);
     if (days <= 0) continue;
     if (dayCount === 'include_end') {
-      // นับวันปลายงวด (วันคืน/วันครบกำหนด) ด้วย — "นับวันคืน"
+      // นับวันคืน/วันครบเข้าช่วงที่จบ · ช่วงถัดไปที่เริ่มวันเดียวกันต้องหักออก 1 วัน ไม่งั้นวันนั้นถูกนับ 2 ครั้ง
       if (b === end || evs.some(e => e.date === b)) days += 1;
-      // ★ ห้ามนับซ้ำ: งวดที่ "เริ่มต้นที่วัน event" งวดก่อนหน้านับวันนั้นไปแล้ว (ผ่าน +1 ข้างบน)
-      //   ไม่งั้นเดือนที่มีคืน/เบิกกลางเดือน จำนวนวันรวมเกินจำนวนวันจริงของเดือน 1 วัน
-      //   (เช่น ก.ค. คืนวันที่ 4 → งวด1=4วัน (1-4) + งวด2=28วัน (4-31) = 32 > 31 ; ต้องเป็น 4 + 27)
       if (a !== start && evs.some(e => e.date === a)) days -= 1;
     }
     const basis = (method === 'ACT/360' || method === '30/360') ? 360
@@ -433,16 +429,13 @@ function _basisFor(method, year) {
 //   · ไม่มีวันคืน/closedDate ค่อย fallback → maturityDate → สิ้นเดือนของแถวสุดท้ายในตาราง
 // ★ ใช้ทั้งใน adoptAutoMode และแผงเทียบ 🔬 เพื่อให้ "พรีวิว = ตอนกดใช้จริง" เสมอ
 function _closedEndDate(master, events, ledgerRows) {
-  const repayDates = (events || [])
-    .filter(e => (e.contractId === master.id || e.contractNo === master.contractNo)
-              && e.eventType === 'repayment' && e.eventDate)
-    .map(e => e.eventDate);
-  const real = [master.closedDate, ...repayDates].filter(Boolean).sort();
-  if (real.length) return real[real.length - 1];   // วันคืนจริงช้าสุด
-  if (master.maturityDate) return master.maturityDate;
-  const last = (ledgerRows || []).slice().sort((a, b) =>
+  const evDates = (events || [])
+    .filter(e => e.contractId === master.id || e.contractNo === master.contractNo)
+    .map(e => e.eventDate).filter(Boolean).sort();
+  const lastRow = (ledgerRows || []).slice().sort((a, b) =>
     (Number(a.year) || 0) - (Number(b.year) || 0) || (Number(a.month) || 0) - (Number(b.month) || 0)).pop();
-  return last ? _monthEndStr(`${last.year}-${String(last.month).padStart(2, '0')}-01`) : null;
+  const lastRowEnd = lastRow ? _monthEndStr(`${lastRow.year}-${String(lastRow.month).padStart(2, '0')}-01`) : null;
+  return master.maturityDate || master.closedDate || (evDates.length ? evDates[evDates.length - 1] : null) || lastRowEnd;
 }
 
 // จับคู่แถวลูก (ledger/event) กับสัญญาแม่ — ใช้ contractId (id ที่ไม่มีวันเปลี่ยน) เป็นหลัก
@@ -1799,7 +1792,7 @@ function DebtRenewalImportModal({ open, masters, onClose, onApply }) {
     const replace = ready.filter(r => { const m = mById.get(r.masterId); return m && debtRenewals(m).length; }).length;
     if (!confirm(`บันทึกประวัติต่อสัญญา ${ready.length} สัญญา · รวม ${nRen} ครั้ง?`
       + (replace ? `\n\n• ${replace} สัญญามีประวัติต่อสัญญาอยู่แล้ว — จะถูกแทนที่ด้วยของในไฟล์` : '')
-      + (rebuild ? '\n• สัญญาที่เปิดคำนวณอัตโนมัติ จะสร้างตารางดอกเบี้ยใหม่ให้แบ่งแถวตามวันต่อสัญญา (สถานะจ่ายเดิมยังอยู่)' : ''))) return;
+      + (rebuild ? '\n• สัญญา Active ที่เปิดคำนวณอัตโนมัติ จะสร้างตารางดอกเบี้ยใหม่ให้แบ่งแถวตามวันต่อสัญญา (สถานะจ่ายเดิมยังอยู่)' : ''))) return;
     onApply && onApply(items, { rebuild });
   };
 
@@ -1837,7 +1830,7 @@ function DebtRenewalImportModal({ open, masters, onClose, onApply }) {
           </label>
           <label style={{ fontSize: 12, display: 'inline-flex', gap: 5, alignItems: 'center' }}>
             <input type="checkbox" checked={rebuild} onChange={e => setRebuild(e.target.checked)} />
-            สร้างตารางดอกเบี้ยใหม่ให้แบ่งแถวตามวันต่อสัญญา (เฉพาะสัญญาที่คำนวณอัตโนมัติ)
+            สร้างตารางดอกเบี้ยใหม่ให้แบ่งแถวตามวันต่อสัญญา (เฉพาะ Active ที่คำนวณอัตโนมัติ)
           </label>
           <span style={{ fontSize: 11.5, color: 'var(--ink-400)', marginLeft: 'auto' }}>
             อ่านได้ {live.length} สัญญา · จับคู่ได้ {live.filter(r => r.masterId).length} · ข้าม {skipRows.length} ชีท
@@ -2395,11 +2388,9 @@ function useDebtContractActions(setData, toast) {
         let ledger = d.debtLedger || [];
         msg = `ต่อสัญญา ${mNow.contractNo} ถึง ${fmtDate(endDate)} แล้ว` + (renewal.increase > 0 ? ` · เพิ่มทุน ${fmtNum(renewal.increase, 2)}` : '');
         const ic = mNow.interestCalc || {};
-        if (ic.autoMode) {
+        if (ic.autoMode && patched.status === 'Active') {  // สัญญาปิดแล้วไม่สร้างตารางใหม่ (กติกาเดียวกับ POG — วันจบยึด maturity)
           const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
-          // สัญญาปิดแล้ว → จบที่วันคืนจริง (กติกาเดียวกับ adoptAutoMode) · Active → ถึงสิ้นเดือนนี้
-          const cap = patched.status !== 'Active' ? _closedEndDate(patched, events, mine) : null;
-          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: cap });
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
           if (!sched.error && sched.rows.length) {
             const rows = _materializeAutoRows(mNow, patched, sched, mine);
             ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
@@ -2460,10 +2451,9 @@ function useDebtContractActions(setData, toast) {
           }
           nC++; nR += renewals.length;
           const ic = mNow.interestCalc || {};
-          if (opts.rebuild && ic.autoMode) {
+          if (opts.rebuild && ic.autoMode && patched.status === 'Active') {
             const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
-            const cap = patched.status !== 'Active' ? _closedEndDate(patched, events, mine) : null;
-            const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: cap });
+            const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount });
             if (!sched.error && sched.rows.length) {
               const rows = _materializeAutoRows(mNow, patched, sched, mine);
               ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
@@ -2500,7 +2490,7 @@ function useDebtContractActions(setData, toast) {
         patched.balance = recalcBalance(patched, events);
         let ledger = d.debtLedger || [];
         const ic = mNow.interestCalc || {};
-        if (ic.autoMode) {
+        if (ic.autoMode && patched.status === 'Active') {  // สัญญาปิดแล้วไม่สร้างตารางใหม่ (กติกาเดียวกับ POG — วันจบยึด maturity)
           const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
           const cap = patched.status !== 'Active' ? _closedEndDate(patched, events, mine) : null;
           const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: cap });
@@ -3984,7 +3974,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                     </div>
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ink-100)', fontSize: 11.5, color: 'var(--ink-500)', lineHeight: 1.7 }}>
                       {sortedRows.length === 0
-                        ? <>สัญญานี้ยังไม่มีตารางดอกเบี้ยเลย — ตรวจตัวเลขข้างบนให้ตรงก่อน แล้วกดปุ่มเขียวเพื่อสร้างตาราง</>
+                        ? <>สัญญานี้ยังไม่มีตารางดอกเบี้ยเลย — ตรวจตัวเลขข้างบนให้ตรงก่อน แล้วกดปุ่มเพื่อสร้างตาราง</>
                         : matched
                         ? <><strong style={{ color: 'var(--good)' }}>✓ วิธีคิดนี้ตรงกับข้อมูลเดิม</strong> — ตารางนี้พร้อมสลับเป็น "คำนวณอัตโนมัติ"</>
                         : <>ปรับ "วิธีคิด" จนผลต่าง = <strong style={{ color: 'var(--good)' }}>✓ ตรงกัน</strong> (ส่วนต่างเล็กน้อยใช้ปุ่มแก้ดอกเบี้ยรายเดือนปรับได้)</>}
@@ -3992,23 +3982,15 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                           (เห็นชัด) แทน "ปุ่มกดแล้วเงียบสนิท" (จับไม่ได้เลย) */}
                       {canEdit && onAdoptAuto && (
                         <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <button
-                            onClick={() => {
-                              const msg = `ใช้แบบอัตโนมัติกับสัญญา ${master.contractNo}?\n\n`
-                                + `• สร้างตารางดอกเบี้ย ${cmp.rows.length} เดือน · รวม ${fmtNum(cmp.total, 2)} บาท\n`
-                                + `• วิธีคิด ${cmpMethod} · ${cmpDayCount === 'include_end' ? 'นับวันคืนด้วย' : 'ไม่นับวันคืน'}\n`
-                                + (sortedRows.length ? `• เขียนทับตารางเดิม ${sortedRows.length} แถว (วันจ่าย + ยอดที่แก้มือไว้ ยังอยู่)\n` : '')
-                                + `\nเดือนถัดไปกด "อัปเดตถึงเดือนล่าสุด" เพื่อเดินดอกต่อ`;
-                              if (confirm(msg)) onAdoptAuto && onAdoptAuto(master, sortedRows, { method: cmpMethod, dayCount: cmpDayCount });
-                            }}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8,
-                                     cursor: 'pointer', border: '1px solid #059669', background: '#10b981', color: '#fff',
-                                     fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit' }}>
-                            ✅ ใช้แบบอัตโนมัติจริง — สร้างตารางดอกเบี้ย {cmp.rows.length} เดือน
+                          <button onClick={() => {
+                            if (confirm('สลับสัญญานี้เป็น "คำนวณดอกเบี้ยอัตโนมัติ"?\n\nระบบจะสร้าง/อัปเดตตารางดอกเบี้ยรายเดือนจากสัญญา + วันคืนเงินต้น จนถึงวันครบสัญญา\n(เดือนที่จ่าย/แก้ไว้แล้วจะถูกคงไว้)')) {
+                              onAdoptAuto && onAdoptAuto(master, sortedRows, { method: cmpMethod, dayCount: cmpDayCount });
+                            }
+                          }}
+                            style={{ padding: '7px 15px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', background: 'var(--brand-600)', color: '#fff' }}>
+                            ⚙️ ใช้แบบอัตโนมัติจริง — สร้างตารางดอกเบี้ยรายเดือน
                           </button>
-                          <span style={{ fontSize: 11, color: 'var(--ink-400)' }}>
-                            เขียนลงตารางข้างบนจริง · แก้ดอกเบี้ยรายเดือน/ลบแถว ทีหลังได้
-                          </span>
+                          <span style={{ fontSize: 10.5, color: 'var(--ink-400)' }}>สร้างดอกเบี้ยทุกเดือนจนครบสัญญา · จ่าย/แก้รายเดือนได้ภายหลัง</span>
                         </div>
                       )}
                     </div>
