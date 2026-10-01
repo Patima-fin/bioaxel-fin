@@ -2347,8 +2347,8 @@ function useDebtContractActions(setData, toast) {
               closedReason: opts.reason || m.closedReason || 'ปิดด้วยตนเอง',
               closedBy: username, closedAt: at };
           }
-          // เปิดกลับเป็น Active — ล้างข้อมูลการปิด
-          return { ...m, status: 'Active', closedDate: '', closedReason: '', closedBy: '', closedAt: '' };
+          // เปิดกลับเป็น Active — ล้างข้อมูลการปิด + คำนวณยอดคงเหลือใหม่จาก events (กัน balance ค้าง 0 → คืนเงินต้นต่อไม่ได้)
+          return { ...m, status: 'Active', balance: recalcBalance(m, d.debtEvents), closedDate: '', closedReason: '', closedBy: '', closedAt: '' };
         });
         updated = { ...d, debtMaster: masters };
         return updated;

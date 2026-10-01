@@ -829,7 +829,7 @@ function DebtPage({ data, setData, toast }) {
   // ── CRUD helpers ──────────────────────────────────────────────────────────
   const saveDebt = (rowIn, mode /* 'add' | 'edit' */) => {
     const { _grossPrincipal, ...row } = rowIn || {}; // strip view-only field ไม่ให้รั่วลง DB
-    let updated;
+    let updated, cnChanged = false;
     setData(d => {
       const list = d.debtMaster || [];
       let next, ledgerNext = d.debtLedger, eventsNext = d.debtEvents;
@@ -839,6 +839,7 @@ function DebtPage({ data, setData, toast }) {
         // cascade: แก้ contractNo → อัปเดตรายการลูก (ledger+events) ให้ผูกถูกทั้ง contractNo + contractId
         // ไม่งั้นตารางดอกเบี้ย/รายการเบิก-คืน ที่คีย์ไว้จะหลุดเป็น orphan หาสัญญาไม่เจอ (ต้นเหตุที่โดนมา)
         if (prev && row.contractNo && prev.contractNo !== row.contractNo) {
+          cnChanged = true;
           const oldNo = prev.contractNo, newNo = row.contractNo, cid = row.id;
           const relink = (arr) => (arr || []).map(r =>
             (r.contractId === cid || r.contractNo === oldNo) ? { ...r, contractNo: newNo, contractId: cid } : r);
@@ -852,7 +853,9 @@ function DebtPage({ data, setData, toast }) {
       return updated;
     });
     if (updated && WTPData.forceSyncNow) setTimeout(() => WTPData.forceSyncNow(updated), 0);
-    toast(mode === 'edit' ? 'อัปเดตภาระหนี้แล้ว' : 'เพิ่มภาระหนี้แล้ว');
+    toast(mode === 'edit'
+      ? (cnChanged ? 'อัปเดตภาระหนี้ + ย้ายข้อมูล (คืนเงินต้น/ดอกเบี้ย) ตามเลขสัญญาใหม่แล้ว' : 'อัปเดตภาระหนี้แล้ว')
+      : 'เพิ่มภาระหนี้แล้ว');
     setShowAdd(false);
     setEditRow(null);
     setView(null);
@@ -898,9 +901,6 @@ function DebtPage({ data, setData, toast }) {
             <>
               <button className="btn btn-primary" onClick={() => setShowAdd(true)}>
                 <Icon name="plus" size={14} /> เพิ่มภาระหนี้
-              </button>
-              <button className="btn btn-ghost" onClick={() => setShowImport(true)}>
-                <Icon name="upload" size={14} /> นำเข้า .xlsx
               </button>
             </>
           )}
@@ -1033,13 +1033,21 @@ function DebtPage({ data, setData, toast }) {
           })}
         </div>
 
-        <div className="tb-search" style={{ width: 300, marginLeft: 'auto' }}>
-          <Icon name="search" size={14} />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="ค้นหา สัญญา / ผู้กู้ / ธนาคาร / โครงการ…"
-          />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          <div className="tb-search" style={{ width: 300 }}>
+            <Icon name="search" size={14} />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="ค้นหา สัญญา / ผู้กู้ / ธนาคาร / โครงการ…"
+            />
+          </div>
+          {/* ย้ายมาจากหัวหน้า — นำเข้าภาระหนี้รวมจาก .xlsx (ตำแหน่งเดียวกับ POG) */}
+          {canEdit && (
+            <button className="btn btn-ghost" style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }} onClick={() => setShowImport(true)}>
+              <Icon name="upload" size={14} /> นำเข้า Excel
+            </button>
+          )}
         </div>
       </div>
 
@@ -1084,7 +1092,7 @@ function DebtPage({ data, setData, toast }) {
           <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
           <div style={{ fontWeight: 600, color: 'var(--ink-600)', marginBottom: 8 }}>ยังไม่มีข้อมูลภาระหนี้</div>
           <div style={{ fontSize: 13, color: 'var(--ink-400)', marginBottom: 12 }}>
-            กด "เพิ่มภาระหนี้" หรือ "นำเข้า .xlsx" เพื่อเริ่มต้น
+            กด "เพิ่มภาระหนี้" หรือ "นำเข้า Excel" เพื่อเริ่มต้น
           </div>
         </div>
       )}
