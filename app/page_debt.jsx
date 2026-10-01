@@ -51,6 +51,16 @@ function parseDebtGroupCell(v) {
   if (s === 'invest' || /นักลงทุน/.test(s)) return 'invest';
   return '';
 }
+// สกุลเงินของสัญญา — THB / USD / EUR · ยอดต่างสกุลแยกรวมต่างหาก ห้ามบวกปนกับ THB
+const DEBT_FX_CURS = ['USD', 'EUR'];
+function debtCur(r) {
+  const c = String((r && r.currency) || 'THB').trim().toUpperCase();
+  return DEBT_FX_CURS.includes(c) ? c : 'THB';
+}
+// ยอดคงเหลือแยกสกุลต่างประเทศ → [['USD', 123], ['EUR', 456]] (เฉพาะที่ > 0)
+function debtFxTotals(rows, valFn) {
+  return DEBT_FX_CURS.map(c => [c, rows.filter(r => debtCur(r) === c).reduce((s, r) => s + valFn(r), 0)]).filter(([, v]) => v > 0);
+}
 function metaFor(cat) {
   return CATEGORY_META[cat] || { color: '#525252', bg: '#f5f5f5', label: cat || '—' };
 }
@@ -62,7 +72,7 @@ function DebtCategoryMiniCard({ cat, rawRows }) {
   const activeCnt = catRows.filter(r => r.status === 'Active').length;
   const activeBal = catRows.filter(r => r.status === 'Active')
     .reduce((s, r) => s + (debtDisplayBalance(r)), 0);
-  const isUSD = catRows.some(r => r.currency === 'USD');
+  const fxLbl = [...new Set(catRows.map(debtCur).filter(c => c !== 'THB'))].join('/');
   return (
     <div className="card" style={{ flex: '1 1 200px', padding: '10px 14px', borderLeft: `4px solid ${m.color}` }}>
       <div style={{ fontWeight: 700, fontSize: 12, color: m.color, marginBottom: 6 }}>{m.label}</div>
@@ -76,7 +86,7 @@ function DebtCategoryMiniCard({ cat, rawRows }) {
           <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>คงเหลือ</div>
           <div style={{ fontWeight: 700, fontSize: 13, fontVariantNumeric: 'tabular-nums',
                        color: activeBal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-            {fmtNum(activeBal, 2)} {isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}>USD</span>}
+            {fmtNum(activeBal, 2)} {fxLbl && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}>{fxLbl}</span>}
           </div>
         </div>
       </div>
@@ -93,8 +103,8 @@ function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
   const [open, setOpen] = React.useState(!!defaultOpen);
   const present = [...new Set((rows || []).map(r => String(r.debtCategory || '').trim()).filter(Boolean))];
   const active  = (rows || []).filter(r => r.status === 'Active');
-  const thbBal  = active.filter(r => r.currency !== 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
-  const usdBal  = active.filter(r => r.currency === 'USD').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
+  const thbBal  = active.filter(r => debtCur(r) === 'THB').reduce((s, r) => s + (debtDisplayBalance(r)), 0);
+  const fxBals  = debtFxTotals(active, r => debtDisplayBalance(r));
   return (
     <div className="card" style={{ flex: nested ? '1 1 auto' : '1 1 360px', width: nested ? '100%' : undefined,
       padding: 0, overflow: 'hidden', borderLeft: `${nested ? 4 : 5}px solid ${color}`,
@@ -114,7 +124,7 @@ function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
           <div style={{ fontSize: 10, color: 'var(--ink-400)' }}>คงเหลือ Active</div>
           <div style={{ fontWeight: 800, fontSize: nested ? 16 : 20, fontVariantNumeric: 'tabular-nums',
                        color: thbBal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>{fmtNum(thbBal, 2)}</div>
-          {usdBal > 0 && <div style={{ fontSize: 11, color: 'var(--ink-500)', fontVariantNumeric: 'tabular-nums' }}>+ {fmtNum(usdBal, 2)} USD</div>}
+          {fxBals.map(([c, v]) => <div key={c} style={{ fontSize: 11, color: 'var(--ink-500)', fontVariantNumeric: 'tabular-nums' }}>+ {fmtNum(v, 2)} {c}</div>)}
         </div>
       </div>
       {open && (
@@ -133,7 +143,7 @@ function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
                       const catRows = rows.filter(r => r.debtCategory === cat);
                       const act = catRows.filter(r => r.status === 'Active');
                       const bal = act.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
-                      const isUSD = act.some(r => r.currency === 'USD');
+                      const fxLbl = [...new Set(act.map(debtCur).filter(c => c !== 'THB'))].join('/');
                       return (
                         <tr key={cat} style={{ borderTop: ci === 0 ? '1px solid var(--ink-100)' : '1px solid var(--ink-50, #f1f5f9)' }}>
                           <td style={{ padding: '8px 6px' }}>
@@ -146,7 +156,7 @@ function DebtGroupCard({ label, color, rows, defaultOpen, subGroups, nested }) {
                             <b style={{ color: 'var(--ink-700)' }}>{act.length}</b><span style={{ color: 'var(--ink-300)' }}>/{catRows.length}</span> สัญญา
                           </td>
                           <td style={{ padding: '8px 6px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: bal > 0 ? 'var(--bad)' : 'var(--ink-300)' }}>
-                            {fmtNum(bal, 2)}{isUSD && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}> USD</span>}
+                            {fmtNum(bal, 2)}{fxLbl && <span style={{ fontSize: 9, color: 'var(--ink-400)' }}> {fxLbl}</span>}
                           </td>
                         </tr>
                       );
@@ -230,7 +240,7 @@ function downloadDebtImportTemplate(existing) {
   const headersTh = [
     'หมวด*', 'กลุ่ม (โอนสิทธิ์/นักลงทุน)', 'เลขที่สัญญา*', 'ผู้กู้/เจ้าหนี้*', 'สถานะ (Active/Close)', 'ประเภทวงเงิน',
     'วันที่รับเงิน (DD/MM/YYYY)', 'วันเริ่มสัญญา', 'วันครบกำหนด',
-    'วงเงิน*', 'อัตราดอกเบี้ย/ปี (เช่น 0.075 หรือ 7.5)', 'คงเหลือ', 'สกุลเงิน (THB/USD)',
+    'วงเงิน*', 'อัตราดอกเบี้ย/ปี (เช่น 0.075 หรือ 7.5)', 'คงเหลือ', 'สกุลเงิน (THB/USD/EUR)',
     'ธนาคาร/เจ้าหนี้', 'รหัสโครงการ', 'ชื่อโครงการ', 'หมายเหตุ',
   ];
   const example = [
@@ -284,7 +294,7 @@ function downloadDebtImportTemplate(existing) {
     { key: 'status',       label: 'สถานะ',    strict: true,  values: ['Active', 'Close'] },
     { key: 'facilityType', label: 'ประเภทวงเงิน', strict: true, values: FACILITY_TYPES.slice(),
       msg: 'เลือกจากรายการ หรือเว้นว่าง — พิมพ์ค่าที่ไม่รู้จัก ระบบจะทิ้งเป็นค่าว่าง' },
-    { key: 'currency',     label: 'สกุลเงิน', strict: true,  values: ['THB', 'USD'] },
+    { key: 'currency',     label: 'สกุลเงิน', strict: true,  values: ['THB', 'USD', 'EUR'] },
   ].filter(d => d.values.length && cols.indexOf(d.key) >= 0);
 
   const maxLen = Math.max(...defs.map(d => d.values.length));
@@ -377,7 +387,7 @@ function parseDebtImportFile(file, onDone, onErr) {
           principalAmount: principal,
           interestRate: rate,
           balance,
-          currency:     String(r.currency || 'THB').trim().toUpperCase() === 'USD' ? 'USD' : 'THB',
+          currency:     debtCur(r),
           bankName:     String(r.bankName || '').trim(),
           projectCode:  String(r.projectCode || '').trim(),
           projectName:  String(r.projectName || '').trim(),
@@ -499,6 +509,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
           <select className="select input" value={draft.currency} onChange={e => set('currency', e.target.value)}>
             <option value="THB">THB</option>
             <option value="USD">USD ($)</option>
+            <option value="EUR">EUR (€)</option>
           </select>
         </div>
         <div className="field" style={{ gridColumn: 'span 2' }}>
@@ -756,10 +767,12 @@ function DebtPage({ data, setData, toast }) {
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const activeRows = rawRows.filter(r => r.status === 'Active');
   const closedRows = rawRows.filter(r => r.status !== 'Active');
-  const thbActive  = activeRows.filter(r => r.currency !== 'USD');
-  const usdActive  = activeRows.filter(r => r.currency === 'USD');
+  const thbActive  = activeRows.filter(r => debtCur(r) === 'THB');
+  const usdActive  = activeRows.filter(r => debtCur(r) === 'USD');
+  const eurActive  = activeRows.filter(r => debtCur(r) === 'EUR');
   const totalBalanceThb = thbActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const totalBalanceUsd = usdActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
+  const totalBalanceEur = eurActive.reduce((s, r) => s + (debtDisplayBalance(r)), 0);
   const totalPrincipal  = thbActive.reduce((s, r) => s + (r._grossPrincipal || 0), 0);
   const categoriesPresent = [...new Set(rawRows.map(r => r.debtCategory).filter(Boolean))];
 
@@ -934,7 +947,7 @@ function DebtPage({ data, setData, toast }) {
           accent="var(--brand-500)"
           icon="bank"
           unit="USD"
-          delta={`${usdActive.length} สัญญา · Zigo`}
+          delta={`${usdActive.length} สัญญา` + (eurActive.length ? ` · EUR ${fmtNum(totalBalanceEur, 2)} (${eurActive.length} สัญญา)` : '')}
         />
         <KpiTile animate={false}
           label="วงเงินรวม Active (THB)"
@@ -1115,7 +1128,7 @@ function DebtPage({ data, setData, toast }) {
                   const balance  = debtDisplayBalance(r);
                   const principal= r._grossPrincipal || 0;
                   const rate     = Number(r.interestRate) || 0;
-                  const isUSD    = r.currency === 'USD';
+                  const curLbl   = debtCur(r) === 'THB' ? '' : debtCur(r);
                   return (
                     <tr key={r.id || r.contractNo}
                       onClick={() => setView(r)}
@@ -1153,7 +1166,7 @@ function DebtPage({ data, setData, toast }) {
                         {fmtDate(r.maturityDate || r.endDate) || '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 12.5, whiteSpace: 'nowrap' }}>
-                        {fmtNum(principal, 2)} {isUSD && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>USD</span>}
+                        {fmtNum(principal, 2)} {curLbl && <span style={{ color: 'var(--ink-400)', fontSize: 10 }}>{curLbl}</span>}
                       </td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
                         {rate > 0 ? (rate * 100).toFixed(2) + '%' : '—'}
@@ -1211,7 +1224,7 @@ function DebtPage({ data, setData, toast }) {
         const m       = metaFor(view.debtCategory);
         const gm      = DEBT_GROUP_META[debtGroupOf(view)];
         const isActive= view.status === 'Active';
-        const isUSD   = view.currency === 'USD';
+        const curLbl  = debtCur(view) === 'THB' ? '' : debtCur(view);
         const bal     = debtDisplayBalance(view);
         const princ   = (view._grossPrincipal != null ? view._grossPrincipal : Number(view.principalAmount)) || 0;
         const rate    = Number(view.interestRate) || 0;
@@ -1311,7 +1324,7 @@ function DebtPage({ data, setData, toast }) {
                 <div>
                   <div style={{ fontSize: 10.5, color: 'var(--ink-500)', textTransform: 'uppercase', letterSpacing: 0.5 }}>ยอดคงเหลือ (เงินต้น)</div>
                   <div style={{ fontWeight: 700, fontSize: 22, color: bal > 0 ? 'var(--bad)' : 'var(--ink-400)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtNum(bal, 2)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{isUSD ? 'USD' : ''}</span>
+                    {fmtNum(bal, 2)} <span style={{ fontSize: 12, color: 'var(--ink-500)' }}>{curLbl}</span>
                   </div>
                 </div>
                 <div>
