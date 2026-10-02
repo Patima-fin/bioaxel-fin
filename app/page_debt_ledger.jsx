@@ -1210,9 +1210,11 @@ function RenewContractModal({ open, master, onClose, onSave }) {
 }
 
 // แผง "ช่วงสัญญา" ในแท็บคืนเงินต้น — สัญญาแรก + ทุกครั้งที่ต่อ
-function DebtTermsPanel({ master, canEdit, onRenew, onUndo }) {
+function DebtTermsPanel({ master, canEdit, onRenew, onUndo, onEditTerm }) {
   const terms = debtTerms(master);
+  const [editIdx, setEditIdx] = React.useState(-1);
   if (!terms.length) return null;
+  const canEditTerm = canEdit && !!onEditTerm;
   const today = new Date().toISOString().slice(0, 10);
   const curLabel = debtTermLabelAt(terms, today);
   const th = { padding: '6px 12px', fontSize: 10, fontWeight: 700, color: 'var(--ink-400)', textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid var(--line, #e2e8f0)', whiteSpace: 'nowrap' };
@@ -1244,6 +1246,7 @@ function DebtTermsPanel({ master, canEdit, onRenew, onUndo }) {
             <th style={{ ...th, textAlign: 'left' }}>ครบ</th>
             <th style={{ ...th, textAlign: 'right' }}>ระยะเวลา</th>
             <th style={{ ...th, textAlign: 'right' }}>เพิ่มทุน</th>
+            {canEditTerm && <th style={{ ...th, width: 40 }}></th>}
           </tr></thead>
           <tbody>
             {terms.map((t, i) => (
@@ -1253,12 +1256,83 @@ function DebtTermsPanel({ master, canEdit, onRenew, onUndo }) {
                 <td style={td}>{t.end ? fmtDate(t.end) : '—'}</td>
                 <td style={{ ...td, textAlign: 'right' }}>{t.months ? t.months + ' เดือน' : '—'}</td>
                 <td style={{ ...td, textAlign: 'right', color: t.increase > 0 ? '#b45309' : 'var(--ink-300)' }}>{t.increase > 0 ? '+' + fmtNum(t.increase, 2) : '—'}</td>
+                {canEditTerm && (
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <button title="แก้ช่วงสัญญานี้ (วันเริ่ม / วันครบ / ชื่อช่วง)" onClick={() => setEditIdx(i)}
+                      style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: 7, padding: '2px 7px', cursor: 'pointer', fontSize: 11 }}>✏️</button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {editIdx >= 0 && terms[editIdx] && (
+        <DebtTermEditModal terms={terms} idx={editIdx} onClose={() => setEditIdx(-1)}
+          onSave={(patch) => { onEditTerm(master, editIdx, patch); setEditIdx(-1); }} />
+      )}
     </div>
+  );
+}
+
+// แก้ช่วงสัญญาที่บันทึกไปแล้ว (ต่อผิดวัน/ผิดจำนวนเดือน) — ช่วงต่อกันเสมอ:
+// แก้ "ตั้งแต่" = วันครบของช่วงก่อนหน้าขยับตาม · แก้ "ครบ" = วันเริ่มของช่วงถัดไปขยับตาม (ช่วงสุดท้าย = วันครบสัญญา)
+function DebtTermEditModal({ terms, idx, onClose, onSave }) {
+  const t = terms[idx];
+  const prev = terms[idx - 1], next = terms[idx + 1];
+  const [start, setStart] = React.useState(t.start || '');
+  const [end, setEnd] = React.useState(t.end || '');
+  const [label, setLabel] = React.useState(t.label || '');
+  const [note, setNote] = React.useState((t.renewal && t.renewal.note) || '');
+  const months = (start && end && end > start) ? debtMonthsBetween(start, end) : 0;
+  let err = '';
+  if (!start || !end) err = 'กรอกวันที่ให้ครบ';
+  else if (end <= start) err = 'วันครบต้องหลังวันเริ่ม';
+  else if (prev && start <= prev.start) err = 'วันเริ่มต้องหลังวันเริ่มของ "' + prev.label + '" (' + fmtDate(prev.start) + ')';
+  else if (next && next.end && end >= next.end) err = 'วันครบต้องก่อนวันครบของ "' + next.label + '" (' + fmtDate(next.end) + ')';
+  const quick = (n) => { if (start) setEnd(debtAddMonthsISO(start, n)); };
+  const lbl = { fontSize: 11, color: 'var(--ink-500)', marginBottom: 4 };
+  return (
+    <Modal open={true} maxWidth={480} title={'แก้ช่วงสัญญา · ' + t.label} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={!!err}
+          onClick={() => onSave({ start, end, label: label.trim() || t.label, note: note.trim() })}>บันทึก</button>
+      </>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div>
+          <div style={lbl}>ตั้งแต่</div>
+          <input type="date" className="input" value={start} disabled={idx === 0} onChange={e => setStart(e.target.value)} />
+          {idx === 0 && <div style={{ fontSize: 10.5, color: 'var(--ink-400)', marginTop: 3 }}>วันเริ่มสัญญาแรก — แก้ที่ข้อมูลสัญญา</div>}
+        </div>
+        <div>
+          <div style={lbl}>ครบ</div>
+          <input type="date" className="input" value={end} onChange={e => setEnd(e.target.value)} />
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+            {[3, 6, 9, 12].map(n => (
+              <button key={n} type="button" onClick={() => quick(n)}
+                style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 6, border: '1px solid var(--line, #e2e8f0)', background: '#fff', cursor: 'pointer' }}>{n} เดือน</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ gridColumn: 'span 2' }}>
+          <div style={lbl}>ชื่อช่วง</div>
+          <input className="input" value={label} onChange={e => setLabel(e.target.value)} />
+        </div>
+        {idx > 0 && (
+          <div style={{ gridColumn: 'span 2' }}>
+            <div style={lbl}>หมายเหตุ</div>
+            <input className="input" value={note} onChange={e => setNote(e.target.value)} placeholder="(ไม่บังคับ)" />
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 12, fontSize: 12, color: err ? 'var(--bad)' : 'var(--ink-600)' }}>
+        {err || <>ระยะเวลา <strong>{months} เดือน</strong>
+          {prev && start !== t.start && <> · "{prev.label}" จะจบ {fmtDate(start)}</>}
+          {next && end !== t.end && <> · "{next.label}" จะเริ่ม {fmtDate(end)}</>}
+          {!next && end !== t.end && <> · วันครบสัญญาเป็น {fmtDate(end)}</>}</>}
+      </div>
+    </Modal>
   );
 }
 
@@ -2510,6 +2584,59 @@ function useDebtContractActions(setData, toast) {
         + (failed.length ? ` · ตารางไม่อัปเดต ${failed.length} สัญญา (${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''})` : ''));
     },
     // ยกเลิกการต่อสัญญาครั้งล่าสุด (คีย์ผิด) — คืนวันครบเดิม + ลบรายการเพิ่มทุนที่มากับการต่อครั้งนั้น
+    // แก้ช่วงสัญญาที่ idx (0 = สัญญาแรก) — ช่วงก่อน/หลังขยับตามให้ต่อกัน · เพิ่มทุนที่ผูกกับช่วงย้ายวันตาม
+    // · ช่วงสุดท้าย = maturityDate · Active + autoMode → สร้างตารางดอกเบี้ยใหม่ (id เดิม · ยกรอบจ่าย)
+    editTerm(master, idx, { start, end, label, note }) {
+      const at = new Date().toISOString();
+      const today = at.slice(0, 10);
+      let updated, msg = '';
+      setData(d => {
+        const mNow = (d.debtMaster || []).find(m => m.id === master.id) || master;
+        const rens = debtRenewals(mNow).map(r => ({ ...r }));
+        let events = d.debtEvents || [];
+        const moveStart = (r, newStart) => {
+          if (r.startDate === newStart) return;
+          events = events.map(e => (e.renewalId === r.id && e.eventDate === r.startDate) ? { ...e, eventDate: newStart } : e);
+          r.startDate = newStart;
+          if (r.endDate) r.months = debtMonthsBetween(r.startDate, r.endDate);
+        };
+        const patched = { ...mNow, editedBy: username, editedAt: at };
+        if (idx === 0) {
+          patched.firstTermLabel = label;
+          if (rens.length) { patched.firstTermEnd = end; moveStart(rens[0], end); }
+          else patched.maturityDate = end;
+        } else {
+          const r = rens[idx - 1];
+          if (!r) { msg = 'ไม่พบช่วงสัญญานี้'; updated = null; return d; }
+          moveStart(r, start);
+          r.endDate = end; r.months = debtMonthsBetween(start, end);
+          r.label = label; r.note = note; r.editedBy = username; r.editedAt = at;
+          if (idx === 1) patched.firstTermEnd = start;
+          else { const p = rens[idx - 2]; p.endDate = start; p.months = debtMonthsBetween(p.startDate, start); }
+          if (rens[idx]) moveStart(rens[idx], end);
+          else patched.maturityDate = end;
+        }
+        patched.renewals = rens;
+        patched.balance = recalcBalance(patched, events);
+        let ledger = d.debtLedger || [];
+        msg = `แก้ "${label}" แล้ว` + (idx === rens.length ? ` · วันครบสัญญา ${fmtDate(patched.maturityDate)}` : '');
+        const ic = mNow.interestCalc || {};
+        if (ic.autoMode && patched.status === 'Active') {
+          const mine = ledger.filter(r => debtRowMatchesContract(r, mNow));
+          const sched = buildAutoSchedule(patched, events, today, { method: ic.method, dayCount: ic.dayCount, endCap: null });
+          if (!sched.error && sched.rows.length) {
+            const rows = _materializeAutoRows(mNow, patched, sched, mine);
+            ledger = [...ledger.filter(r => !debtRowMatchesContract(r, mNow)), ...rows];
+            msg += ' · คำนวณตารางดอกเบี้ยใหม่แล้ว';
+          } else msg += ' · (ตารางดอกเบี้ยยังไม่อัปเดต: ' + (sched.error || 'ไม่มีงวด') + ')';
+        }
+        updated = { ...d, debtEvents: events, debtLedger: ledger,
+          debtMaster: (d.debtMaster || []).map(m => m.id === mNow.id ? patched : m) };
+        return updated;
+      });
+      if (updated) syncAfter(updated);
+      toast(msg);
+    },
     undoLastRenewal(master) {
       const at = new Date().toISOString();
       const today = at.slice(0, 10);
@@ -3328,7 +3455,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
     onSavePayments, onSaveInterestPayments, onClearPayment, onOverrideInterest,
     onAddPrincipalEvent, onEditEvent, onDeleteEvent, onDeleteLedgerRow, onAddLedgerRow,
     onAdoptAuto, onSetAutoMode, onSaveMasterFields, onRollover, onSetContractStatus,
-    onRenewContract, onUndoRenewal, canEdit }) {
+    onRenewContract, onUndoRenewal, onEditTerm, canEdit }) {
   const [renewOpen,   setRenewOpen]   = React.useState(false); // ต่อสัญญา (เลื่อนวันครบ)
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [confirmOpen, setConfirmOpen] = React.useState(false);
@@ -3605,7 +3732,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
         )}
 
         {drawerTab === 'principal' && (
-          <DebtTermsPanel master={master} canEdit={canEdit} onUndo={onUndoRenewal} />
+          <DebtTermsPanel master={master} canEdit={canEdit} onUndo={onUndoRenewal} onEditTerm={onEditTerm} />
         )}
 
         {/* Drawdown/repayment events */}
@@ -4956,7 +5083,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   const actions = useDebtContractActions(setData, toast);
   const { savePayments, saveInterestPayments, clearPayment, overrideInterest, addPrincipalEvent,
           editPrincipalEvent, deletePrincipalEvent, deleteLedgerRow, addLedgerRow, relinkOrphans,
-          adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus, renewContract, undoLastRenewal, importRenewals } = actions;
+          adoptAutoMode, setAutoMode, saveMasterFields, doRollover, setContractStatus, renewContract, undoLastRenewal, editTerm, importRenewals } = actions;
 
   // Refresh selectedMaster from store (so popup reflects latest state)
   React.useEffect(() => {
@@ -5198,6 +5325,7 @@ function DebtLedgerPage({ data, setData, toast }) {
         onSetContractStatus={setContractStatus}
         onRenewContract={renewContract}
         onUndoRenewal={undoLastRenewal}
+        onEditTerm={editTerm}
         canEdit={canEdit}
       />
 

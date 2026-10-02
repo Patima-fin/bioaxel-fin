@@ -1462,6 +1462,7 @@ function DebtPage({ data, setData, toast }) {
           onSetContractStatus={actions.setContractStatus}
           onRenewContract={actions.renewContract}
           onUndoRenewal={actions.undoLastRenewal}
+          onEditTerm={actions.editTerm}
           canEdit={canEdit}
         />
       )}
