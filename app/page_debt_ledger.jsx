@@ -3009,7 +3009,7 @@ function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, 
   const sortRows = (rows, m) => rows.slice().sort((a, b) =>
     (Number(a.year) || 0) - (Number(b.year) || 0) ||
     (Number(a.month) || 0) - (Number(b.month) || 0) ||
-    debtRowPeriodStart(a, m).localeCompare(debtRowPeriodStart(b, m)));
+    debtRowPeriodStart(a, m, rows).localeCompare(debtRowPeriodStart(b, m, rows)));
 
   // ── Sheet 1: สรุป (แบบชีท WCI-ดอกเบี้ย) ──
   const SC = 20; // คอลัมน์สุดท้าย (A–U · U = สกุลเงิน)
@@ -3354,9 +3354,12 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
   // สัญญาที่ปิดแล้ว (ปิดด้วยตนเองโดยไม่มีรายการคืนเงินต้น) = 0 — กติกาเดียวกับ debtDisplayBalance
   const liveBalance = master.status === 'Close' ? 0 : Math.max(0, principalIn - principalOut);
 
+  // เดือนเดียวกันที่แตกหลายแถว (ต่อสัญญา/เบิก-คืนกลางเดือน) → เรียงตามช่วงจริงในเดือน
+  //   ช่วงสัญญาเดิมก่อน แล้วค่อยช่วงที่ต่อ (ลำดับแถวที่นำเข้ามาเชื่อไม่ได้)
   const sortedRows = [...ledgerRows].sort((a, b) =>
     (Number(a.year) || 0) - (Number(b.year) || 0) ||
-    (Number(a.month) || 0) - (Number(b.month) || 0)
+    (Number(a.month) || 0) - (Number(b.month) || 0) ||
+    debtRowPeriodStart(a, master, ledgerRows).localeCompare(debtRowPeriodStart(b, master, ledgerRows))
   );
   const visibleRows = filter === 'all'
     ? sortedRows
