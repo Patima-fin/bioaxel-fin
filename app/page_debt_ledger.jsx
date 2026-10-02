@@ -247,13 +247,16 @@ function debtAddMonthsISO(iso, n) {
   const last = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
   return `${ny}-${String(nm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
-// จำนวนเดือนเต็มระหว่าง 2 วัน (21/08/2023 → 21/02/2024 = 6)
+// จำนวนเดือนระหว่าง 2 วัน ปัดเป็นเดือนที่ใกล้ที่สุด (21/08/2023 → 21/02/2024 = 6)
+// · ขาด/เกินไม่กี่วันยังนับเป็นเดือนนั้น — ของจริง 26/09/2023 → 25/06/2024 (ขาด 1 วัน) = 9 ไม่ใช่ 8
 function debtMonthsBetween(a, b) {
   if (!a || !b) return 0;
   const [y1, m1, d1] = a.slice(0, 10).split('-').map(Number);
   const [y2, m2, d2] = b.slice(0, 10).split('-').map(Number);
   let n = (y2 - y1) * 12 + (m2 - m1);
-  if (d2 < d1 && debtAddMonthsISO(a, n) !== b.slice(0, 10)) n -= 1;
+  if (d2 < d1 && debtAddMonthsISO(a, n) !== b.slice(0, 10)) n -= 1;      // เดือนเต็ม (ปัดลง)
+  const extra = (Date.parse(b.slice(0, 10)) - Date.parse(debtAddMonthsISO(a, n) || a.slice(0, 10))) / 86400000;
+  if (extra >= 15) n += 1;                                              // เศษ ≥ 15 วัน → ปัดขึ้น
   return Math.max(0, n);
 }
 function debtRenewals(master) {
@@ -273,7 +276,8 @@ function debtTerms(master) {
   });
   rens.forEach(r => terms.push({
     label: r.label || `ต่อสัญญาครั้งที่ ${r.no || ''}`.trim(), start: r.startDate, end: r.endDate || '',
-    months: Number(r.months) || debtMonthsBetween(r.startDate, r.endDate), increase: Number(r.increase) || 0, renewal: r,
+    // คิดจากวันที่เสมอ (ค่า months ที่เก็บตอนนำเข้าอาจนับแบบเก่า) · ไม่มีวันครบค่อยใช้ค่าที่เก็บ
+    months: (r.startDate && r.endDate) ? debtMonthsBetween(r.startDate, r.endDate) : (Number(r.months) || 0), increase: Number(r.increase) || 0, renewal: r,
   }));
   return terms;
 }
