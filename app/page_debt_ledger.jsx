@@ -441,6 +441,30 @@ function _closedEndDate(master, events, ledgerRows) {
 // จับคู่แถวลูก (ledger/event) กับสัญญาแม่ — ใช้ contractId (id ที่ไม่มีวันเปลี่ยน) เป็นหลัก
 // + contractNo เป็น fallback → แก้ contractNo แล้วแถวไม่หลุด (เหมือนที่ events ทำอยู่แล้ว เลยเป็นเหตุผล
 // ที่ "เบิก/คืนเงินต้น" ยังโชว์ตอนตารางดอกเบี้ยหาย). ★ ต้องเป็น global (page_debt.jsx ยืมไปใช้)
+// ── ลำดับที่ของสัญญา (seqNo) ─────────────────────────────────────────────────
+// = ลำดับที่นักลงทุนเอาเงินมาลง ตามไฟล์ "ตารางคุมดอกเบี้ยรายบุคคล" (เลขชีท) · นับแยกในแต่ละหมวด
+// ว่าง = ยังไม่ได้ตั้ง → ตกท้ายหมวด เรียงเลขสัญญาแบบ numeric ต่อ
+function debtSeqOf(m) {
+  const v = m && m.seqNo;
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+// เรียง: หมวด → ลำดับที่ (ว่างไว้ท้าย) → วันเริ่มสัญญา → เลขสัญญา
+function debtSeqCompare(a, b) {
+  const ca = String(a.debtCategory || ''), cb = String(b.debtCategory || '');
+  if (ca !== cb) return ca.localeCompare(cb, 'th');
+  const sa = debtSeqOf(a), sb = debtSeqOf(b);
+  if (sa != null || sb != null) {
+    if (sa == null) return 1;
+    if (sb == null) return -1;
+    if (sa !== sb) return sa - sb;
+  }
+  const da = String(a.receiveDate || a.startDate || ''), db = String(b.receiveDate || b.startDate || '');
+  if (da !== db) return da.localeCompare(db);
+  return String(a.contractNo || '').localeCompare(String(b.contractNo || ''), 'th', { numeric: true });
+}
+
 function debtRowMatchesContract(row, master) {
   if (!row || !master) return false;
   return (row.contractId != null && row.contractId !== '' && row.contractId === master.id)
@@ -533,6 +557,9 @@ function DebtLedgerRow({ master, summary, onOpen }) {
   const s = summary || { totalInterest: 0, outstandingInterest: 0, paidInterest: 0, unpaidMonths: 0, paidMonths: 0 };
   return (
     <tr style={{ opacity: isActive ? 1 : 0.6, cursor: onOpen ? 'pointer' : 'default' }} onClick={() => onOpen && onOpen(master)}>
+      <td style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums', fontSize: 12, color: 'var(--ink-500)' }}>
+        {debtSeqOf(master) != null ? debtSeqOf(master) : '—'}
+      </td>
       <td>
         <Badge kind="b-blue" dot={false} style={{ background: bg, color, border: `1px solid ${color}33` }}>
           {cat}
@@ -2971,13 +2998,14 @@ function _debtMaturitySheet(masters, seqOf) {
 function exportPerContractSheets({ masters, ledgerByContract, eventsByContract, mode /* 'detail' | 'summary' */ }) {
   if (typeof XLSX === 'undefined') { alert('SheetJS ยังไม่โหลด'); return; }
   eventsByContract = eventsByContract || {};
+  masters = (masters || []).slice().sort(debtSeqCompare);   // เรียงตามลำดับที่ (ไฟล์ตารางคุมดอกเบี้ย)
   const wb = XLSX.utils.book_new();
   const SUMMARY = 'สรุปทั้งหมด';
   const used = new Set();
   const sheetKey = (m) => m.id || m.contractNo;
   const sheetOf = {};
   if (mode === 'detail') masters.forEach(m => { sheetOf[sheetKey(m)] = _debtSheetName(m, used); });
-  const seqOf = (m, i) => { const mm = String(m.contractNo || '').match(/^(\d{1,3})-/); return mm ? Number(mm[1]) : i + 1; };
+  const seqOf = (m, i) => { const q = debtSeqOf(m); if (q != null) return q; const mm = String(m.contractNo || '').match(/^(\d{1,3})-/); return mm ? Number(mm[1]) : i + 1; };
   const sortRows = (rows, m) => rows.slice().sort((a, b) =>
     (Number(a.year) || 0) - (Number(b.year) || 0) ||
     (Number(a.month) || 0) - (Number(b.month) || 0) ||
@@ -4853,7 +4881,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   };
 
   // ── Sort (คลิกหัวคอลัมน์ได้ทุกคอลัมน์) ──────────────────────────────────────
-  const [sort, setSort] = React.useState({ key: 'outstandingInterest', dir: 'desc' });
+  const [sort, setSort] = React.useState({ key: 'seqNo', dir: 'asc' });   // ดีฟอลต์ = ลำดับที่ตามไฟล์ตารางคุมดอกเบี้ย
   const toggleSort = (key) =>
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   const sortVal = (m, key) => {
@@ -4890,6 +4918,7 @@ function DebtLedgerPage({ data, setData, toast }) {
   // เรียงตามคอลัมน์ที่เลือก (ดีฟอลต์ = ดอกเบี้ยค้างชำระมาก→น้อย)
   const sortedRows = React.useMemo(() => {
     const { key, dir } = sort;
+    if (key === 'seqNo') return [...filtered].sort((a, b) => dir === 'asc' ? debtSeqCompare(a, b) : -debtSeqCompare(a, b));
     return [...filtered].sort((a, b) => {
       const av = sortVal(a, key), bv = sortVal(b, key);
       if ((av === '' || av == null) && (bv === '' || bv == null)) return 0;
@@ -5098,9 +5127,10 @@ function DebtLedgerPage({ data, setData, toast }) {
       {masters.length > 0 && (
         <div className="card anim-in" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'min(540px, calc(100vh - 380px))' }}>
-            <table className="tbl tbl-compact" style={{ minWidth: 1200, tableLayout: 'fixed', width: '100%' }}>
+            <table className="tbl tbl-compact" style={{ minWidth: 1260, tableLayout: 'fixed', width: '100%' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--panel)' }}>
                 <tr>
+                  <SortHeader label="ลำดับ" sortKey="seqNo" sort={sort} toggle={toggleSort} align="center" width={58} />
                   <FilterableColHeader label="หมวดหนี้" sortKey="debtCategory" colKey="debtCategory" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={100} align="center" />
                   <FilterableColHeader label="เลขที่สัญญา" sortKey="contractNo" colKey="contractNo" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} width={150} align="center" />
                   <FilterableColHeader label="ผู้กู้ / ผู้รับสินเชื่อ" sortKey="borrowerName" colKey="borrowerName" sort={sort} sortToggle={toggleSort} colFilters={colFilters} setColFilters={setColFilters} openCol={openCol} setOpenCol={setOpenCol} allRows={masters} getValue={colDisplayVal} align="center" />
@@ -5115,7 +5145,7 @@ function DebtLedgerPage({ data, setData, toast }) {
               </thead>
               <tbody>
                 {sortedRows.length === 0 && (
-                  <tr><td colSpan={10} style={{ textAlign: 'center', padding: 36, color: 'var(--ink-400)' }}>ไม่พบข้อมูลที่ตรงกับเงื่อนไข</td></tr>
+                  <tr><td colSpan={11} style={{ textAlign: 'center', padding: 36, color: 'var(--ink-400)' }}>ไม่พบข้อมูลที่ตรงกับเงื่อนไข</td></tr>
                 )}
                 {sortedRows.map(m => (
                   <DebtLedgerRow

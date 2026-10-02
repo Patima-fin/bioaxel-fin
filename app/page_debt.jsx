@@ -500,9 +500,17 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-        <div className="field" style={{ gridColumn: 'span 2' }}>
-          <label>เลขที่สัญญา *</label>
-          <input className="input" value={draft.contractNo} onChange={e => set('contractNo', e.target.value)} placeholder="เช่น WCI-2026-001" />
+        <div className="field" style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 96px', gap: 8 }}>
+          <div>
+            <label>เลขที่สัญญา *</label>
+            <input className="input" value={draft.contractNo} onChange={e => set('contractNo', e.target.value)} placeholder="เช่น WCI-2026-001" />
+          </div>
+          <div title="ลำดับที่ตามไฟล์ตารางคุมดอกเบี้ย (เลขชีท = ลำดับที่นักลงทุนเอาเงินมาลง) · ใช้เรียงในตาราง/Excel">
+            <label>ลำดับที่</label>
+            <input className="input" inputMode="numeric" value={draft.seqNo == null ? '' : draft.seqNo}
+              onChange={e => { const t = e.target.value.replace(/[^0-9]/g, ''); set('seqNo', t === '' ? null : Number(t)); }}
+              placeholder="—" style={{ textAlign: 'center' }} />
+          </div>
         </div>
         <div className="field">
           <label>สกุลเงิน</label>
@@ -816,7 +824,8 @@ function DebtPage({ data, setData, toast }) {
     return rows;
   }, [rawRows, tab, categoryFilter, query, colFilters]);
 
-  const { sorted, sort, toggle } = useSortable(filtered, 'debtCategory', 'asc');
+  const seqSorted = React.useMemo(() => filtered.slice().sort(debtSeqCompare), [filtered]);
+  const { sorted, sort, toggle } = useSortable(seqSorted, 'debtCategory', 'asc');
 
   // ── Footer totals ─────────────────────────────────────────────────────────
   const filtBalance   = filtered.reduce((s,r) => s + debtDisplayBalance(r), 0);
