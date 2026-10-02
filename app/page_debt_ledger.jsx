@@ -160,13 +160,15 @@ function buildInterestByContract(debtLedger) {
   return map;
 }
 
+// ดอกเบี้ยใช้ทศนิยม 2 ตำแหน่งเท่านั้น (ตามไฟล์ตารางคุมดอกเบี้ย) — ปัดรายแถว แล้วค่อยรวม
+function debtR2(n) { const x = Number(n) || 0; return Math.round((x + (x >= 0 ? Number.EPSILON : -Number.EPSILON)) * 100) / 100; }
 // "effective" interest = override if set, else computed
 function effectiveInterest(r) {
   if (r.interestOverride != null && r.interestOverride !== '') {
     const n = Number(r.interestOverride);
-    if (!isNaN(n)) return n;
+    if (!isNaN(n)) return debtR2(n);
   }
-  return Number(r.interestAmount) || 0;
+  return debtR2(r.interestAmount);
 }
 
 // ── ดอกเบี้ย: รองรับ "จ่ายหลายรอบ/บางส่วน" ต่อเดือน ─────────────────────────────
@@ -409,7 +411,7 @@ function buildAutoSchedule(master, events, asOf, cfg) {
     rows.push({
       year: Number(a.slice(0, 4)), month: Number(a.slice(5, 7)),
       periodStart: a, periodEnd: b,
-      principal: p, days, interest: p * rate * (days / basis),
+      principal: p, days, interest: debtR2(p * rate * (days / basis)),
       balanceAfter: principalAt(b),
     });
   }
@@ -753,15 +755,15 @@ function InterestOverridePopup({ open, row, master, onClose, onSave }) {
     if (open && row) {
       const cur = row.interestOverride != null && row.interestOverride !== ''
         ? row.interestOverride
-        : (row.interestAmount || '');
+        : (row.interestAmount != null && row.interestAmount !== '' ? debtR2(row.interestAmount).toFixed(2) : '');
       setVal(String(cur));
       setNote(row.overrideNote || '');
       setDaysVal(String(row.days || ''));
     }
   }, [open, row]);
   if (!open || !row) return null;
-  const computed = Number(row.interestAmount) || 0;
-  const next     = Number(val);
+  const computed = debtR2(row.interestAmount);
+  const next     = debtR2(val);
   const diff     = next - computed;
   const rPrincipal = Number(row.principal) || 0;
   const rRate      = Number(row.interestRate) || 0;
@@ -912,7 +914,7 @@ function AddLedgerRowModal({ open, master, ledgerRows, onClose, onSave }) {
   const dnum = Number(days) || 0;
   const basis = _basisFor(method, year);
   const computed = p * rate * (dnum / basis);
-  const effInterest = touched ? (Number(interest) || 0) : computed;
+  const effInterest = debtR2(touched ? (Number(interest) || 0) : computed);
   const canSave = !!year && !!month && dnum > 0 && effInterest >= 0;
 
   return (
@@ -2129,7 +2131,7 @@ function useDebtContractActions(setData, toast) {
             const { interestOverride, overrideBy, overrideAt, overrideNote, ...rest } = r;
             return { ...rest, ...dPatch };
           }
-          return { ...r, ...dPatch, interestOverride: Number(value), overrideBy: username, overrideAt: at, overrideNote: note || '' };
+          return { ...r, ...dPatch, interestOverride: debtR2(value), overrideBy: username, overrideAt: at, overrideNote: note || '' };
         });
         updated = { ...d, debtLedger: next };
         return updated;
@@ -3774,7 +3776,7 @@ function InterestSchedulePopup({ master, ledgerRows, events, onClose,
                   const remain = interestRemaining(r);
                   const roundCount = interestPayments(r).length;
                   const canOpenPay = canEdit && onSaveInterestPayments && payStatus !== 'unpaid';
-                  const computed = Number(r.interestAmount) || 0;
+                  const computed = debtR2(r.interestAmount);
                   const isSelected = selectedIds.has(r.id);
                   return (
                     <tr key={(r.id || '') + '|' + ri} style={{
