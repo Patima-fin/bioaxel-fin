@@ -1710,6 +1710,12 @@ function drpParseSheet(ws, sheetName, XLSXlib) {
   if (!terms.length || !terms[0].label) { out.skip = 'ไม่มีหมายเหตุช่วงสัญญา'; return out; }
   out.terms = terms;
   out.lastMonth = `${rows[rows.length - 1].y}-${drpPad(rows[rows.length - 1].m)}`;
+  // แถวสุดท้ายนับแค่บางส่วนของเดือน (เช่น มิ.ย. 24 วัน) = ไฟล์คิดถึง "วันครบสัญญา" จริง → ใช้เป็นวันครบช่วงสุดท้าย
+  //   (ถ้าเต็มเดือน = แค่ข้อมูลหยุดตรงนั้น ไม่ใช่วันครบ) · ไม่ใช้ "ระยะเวลากู้" หัวชีท — นั่นคือของสัญญาแรก
+  //   (ของจริง WCI-3: หัวชีท 9 เดือน แต่ต่อครั้งหลัง ๆ ปีละ 12 เดือน → เดิมได้วันครบผิดเป็น 25/03/2027)
+  const lr = rows[rows.length - 1];
+  const lrEnd = Number(lr.start.slice(8, 10)) + (lr.days || 0);
+  if (lr.days > 0 && lrEnd <= drpDaysInMonth(lr.y, lr.m)) out.lastEnd = `${lr.y}-${drpPad(lr.m)}-${drpPad(lrEnd)}`;
   return out;
 }
 function drpParseWorkbook(wb, XLSXlib) {
@@ -1816,6 +1822,7 @@ function DebtRenewalImportModal({ open, masters, onClose, onApply }) {
       const cut = ts.length < (r.p.terms || []).length;           // ตัดช่วงอนาคตออก → ช่วงสุดท้ายจบตามรอบ
       return { masterId: r.masterId, terms: ts, termMonths: r.p.termMonths || 0,
                endStart: cut ? '' : (r.p.end ? r.p.end.start : ''),
+               lastEnd: cut ? '' : (r.p.lastEnd || ''),
                source: r.file + ' · ชีท ' + r.p.sheet };
     });
     const replace = ready.filter(r => { const m = mById.get(r.masterId); return m && debtRenewals(m).length; }).length;
@@ -2457,8 +2464,12 @@ function useDebtContractActions(setData, toast) {
           const ts = it.terms;
           const renewals = ts.slice(1).map((t, i) => {
             const next = ts[i + 2];
-            const months = Number(it.termMonths) || debtMonthsBetween(ts[i].start, t.start) || 0;
-            const endDate = next ? next.start : (it.endStart && it.endStart > t.start ? it.endStart : debtAddMonthsISO(t.start, months));
+            // ช่วงสุดท้ายที่ไฟล์ไม่บอกวันครบ: ยาวเท่าช่วงก่อนหน้า (ต่อปีละ 12 เดือนก็ได้ 12) — "ระยะเวลากู้" หัวชีทเป็นของสัญญาแรก ใช้เป็นทางสุดท้าย
+            const months = debtMonthsBetween(ts[i].start, t.start) || Number(it.termMonths) || 0;
+            const endDate = next ? next.start
+              : (it.endStart && it.endStart > t.start) ? it.endStart
+              : (it.lastEnd && it.lastEnd > t.start) ? it.lastEnd
+              : debtAddMonthsISO(t.start, months);
             return {
               id: WTPData.newId(), no: i + 1, startDate: t.start, endDate,
               months: debtMonthsBetween(t.start, endDate) || months, increase: 0,
