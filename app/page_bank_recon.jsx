@@ -2327,7 +2327,7 @@ function BRMangoDetail({ acct, month, stmLines, book, matches, readOnly, toast,
             <button className="btn btn-primary" onClick={() => fileRef.current && fileRef.current.click()}>
               {busy ? 'กำลังอ่าน…' : (noBook ? '📂 นำเข้างบกระทบยอด Express' : '📂 นำเข้า/อัปเดต Express')}
             </button>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,.xml" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }} />
             {!noBook && onClearPeriod && <button className="btn btn-ghost" title="ล้างงบกระทบยอด + การจับคู่ของงวดนี้ (ไว้เริ่มใหม่เมื่ออัปผิด) — statement ไม่ถูกลบ"
               onClick={() => onClearPeriod(accNo, month)} style={{ color: 'var(--bad)', borderColor: 'var(--bad)' }}>🧹 ล้างข้อมูลงวดนี้</button>}
@@ -2867,7 +2867,7 @@ function BRImportModal({ accounts, defaultAcct, buildMapping, onCommit, onClose,
         <div style={{ fontSize: 28, marginBottom: 2 }}>📂</div>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-700)' }}>ลากไฟล์มาวางที่นี่ หรือกดเพื่อเลือก</div>
         <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 3 }}>เลือกได้หลายไฟล์/หลายบัญชี · CSV / Excel · ระบบเดาบัญชีจากชื่อไฟล์ให้ (เปลี่ยนได้)</div>
-        <input ref={inputRef} type="file" multiple accept=".csv,.xls,.xlsx,.txt" style={{ display: 'none' }}
+        <input ref={inputRef} type="file" multiple accept=".csv,.xls,.xlsx,.txt,.xml" style={{ display: 'none' }}
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
       </div>
       {/* คู่มือไฟล์ที่ใช้นำเข้า (ย้ายมาจากหน้าหลัก — พับเก็บได้) */}
