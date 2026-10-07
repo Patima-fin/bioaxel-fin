@@ -107,6 +107,42 @@ function pvSettledDocs(pv) {
   return Array.from(new Set(out.filter(Boolean)));   // unique (AP_No มักซ้ำกับ settles[0])
 }
 
+// ── ใบเจ้าหนี้ "จ่ายแล้ว" ไหม — กติกาเดียวของหน้า DATA เจ้าหนี้คงค้าง (แบนเนอร์ล้างออก + ตอนนำเข้า) ──
+//   คืน function(row) → 'bill' | 'self' | ''
+//   'bill' = เลขที่ใบเจ้าหนี้เป็นบิลที่ใบจ่ายไปตัด (AP_No / settles[]) — กติกาเดิม
+//   'self' = เลขที่ใบเจ้าหนี้ "ตรงกับเลขที่ใบจ่ายเอง" (PL_PV_No) — ใบ AV/AE/PC จาก "รายงานอนุมัติจ่าย"
+//            จ่ายด้วยเลขของตัวเอง ไม่มีบิลย่อยให้เทียบ ⇒ กติกา 'bill' มองไม่เห็นเลย
+//            (ของจริง 2026-10-07: 17 ใบที่จ่ายแล้วค้างอยู่ในเจ้าหนี้คงค้าง แบนเนอร์ไม่ขึ้นสักใบ)
+//   ⚠️ 'self' ต้องเช็คยอดด้วย: ยอดจ่ายรวม ≥ 95% ของ "ยอดในบิล" (Amount) — ส่วนต่างไม่เกิน 5% คือภาษีหัก ณ ที่จ่าย
+//      ที่ EXPRESS ยังโชว์เป็นยอดคงค้าง (AE 1,337,500 จ่าย 1,300,000 เหลือ 37,500 = WHT 3% · เตยเคาะให้นับว่าจ่ายแล้ว)
+//      จ่ายบางส่วนจริง (< 95%) = ยังค้าง ห้ามตัด · เลขเดียวกัน+ยอดเดียวกันนับครั้งเดียว (กติกาเดียวกับตัวอ่านใบอนุมัติจ่าย)
+const PAYABLE_SELF_PAID_MIN = 0.95;
+function buildPayablePaidCheck(pvVouchers) {
+  const num = (v) => { const n = parseFloat(String(v == null ? '' : v).replace(/[, ]/g, '')); return isNaN(n) ? 0 : n; };
+  const bills = new Set(), selfPaid = new Map(), seen = new Set();
+  (pvVouchers || []).forEach(pv => {
+    pvSettledDocs(pv).forEach(d => bills.add(d));
+    const no = String((pv && pv.PL_PV_No) || '').trim();
+    if (!no) return;
+    const amt = num(pv.Net_Amount);
+    const k = no + '|' + amt.toFixed(2);
+    if (seen.has(k)) return;
+    seen.add(k);
+    selfPaid.set(no, (selfPaid.get(no) || 0) + amt);
+  });
+  return function (row) {
+    const v = String((row && row.vchno) || '').trim();
+    if (!v) return '';
+    if (bills.has(v)) return 'bill';
+    if (!selfPaid.has(v)) return '';
+    const paid = selfPaid.get(v);
+    const full = num(row.Amount) || num(row.netpayment);   // ยอดในบิล · ไม่มีค่อยใช้ยอดคงค้าง
+    if (!full || !paid) return '';                         // เทียบยอดไม่ได้ = ไม่ตัดให้เอง
+    if ((paid < 0) !== (full < 0)) return '';
+    return Math.abs(paid) >= Math.abs(full) * PAYABLE_SELF_PAID_MIN - 0.01 ? 'self' : '';
+  };
+}
+
 function fmtDate(iso) {
   const d = parseDateFlexible(iso);
   if (!d) return '—';

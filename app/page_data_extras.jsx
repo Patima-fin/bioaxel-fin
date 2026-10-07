@@ -3523,17 +3523,13 @@ function DataPayablePage({ data, setData, toast }) {
   // Normalise due-date field variants → 'due2' before any filtering / display
   const rows = dxMemo(() => (data.payables || []).map(_normPayableRow), [data.payables]);
 
-  // ── รายการที่ "จ่ายแล้ว" = vchno ตรงกับ AP_No ในหน้า PV
-  //    เกณฑ์เดียวกับ import paidCut (handleImport) และ cashflow isApPaid — จ่ายผ่าน PV แล้ว
+  // ── รายการที่ "จ่ายแล้ว" — กติกาเดียวกับตอนนำเข้า (handleImport) ผ่าน buildPayablePaidCheck:
+  //    (1) vchno เป็นบิลที่ใบจ่ายไปตัด (AP_No / settles[]) หรือ
+  //    (2) vchno ตรงกับเลขที่ใบจ่ายเอง (AV/AE/PC จากรายงานอนุมัติจ่าย) + ยอดจ่ายครอบยอดในบิล
   //    จึงไม่ใช่เจ้าหนี้คงค้าง ไม่ควรอยู่ในชีตนี้ (ผู้ใช้กดล้างได้จาก banner ด้านบน)
-  const paidVchnoSet = dxMemo(() => {
-    const s = new Set();
-    (data.pvVouchers || []).forEach(pv => pvSettledDocs(pv).forEach(d => s.add(d)));   // AP_No + บิลย่อย settles[]
-    return s;
-  }, [data.pvVouchers]);
-  const paidRows = dxMemo(() =>
-    rows.filter(r => { const v = String(r.vchno || '').trim(); return v && paidVchnoSet.has(v); })
-  , [rows, paidVchnoSet]);
+  const payablePaidKind = dxMemo(() => buildPayablePaidCheck(data.pvVouchers), [data.pvVouchers]);
+  const paidRows = dxMemo(() => rows.filter(r => payablePaidKind(r)), [rows, payablePaidKind]);
+  const paidSelfCount = dxMemo(() => paidRows.filter(r => payablePaidKind(r) === 'self').length, [paidRows, payablePaidKind]);
 
   // ── ตั้งหนี้ลอยที่ยังค้างอยู่ (ของชั่วคราว — ต้องลบเมื่อใบจริงเข้าระบบ) ────────
   //    dup = มีใบจริง (ไม่ใช่ FLOAT) ชื่อเจ้าหนี้ + ยอดสุทธิเดียวกันอยู่แล้ว ⇒ น่าจะซ้ำ
@@ -3557,7 +3553,8 @@ function DataPayablePage({ data, setData, toast }) {
   // ล้างรายการที่จ่ายแล้วออกจากชีต — ลบจริงผ่าน sync (replaceAll + baseIds ลบเฉพาะ id ที่ตัดออก)
   const cleanPaidNow = () => {
     if (!paidRows.length) return;
-    if (!confirm(`พบ ${paidRows.length} รายการที่จ่ายแล้ว (vchno มีใน PV)\nยืนยันลบออกจากรายการคงค้าง (ชีต payables)?`)) return;
+    const selfNote = paidSelfCount ? `\n(ในนี้ ${paidSelfCount} รายการ = เลขที่ตรงกับใบจ่าย AV/AE/PC และยอดจ่ายครอบยอดในบิล)` : '';
+    if (!confirm(`พบ ${paidRows.length} รายการที่จ่ายแล้ว (มีใบจ่ายใน PV)${selfNote}\nยืนยันลบออกจากรายการคงค้าง (ชีต payables)?`)) return;
     const ids = new Set(paidRows.map(r => r.id).filter(Boolean));
     if (!ids.size) { toast('รายการที่จ่ายแล้วไม่มี id — ลบไม่ได้'); return; }
     setData(d => ({ ...d, payables: (d.payables || []).filter(r => !ids.has(r.id)) }));
@@ -4338,8 +4335,9 @@ function DataPayablePage({ data, setData, toast }) {
       detail = parsed.filter(o => { const keep = _isPayableDetailRow(o); if (!keep) summarySkipped++; return keep; });
     }
 
-    // (2) เซ็ตของที่จ่ายแล้ว (ดึงไป PV) — vchno ที่ตรงกับ AP_No หรือบิลย่อย settles[] ใน pvVouchers
-    const paidSet = new Set(); (data.pvVouchers || []).forEach(pv => pvSettledDocs(pv).forEach(d => paidSet.add(d)));
+    // (2) ตัวเช็ค "จ่ายแล้ว" (ดึงไป PV) — บิลที่ใบจ่ายไปตัด (AP_No / settles[]) หรือเลขตรงกับใบจ่ายเอง + ยอดครอบ
+    //     ต้องใช้ตัวเดียวกับแบนเนอร์ (buildPayablePaidCheck) ไม่งั้นใบที่ล้างออกไปจะถูกนำเข้ากลับมาใหม่
+    const isPaid = buildPayablePaidCheck(data.pvVouchers);
 
     // index payable เดิมด้วย vchno
     const existing = data.payables || [];
@@ -4352,7 +4350,7 @@ function DataPayablePage({ data, setData, toast }) {
 
     detail.forEach(obj => {
       const v = String(obj.vchno || '').trim();
-      if (paidSet.has(v)) { paidImportSkipped++; return; }   // จ่ายแล้ว → ไม่นำเข้า
+      if (isPaid(obj)) { paidImportSkipped++; return; }   // จ่ายแล้ว → ไม่นำเข้า
       importedVchno.add(v);
       const ex = existingByVchno.get(v);
       if (!ex) { added.push({ row: obj, key: v, primary: v }); return; }
@@ -4376,7 +4374,7 @@ function DataPayablePage({ data, setData, toast }) {
       const v = String(r.vchno || '').trim();
       if (!v || importedVchno.has(v)) return;
       if (isFloatingAp(r)) return;   // ตั้งหนี้ลอย = เพิ่มเอง ไม่เคยอยู่ในไฟล์ EXPRESS → ไม่ใช่ "หาย" (เคลียร์ที่แบนเนอร์ 🏷 แทน)
-      if (paidSet.has(v)) paidCut.push({ row: r, key: v, primary: v });
+      if (isPaid(r)) paidCut.push({ row: r, key: v, primary: v });
       else missing.push({ row: r, key: v, primary: v });
     });
 
@@ -4492,8 +4490,13 @@ function DataPayablePage({ data, setData, toast }) {
         }}>
           <span style={{ fontSize: 20, lineHeight: 1 }}>⚠️</span>
           <div style={{ flex: 1, minWidth: 220, fontSize: 13, lineHeight: 1.55, color: 'var(--ink-800)' }}>
-            <strong>พบ {paidRows.length} รายการที่จ่ายแล้ว</strong> (vchno ตรงกับ AP_No ในหน้า PV) ปนอยู่ในรายการคงค้าง —
+            <strong>พบ {paidRows.length} รายการที่จ่ายแล้ว</strong> (มีใบจ่ายในหน้า PV) ปนอยู่ในรายการคงค้าง —
             จ่ายผ่าน PV ไปแล้วจึงไม่ใช่เจ้าหนี้คงค้าง ควรล้างออกจากชีต
+            {paidSelfCount > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--ink-600)' }}>
+                ในนี้ {paidSelfCount} รายการ = เลขที่ตรงกับใบจ่ายเอง (AV/AE/PC จากรายงานอนุมัติจ่าย) และยอดจ่ายครอบยอดในบิล
+              </div>
+            )}
           </div>
           <button className="btn btn-primary" onClick={cleanPaidNow}
             style={{ background: 'var(--bad)', borderColor: 'var(--bad)', flex: '0 0 auto' }}>
