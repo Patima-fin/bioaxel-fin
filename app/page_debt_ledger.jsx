@@ -67,8 +67,18 @@ function FacilityChip({ type, size = 'sm' }) {
 function NumberInput({ value, onChange, digits = 0, blankable = false, style, ...rest }) {
   const [focused, setFocused] = React.useState(false);
   const [raw, setRaw] = React.useState('');
+  const elRef = React.useRef(null);
+  const typed = React.useRef(false);   // พิมพ์ในช่องแล้วหรือยัง (นับตั้งแต่โฟกัสรอบนี้)
   const n = (value == null || value === '') ? null : Number(value);
   const isBlank = n == null || isNaN(n) || (!blankable && n === 0);
+  // ค่าจากข้างนอกเปลี่ยนตอนช่องถูกโฟกัสอยู่และยังไม่ได้พิมพ์ → ตามค่าใหม่ (+ เลือกทั้งช่องให้พิมพ์ทับได้เลย)
+  // หน้าต่างแก้ไขรายการคืน/เบิกเงินต้นใช้ autoFocus = ช่องถูกโฟกัสก่อนยอดเดิมจะถูกใส่เข้ามา
+  // เดิมช่องเลยโชว์ว่างทั้งที่มียอดอยู่ — คลิกออกจากช่องแล้วยอดกลายเป็น 0 กดบันทึกไม่ได้
+  React.useEffect(() => {
+    if (!focused || typed.current) return;
+    setRaw(isBlank ? '' : String(n));
+    setTimeout(() => { const el = elRef.current; if (el && document.activeElement === el) el.select(); }, 0);
+  }, [value]);
   const display = focused
     ? raw
     : (isBlank ? '' : fmtNum(n, digits));
@@ -76,9 +86,11 @@ function NumberInput({ value, onChange, digits = 0, blankable = false, style, ..
     <input
       type="text" inputMode="decimal"
       {...rest}
+      ref={elRef}
       value={display}
-      onChange={e => setRaw(e.target.value)}
+      onChange={e => { typed.current = true; setRaw(e.target.value); }}
       onFocus={e => {
+        typed.current = false;
         setFocused(true);
         setRaw(isBlank ? '' : String(n));
         setTimeout(() => e.target.select(), 0);
