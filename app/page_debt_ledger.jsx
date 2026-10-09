@@ -62,13 +62,16 @@ function FacilityChip({ type, size = 'sm' }) {
 
 // ── Comma-formatted number input ────────────────────────────────────────────
 // value = raw number; display = "8,000,000.00" when blurred, "8000000" when focused
-function NumberInput({ value, onChange, digits = 0, style, ...rest }) {
+// blankable = แยก "ช่องว่าง" ออกจาก 0 — โชว์ 0 เป็น "0.00" และลบจนว่างแล้วออกจากช่อง → onChange('') ไม่ใช่ 0
+// (ช่องที่ "ว่าง" มีความหมายต่างจาก 0 เช่น ยอดคงเหลือในฟอร์มแก้ไขภาระหนี้: ว่าง = ใช้วงเงิน · 0 = คืนครบแล้ว)
+function NumberInput({ value, onChange, digits = 0, blankable = false, style, ...rest }) {
   const [focused, setFocused] = React.useState(false);
   const [raw, setRaw] = React.useState('');
   const n = (value == null || value === '') ? null : Number(value);
+  const isBlank = n == null || isNaN(n) || (!blankable && n === 0);
   const display = focused
     ? raw
-    : (n == null || isNaN(n) || n === 0 ? '' : fmtNum(n, digits));
+    : (isBlank ? '' : fmtNum(n, digits));
   return (
     <input
       type="text" inputMode="decimal"
@@ -77,12 +80,12 @@ function NumberInput({ value, onChange, digits = 0, style, ...rest }) {
       onChange={e => setRaw(e.target.value)}
       onFocus={e => {
         setFocused(true);
-        setRaw(n == null || isNaN(n) || n === 0 ? '' : String(n));
+        setRaw(isBlank ? '' : String(n));
         setTimeout(() => e.target.select(), 0);
       }}
       onBlur={() => {
         const txt = String(raw).replace(/,/g, '').trim();
-        if (txt === '') { onChange(0); setFocused(false); return; }
+        if (txt === '') { onChange(blankable ? '' : 0); setFocused(false); return; }
         const parsed = parseFloat(txt);
         onChange(isNaN(parsed) ? 0 : parsed);
         setFocused(false);

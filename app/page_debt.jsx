@@ -433,13 +433,16 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
     if (!draft.borrowerName.trim()) { setErr('กรุณากรอกชื่อผู้กู้/เจ้าหนี้'); return; }
     if (!DEBT_GROUP_META[draft.debtGroup]) { setErr('กรุณาเลือก "กลุ่ม" — สินเชื่อโอนสิทธิ์ หรือ นักลงทุน'); return; }
     if (!Number(draft.principalAmount)) { setErr('กรุณากรอกวงเงิน'); return; }
+    // ยอดคงเหลือ "ว่าง = วงเงิน" · แต่ตอนแก้ไข 0 คือ 0 จริง (คืนครบ/ปิดสัญญาแล้ว) — เดิมมอง 0 เป็นช่องว่าง
+    // → บันทึกฟอร์มของสัญญาที่คงเหลือ 0 ทีไร ยอดคงเหลือเด้งกลับเป็นเท่าวงเงิน
+    const balBlank = draft.balance == null || draft.balance === '' || (isNew && !Number(draft.balance));
     onSave({
       ...draft,
       borrowerName:    debtCleanName(draft.borrowerName),   // กันชื่อเดียวกันแตกเป็น 2 เจ้าหนี้
       contractNo:      draft.contractNo.trim(),
       principalAmount: Number(draft.principalAmount) || 0,
       interestRate:    Number(draft.interestRate) || 0,
-      balance:         Number(draft.balance || draft.principalAmount) || 0,
+      balance:         balBlank ? (Number(draft.principalAmount) || 0) : (Number(draft.balance) || 0),
     });
   };
   const m = metaFor(draft.debtCategory);
@@ -538,7 +541,7 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
         </div>
         <div className="field">
           <label>ธนาคาร / เจ้าหนี้</label>
-          <input className="input" value={draft.bankName} onChange={e => set('bankName', e.target.value)} placeholder="—" />
+          <input className="input" value={draft.bankName || ''} onChange={e => set('bankName', e.target.value)} placeholder="—" />
         </div>
         <div className="field">
           <label>ประเภทวงเงิน (Facility)</label>
@@ -554,17 +557,18 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
           </select>
         </div>
 
+        {/* ช่องที่ข้อมูลเป็น null ต้องส่ง '' ไม่งั้น React ปล่อยเป็น uncontrolled → โชว์ค่าของสัญญาที่เปิดก่อนหน้าค้างอยู่ */}
         <div className="field">
           <label>วันรับเงิน</label>
-          <input className="input" type="date" value={draft.receiveDate} onChange={e => set('receiveDate', e.target.value)} />
+          <input className="input" type="date" value={draft.receiveDate || ''} onChange={e => set('receiveDate', e.target.value)} />
         </div>
         <div className="field">
           <label>วันเริ่มสัญญา</label>
-          <input className="input" type="date" value={draft.startDate} onChange={e => set('startDate', e.target.value)} />
+          <input className="input" type="date" value={draft.startDate || ''} onChange={e => set('startDate', e.target.value)} />
         </div>
         <div className="field">
           <label>วันครบกำหนด</label>
-          <input className="input" type="date" value={draft.maturityDate} onChange={e => set('maturityDate', e.target.value)} />
+          <input className="input" type="date" value={draft.maturityDate || ''} onChange={e => set('maturityDate', e.target.value)} />
         </div>
 
         <div className="field">
@@ -579,22 +583,23 @@ function DebtFormModal({ open, initial, onClose, onSave, isNew, existing }) {
         </div>
         <div className="field">
           <label>ยอดคงเหลือ (ว่าง = วงเงิน)</label>
-          <NumberInput className="input" value={draft.balance} digits={2}
+          {/* แก้ไข: โชว์ 0 เป็น "0.00" (คืนครบแล้ว) แยกจากช่องว่าง · เพิ่มใหม่: 0/ว่าง = วงเงิน เหมือนเดิม */}
+          <NumberInput className="input" value={draft.balance} digits={2} blankable={!isNew}
             onChange={n => set('balance', n)} />
         </div>
 
         <div className="field">
           <label>รหัสโครงการ</label>
-          <input className="input" value={draft.projectCode} onChange={e => set('projectCode', e.target.value)} placeholder="เช่น PP073" />
+          <input className="input" value={draft.projectCode || ''} onChange={e => set('projectCode', e.target.value)} placeholder="เช่น PP073" />
         </div>
         <div className="field" style={{ gridColumn: 'span 2' }}>
           <label>ชื่อโครงการ</label>
-          <input className="input" value={draft.projectName} onChange={e => set('projectName', e.target.value)} />
+          <input className="input" value={draft.projectName || ''} onChange={e => set('projectName', e.target.value)} />
         </div>
 
         <div className="field" style={{ gridColumn: '1 / -1' }}>
           <label>หมายเหตุ</label>
-          <input className="input" value={draft.note} onChange={e => set('note', e.target.value)} />
+          <input className="input" value={draft.note || ''} onChange={e => set('note', e.target.value)} />
         </div>
       </div>
     </Modal>
