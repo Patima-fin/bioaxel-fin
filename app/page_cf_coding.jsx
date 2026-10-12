@@ -859,6 +859,16 @@
     return best;
   }
 
+  /* เดือนตั้งต้นตอนเปิดหน้า = "เดือนที่แล้ว" ตามปฏิทิน (ต.ค. → ก.ย. · ม.ค. → ธ.ค. ปีก่อน) — งบกระทบยอดทำหลังปิดเดือน
+     (ผู้ใช้ขอ 2026-10-12 · โค้ดเดียวกับ WTP) · เดือนที่แล้วยังไม่มีข้อมูล → เดือนล่าสุดที่มีก่อนหน้านั้น
+     → มีแต่เดือนที่ใหม่กว่า = เดือนที่ใกล้ที่สุด · yms = รายการ 'YYYY-MM' ที่มีข้อมูล (ลำดับใดก็ได้) · today ใส่ได้เพื่อทดสอบ */
+  function cfcDefaultYm(yms, today) {
+    const d = today || new Date(), p = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    const prev = p.getFullYear() + '-' + String(p.getMonth() + 1).padStart(2, '0');
+    const list = (yms || []).filter(Boolean).slice().sort().reverse();
+    return list.find(y => y <= prev) || list[list.length - 1] || '';
+  }
+
   /* ยุบหลายเดือนของบัญชีเดียวกันเป็นแถวเดียว (ตอนเลือก "ทุกเดือน")
      ⚠️ ก่อนหน้านี้ index ด้วยเลขบัญชีอย่างเดียว → เดือนหลังทับเดือนก่อน เห็นแค่เดือนเดียว */
   function cfcAggByAcct(list) {
@@ -968,7 +978,10 @@
   /* ช่องกรอกจำนวนเงิน — แสดงคั่นหลักพันเหมือนตัวเลขอื่นในตาราง
      ⚠️ ใช้ <input type="number"> ไม่ได้ เบราว์เซอร์ไม่ยอมให้ค่ามีคอมมา (ตัวเลขในช่องจะ
         โล้น ๆ ไม่เหมือนคอลัมน์ข้าง ๆ ที่มีคอมมา — ผู้ใช้ทักว่าดูไม่เป็นสัดส่วน)
-        จึงเป็น type=text + inputMode=decimal: โฟกัส = แก้เป็นเลขดิบ, ออกจากช่อง = จัดรูปให้ */
+        จึงเป็น type=text + inputMode=decimal: โฟกัส = แก้เป็นเลขดิบ, ออกจากช่อง = จัดรูปให้
+     ⚠️ บันทึกเฉพาะตอน "ตัวเลขเปลี่ยนจริง" — blur เกิดทุกครั้งที่ออกจากช่อง รวมถึงตอนสลับไปหน้าต่างอื่น
+        (เปิด statement เทียบยอด) ทั้งที่เคอร์เซอร์ยังค้างในช่อง · เดิมบันทึกทุก blur = toast "บันทึกยอด…แล้ว"
+        เด้งซ้ำไม่หยุด + เขียนขึ้นส่วนกลางซ้ำทุกครั้ง จนกว่าจะเปลี่ยนหน้า (ผู้ใช้แจ้ง 2026-10-12 · แก้คู่กับ WTP) */
   function CfcMoneyInput({ value, placeholder, title, width, bad, onSave }) {
     const [txt, setTxt] = useState(value == null || value === '' ? '' : cfcMoney(value));
     const [hot, setHot] = useState(false);
@@ -981,8 +994,10 @@
         onBlur={e => {
           setHot(false);
           const raw = String(e.target.value).trim();
-          if (raw === '') { setTxt(''); onSave(null); return; }
-          const n = cfcNum(raw); setTxt(cfcMoney(n)); onSave(n);
+          const old = value == null || value === '' ? null : cfcNum(value);
+          const n = raw === '' ? null : cfcNum(raw);
+          setTxt(n == null ? '' : cfcMoney(n));
+          if (n !== old) onSave(n);
         }}
         style={{ width: width || 120, fontSize: 12, padding: '3px 7px', borderRadius: 8, textAlign: 'right',
           fontVariantNumeric: 'tabular-nums', color: C.ink,
@@ -1806,7 +1821,8 @@
     const allAccts = useMemo(() => {
       const m = {}; buckets.forEach(b => { m[b.acctNo] = b.acctLabel || b.acctNo; }); return Object.entries(m);
     }, [buckets]);
-    useEffect(() => { if (!ym && allYms.length) setYm(allYms[0]); }, [allYms, ym]);
+    // เปิดหน้ามา = เดือนที่แล้วตามปฏิทิน (เดิม = เดือนล่าสุดที่มีข้อมูล ซึ่งมักเป็นเดือนปัจจุบันที่ยังไม่ปิด)
+    useEffect(() => { if (!ym && allYms.length) setYm(cfcDefaultYm(allYms)); }, [allYms, ym]);
 
     /* ── join กับ pvVouchers + เสนอหมวด ── */
     const pvIdx = useMemo(() => cfcBuildPvIndex(data.pvVouchers || []), [data.pvVouchers]);
@@ -3177,5 +3193,6 @@
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED, cfcAutoCatChips, cfcShortCat,
+    cfcDefaultYm,
   });
 })();
