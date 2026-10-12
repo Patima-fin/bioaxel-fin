@@ -2707,6 +2707,7 @@ function _normPayableRow(r) {
 // Parse ไฟล์ "รายงานตรวจสอบเงินทดรองจ่าย/เงินมัดจำคงค้าง" XML จาก EXPRESS (SpreadsheetML)
 // โครงสร้างต่างจากเจ้าหนี้คงค้าง: แถวรายการ = col1 vchno (AE/AV/PC…) + col2 วันที่,
 //   แถวถัดมา = รายละเอียด ("1  มัดจำค่า… PO0000987") แล้วอาจตามด้วยบล็อก "หมายเหตุ:" หลายบรรทัด.
+//   remark = "รายละเอียดบรรทัดแรก · ข้อความในบล็อกหมายเหตุ" (ไม่มีบล็อก = รายละเอียดอย่างเดียว).
 //   Col index (1-based):
 //   1=เลขที่(vchno) 2=วันที่ 3=รหัสผู้จำหน่าย 4=ชื่อผู้จำหน่าย 5=เลขที่บิล
 //   9=รวมทั้งสิ้น(incl VAT) 10=ครบกำหนด 15=จ่ายด้วยเช็ค → ยอดค้าง = รวมทั้งสิ้น − จ่ายด้วยเช็ค
@@ -2723,35 +2724,45 @@ function parseDepositXML(xmlText) {
   var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
   var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
-  var results = [], pending = null, inNote = false;
+  var results = [], pending = null, inNote = false, desc = '', notes = [];
+  // EXPRESS เขียนการขึ้นบรรทัดในช่องข้อความเป็นตัวอักษร "\n" ตรง ๆ → แทนด้วยช่องว่าง
+  var clean = function(s) { return String(s || '').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim(); };
   rowEls.forEach(function(rowEl) {
     var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
     if (!cellEls.length) return;
-    var cm = {}, li = 0;
+    var cm = {}, li = 0, isTotal = false;
     cellEls.forEach(function(cell) {
       var is = ssAttr(cell, 'Index');
       li = is ? parseInt(is) : li + 1;
       var d = cell.getElementsByTagNameNS('*', 'Data')[0];
       cm[li] = { v: d ? d.textContent.trim() : '', s: ssAttr(cell, 'StyleID') };
+      if (/^รวม\s+[\d,]+\s+ใบ/.test(cm[li].v)) isTotal = true;
     });
+    // แถว "รวม N ใบ" = จบข้อมูล — ข้อความท้ายรายงาน ("หมายเหตุ: เอกสารที่มีเครื่องหมาย '*' …") ไม่ใช่หมายเหตุของใบสุดท้าย
+    if (isTotal) { pending = null; return; }
     var c1 = cm[1];
     if (!c1) return;
     // แถวรายการจริง = col1 เป็น vchno (ตัวอักษร 2-3 ตัว + เลข · '*' นำหน้า = ยกเลิก) + col2 เป็นวันที่
     //   (ต้องมีวันที่ด้วย — บรรทัดหมายเหตุอย่าง "BA500 ทต.บางเตย" หน้าตาเหมือนเลขที่เอกสาร)
     var isDoc = /^\*?[A-Z]{2,3}\d/.test(c1.v) && /^\d{4}-\d{2}-\d{2}/.test((cm[2] && cm[2].v) || '');
     if (!isDoc) {
-      // แถวใต้รายการ: บรรทัดรายละเอียด ("1  มัดจำค่า…") → เอาบรรทัดแรกเป็นหมายเหตุของรายการล่าสุด
-      //   พอเจอ "หมายเหตุ:" = เข้าบล็อกข้อความอิสระ (ชื่อโครงการ/สถานที่) → ไม่เอามาปนจนกว่าจะขึ้นรายการใหม่
+      // แถวใต้รายการ → หมายเหตุของรายการล่าสุด = "รายละเอียดบรรทัดแรก · บล็อกหมายเหตุ"
+      //   รายละเอียด = "1  มัดจำค่า…" (เอาบรรทัดแรก) · หลัง "หมายเหตุ:" = ข้อความอิสระหลายบรรทัด
+      //   (ชื่อโครงการ/สถานที่ — บรรทัดที่ตัดเพราะยาว ต่อกันด้วยช่องว่าง) จนกว่าจะขึ้นรายการใหม่
       if (!pending) return;
-      if (/^หมายเหตุ\s*:/.test(c1.v)) { inNote = true; return; }
-      if (inNote || pending.remark || !/^\d+\s+\S/.test(c1.v)) return;
-      var desc = String(c1.v || '').replace(/^\s*\d+\s+/, '').trim();     // ตัดเลขลำดับ "  1  "
-      pending.remark = desc;
-      var po = desc.match(/PO[\s-]?\d+/i);                                // ดึงเลข PO ออกมาเป็น refno
-      if (po) pending.refno = po[0].replace(/\s/g, '');
+      if (/^(หมายเหตุ\s*:\s*เอกสารที่มี|[>\s]*จบรายงาน)/.test(c1.v)) { pending = null; return; }   // ท้ายรายงาน (กันไว้อีกชั้น)
+      var head = c1.v.match(/^หมายเหตุ\s*:\s*([\s\S]*)$/);
+      if (head) { inNote = true; if (clean(head[1])) notes.push(clean(head[1])); }
+      else if (inNote) { if (clean(c1.v)) notes.push(clean(c1.v)); }
+      else if (!desc && /^\d+\s+\S/.test(c1.v)) {
+        desc = clean(c1.v.replace(/^\s*\d+\s+/, ''));                     // ตัดเลขลำดับ "  1  "
+        var po = desc.match(/PO[\s-]?\d+/i);                              // ดึงเลข PO ออกมาเป็น refno
+        if (po) pending.refno = po[0].replace(/\s/g, '');
+      } else return;
+      pending.remark = [desc, notes.join(' ')].filter(Boolean).join(' · ');
       return;
     }
-    pending = null; inNote = false;
+    pending = null; inNote = false; desc = ''; notes = [];
     var vchno = c1.v;
     if (vchno.charAt(0) === '*') return;                                 // เอกสารยกเลิก → ข้าม
     var g = function(i) { return (cm[i] && cm[i].v) || ''; };
