@@ -1821,8 +1821,17 @@
     const allAccts = useMemo(() => {
       const m = {}; buckets.forEach(b => { m[b.acctNo] = b.acctLabel || b.acctNo; }); return Object.entries(m);
     }, [buckets]);
-    // เปิดหน้ามา = เดือนที่แล้วตามปฏิทิน (เดิม = เดือนล่าสุดที่มีข้อมูล ซึ่งมักเป็นเดือนปัจจุบันที่ยังไม่ปิด)
-    useEffect(() => { if (!ym && allYms.length) setYm(cfcDefaultYm(allYms)); }, [allYms, ym]);
+    /* เปิดหน้ามา = เดือนที่แล้วตามปฏิทิน (cfcDefaultYm · เดิม = เดือนล่าสุดที่มีข้อมูล ซึ่งมักเป็นเดือนปัจจุบันที่ยังไม่ปิด)
+       — ตั้งให้ครั้งเดียว (แบบเดียวกับ WTP) · เดิมตั้งให้ทุกครั้งที่ ym ว่าง ⇒ เลือก "ทุกเดือน" แล้วเด้งกลับเอง ทั้งช่องเดือน
+       ด้านบนและในหน้าต่างส่งขึ้น Cash Flow (ผู้ใช้สั่งแก้ 2026-10-12) · ข้อมูลโหลดจากส่วนกลางตามมาทีหลัง
+       + ผู้ใช้ยังไม่ได้เปลี่ยนเดือนเอง → ขยับตาม */
+    const ymInit = useRef(false), ymAuto = useRef(null);
+    useEffect(() => {
+      if (!allYms.length) return;
+      const want = cfcDefaultYm(allYms);
+      if (!ymInit.current) { ymInit.current = true; if (!ym) { ymAuto.current = want; setYm(want); } return; }
+      if (ymAuto.current && ym === ymAuto.current && want !== ym) { ymAuto.current = want; setYm(want); }
+    }, [allYms]);   // eslint-disable-line
 
     /* ── join กับ pvVouchers + เสนอหมวด ── */
     const pvIdx = useMemo(() => cfcBuildPvIndex(data.pvVouchers || []), [data.pvVouchers]);
@@ -3155,6 +3164,10 @@
               </div>
               {acct && <div style={{ fontSize: 12, color: C.warn, background: C.warnBg, borderRadius: 8, padding: '8px 10px' }}>
                 ⚠️ ตัวกรอง “บัญชี” เปิดอยู่ — จะส่งเฉพาะบัญชีนี้ ถ้าต้องการทั้งเดือนให้ปิดตัวกรองบัญชีก่อน
+              </div>}
+              {/* "ทุกเดือน" เพิ่งเลือกได้จริง (2026-10-12 — เดิมเด้งกลับเป็นเดือนเดียว) → กติกา "แตะเฉพาะเดือนที่ส่ง" ไม่คุ้มครองแล้ว ต้องเตือน */}
+              {!ym && <div style={{ fontSize: 12, color: C.neg, background: C.negBg, borderRadius: 8, padding: '8px 10px' }}>
+                ⚠️ เลือก “ทุกเดือน” — ตัวเลขบนหน้า Cash Flow จะถูกคิดใหม่ทับของเดิมทุกเดือนที่มีรายการในหน้านี้ รวมเดือนเก่าที่เคยปรับด้วยมือไว้ · ถ้าจะแก้แค่เดือนเดียว ให้เลือกเดือนนั้น
               </div>}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button style={btn()} onClick={() => setPushAsk(false)}>ยกเลิก</button>
