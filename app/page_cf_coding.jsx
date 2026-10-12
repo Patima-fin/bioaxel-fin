@@ -751,14 +751,20 @@
      จากหน้า "บันทึกยอดคงเหลือรายวัน") เอาแถวล่าสุดที่ไม่เกินสิ้นเดือนนั้น
      ยังขาดอีก = คืนยอดเท่าที่รู้ + ติดธง short เพื่อไปเตือนที่ชื่อบรรทัด (ไม่เว้นว่าง —
      ผู้ใช้ต้องการเห็นตัวเลขไว้เทียบ แต่ต้องรู้ด้วยว่ายังไม่ครบ) */
-  function cfcStmClosingByYm(hist, months, registry, snaps, manualClosing) {
+  function cfcStmClosingByYm(hist, months, registry, snaps, manualClosing, manualOpening) {
     /* เส้นเวลา "ยอดคงเหลือปลายงวด" ต่อบัญชี = คอลัมน์ "ปลายงวด" ของการ์ดตรวจยอดเป๊ะ ๆ
        ⚠️ แถวนี้ชื่อ "จาก STM" ⇒ **ปลายงวดจากไฟล์ (`closingFile`) ต้องมาก่อน** ·
           "ปลายงวดจริง (คีย์เอง)" เป็นแค่ตัวสำรองตอนไม่มีไฟล์ (pri ต่ำกว่า)
           เอาค่าที่คีย์มาทับไฟล์เมื่อไร = ยอดจะต่างจากที่การ์ดโชว์ ด้วยส่วนที่ "ไฟล์ขาด"
-          (ของจริงต่าง 15,125 ที่ ส.ค. → ผู้ใช้ทักว่าผิด) */
+          (ของจริงต่าง 15,125 ที่ ส.ค. → ผู้ใช้ทักว่าผิด)
+       ★ hist ต้องผ่าน cfcApplyManual มาแล้ว — ปลายงวดของไฟล์ขยับตาม "ต้นงวดที่คีย์" (ถ้าคีย์ไว้ต่างจากไฟล์)
+       ★ ต้นงวดที่คีย์ (pri ต่ำสุด) = ยอดของเดือนนั้นเมื่อไม่มีทั้งไฟล์และปลายงวดที่คีย์ (บัญชีไม่มีรายการ ปลายงวด = ต้นงวด) */
     const tl = {};
     const push = (k, row) => { if (k && k !== '(ไม่ระบุบัญชี)') (tl[k] = tl[k] || []).push(row); };
+    Object.keys(manualOpening || {}).forEach(key => {
+      const i = key.lastIndexOf('|'); if (i < 0) return;
+      push(key.slice(0, i), { ym: key.slice(i + 1), v: cfcNum(manualOpening[key]), pri: -1 });
+    });
     Object.keys(manualClosing || {}).forEach(key => {
       const i = key.lastIndexOf('|'); if (i < 0) return;
       push(key.slice(0, i), { ym: key.slice(i + 1), v: cfcNum(manualClosing[key]), pri: 0 });
@@ -811,7 +817,9 @@
        ตรวจยอดเป๊ะ ๆ** (ผู้ใช้ชี้เอง 2026-09-10: ต้องเท่ากับ 5,834,332.82 = ผลรวมทุกบัญชีในการ์ด)
      ลำดับเดียวกับการ์ด: ไฟล์ประกาศ/คำนวณของเดือนนั้น > ปลายงวดเดือนก่อน (ไฟล์ หรือยอดจริงที่คีย์เอง)
        > **ยอดต้นงวดที่คีย์เอง (`manual.opening`)** > ยอดคงเหลือรายวันก่อนขึ้นเดือน
-     ⚠️ เดิมดูแค่ `hist` (ไฟล์ธนาคาร) ⇒ บัญชีที่ป้ายว่า "คีย์เอง" นับเป็น 0 หายไปทั้งก้อน */
+     ⚠️ เดิมดูแค่ `hist` (ไฟล์ธนาคาร) ⇒ บัญชีที่ป้ายว่า "คีย์เอง" นับเป็น 0 หายไปทั้งก้อน
+     ★ 2026-10-12 (คู่กับ WTP): **ต้นงวดที่คีย์เองของเดือนนั้นมาก่อนทุกอย่าง** (คีย์ไว้ = ยอดจริง) + hist ต้องผ่าน cfcApplyManual
+       ⇒ เลขที่ได้ = "ยอดที่ใช้ส่ง" ในแถวรวมของการ์ด (เท่ากับคอลัมน์ "ในระบบ" เมื่อไม่มีช่องไหนคีย์ต่างจากระบบ) */
   function cfcOpeningTotalAt(hist, ym0, registry, snaps, manualOpen, manualClose) {
     const byAcct = {};
     (hist || []).forEach(g => { const k = cfcAcctKey(g.acctNo, g.acctLabel); (byAcct[k] = byAcct[k] || []).push(g); });
@@ -833,14 +841,14 @@
     const prevYm = (pm === 1 ? (py - 1) + '-12' : py + '-' + String(pm - 1).padStart(2, '0'));
     let s = 0;
     keys.forEach(k => {
+      const mo = (manualOpen || {})[k + '|' + ym0];
+      if (mo != null) { s += cfcNum(mo); return; }                             // ต้นงวดที่คีย์เอง (ยอดจริง — ชนะไฟล์)
       const cur = (byAcct[k] || []).find(g => g.ym === ym0);
       if (cur) { s += cur.opening; return; }                                   // ไฟล์ของเดือนนั้น
       let prev = null;
       (byAcct[k] || []).forEach(g => { if (g.ym < ym0 && (!prev || g.ym > prev.ym)) prev = { ym: g.ym, v: g.closingFile }; });
       (mc[k] || []).forEach(x => { if (x.ym < ym0 && (!prev || x.ym >= prev.ym)) prev = x; });
       if (prev) { s += prev.v; return; }                                       // ปลายงวดเดือนก่อน
-      const mo = (manualOpen || {})[k + '|' + ym0];
-      if (mo != null) { s += cfcNum(mo); return; }                             // ต้นงวดที่คีย์เอง
       let sn = null; (snapByAcct[k] || []).forEach(x => { if (x.d && x.d <= prevYm + '-31') sn = x; });
       if (sn) s += sn.v;                                                       // ยอดคงเหลือรายวัน
     });
@@ -857,6 +865,27 @@
       if (!best || g.ym > best.ym) best = g;
     });
     return best;
+  }
+
+  /* ★ ต้นงวดที่คนคีย์ = ยอดจริงจากธนาคาร → ชนะยอดยกมาของไฟล์ (คู่กับ WTP 2026-10-12: บัญชีค้ำประกันของ WTP ไฟล์ตั้งยอดยกมา
+       ขาดไป 11 ล้านทั้งที่รายการครบ — เดิมไฟล์ชนะเสมอ ยอดที่ส่งขึ้นหน้า Cash Flow จึงขาด 11 ล้าน)
+     ต้นงวด  = ที่คีย์ > ยอดยกมาในไฟล์
+     ปลายงวด = ปลายงวดในไฟล์ + ส่วนต่างต้นงวด (= ต้นงวดที่ใช้ + รับ − จ่าย ของไฟล์ · รายการในไฟล์ยังเชื่อได้)
+     ⚠️ "ยอดจริงธนาคาร" (`manual.closing`) **ไม่ทับปลายงวดของไฟล์** — ยังเป็นตัวตรวจ "ไฟล์ขาด" เหมือนเดิม
+        (ของจริง ส.ค. ต่าง 15,125 → เคยเอามาทับแล้วผู้ใช้ทักว่าผิด · ดูหมายเหตุที่ cfcStmClosingByYm)
+     คืนชุดใหม่ (ของเดิมไม่ถูกแก้) · แถวที่ถูกแทนติด keyed + openingRaw/closingRaw (เลขดิบในไฟล์)
+     ⚠️ ทุกอย่างที่ "ส่งออก / ส่งขึ้น Cash Flow / ยกยอดไปเดือนถัดไป" ต้องอ่านผ่านตัวนี้ ·
+        คอลัมน์ "ในระบบ" / "ในไฟล์" ของการ์ดภาพรวม + ชีตตรวจยอด ยังโชว์เลขดิบของไฟล์ไว้เทียบกับที่คีย์ */
+  function cfcApplyManual(hist, manual) {
+    const mo = (manual && manual.opening) || {};
+    return (hist || []).map(g => {
+      const o = mo[cfcAcctKey(g.acctNo, g.acctLabel) + '|' + g.ym];
+      if (o == null) return g;
+      const opening = cfcNum(o), off = opening - g.opening;
+      if (Math.abs(off) <= 0.004) return g;
+      return Object.assign({}, g, { opening, closingFile: Math.round((g.closingFile + off) * 100) / 100, closingCalc: g.closingCalc + off,
+        openingRaw: g.opening, closingRaw: g.closingFile, keyed: true });
+    });
   }
 
   /* เดือนตั้งต้นตอนเปิดหน้า = "เดือนที่แล้ว" ตามปฏิทิน (ต.ค. → ก.ย. · ม.ค. → ธ.ค. ปีก่อน) — งบกระทบยอดทำหลังปิดเดือน
@@ -2044,14 +2073,18 @@
        (ลำดับเดียวกับการ์ดภาพรวม: ไฟล์ประกาศ/คำนวณจากแถวแรก > ปลายงวดเดือนก่อน > ค่าที่คีย์เอง)
        ห้ามให้หน้าปลายทางไปเดาจากคอลัมน์ "ยอดคงเหลือ" ของชีตที่ส่งไป — แถวส่วนใหญ่เป็น
        บิลรายใบซึ่งไม่มียอดคงเหลือ ปลายทางจะได้ต้นงวด = ยอดจ่ายของบิลใบแรก (เพี้ยนทั้งงบ) */
+    /* ★ 2026-10-12 (คู่กับ WTP): ต้นงวดที่คีย์เองมาก่อน (คีย์ไว้ = ยอดจริง ชนะยอดยกมาของไฟล์) แล้วค่อยไฟล์ > ปลายงวดเดือนก่อน
+         histUse = ชุดที่ "ใช้จริง" (cfcApplyManual) — ส่งออก · ส่งขึ้น Cash Flow · ยกยอดไปเดือนถัดไป อ่านจากตัวนี้
+         histCheck = เลขดิบของไฟล์ ใช้เฉพาะโชว์เทียบในการ์ดภาพรวม + ชีตตรวจยอด */
+    const histUse = useMemo(() => cfcApplyManual(histCheck, manual), [histCheck, manual]);
     function openingAt(acctNo, acctLabel, ymOf) {
       const key = cfcAcctKey(acctNo, acctLabel);
-      const g = histCheck.find(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym === ymOf);
-      if (g) return g.opening;
-      const prev = cfcPrevMonth(histCheck, acctNo, ymOf, acctLabel);
-      if (prev) return prev.closingFile;
       const mo = manual.opening[key + '|' + ymOf];
-      return mo == null ? null : cfcNum(mo);
+      if (mo != null) return cfcNum(mo);
+      const g = histUse.find(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym === ymOf);
+      if (g) return g.opening;
+      const prev = cfcPrevMonth(histUse, acctNo, ymOf, acctLabel);
+      return prev ? prev.closingFile : null;
     }
 
 
@@ -2059,6 +2092,8 @@
     const overview = useMemo(() => {
       const aggRows = cfcAggByAcct(acctCheck);
       const byKey = {}; aggRows.forEach(g => { byKey[cfcAcctKey(g.acctNo, g.acctLabel)] = g; });
+      // ยอดที่ "ใช้จริง" ของแต่ละบัญชี (ต้นงวดที่คีย์ชนะไฟล์) — data = เลขดิบของไฟล์ไว้โชว์เทียบ · use = ที่ไปออกส่งออก/Cash Flow
+      const useByKey = {}; cfcAggByAcct(cfcApplyManual(acctCheck, manual)).forEach(g => { useByKey[cfcAcctKey(g.acctNo, g.acctLabel)] = g; });
       const used = {};
       /* ★ ยอดต้นงวดยกมาจากเดือนก่อน (ถ้ามี):
            - บัญชีที่มีข้อมูลเดือนนี้ → เทียบ "ต้นงวดที่อ่านจากไฟล์" กับ "ปลายงวดเดือนก่อน"
@@ -2066,53 +2101,69 @@
            - บัญชีที่ไม่มีข้อมูลเดือนนี้เลย → ยกยอดเดือนก่อนมาแสดงเป็นต้นงวด=ปลายงวด
              (บัญชีที่ไม่มีรายการทั้งเดือนก็ยังมีเงินอยู่ — เดิมโชว์ว่าง เหมือนยอดหาย) */
       const attach = (b, g) => {
-        const mk = (g ? cfcAcctKey(g.acctNo, g.acctLabel) : b.key) + '|' + (ym || (g ? g.ymFirst : 'all'));
+        const key = g ? cfcAcctKey(g.acctNo, g.acctLabel) : b.key;
+        // แถว "ทุกเดือน" ที่ยุบหลายเดือน: ต้นงวด = ของเดือนแรก · ปลายงวด = ของเดือนสุดท้าย (เดิมเก็บปลายงวดไว้ใต้เดือนแรก)
+        const mk = key + '|' + (ym || (g ? g.ymFirst : 'all')), mkC = key + '|' + (ym || (g ? g.ymLast : 'all'));
         const still = !!manual.still[mk];
         const manOpen = manual.opening[mk];
-        const manClose = manual.closing[mk];
-        const prev = cfcPrevMonth(histCheck, g ? g.acctNo : b.no, g ? g.ymFirst : (ym || ''), g ? g.acctLabel : '');
-        // มีไฟล์ → ยอดยกมาของไฟล์คือตัวจริง, เดือนก่อนเป็น "ตัวตรวจ"
+        const manClose = manual.closing[mkC];
+        // เดือนก่อน = ยอดที่ "ใช้จริง" ของเดือนก่อน (histUse) — เดือนก่อนคีย์ต้นงวดแก้ไว้ ปลายงวดที่ยกมาต้องขยับตาม
+        const prev = cfcPrevMonth(histUse, g ? g.acctNo : b.no, g ? g.ymFirst : (ym || ''), g ? g.acctLabel : '');
+        // มีไฟล์ → โชว์ยอดของไฟล์เทียบกับที่คีย์ (ต่าง = ป้ายเตือน) · ยอดที่ใช้จริง (use) = ต้นงวดที่คีย์ + รายการในไฟล์
         // ★ ยอดจริงที่คีย์เอง − ปลายงวดที่ไฟล์บอก = ส่วนที่ไฟล์ยังขาด (บวก = ไฟล์ขาดรายการรับ / ลบ = ขาดรายการจ่าย)
-        // ★ openDiff = ยอดต้นงวดที่ใช้จริง − ยอดที่คนคีย์ไว้
-        //   คิดเฉพาะตอนที่ค่าที่ใช้ "ไม่ได้มาจากค่าที่คีย์เอง" (ไม่งั้นเทียบกับตัวเอง = 0 เสมอ)
-        if (g) return Object.assign({}, b, { mk, still, data: g, prev, manOpen, manClose,
-          openDiff: manOpen == null ? null : (g.opening - cfcNum(manOpen)),
-          fileMiss: manClose == null ? null : (cfcNum(manClose) - g.closingFile),
-          carryDiff: prev ? (g.opening - prev.closingFile) : null });
-        // ไม่มีไฟล์ → ยกจากเดือนก่อน ถ้าไม่มีก็ใช้ค่าที่คีย์เอง
+        // ★ openDiff = ยอดต้นงวดในระบบ (ไฟล์/ยกมา) − ยอดที่คนคีย์ไว้
+        if (g) {
+          const u = useByKey[key] || g;
+          return Object.assign({}, b, { mk, mkC, still, data: g, prev, manOpen, manClose, use: { opening: u.opening, closing: u.closingFile },
+            openDiff: manOpen == null ? null : (g.opening - cfcNum(manOpen)),
+            fileMiss: manClose == null ? null : (cfcNum(manClose) - g.closingFile),
+            carryDiff: prev ? (u.opening - prev.closingFile) : null });
+        }
+        // ไม่มีไฟล์ → ยกจากเดือนก่อน ถ้าไม่มีก็ใช้ค่าที่คีย์เอง (ยอดที่ใช้จริง: ต้นงวดที่คีย์มาก่อนยอดยกมา · ปลายงวด = ที่คีย์ ไม่งั้นเท่าต้นงวด)
         const base = prev ? prev.closingFile : (manOpen == null ? null : cfcNum(manOpen));
-        if (base != null) return Object.assign({}, b, { mk, still, prev, carried: true,
-          openSrc: prev ? 'prev' : 'manual', manOpen, manClose,
-          openDiff: (prev && manOpen != null) ? (base - cfcNum(manOpen)) : null,
-          fileMiss: manClose == null ? null : (cfcNum(manClose) - base),
-          data: { acctNo: g ? g.acctNo : b.no, acctLabel: b.no, ym: ym || (prev ? prev.ym : ''),
-            ymFirst: prev ? prev.ym : (ym || ''), ymLast: prev ? prev.ym : (ym || ''),
-            opening: base, closingFile: base, closingCalc: base, diff: 0, inSum: 0, outSum: 0, n: 0, uncoded: 0 } });
-        return Object.assign({}, b, { mk, still, data: null, prev: null, manOpen, manClose });
+        if (base != null) {
+          const uo = manOpen == null ? base : cfcNum(manOpen), uc = manClose == null ? uo : cfcNum(manClose);
+          return Object.assign({}, b, { mk, mkC, still, prev, carried: true,
+            openSrc: prev ? 'prev' : 'manual', manOpen, manClose, use: { opening: uo, closing: uc },
+            openDiff: (prev && manOpen != null) ? (base - cfcNum(manOpen)) : null,
+            fileMiss: manClose == null ? null : (cfcNum(manClose) - base),
+            data: { acctNo: g ? g.acctNo : b.no, acctLabel: b.no, ym: ym || (prev ? prev.ym : ''),
+              ymFirst: prev ? prev.ym : (ym || ''), ymLast: prev ? prev.ym : (ym || ''),
+              opening: base, closingFile: base, closingCalc: base, diff: 0, inSum: 0, outSum: 0, n: 0, uncoded: 0 } });
+        }
+        return Object.assign({}, b, { mk, mkC, still, data: null, prev: null, manOpen, manClose });
       };
       const listed = bankMaster.map(b => { const g = byKey[b.key]; if (g) used[b.key] = 1; return attach(b, g); });
       // บัญชีที่นำเข้ามาแต่ไม่มีในทะเบียน (เช่นเปิดบัญชีใหม่ / ไฟล์ผิดบริษัท)
       const extra = aggRows.filter(g => !used[cfcAcctKey(g.acctNo, g.acctLabel)])
         .map(g => attach({ bank: '', no: g.acctLabel || g.acctNo, type: 'ไม่อยู่ในทะเบียน', key: cfcAcctKey(g.acctNo, g.acctLabel) }, g));
       const all = listed.concat(extra);
-      const tot = { inSum: 0, outSum: 0, opening: 0, closing: 0, n: 0, uncoded: 0, bad: 0 };
+      const tot = { inSum: 0, outSum: 0, opening: 0, closing: 0, useOpening: 0, useClosing: 0, n: 0, uncoded: 0, bad: 0 };
+      const isBad = (v) => v != null && Math.abs(v) > 0.02;
       all.forEach(r => {
         if (!r.data) return;
         r.data.uncoded = uncodedByAcct[cfcAcctKey(r.data.acctNo, r.data.acctLabel)] || 0;
         tot.inSum += r.data.inSum; tot.outSum += r.data.outSum;
         tot.opening += r.data.opening; tot.closing += r.data.closingFile;
+        tot.useOpening += r.use.opening; tot.useClosing += r.use.closing;
         tot.n += r.data.n; tot.uncoded += r.data.uncoded;
         if (Math.abs(r.data.diff) > 0.02) tot.bad++;
+        /* ★ ต้นงวดที่คีย์ต่างจากในระบบ และปลายงวดที่คีย์ต่างเท่ากันพอดี (หรือยังไม่คีย์ปลายงวด = ขยับตามต้นงวด)
+             = รายการครบ ผิดแค่ยอดตั้งต้น → ระบบใช้ต้นงวดที่คีย์แทนให้แล้ว ไม่ใช่เรื่องค้าง (ป้ายเหลือง ไม่นับเป็น "ไม่ตรง") */
+        r.keyedFix = isBad(r.openDiff) && (r.manClose == null || (isBad(r.fileMiss) && Math.abs(r.openDiff + r.fileMiss) <= 0.02));
       });
       const loaded = all.filter(r => r.data && !r.carried).length;
       const carried = all.filter(r => r.carried).length;
       const missingActive = listed.filter(r => !r.data && !r.still && r.type === 'สามารถใช้ได้').length;
-      const gapBreak = all.filter(r => !r.still && r.carryDiff != null && Math.abs(r.carryDiff) > 0.02).length;
-      const fileShort = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) > 0.02).length;
-      const openMismatch = all.filter(r => r.openDiff != null && Math.abs(r.openDiff) > 0.02).length;
+      const gapBreak = all.filter(r => !r.still && isBad(r.carryDiff)).length;
+      const keyedFix = all.filter(r => r.keyedFix).length;
+      const fileShort = all.filter(r => !r.keyedFix && isBad(r.fileMiss)).length;
+      const openMismatch = all.filter(r => !r.keyedFix && isBad(r.openDiff)).length;
       const fileOk = all.filter(r => r.fileMiss != null && Math.abs(r.fileMiss) <= 0.02).length;
-      return { all, tot, loaded, carried, gapBreak, fileShort, fileOk, openMismatch, total: bankMaster.length, missingActive };
-    }, [acctCheck, histCheck, bankMaster, ym, manual, uncodedByAcct]);
+      return { all, tot, loaded, carried, gapBreak, keyedFix, fileShort, fileOk, openMismatch, total: bankMaster.length, missingActive };
+    }, [acctCheck, histUse, bankMaster, ym, manual, uncodedByAcct]);
+    /* บัญชี-เดือนที่ต้นงวดที่คีย์ถูกใช้แทนยอดยกมาของไฟล์ (ตามตัวกรองเดือน/บัญชี) — โชว์ในกล่องยืนยันก่อนส่ง ไม่ให้ยอดเปลี่ยนเงียบ ๆ */
+    const keyedOver = useMemo(() => histUse.filter(g => g.keyed && (!ym || g.ym === ym) && (!acct || g.acctNo === acct)), [histUse, ym, acct]);
 
     /* ── ชิปหมวด — มีเฉพาะแท็บ "มั่นใจ": เฉพาะหมวดที่ยังมีรายการมั่นใจรอยืนยัน (พร้อมจำนวน) + "ดูทั้งหมด"
        กดชิป = กรองหมวดนั้น แล้ว "ยืนยันที่กรองอยู่" ทีเดียว · ยืนยันหมดแล้วชิปหายเอง ⇒ เห็นทันทีว่าเหลือกี่หมวด
@@ -2414,12 +2465,13 @@
         cell[k] = (cell[k] || 0) + v;
         if (!r.sug.cat) uncodedTot++;
       });
-      const stmC = cfcStmClosingByYm(histCheck, months, bankMaster, data.cashflowSnapshots, manual.closing);
+      // ★ histUse = ยอดที่ใช้จริง (ต้นงวดที่คีย์ชนะยอดยกมาของไฟล์ — cfcApplyManual)
+      const stmC = cfcStmClosingByYm(histUse, months, bankMaster, data.cashflowSnapshots, manual.closing, manual.opening);
       const solid = {}; months.forEach(m => { if (stmC.v[m] != null && !stmC.short[m]) solid[m] = true; });
       const cutByYm = {};
       (rows.cut || []).forEach(r => { const m = String(r.iso).slice(0, 7);
         cutByYm[m] = (cutByYm[m] || 0) + ((r.in || 0) - (r.out || 0)); });
-      const cash = { opening: cfcOpeningTotalAt(histCheck, months[0], bankMaster, data.cashflowSnapshots, manual.opening, manual.closing), stmClosing: stmC.v,
+      const cash = { opening: cfcOpeningTotalAt(histUse, months[0], bankMaster, data.cashflowSnapshots, manual.opening, manual.closing), stmClosing: stmC.v,
         stmShort: Object.keys(stmC.short).length > 0, stmSolid: solid,
         cutByYm: cutByYm, noLineByYm: stmC.noLine };
       const sumAoa = cfcSummaryAoa(master, months, cell, monLabel, [...new Set(rows.map(r => r.sug.cat).filter(Boolean))], cash);
@@ -2507,7 +2559,7 @@
            ต้นงวด(เดือนแรก) = ต้นงวด(เดือนที่รู้) − ผลรวมกระแสของทุกแถวก่อนเดือนนั้น */
         const openingBack = (info, ym0, acctName) => {
           const key = cfcAcctKey(info.no, info.label);
-          const known = histCheck.filter(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym > ym0)
+          const known = histUse.filter(x => cfcAcctKey(x.acctNo, x.acctLabel) === key && x.ym > ym0)
             .sort((x, y) => (x.ym < y.ym ? -1 : 1))[0];
           if (!known) return null;
           const before = allTxns.reduce((s, t) => (t.account === acctName && String(t.iso).slice(0, 7) < known.ym
@@ -2568,9 +2620,9 @@
         const m0 = allMonths[0];
         let openTotal;
         if (m0 && !sendMonths.has(m0) && oldBf && oldMonthCol[m0] != null) openTotal = cfcNum(oldBf[oldMonthCol[m0]]);
-        else if (m0) openTotal = cfcOpeningTotalAt(histCheck, m0, bankMaster, data.cashflowSnapshots, manual.opening, manual.closing);
+        else if (m0) openTotal = cfcOpeningTotalAt(histUse, m0, bankMaster, data.cashflowSnapshots, manual.opening, manual.closing);
         else openTotal = opening;
-        const stmCalc = cfcStmClosingByYm(histCheck, allMonths, bankMaster, data.cashflowSnapshots, manual.closing);
+        const stmCalc = cfcStmClosingByYm(histUse, allMonths, bankMaster, data.cashflowSnapshots, manual.closing, manual.opening);
         const stmClosing = {}; let stmShort = false;
         allMonths.forEach(m => {
           if (!sendMonths.has(m) && oldStm && oldMonthCol[m] != null) { stmClosing[m] = cfcNum(oldStm[oldMonthCol[m]]); return; }
@@ -2603,9 +2655,11 @@
         try { localStorage.setItem('bio-cfpresent-v1', JSON.stringify(payload)); } catch (e) {}
         setBusy('');
         const replaced = ((old.stm && old.stm.txns) || []).length - kept.length;
+        const keyedN = histUse.filter(g => g.keyed && sendMonths.has(g.ym)).length;
         toast && toast('ส่งขึ้นหน้า Cash Flow แล้ว · เดือน ' + built.months.join(', ') + ' ' +
           (replaced ? '(แทนที่ของเดิม ' + replaced + ' รายการ)' : '(เพิ่มใหม่)') +
           ' · รวมทั้งหมด ' + allTxns.length + ' รายการ / ' + allMonths.length + ' เดือน' +
+          (keyedN ? ' · ใช้ต้นงวดที่คีย์แทนยอดในไฟล์ ' + keyedN + ' บัญชี-เดือน' : '') +
           (keptMonths.length ? ' · คงตัวเลขเดิมของอีก ' + keptMonths.length + ' เดือน (' + keptMonths.map(built.monLabel).join(', ') + ')' : '') +
           (Math.abs(plugSent) > 0.5 ? ' · ⚠️ ยังกระทบยอดไม่ลงตัว ' + cfcMoney(plugSent) + ' บาท (ดูบรรทัด "ผลต่างที่ยังกระทบยอดไม่ลงตัว" ท้ายงบ)' : '') +
           (dupDropped ? ' · ล้างรายการซ้ำจากข้อมูลเก่า (ปี พ.ศ.) ' + dupDropped + ' รายการ' : '') +
@@ -2644,25 +2698,29 @@
         { uncoded: uncodedByAcct[cfcAcctKey(g.acctNo, g.acctLabel)] || 0 }));
       const s3 = [['ตรวจยอดรายบัญชีรายเดือน — ยอดยกมา + รับ − จ่าย ต้องเท่ากับยอดคงเหลือปลายงวด'],
         ['และ "ยอดยกมา" ต้องเท่ากับ "ปลายงวดเดือนก่อน" ด้วย — ถ้าต่าง แปลว่ามีเดือน/รายการขาดหายระหว่างกลาง · ' + scope + ' · สร้าง ' + stamp], [],
-        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ต้นงวดที่คีย์', 'ต่างจากที่คีย์', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'ปลายงวดจริง (คีย์)', 'ไฟล์ขาด', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
+        ['บัญชีธนาคาร', 'เลขที่บัญชี', 'เดือน', 'ยอดยกมา', 'ต้นงวดที่คีย์', 'ต่างจากที่คีย์', 'ปลายงวดเดือนก่อน', 'ต่างจากเดือนก่อน', 'รับ', 'จ่าย', 'ปลายงวด (คำนวณ)', 'ปลายงวด (จากไฟล์)', 'ต่าง', 'ปลายงวดจริง (คีย์)', 'ไฟล์ขาด', 'ต้นงวดที่ใช้', 'ปลายงวดที่ใช้', 'จำนวนรายการ', 'ยังไม่ลงหมวด']];
+      // "ที่ใช้" = ยอดที่ไปออกชีตงบ/ส่งขึ้นหน้า Cash Flow (ต้นงวดที่คีย์ชนะไฟล์ · ปลายงวดขยับตาม) · เดือนก่อน = ยอดที่ใช้ของเดือนก่อน — กติกาเดียวกับการ์ดภาพรวม
+      const useBy = {}; histUse.forEach(u => { useBy[cfcAcctKey(u.acctNo, u.acctLabel) + '|' + u.ym] = u; });
+      let useO = 0, useC = 0;
       sum.forEach(g => {
-        const pv = cfcPrevMonth(histCheck, g.acctNo, g.ym, g.acctLabel);
+        const pv = cfcPrevMonth(histUse, g.acctNo, g.ym, g.acctLabel);
         const gk = cfcAcctKey(g.acctNo, g.acctLabel) + '|' + g.ym;
-        const mc = manual.closing[gk], mo = manual.opening[gk];
+        const mc = manual.closing[gk], mo = manual.opening[gk], u = useBy[gk] || g;
         s3.push([g.acctLabel || '', g.acctNo || '', monLabel(g.ym), g.opening,
           mo == null ? '' : cfcNum(mo), mo == null ? '' : (g.opening - cfcNum(mo)),
-          pv ? pv.closingFile : '', pv ? (g.opening - pv.closingFile) : '',
+          pv ? pv.closingFile : '', pv ? (u.opening - pv.closingFile) : '',
           g.inSum, g.outSum, g.closingCalc, g.closingFile, g.diff,
           mc == null ? '' : cfcNum(mc), mc == null ? '' : (cfcNum(mc) - g.closingFile),
-          g.n, g.uncoded]);
+          u.opening, u.closingFile, g.n, g.uncoded]);
+        useO += u.opening; useC += u.closingFile;
       });
       s3.push([]);
       s3.push(['รวมทุกบัญชี', '', '', sum.reduce((a, g) => a + g.opening, 0), '', '', '', '',
         sum.reduce((a, g) => a + g.inSum, 0), sum.reduce((a, g) => a + g.outSum, 0),
         sum.reduce((a, g) => a + g.closingCalc, 0), sum.reduce((a, g) => a + g.closingFile, 0),
-        sum.reduce((a, g) => a + g.diff, 0), '', '', sum.reduce((a, g) => a + g.n, 0), uncodedTot]);
+        sum.reduce((a, g) => a + g.diff, 0), '', '', useO, useC, sum.reduce((a, g) => a + g.n, 0), uncodedTot]);
       const ws3 = XLSX.utils.aoa_to_sheet(s3);
-      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }];
+      ws3['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 11 }, { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 17 }, { wch: 15 }, { wch: 15 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 18 }, { wch: 13 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 12 }];
       cfcStyleCheck(ws3, s3, [5, 7, 12, 14]);   // คอลัมน์ "ต่าง…" ทั้ง 4 ช่อง
       XLSX.utils.book_append_sheet(wb, ws3, 'ตรวจยอดรายบัญชี');
 
@@ -2804,6 +2862,7 @@
               {overview.carried > 0 && <CfcChip tone="mute">ยกยอดจากเดือนก่อน {overview.carried}</CfcChip>}
               {overview.missingActive > 0 && <CfcChip tone="bad">ยังไม่นำเข้า {overview.missingActive}</CfcChip>}
               {overview.gapBreak > 0 && <CfcChip tone="bad">ยกมาไม่ตรงเดือนก่อน {overview.gapBreak}</CfcChip>}
+              {overview.keyedFix > 0 && <CfcChip tone="warn" title="ยอดตั้งต้นในระบบไม่ตรงกับที่คีย์ แต่รายการครบ — ส่งออก/ส่งขึ้นหน้า Cash Flow ใช้ต้นงวดที่คีย์ (ปลายงวดขยับตาม)">ใช้ยอดที่คีย์ {overview.keyedFix}</CfcChip>}
               {overview.openMismatch > 0 && <CfcChip tone="bad">ต้นงวดไม่ตรงที่คีย์ {overview.openMismatch}</CfcChip>}
               {overview.fileShort > 0 && <CfcChip tone="bad">ไม่ตรงยอดธนาคาร {overview.fileShort}</CfcChip>}
               {overview.fileShort === 0 && overview.fileOk > 0 && <CfcChip tone="ok">ตรงยอดธนาคาร {overview.fileOk}</CfcChip>}
@@ -2849,8 +2908,10 @@
                     let chip;
                     if (!g) chip = r.still ? <CfcChip tone="mute">ไม่มีการเคลื่อนไหว</CfcChip>
                       : (active ? <CfcChip tone="bad">ยังไม่นำเข้าไฟล์</CfcChip> : <CfcChip tone="mute">ไม่มีข้อมูล</CfcChip>);
-                    else if (missBad && openBad && Math.abs(r.openDiff + miss) <= 0.02)
-                      chip = <CfcChip tone="bad" title={'ต้นงวดในระบบ ' + cfcMoney(g.opening) + ' · ที่คีย์ไว้ ' + cfcMoney(r.manOpen) + ' — ส่วนต่างเท่ากับที่ปลายงวดพอดี แปลว่ารายการในไฟล์ครบแล้ว แต่ยอดตั้งต้นผิด'}>ต้นงวดผิด {cfcMoney(Math.abs(r.openDiff))} · ปลายเพี้ยนตาม</CfcChip>;
+                    else if (r.keyedFix)
+                      chip = <CfcChip tone="warn" title={'ต้นงวดในระบบ ' + cfcMoney(g.opening) + ' · ที่คีย์ไว้ ' + cfcMoney(r.manOpen)
+                        + (missBad ? ' — ส่วนต่างเท่ากับที่ปลายงวดพอดี แปลว่ารายการครบแล้ว แต่ยอดตั้งต้นในระบบไม่ตรงธนาคาร' : ' — ยังไม่ได้คีย์ยอดจริงปลายงวด ปลายงวดขยับตามต้นงวดที่คีย์')
+                        + ' · ส่งออก/ส่งขึ้นหน้า Cash Flow ใช้ ' + cfcMoney(r.use.opening) + ' → ' + cfcMoney(r.use.closing)}>ใช้ยอดที่คีย์ · ในระบบต่าง {cfcMoney(Math.abs(r.openDiff))}</CfcChip>;
                     else if (missBad && !hasFile) chip = <CfcChip tone="warn" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' แต่ยังไม่ได้นำเข้าไฟล์'}>ยังไม่นำเข้าไฟล์ · ต่าง {cfcMoney(Math.abs(miss))}</CfcChip>;
                     else if (missBad) chip = <CfcChip tone="bad" title={'ยอดจริง ' + cfcMoney(r.manClose) + ' − ในไฟล์ ' + cfcMoney(g.closingFile) + (miss > 0 ? ' → ไฟล์ขาดรายการรับ' : ' → ไฟล์ขาดรายการจ่าย')}>ไฟล์ขาด {cfcMoney(Math.abs(miss))}</CfcChip>;
                     else if (openBad) chip = <CfcChip tone="bad" title={'ต้นงวดในระบบ ' + cfcMoney(g.opening) + ' · ที่คีย์ไว้ ' + cfcMoney(r.manOpen)}>ต้นงวดไม่ตรง {cfcMoney(Math.abs(r.openDiff))}</CfcChip>;
@@ -2891,8 +2952,8 @@
                         {/* ต้นงวด · คีย์เอง */}
                         <td style={num}>
                           {canEdit
-                            ? <CfcMoneyInput value={r.manOpen} placeholder="คีย์ต้นงวด" width={122} bad={openBad}
-                                title="ยอดต้นงวดจากสมุดบัญชี — ต่างจากยอดในระบบ = มียอดผิด ต้องไล่หา"
+                            ? <CfcMoneyInput value={r.manOpen} placeholder="คีย์ต้นงวด" width={122} bad={openBad && !r.keyedFix}
+                                title="ยอดต้นงวดจากสมุดบัญชี — คีย์ไว้ = ใช้ยอดนี้ส่งออก/ส่งขึ้นหน้า Cash Flow แทนยอดในระบบ แล้วปลายงวดขยับตาม (ต่างกัน = ขึ้นป้ายให้เห็น)"
                                 onSave={v => saveManual('opening', r.mk, v)} />
                             : <span style={{ color: C.faint }}>{r.manOpen == null ? '—' : cfcMoney(r.manOpen)}</span>}
                         </td>
@@ -2907,9 +2968,9 @@
                         {/* ปลายงวด · ยอดจริงจากธนาคาร */}
                         <td style={num}>
                           {canEdit
-                            ? <CfcMoneyInput value={r.manClose} placeholder="คีย์ยอดจริง" width={126} bad={missBad}
-                                title="ยอดคงเหลือจริงจาก statement — ต่างจากยอดในไฟล์ = ไฟล์ดึงมารายการไม่ครบ"
-                                onSave={v => saveManual('closing', r.mk, v)} />
+                            ? <CfcMoneyInput value={r.manClose} placeholder="คีย์ยอดจริง" width={126} bad={missBad && !r.keyedFix}
+                                title="ยอดคงเหลือจริงจาก statement — ใช้ตรวจว่าไฟล์ครบไหม (ไม่ทับยอดในไฟล์) · ต่างจากยอดในไฟล์โดยที่ต้นงวดตรง = ไฟล์ดึงมารายการไม่ครบ"
+                                onSave={v => saveManual('closing', r.mkC, v)} />
                             : <span style={{ color: C.faint }}>{r.manClose == null ? '—' : cfcMoney(r.manClose)}</span>}
                         </td>
 
@@ -2930,11 +2991,16 @@
                   <tr style={{ fontWeight: 800, borderTop: '2px solid ' + C.line, background: C.soft }}>
                     <td>รวม {overview.loaded} บัญชีที่นำเข้าแล้ว</td>
                     <td style={{ textAlign: 'right', borderLeft: '1px solid ' + C.line }}>{cfcMoney(overview.tot.opening)}</td>
-                    <td></td>
+                    {/* ยอดรวมที่ "ใช้ส่ง" (ต้นงวดที่คีย์ชนะยอดในระบบ) — โชว์เฉพาะตอนต่างจากยอดรวมในระบบ */}
+                    <td style={{ textAlign: 'right', color: C.warn }} title="ต้นงวดรวมที่ใช้ส่งออก/ส่งขึ้นหน้า Cash Flow (ใช้ต้นงวดที่คีย์แทนยอดในระบบ)">
+                      {Math.abs(overview.tot.useOpening - overview.tot.opening) > 0.02 && <Fragment>{cfcMoney(overview.tot.useOpening)}<div style={{ fontSize: 10, fontWeight: 500 }}>ยอดที่ใช้ส่ง</div></Fragment>}
+                    </td>
                     <td style={{ textAlign: 'right', color: C.pos, borderLeft: '1px solid ' + C.line }}>{cfcMoney(overview.tot.inSum)}</td>
                     <td style={{ textAlign: 'right', color: C.neg }}>{cfcMoney(overview.tot.outSum)}</td>
                     <td style={{ textAlign: 'right', borderLeft: '1px solid ' + C.line }}>{cfcMoney(overview.tot.closing)}</td>
-                    <td></td>
+                    <td style={{ textAlign: 'right', color: C.warn }} title="ปลายงวดรวมที่ใช้ส่งออก/ส่งขึ้นหน้า Cash Flow (ขยับตามต้นงวดที่คีย์)">
+                      {Math.abs(overview.tot.useClosing - overview.tot.closing) > 0.02 && <Fragment>{cfcMoney(overview.tot.useClosing)}<div style={{ fontSize: 10, fontWeight: 500 }}>ยอดที่ใช้ส่ง</div></Fragment>}
+                    </td>
                     <td style={{ fontWeight: 600, fontSize: 11.5, color: C.mut, borderLeft: '1px solid ' + C.line }}>
                       {overview.fileShort ? 'ไม่ตรงยอดธนาคาร ' + overview.fileShort + ' บัญชี'
                         : (overview.tot.bad ? 'ยอดไม่ลงตัว ' + overview.tot.bad + ' บัญชี' : 'ยอดลงตัวทุกบัญชี')}
@@ -2945,6 +3011,7 @@
             </div>
             <div style={{ padding: '9px 18px 12px', fontSize: 11, color: C.faint, lineHeight: 1.75 }}>
               คอลัมน์คู่ = <strong style={{ color: C.mut }}>ในระบบ</strong> (จากไฟล์ / ยกมาจากเดือนก่อน) เทียบกับ <strong style={{ color: C.mut }}>ที่คีย์จากสมุดบัญชี</strong> — ช่องคีย์ขึ้นสีแดงเมื่อไม่ตรง แล้วชิปสถานะบอกจำนวนที่ต่าง<br />
+              <strong style={{ color: C.mut }}>คีย์ต้นงวดไว้ = ใช้ต้นงวดที่คีย์</strong> ตอนส่งออก / ส่งขึ้นหน้า Cash Flow / ยกยอดไปเดือนถัดไป แล้วปลายงวดขยับตาม · ป้ายเหลือง “ใช้ยอดที่คีย์” = รายการครบ ผิดแค่ยอดตั้งต้นในระบบ · “ยอดจริงธนาคาร” ยังเป็นตัวตรวจว่าไฟล์ครบไหม ไม่ทับยอดในไฟล์<br />
               ใต้ต้นงวดบอกที่มา + ผลเทียบกับเดือนก่อน (✓ / ✗) · บัญชีที่เดือนนั้นไม่มีรายการ ติ๊ก “ไม่มีการเคลื่อนไหว” แล้วจะไม่เตือน
             </div>
             </Fragment>}
@@ -3162,6 +3229,14 @@
                 <br />ยังไม่ลงหมวด <strong style={{ color: stat.new ? C.neg : C.pos }}>{stat.new}</strong> รายการ
                 {stat.new > 0 && <span style={{ color: C.neg }}> — ยอดพวกนี้จะไม่เข้าบรรทัดไหนในงบ</span>}
               </div>
+              {keyedOver.length > 0 && <div style={{ background: C.warnBg, borderRadius: 10, padding: '9px 12px', fontSize: 12, lineHeight: 1.75, color: C.warn }}>
+                <strong>ใช้ต้นงวดที่คีย์แทนยอดในไฟล์ {keyedOver.length} บัญชี{ym ? '' : '-เดือน'}</strong> (ปลายงวดขยับตาม)
+                {keyedOver.slice(0, 6).map(g => <div key={cfcAcctKey(g.acctNo, g.acctLabel) + '|' + g.ym} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {g.acctLabel || g.acctNo}{ym ? '' : ' · ' + g.ym}: {cfcMoney(g.opening)} → {cfcMoney(g.closingFile)}
+                  <span style={{ color: C.mut }}> (ไฟล์ {cfcMoney(g.openingRaw)} → {cfcMoney(g.closingRaw)})</span>
+                </div>)}
+                {keyedOver.length > 6 && <div>… อีก {keyedOver.length - 6}</div>}
+              </div>}
               {acct && <div style={{ fontSize: 12, color: C.warn, background: C.warnBg, borderRadius: 8, padding: '8px 10px' }}>
                 ⚠️ ตัวกรอง “บัญชี” เปิดอยู่ — จะส่งเฉพาะบัญชีนี้ ถ้าต้องการทั้งเดือนให้ปิดตัวกรองบัญชีก่อน
               </div>}
@@ -3206,6 +3281,6 @@
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED, cfcAutoCatChips, cfcShortCat,
-    cfcDefaultYm,
+    cfcDefaultYm, cfcApplyManual,
   });
 })();
