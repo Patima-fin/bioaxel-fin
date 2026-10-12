@@ -1155,40 +1155,149 @@
     );
   }
 
-  function CfcCatSelect({ value, master, onChange, disabled, width }) {
+  /* ค้นหาหมวดในกล่องเลือกหมวด (คู่กับ WTP 2026-10-12) — แตกคำค้นด้วยช่องว่าง ต้องเจอ "ทุกคำ" ใน ชื่อหมวด + หัวกลุ่ม
+     (รับ/จ่าย · กิจกรรม · ชื่อกลุ่ม) · เทียบแบบ cfcNorm (ไม่สนช่องว่าง/จุด/ขีด/ตัวพิมพ์)
+     คืน [[คีย์กลุ่ม, [ชื่อหมวด…]], …] รูปเดียวกับ cfcCatGroups (ลำดับเดิม · กลุ่มที่ไม่เหลือรายการถูกตัด) */
+  function cfcCatSearch(groups, q) {
+    const toks = String(q || '').trim().split(/\s+/).map(cfcNorm).filter(Boolean);
+    if (!toks.length) return groups;
+    const out = [];
+    groups.forEach(([k, items]) => {
+      const [a, f, g] = k.split('|');
+      const head = cfcNorm(((CFC_FLOW_META[f] || CFC_FLOW_META.out).label) + ' ' + (CFC_ACT_SHORT[a] || '') + ' ' + g);
+      const hit = items.filter(n => { const hay = cfcNorm(n) + ' ' + head; return toks.every(t => hay.indexOf(t) >= 0); });
+      if (hit.length) out.push([k, hit]);
+    });
+    return out;
+  }
+
+  /* กล่องตัวเลือกของ CfcCatSelect — ช่องค้นหา + รายการจัดกลุ่มแบบเดิม · วางด้วย portal ติดใต้ปุ่ม (พื้นที่ล่างไม่พอ = กางขึ้น)
+     ⚠️ อยู่ใน <td> ไม่ได้ — ตารางมี overflow ตัดกล่องทิ้ง · คีย์บอร์ด: ↑↓ เลื่อน · Enter เลือก · Esc/Tab ปิด */
+  function CfcCatMenu({ anchor, value, master, seed, onPick, onClose }) {
     const groups = useMemo(() => cfcCatGroups(master), [master]);
+    const [q, setQ] = useState(seed || '');
+    const [pos, setPos] = useState(null);
+    const selfRef = useRef(null), listRef = useRef(null), inpRef = useRef(null), first = useRef(true);
+    const shown = useMemo(() => cfcCatSearch(groups, q), [groups, q]);
+    // ตัวเลือกที่กดได้ เรียงตามที่เห็น — ไม่ได้ค้น = มี "ยังไม่ลงหมวด" นำหน้า (ล้างหมวด)
+    const picks = useMemo(() => { const p = q.trim() ? [] : ['']; shown.forEach(([, items]) => items.forEach(n => p.push(n))); return p; }, [shown, q]);
+    const [hi, setHi] = useState(0);
+    // เปิดมา = ชี้ที่หมวดปัจจุบัน · พิมพ์ค้น = ชี้ตัวแรกที่เจอ
+    useEffect(() => { const i = q.trim() ? 0 : picks.indexOf(value || ''); setHi(i < 0 ? 0 : i); }, [picks]);   // eslint-disable-line
+    useEffect(() => {
+      const calc = (e) => {
+        if (e && e.target && e.target.nodeType === 1 && selfRef.current && selfRef.current.contains(e.target)) return;   // เลื่อนในกล่องเอง ไม่ต้องคิดตำแหน่งใหม่
+        const el = anchor.current; if (!el) return;
+        const r = el.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+        const w = Math.min(430, vw - 16), below = vh - r.bottom - 10, above = r.top - 10;
+        const up = below < 260 && above > below;
+        setPos({ left: Math.max(8, Math.min(r.left, vw - w - 8)), width: w, maxH: Math.max(170, Math.min(400, up ? above : below)),
+          top: up ? null : r.bottom + 3, bottom: up ? vh - r.top + 3 : null });
+      };
+      calc();
+      window.addEventListener('scroll', calc, true); window.addEventListener('resize', calc);
+      return () => { window.removeEventListener('scroll', calc, true); window.removeEventListener('resize', calc); };
+    }, []);   // eslint-disable-line
+    useEffect(() => {
+      const h = (e) => {
+        if (selfRef.current && selfRef.current.contains(e.target)) return;
+        if (anchor.current && anchor.current.contains(e.target)) return;   // กดปุ่มเดิมซ้ำ = ปุ่มปิดเอง (ไม่งั้นปิดแล้วเปิดใหม่)
+        onClose(false);
+      };
+      document.addEventListener('mousedown', h);
+      return () => document.removeEventListener('mousedown', h);
+    }, []);   // eslint-disable-line
+    // โฟกัสช่องค้นหา (เคอร์เซอร์ต่อท้ายตัวอักษรที่พิมพ์เปิดกล่องมา)
+    useEffect(() => { const el = inpRef.current; if (!pos || !el || document.activeElement === el) return; el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} }, [!!pos]);   // eslint-disable-line
+    // ให้ตัวที่ชี้อยู่เห็นเสมอ (ครั้งแรก = วางกลางกล่อง) — เลื่อนเฉพาะในรายการ ห้ามใช้ scrollIntoView (หน้าทั้งหน้าขยับตาม)
+    useEffect(() => {
+      const list = listRef.current; if (!list || !pos) return;
+      const el = list.querySelector('[data-i="' + hi + '"]'); if (!el) return;
+      const top = el.offsetTop, h = el.offsetHeight, HEAD = 26;   // HEAD = หัวกลุ่มที่ลอยค้างบนสุด
+      if (first.current) { first.current = false; list.scrollTop = Math.max(0, top - (list.clientHeight - h) / 2); return; }
+      if (top - HEAD < list.scrollTop) list.scrollTop = Math.max(0, top - HEAD);
+      else if (top + h > list.scrollTop + list.clientHeight) list.scrollTop = top + h - list.clientHeight;
+    }, [hi, shown, !!pos]);   // eslint-disable-line
+    const onKey = (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setHi(i => Math.min(picks.length - 1, i + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(i => Math.max(0, i - 1)); }
+      else if (e.key === 'PageDown') { e.preventDefault(); setHi(i => Math.min(picks.length - 1, i + 10)); }
+      else if (e.key === 'PageUp') { e.preventDefault(); setHi(i => Math.max(0, i - 10)); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (picks[hi] != null) onPick(picks[hi]); }
+      else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); onClose(true); }
+    };
+    if (!pos) return null;
+    let n = -1;   // ลำดับตัวเลือกที่กดได้ (ตรงกับ picks)
+    const row = (i, name, child, extra) => (
+      <div key={'p' + name} data-i={i} onMouseEnter={() => setHi(i)} onMouseDown={e => e.preventDefault()} onClick={() => onPick(name)}
+        style={Object.assign({ display: 'flex', alignItems: 'baseline', gap: 7, padding: '4px 12px 4px 22px', cursor: 'pointer', fontSize: 12.5, lineHeight: 1.45,
+          background: i === hi ? C.infoBg : '#fff', fontWeight: name === (value || '') ? 700 : 400 }, extra)}>
+        {child}
+        {name === (value || '') && <span style={{ marginLeft: 'auto', flex: '0 0 auto', color: C.primaryD, fontSize: 11 }}>✓</span>}
+      </div>
+    );
+    return ReactDOM.createPortal(
+      <div ref={selfRef} style={{ position: 'fixed', left: pos.left, top: pos.top == null ? 'auto' : pos.top, bottom: pos.bottom == null ? 'auto' : pos.bottom,
+        width: pos.width, maxHeight: pos.maxH, zIndex: 99999, display: 'flex', flexDirection: 'column', background: '#fff',
+        border: '1.5px solid ' + C.line, borderRadius: 10, boxShadow: '0 10px 40px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+        <div style={{ padding: '8px 10px 7px', borderBottom: '1px solid ' + C.line, flex: '0 0 auto' }}>
+          <input ref={inpRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKey} placeholder="🔍 ค้นหา ชื่อหมวด / ชื่อกลุ่ม…"
+            style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, padding: '6px 9px', borderRadius: 8, border: '1px solid ' + C.line, outline: 'none', color: C.ink }} />
+        </div>
+        <div ref={listRef} style={{ flex: '1 1 auto', overflowY: 'auto', position: 'relative', paddingBottom: 4 }}>
+          {!q.trim() && row(++n, '', <span style={{ color: C.mut }}>— ยังไม่ลงหมวด —</span>, { paddingLeft: 12 })}
+          {shown.map(([k, items]) => {
+            const [a, f, g] = k.split('|');
+            const meta = CFC_FLOW_META[f] || CFC_FLOW_META.out;
+            return (
+              <Fragment key={k}>
+                <div style={{ position: 'sticky', top: 0, zIndex: 1, padding: '4px 12px', fontSize: 11.5, fontWeight: 800, color: meta.color, background: meta.bg,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {meta.mark + ' ' + meta.label + ' · ' + (CFC_ACT_SHORT[a] || '') + ' · ' + g}</div>
+                {items.map(nm => row(++n, nm, <span style={{ color: C.ink, minWidth: 0 }}>{nm}</span>))}
+              </Fragment>
+            );
+          })}
+          {!shown.length && <div style={{ padding: '14px 12px', fontSize: 12.5, color: C.mut }}>ไม่พบหมวดที่ตรงกับ “{q.trim()}”</div>}
+        </div>
+        <div style={{ flex: '0 0 auto', padding: '4px 12px', fontSize: 10.5, color: C.faint, borderTop: '1px solid ' + C.line, background: C.soft }}>
+          {q.trim() ? 'พบ ' + picks.length + ' หมวด' : master.length + ' หมวด'} · ↑↓ เลื่อน · Enter เลือก · Esc ปิด
+        </div>
+      </div>, document.body);
+  }
+
+  /* ตัวเลือกหมวดของแต่ละแถว — ค้นหาได้ (คู่กับ WTP 2026-10-12: รายการยาว เลื่อนหาใน <select> ไม่ไหว)
+     ปุ่มหน้าตาเดิม → กด/พิมพ์ = กางกล่อง CfcCatMenu (พิมพ์บนปุ่มที่โฟกัสอยู่ = เปิดแล้วค้นตัวอักษรนั้นเลย)
+     ⚠️ ตารางแสดงได้ถึง 600 แถว: แถวที่ยังไม่กดมีแค่ปุ่มเดียว — รายการหมวดมีเฉพาะกล่องที่เปิดอยู่
+        (เดิม <select> ต้องกาง <option> ตอนกดด้วย flushSync ไม่งั้น option เป็นแสนโหนด) */
+  function CfcCatSelect({ value, master, onChange, disabled, width }) {
     const cur = master.find(m => m.name === value);
     const fm = value ? CFC_FLOW_META[cfcFlowOf(cur || { name: value })] : null;
-    /* ⚠️ ตารางแสดงได้ถึง 600 แถว × หมวด ~100 ตัว = <option> เป็นแสนโหนด — หน้าจะอืดตั้งแต่โหลด
-       และอืดซ้ำทุกครั้งที่พิมพ์ค้นหา. จึงกางรายการหมวด "ตอนจะกดเลือกเท่านั้น"
-       ★ ต้อง flushSync เพราะเบราว์เซอร์เปิด dropdown ทันทีหลังจบ mousedown — ถ้าปล่อยให้
-         React อัปเดตทีหลัง ครั้งแรกจะเห็นแค่ตัวเลือกเดียว */
-    const [ready, setReady] = useState(false);
-    const wake = () => {
-      if (ready) return;
-      try { ReactDOM.flushSync(() => setReady(true)); } catch (e) { setReady(true); }
-    };
+    const [open, setOpen] = useState(false);
+    const [seed, setSeed] = useState('');
+    const btnRef = useRef(null);
+    const close = (refocus) => { setOpen(false); setSeed(''); if (refocus && btnRef.current) btnRef.current.focus(); };
     return (
-      <select value={value || ''} disabled={disabled} onChange={e => onChange(e.target.value)}
-        onMouseDown={wake} onFocus={wake} onKeyDown={wake} onTouchStart={wake}
-        style={{ width: width || 232, maxWidth: '100%', fontSize: 12, padding: '4px 6px', borderRadius: 8,
-          border: '1px solid ' + (value ? (fm ? fm.color + '55' : C.line) : '#f0c9c9'),
-          background: value ? (fm ? fm.bg : '#fff') : '#fff8f8',
-          color: fm ? fm.color : C.ink, fontWeight: value ? 600 : 400 }}>
-        <option value="">— ยังไม่ลงหมวด —</option>
-        {/* ต้องมี option ของค่าปัจจุบันเสมอ ไม่งั้น <select> จะเด้งกลับเป็นค่าว่าง
-            — ทั้งตอนยังไม่กาง และตอนที่ค่านั้นเป็น "หมวดผี" ที่ไม่มีในผังหมวดแล้ว */}
-        {value && (!ready || !cur) && <option value={value}>{value}</option>}
-        {ready && groups.map(([k, items]) => {
-          const [a, f, g] = k.split('|');
-          const meta = CFC_FLOW_META[f] || CFC_FLOW_META.out;
-          return (
-            <optgroup key={k} label={meta.mark + ' ' + meta.label + ' · ' + (CFC_ACT_SHORT[a] || '') + ' · ' + g}>
-              {items.map(n => <option key={n} value={n}>{n}</option>)}
-            </optgroup>
-          );
-        })}
-      </select>
+      <Fragment>
+        <button ref={btnRef} type="button" disabled={disabled} title={value || ''}
+          onClick={() => { if (open) close(false); else setOpen(true); }}
+          onKeyDown={e => {
+            if (open) return;
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); }
+            else if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); setSeed(e.key); setOpen(true); }
+          }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, width: width || 232, maxWidth: '100%', fontSize: 12, padding: '4px 6px', borderRadius: 8,
+            textAlign: 'left', fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.7 : 1,
+            border: '1px solid ' + (value ? (fm ? fm.color + '55' : C.line) : '#f0c9c9'),
+            background: value ? (fm ? fm.bg : '#fff') : '#fff8f8',
+            color: fm ? fm.color : C.ink, fontWeight: value ? 600 : 400 }}>
+          <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {value || '— ยังไม่ลงหมวด —'}</span>
+          <span style={{ flex: '0 0 auto', fontSize: 8, opacity: 0.75 }}>▼</span>
+        </button>
+        {open && <CfcCatMenu anchor={btnRef} value={value} master={master} seed={seed} onClose={close}
+          onPick={v => { close(true); if (v !== (value || '')) onChange(v); }} />}
+      </Fragment>
     );
   }
 
@@ -3281,6 +3390,6 @@
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED, cfcAutoCatChips, cfcShortCat,
-    cfcDefaultYm, cfcApplyManual,
+    cfcDefaultYm, cfcApplyManual, cfcCatGroups, cfcCatSearch,
   });
 })();
