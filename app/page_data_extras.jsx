@@ -2705,11 +2705,15 @@ function _normPayableRow(r) {
 }
 
 // Parse ไฟล์ "รายงานตรวจสอบเงินทดรองจ่าย/เงินมัดจำคงค้าง" XML จาก EXPRESS (SpreadsheetML)
-// โครงสร้างต่างจากเจ้าหนี้คงค้าง: แถวรายการ = col1 StyleID 'A10' + vchno (AE/AV/PC…),
-//   แถวถัดมา StyleID 'A11' = รายละเอียด. Col index (1-based):
+// โครงสร้างต่างจากเจ้าหนี้คงค้าง: แถวรายการ = col1 vchno (AE/AV/PC…) + col2 วันที่,
+//   แถวถัดมา = รายละเอียด ("1  มัดจำค่า… PO0000987") แล้วอาจตามด้วยบล็อก "หมายเหตุ:" หลายบรรทัด.
+//   Col index (1-based):
 //   1=เลขที่(vchno) 2=วันที่ 3=รหัสผู้จำหน่าย 4=ชื่อผู้จำหน่าย 5=เลขที่บิล
 //   9=รวมทั้งสิ้น(incl VAT) 10=ครบกำหนด 15=จ่ายด้วยเช็ค → ยอดค้าง = รวมทั้งสิ้น − จ่ายด้วยเช็ค
 // ดึงเฉพาะรายการที่ยัง "ค้างจ่าย" (ยอดค้าง > 0); ข้ามที่จ่ายเคลียร์แล้ว + เอกสารยกเลิก ('*' นำหน้า vchno)
+// ⚠️ ห้ามแยกชนิดแถวด้วย StyleID — EXPRESS ตั้งชื่อสไตล์ตาม "ตำแหน่งเซลล์แรกที่ใช้สไตล์นั้น"
+//    (แถวรายละเอียดแรกอยู่แถว 11 = 'A11'). ใบแรกของไฟล์ไม่มีบรรทัดรายละเอียดเมื่อไร แถวรายละเอียดแรก
+//    เลื่อนไปแถว 12 = 'A12' ทั้งไฟล์ → เดิมเช็ค 'A11' ตายตัว หมายเหตุหายทุกใบแบบเงียบ ๆ (ไฟล์ 08/10/2026).
 function parseDepositXML(xmlText) {
   var SS = 'urn:schemas-microsoft-com:office:spreadsheet';
   function ssAttr(el, name) {
@@ -2719,7 +2723,7 @@ function parseDepositXML(xmlText) {
   var doc = new DOMParser().parseFromString(xmlText, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('XML รูปแบบไม่ถูกต้อง — ตรวจสอบไฟล์อีกครั้ง');
   var rowEls = Array.from(doc.getElementsByTagNameNS('*', 'Row'));
-  var results = [], pending = null;
+  var results = [], pending = null, inNote = false;
   rowEls.forEach(function(rowEl) {
     var cellEls = Array.from(rowEl.getElementsByTagNameNS('*', 'Cell'));
     if (!cellEls.length) return;
@@ -2732,41 +2736,43 @@ function parseDepositXML(xmlText) {
     });
     var c1 = cm[1];
     if (!c1) return;
-    // แถวรายละเอียด (A11) — ผูกกับรายการล่าสุด
-    if (c1.s === 'A11') {
-      if (pending && !pending.remark) {
-        var desc = String(c1.v || '').replace(/^\s*\d+\s+/, '').trim();   // ตัดเลขลำดับ "  1  "
-        pending.remark = desc;
-        var po = desc.match(/PO[\s-]?\d+/i);                              // ดึงเลข PO ออกมาเป็น refno
-        if (po) pending.refno = po[0].replace(/\s/g, '');
-      }
+    // แถวรายการจริง = col1 เป็น vchno (ตัวอักษร 2-3 ตัว + เลข · '*' นำหน้า = ยกเลิก) + col2 เป็นวันที่
+    //   (ต้องมีวันที่ด้วย — บรรทัดหมายเหตุอย่าง "BA500 ทต.บางเตย" หน้าตาเหมือนเลขที่เอกสาร)
+    var isDoc = /^\*?[A-Z]{2,3}\d/.test(c1.v) && /^\d{4}-\d{2}-\d{2}/.test((cm[2] && cm[2].v) || '');
+    if (!isDoc) {
+      // แถวใต้รายการ: บรรทัดรายละเอียด ("1  มัดจำค่า…") → เอาบรรทัดแรกเป็นหมายเหตุของรายการล่าสุด
+      //   พอเจอ "หมายเหตุ:" = เข้าบล็อกข้อความอิสระ (ชื่อโครงการ/สถานที่) → ไม่เอามาปนจนกว่าจะขึ้นรายการใหม่
+      if (!pending) return;
+      if (/^หมายเหตุ\s*:/.test(c1.v)) { inNote = true; return; }
+      if (inNote || pending.remark || !/^\d+\s+\S/.test(c1.v)) return;
+      var desc = String(c1.v || '').replace(/^\s*\d+\s+/, '').trim();     // ตัดเลขลำดับ "  1  "
+      pending.remark = desc;
+      var po = desc.match(/PO[\s-]?\d+/i);                                // ดึงเลข PO ออกมาเป็น refno
+      if (po) pending.refno = po[0].replace(/\s/g, '');
       return;
     }
-    // แถวรายการจริง = col1 StyleID 'A10' + vchno (ตัวอักษร 2-3 ตัว + เลข)
-    if (c1.s === 'A10' && /^[A-Z]{2,3}\d/.test(c1.v)) {
-      pending = null;
-      var vchno = c1.v;
-      if (vchno.charAt(0) === '*') return;                               // เอกสารยกเลิก → ข้าม
-      var g = function(i) { return (cm[i] && cm[i].v) || ''; };
-      var gn = function(i) { var v = g(i); return v ? (parseFloat(v.replace(/,/g, '')) || 0) : 0; };
-      var total = gn(9), cheque = gn(15);
-      var outstanding = total - cheque;                                  // ยอดค้าง = รวมทั้งสิ้น − จ่ายเช็ค
-      if (outstanding <= 0.01) return;                                   // จ่ายเคลียร์แล้ว → ข้าม
-      var row = {
-        vchdate:    g(2),                  // ISO date
-        vchno:      vchno,                 // AE / AV / PC …
-        docno:      g(5),                  // เลขที่บิล
-        cust_name:  g(4),                  // ชื่อผู้จำหน่าย
-        maincode:   g(3),                  // รหัสผู้จำหน่าย
-        Amount:     String(total),         // ยอดรวมทั้งสิ้น (incl VAT)
-        netpayment: String(outstanding),   // ยอดค้างจ่าย
-        due2:       g(10),                 // วันครบกำหนด
-        remark:     '',
-        refno:      '',
-      };
-      results.push(row);
-      pending = row;
-    }
+    pending = null; inNote = false;
+    var vchno = c1.v;
+    if (vchno.charAt(0) === '*') return;                                 // เอกสารยกเลิก → ข้าม
+    var g = function(i) { return (cm[i] && cm[i].v) || ''; };
+    var gn = function(i) { var v = g(i); return v ? (parseFloat(v.replace(/,/g, '')) || 0) : 0; };
+    var total = gn(9), cheque = gn(15);
+    var outstanding = total - cheque;                                    // ยอดค้าง = รวมทั้งสิ้น − จ่ายเช็ค
+    if (outstanding <= 0.01) return;                                     // จ่ายเคลียร์แล้ว → ข้าม
+    var row = {
+      vchdate:    g(2),                  // ISO date
+      vchno:      vchno,                 // AE / AV / PC …
+      docno:      g(5),                  // เลขที่บิล
+      cust_name:  g(4),                  // ชื่อผู้จำหน่าย
+      maincode:   g(3),                  // รหัสผู้จำหน่าย
+      Amount:     String(total),         // ยอดรวมทั้งสิ้น (incl VAT)
+      netpayment: String(outstanding),   // ยอดค้างจ่าย
+      due2:       g(10),                 // วันครบกำหนด
+      remark:     '',
+      refno:      '',
+    };
+    results.push(row);
+    pending = row;
   });
   return results;
 }
@@ -4357,8 +4363,13 @@ function DataPayablePage({ data, setData, toast }) {
       const diff = {};
       _PAYABLE_DIFF_FIELDS.forEach(f => {
         const oldRaw = ex[f.key];
-        // กัน false-positive: ถ้าของเดิมไม่มีค่า field นี้ (schema ต่าง) ไม่ถือว่า "เปลี่ยน"
-        if (oldRaw === undefined || oldRaw === null || String(oldRaw).trim() === '') return;
+        // ของเดิมว่าง: ตัวเลขไม่ถือว่า "เปลี่ยน" (กัน false-positive) · แต่ข้อความ/วันที่ที่ไฟล์มีค่ามา = เติมให้
+        //   (เดิมข้ามหมด ⇒ หมายเหตุที่เคยว่างจะไม่มีวันถูกเติม แม้ไฟล์รอบใหม่มีมาครบ — แถวขึ้น "เหมือนเดิม")
+        if (oldRaw === undefined || oldRaw === null || String(oldRaw).trim() === '') {
+          const nw = obj[f.key];
+          if (f.type !== 'number' && nw != null && String(nw).trim() !== '') diff[f.key] = { old: '', new: nw };
+          return;
+        }
         if (_payableNormCmp(oldRaw, f.type) !== _payableNormCmp(obj[f.key], f.type)) {
           diff[f.key] = { old: oldRaw, new: obj[f.key] };
         }
