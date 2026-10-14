@@ -321,45 +321,88 @@
    *   6. คล้ายของเดิมบ้าง                                     → ขอให้ยืนยัน
    *   7. ไม่เคยเจอ                                            → รายการใหม่
    * ★ เกณฑ์ชั้น 5 ตั้งไว้ "แน่นเกินไว้ก่อน": จากการวัดกับข้อมูลจริง 1,185 แถว
-   *   ยอมทายน้อยลงแต่ถูก ~94% ดีกว่าทายเยอะแล้วถูก 24% (ผู้ใช้ต้องไล่แก้เอง)   */
+   *   ยอมทายน้อยลงแต่ถูก ~94% ดีกว่าทายเยอะแล้วถูก 24% (ผู้ใช้ต้องไล่แก้เอง)
+   * ★ เสนอเฉพาะหมวดที่ "ฝั่งเงิน" ตรงกับรายการ (คู่กับ WTP 2026-10-14 — ผู้ใช้ทัก: เงินเข้าจากคู่ค้าที่ปกติจ่าย
+   *   ได้หมวดจ่ายแบบ "มั่นใจ") — เงินเข้า = หมวดรับ · เงินออก = หมวดจ่าย (ฝั่งของหมวดตาม cfcFlowOf) ·
+   *   ทุกชั้นกรองหมวดอีกฝั่งทิ้งก่อนนับ · เลือกเองยังข้ามฝั่งได้ (รับคืนลงใต้หมวดจ่ายมีจริง) แค่ขึ้นป้ายเตือน
+   * ★ การยืนยันผูกกับ "บรรทัด" (line:<row.key>) ไม่ใช่ทั้งเลขเอกสาร (ผู้ใช้ทัก: เลขเดียวกัน 2 บรรทัดคนละยอด
+   *   ไม่จำเป็นต้องลงหมวดเดียวกัน) · "สอนระบบ" จากไฟล์เก็บรายบรรทัดด้วย docamt:<เลข>|<ยอดมีเครื่องหมาย>
+   *   · กฎ doc:<เลข> แบบเก่ายังอ่าน แต่ล็อกเฉพาะเลขที่มีบรรทัดเดียว (หลายบรรทัด = ขอให้ยืนยัน) */
   const cfcGrams = (s) => { const x = cfcNorm(s); const g = []; for (let i = 0; i < x.length - 2; i++) g.push(x.slice(i, i + 3)); return g; };
   const cfcTop = (o) => { if (!o) return null; const e = Object.entries(o).sort((a, b) => b[1] - a[1]); return e.length ? e[0] : null; };
+  // ฝั่งเงินของรายการ (แถวใบจ่ายเป็นเงินออกเสมอ)
+  const cfcRowDir = (r) => (!r ? '' : r.in > 0 ? 'in' : r.out > 0 ? 'out' : '');
+  // คีย์รายบรรทัดจากเลขเอกสาร + ยอด (เงินเข้า +, เงินออก −) — ใช้ทั้งตอนสอนจากไฟล์และตอนเสนอ
+  const cfcDocAmtKey = (docNo, inAmt, outAmt) => cfcT(docNo) + '|' + Math.round(((inAmt || 0) - (outAmt || 0)) * 100);
+  /* เพิ่มกฎ text/memo/vendor — หมวดคนละฝั่งเงินไม่ทับกัน: ของเดิมอีกฝั่งย้ายไปเก็บใน alt
+     (ยืนยันเงินเข้าของคู่ค้าเป็นหมวดรับ แล้วกฎหมวดจ่ายของคู่ค้าเดียวกันต้องยังอยู่ให้รายการจ่าย) */
+  function cfcRuleAdd(map, k, cat, meta, catFlow) {
+    const cur = map[k], fl = c => (catFlow && catFlow[c]) || 'out', f = fl(cat);
+    if (!cur || !cur.cat) { map[k] = { cat, n: 1, by: meta.by, at: meta.at }; return; }
+    const alt = Object.assign({}, cur.alt);
+    let n = 1;
+    if (cur.cat === cat) n = (Number(cur.n) || 1) + 1;
+    else if (fl(cur.cat) !== f) {
+      n = (Number(alt[cat]) || 0) + 1;
+      Object.keys(alt).forEach(c => { if (fl(c) === f) delete alt[c]; });
+      alt[cur.cat] = Number(cur.n) || 1;
+    }
+    map[k] = Object.assign({ cat, n, by: meta.by, at: meta.at }, Object.keys(alt).length ? { alt } : {});
+  }
 
-  function cfcBuildEngine(rules, catAct) {
-    const byDoc = {}, byText = {}, byMemo = {}, byVendor = {}, gram = {}, gramN = {};
+  function cfcBuildEngine(rules, catAct, catFlow) {
+    const byLine = {}, byDocAmt = {}, byDoc = {}, byText = {}, byMemo = {}, byVendor = {}, gram = {}, gramN = {};
+    const add = (o, key, cat, n) => { const e = o[key] || (o[key] = {}); e[cat] = (e[cat] || 0) + n; };
     Object.keys(rules || {}).forEach(k => {
       const r = rules[k]; if (!r || !r.cat) return;
       const i = k.indexOf(':'); if (i < 0) return;
       const kind = k.slice(0, i), key = k.slice(i + 1), n = Number(r.n) || 1;
-      if (kind === 'doc') byDoc[key] = r;
-      else if (kind === 'vendor') { (byVendor[key] = byVendor[key] || {})[r.cat] = ((byVendor[key] || {})[r.cat] || 0) + n; }
-      else if (kind === 'memo') { (byMemo[key] = byMemo[key] || {})[r.cat] = ((byMemo[key] || {})[r.cat] || 0) + n; }
-      else if (kind === 'text') {
-        (byText[key] = byText[key] || {})[r.cat] = ((byText[key] || {})[r.cat] || 0) + n;
-        new Set(cfcGrams(key)).forEach(g => { (gram[g] = gram[g] || {})[r.cat] = ((gram[g] || {})[r.cat] || 0) + n; gramN[g] = (gramN[g] || 0) + n; });
-      }
+      if (kind === 'line') { byLine[key] = r; return; }
+      if (kind === 'docamt') { byDocAmt[key] = r; return; }
+      if (kind === 'doc') { byDoc[key] = r; return; }
+      // r.alt = หมวดหัวแถวของ "อีกฝั่งเงิน" ใต้คีย์เดียวกัน (คู่ค้าที่มีทั้งรับและจ่าย)
+      const each = (fn) => { fn(r.cat, n); Object.keys(r.alt || {}).forEach(c => fn(c, Number(r.alt[c]) || 1)); };
+      if (kind === 'vendor') each((c, m) => add(byVendor, key, c, m));
+      else if (kind === 'memo') each((c, m) => add(byMemo, key, c, m));
+      else if (kind === 'text') each((c, m) => {
+        add(byText, key, c, m);
+        new Set(cfcGrams(key)).forEach(g => { add(gram, g, c, m); gramN[g] = (gramN[g] || 0) + m; });
+      });
     });
     const withAct = (cat, why, tier) => ({ cat, act: catAct[cat] || '', why, tier });
+    const fl = (cat) => (catFlow && catFlow[cat]) || '';
     return function predict(line) {
+      if (byLine[line.key]) return withAct(byLine[line.key].cat, 'ยืนยันไว้แล้วสำหรับรายการนี้', 'locked');
       const d = cfcT(line.docNo);
-      if (byDoc[d]) return withAct(byDoc[d].cat, 'ยืนยันไว้แล้วสำหรับเอกสารใบนี้', 'locked');
+      const fa = byDocAmt[cfcDocAmtKey(d, line.in, line.out)];
+      if (fa) return withAct(fa.cat, 'ลงไว้แล้วในไฟล์ CASH FLOW เดิม (เลขเอกสาร + ยอดตรง)', 'locked');
+      const dir = cfcRowDir(line);
+      // หมวดฝั่งเดียวกับรายการ (โอน/หมวดที่ไม่รู้ฝั่ง = ผ่าน)
+      const fits = (cat) => { const f = fl(cat); return !dir || !f || f === 'both' || f === dir; };
+      const only = (o) => { if (!o) return null; const x = {}; let any = 0; Object.keys(o).forEach(c => { if (fits(c)) { x[c] = o[c]; any = 1; } }); return any ? x : null; };
+      const legacy = byDoc[d];
+      if (legacy) {
+        if ((line.docN || 1) <= 1) return withAct(legacy.cat, 'ยืนยันไว้แล้วสำหรับเอกสารใบนี้', 'locked');
+        if (fits(legacy.cat)) return withAct(legacy.cat, 'เคยยืนยันเลข ' + d + ' ไว้ทั้งใบ แต่ใบนี้มี ' + line.docN + ' บรรทัด — ตรวจทีละบรรทัด', 'ask');
+      }
       const pre = cfcDocPre(d);
-      if (CFC_PREFIX_RULE[pre]) return withAct(CFC_PREFIX_RULE[pre], 'เลขเอกสารขึ้นต้น ' + pre + ' = ' + (pre === 'BT' ? 'ใบโอนระหว่างบัญชี' : 'ใบถอน/ค่าธรรมเนียม'), 'auto');
+      if (CFC_PREFIX_RULE[pre] && fits(CFC_PREFIX_RULE[pre])) return withAct(CFC_PREFIX_RULE[pre], 'เลขเอกสารขึ้นต้น ' + pre + ' = ' + (pre === 'BT' ? 'ใบโอนระหว่างบัญชี' : 'ใบถอน/ค่าธรรมเนียม'), 'auto');
       const text = line.matchText || '';
-      const et = cfcTop(byText[cfcNorm(text)]);
+      const et = cfcTop(only(byText[cfcNorm(text)]));
       if (et) return withAct(et[0], 'ข้อความตรงกับที่เคยลงไว้ (' + et[1] + ' ครั้ง)', 'auto');
       // ★ คำอธิบายรายการชนะชื่อคู่ค้า — คนคนเดียวเบิกได้หลายเรื่อง
       //   (เคสจริง: "ค่าที่พักและค่าตั๋วเครื่องบิน / คุณอรวรรณ" ถูกกฎคู่ค้าลากไป "ค่าใช้จ่ายเครื่อง BA")
-      const em = cfcTop(byMemo[cfcNorm(line.memo || '')]);
+      const em = cfcTop(only(byMemo[cfcNorm(line.memo || '')]));
       if (em && em[1] >= 2) return withAct(em[0], 'คำอธิบายรายการเดิม (' + em[1] + ' ครั้ง)', 'auto');
       // คู่ค้า: ลองทั้งชื่อจากบรรทัดธนาคาร และชื่อผู้รับเงินจากใบสำคัญจ่าย
       const vkeys = [];
       [line.payee, line.pvPayee].forEach(n => { const k = cfcVendorKey(n); if (k.length > 3 && vkeys.indexOf(k) < 0) vkeys.push(k); });
-      let bestV = null;
-      vkeys.forEach(k => { const e = cfcTop(byVendor[k]); if (e && (!bestV || e[1] > bestV[1])) bestV = e; });
+      let bestV = null, rawV = false;
+      vkeys.forEach(k => { if (byVendor[k]) rawV = true; const e = cfcTop(only(byVendor[k])); if (e && (!bestV || e[1] > bestV[1])) bestV = e; });
+      // gram ที่เคยเจอแต่ในหมวดอีกฝั่ง ไม่นับเป็น "รู้จัก" (cover) — กันข้อความรายการจ่ายดันหมวดรับขึ้นเป็นมั่นใจ
       const G = new Set(cfcGrams(text)); const sc = {}; let cover = 0;
       G.forEach(g => {
-        const c = gram[g]; if (!c) return;
+        const c = only(gram[g]); if (!c) return;
         const idf = 1 / Math.log(2 + gramN[g]); cover += idf;
         Object.entries(c).forEach(([k, n]) => { sc[k] = (sc[k] || 0) + idf * n / gramN[g]; });
       });
@@ -378,6 +421,7 @@
         if (share >= 0.35) return withAct(b[0], 'คล้ายรายการเดิม — ขอให้ยืนยัน', 'ask');
         return withAct(b[0], 'พอเดาได้แต่ไม่มั่นใจ', 'ask');
       }
+      if (rawV) return withAct('', 'คู่ค้านี้เคยลงแต่หมวด' + (dir === 'in' ? 'จ่าย' : 'รับ') + ' — รายการนี้เป็นเงิน' + (dir === 'in' ? 'เข้า' : 'ออก') + ' เลือกหมวด' + (dir === 'in' ? 'รับ' : 'จ่าย') + 'เอง', 'new');
       return withAct('', 'ไม่เคยเจอรูปแบบนี้', 'new');
     };
   }
@@ -1866,6 +1910,7 @@
     const [pushAsk, setPushAsk] = useState(false);   // หน้าต่างยืนยัน "จะดันเดือนไหน"
     const [acctAsk, setAcctAsk] = useState(false);   // หน้าต่างเลือกบัญชีให้รายการที่ไม่มีเลขบัญชี
     const [cutAsk, setCutAsk] = useState(false);     // หน้าต่างดู/เอากลับรายการที่ตัดออก
+    const [flowF, setFlowF] = useState(false);       // กรองเฉพาะรายการที่หมวดสวนฝั่งเงิน (แถบเตือน)
     const [codeF, setCodeF] = useState('');          // ชิปหมวดที่เลือกในแท็บ "มั่นใจ": '' (ดูทั้งหมด) | 'c:<หมวด>'
     // ภาพรวมธนาคาร กางตารางรายบัญชีไหม — ค่าเริ่ม = พับ (บัญชีเยอะเกะกะ · ผู้ใช้ขอ 2026-09-11) · จำในเครื่องต่อคน
     const [ovOpen, setOvOpen] = useState(() => { try { return localStorage.getItem('bio-cfcode-ov') === '1'; } catch (e) { return false; } });
@@ -1913,6 +1958,7 @@
       return out;
     }, [store.master]);
     const catAct = useMemo(() => { const o = {}; master.forEach(m => { o[m.name] = m.act; }); return o; }, [master]);
+    const catFlow = useMemo(() => { const o = {}; master.forEach(m => { o[m.name] = cfcFlowOf(m); }); return o; }, [master]);
     const rules = useMemo(() => (store.rules && store.rules.map) || {}, [store.rules]);
     /* ⚠️ ใบสำคัญจ่ายที่เอกสารไม่บอกบัญชีต้นทาง (ใบอนุมัติจ่าย AV/AE · ใบ PS ที่เว้นช่องธนาคาร)
        — ปล่อยว่างไม่ได้ ต้องให้คนเลือก. เก็บเป็น "เลขที่เอกสาร → เลขบัญชี" (หรือ 'dup' = ซ้ำกับ
@@ -1923,7 +1969,7 @@
        เก็บเป็น rowKey → {why,by,at} · sync ทั้งทีม · **ตัดที่ชั้นแสดงผล ไม่ลบข้อมูลต้นทาง**
        (เอากลับได้เสมอ · pvVouchers/บรรทัดธนาคารยังอยู่ครบให้หน้าอื่นใช้) */
     const excluded = useMemo(() => (store.exclude && store.exclude.map) || {}, [store.exclude]);
-    const engine = useMemo(() => cfcBuildEngine(rules, catAct), [rules, catAct]);
+    const engine = useMemo(() => cfcBuildEngine(rules, catAct, catFlow), [rules, catAct, catFlow]);
 
     /* ── บรรทัดดิบทั้งหมดที่นำเข้าไว้ ── */
     const buckets = useMemo(() => {
@@ -2040,7 +2086,6 @@
             pvPayee: r.payee, matchHow: 'ps', psSrc: srcTag,
             matchText: [r.memo, r.payee].filter(Boolean).join(' '),
           });
-          row.sug = engine(row);
           made.push(row);
         });
         vEntries.push({ v: v, rows: made });
@@ -2056,7 +2101,11 @@
       /* (ข) งบกระทบยอด — เอาเฉพาะบรรทัดที่ "ไม่มีใน 291" (เงินเข้า/โอน/ค่าธรรมเนียม/ใบอนุมัติจ่าย) */
       const bankRows = [];
       const sel = buckets.filter(b => (!ym || b.ym === ym) && (!acct || b.acctNo === acct));
-      sel.forEach(b => (b.lines || []).forEach(L => {
+      sel.forEach(b => { const occ = {}; (b.lines || []).forEach(L => {
+        /* คีย์บรรทัด = บัญชี-เดือน|เลขที่|ยอด · เลข+ยอดซ้ำในไฟล์เดียว (เช่น รับ 800 / จ่าย 800 เลขเดียวกัน) ต่อ #2, #3…
+           (เดิมคีย์ชน = ยืนยัน/ตัดออกบรรทัดหนึ่ง ติดอีกบรรทัดไปด้วย) · นับก่อนข้ามบรรทัดที่ใบจ่ายครอบแล้ว → คีย์คงที่ */
+        const k0 = b.id + '|' + L.docNo + '|' + (L.out || L.in); occ[k0] = (occ[k0] || 0) + 1;
+        const lineKey = occ[k0] > 1 ? k0 + '#' + occ[k0] : k0;
         // ลงรหัสจากบิลในใบจ่ายไปแล้ว → ไม่ต้องเอาบรรทัดธนาคารมาซ้ำ
         // (เลขตรงเป๊ะ = ตัดได้เลย · เลขผ่อนรูป = ต้องยอดตรงด้วย ไม่งั้นเสี่ยงตัดผิดใบ)
         const lk = norm(L.docNo), lp = cfcRefParts(L.docNo), lamt = Math.abs(L.out || L.in);
@@ -2068,15 +2117,14 @@
         const pvPayee = pv ? cfcT(pv.Payee) : '';
         const matchText = [L.memo, L.payee, pvPayee, bills.map(s => cfcT(s.note)).join(' ')].filter(Boolean).join(' ');
         const row = Object.assign({}, L, {
-          key: b.id + '|' + L.docNo + '|' + (L.out || L.in),
+          key: lineKey,
           bucketId: b.id, acctLabel: b.acctLabel || L.acctLabel, pv, pvPayee, bills,
           matchHow: m ? m.how : null, matchNear: m && m.near, matchText,
           wht: pv ? cfcNum(pv.WHT) : 0,
         });
-        row.sug = engine(row);
         row.src = 'bank';
         bankRows.push(row);
-      }));
+      }); });
       /* ⚠️⚠️ ใบ "อนุมัติจ่าย" (AV/AE) ไม่มี เลขเช็ค · บิลย่อย · บัญชีต้นทาง เลย (ไฟล์ต้นทางไม่มีคอลัมน์)
          ⇒ `cfcCoverKeys` จับคู่กับบรรทัดธนาคารไม่ได้ → **เงินก้อนเดียวถูกนับ 2 รอบ**
             (ใบอนุมัติจ่าย 1 + บรรทัดธนาคารอีก 1) ยอดจ่ายเกินจริง งบเลยกระทบยอดไม่ลงตัว
@@ -2099,13 +2147,17 @@
         if (!L.pvPayee) L.pvPayee = v.payee;
         L.matchHow = L.matchHow || 'apv';
         L.matchText = [L.memo, L.payee, L.pvPayee, v.memo].filter(Boolean).join(' ');
-        L.sug = engine(L);                                 // เสนอหมวดใหม่หลังได้ชื่อผู้รับเพิ่ม
+                                                           // (เสนอหมวดรอบสุดท้ายด้านล่าง — ได้ชื่อผู้รับเพิ่มแล้ว)
         e.dropped = true;
         dupPaired.push({ doc: v.doc, amt: amt, iso: v.iso, payee: v.payee });
       });
       vEntries.forEach(e => { if (!e.dropped) e.rows.forEach(r => out.push(r)); });
       bankRows.forEach(r => out.push(r));
       out.dupPaired = dupPaired;
+      /* เสนอหมวดหลังรวมแถวครบแล้วเท่านั้น — ต้องรู้ก่อนว่าเลขเอกสารไหนมีหลายบรรทัด (docN):
+         กฎ doc:<เลข> แบบเก่าล็อกได้เฉพาะเลขที่มีบรรทัดเดียว */
+      const docN = {}; out.forEach(r => { const d = cfcT(r.docNo); docN[d] = (docN[d] || 0) + 1; });
+      out.forEach(r => { r.docN = docN[cfcT(r.docNo)] || 1; r.sug = engine(r); });
       // เรียงแบบเดียวกับชีต "รวมทุกบัญชี": วันที่ → บัญชี → ลำดับเดิมในไฟล์
       const sorted = out.sort((a, b) => (a.iso !== b.iso ? (a.iso < b.iso ? -1 : 1)
         : (a.acctNo !== b.acctNo ? String(a.acctNo).localeCompare(String(b.acctNo))
@@ -2116,8 +2168,11 @@
       return vis;
     }, [buckets, psBuckets, data.pvVouchers, ym, acct, pvIdx, engine, acctOf, acctFix, acctLabelOf, bankMaster, excluded]);
 
+    /* หมวดสวนฝั่งเงิน — เงินเข้าแต่ลงหมวดจ่าย / เงินออกแต่ลงหมวดรับ (ส่วนใหญ่ = ที่ยืนยันไว้ก่อนเครื่องเสนอแยกฝั่ง)
+       ไม่บล็อก (รับคืนลงใต้หมวดจ่ายมีจริง) แค่ชี้ให้เห็น + กรองดูได้ */
+    const flowBad = (r) => { const f = r.sug.cat ? catFlow[r.sug.cat] : ''; const d = cfcRowDir(r); return (f === 'in' || f === 'out') && !!d && f !== d; };
     const stat = useMemo(() => {
-      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [],
+      const s = { n: rows.length, locked: 0, auto: 0, ask: 0, new: 0, inSum: 0, outSum: 0, noPv: 0, suspect: 0, orphan: 0, orphanNames: [], flowBad: 0,
         noAcct: 0, noAcctSum: 0, dup: (rows.dupPaired || []).length,
         dupSum: (rows.dupPaired || []).reduce((a, x) => a + x.amt, 0) };
       const known = new Set(master.map(m => m.name));
@@ -2125,12 +2180,13 @@
         // หมวดที่เคยลงไว้ แต่ตอนนี้ไม่มีในงบหน้าแรกแล้ว → ยอดจะหายจากชีตสรุป ต้องเตือน
         if (r.sug.cat && !known.has(r.sug.cat)) { s.orphan++; if (s.orphanNames.indexOf(r.sug.cat) < 0) s.orphanNames.push(r.sug.cat); }
         s[r.sug.tier]++; s.inSum += r.in; s.outSum += r.out;
+        if (flowBad(r)) s.flowBad++;
         if (!cfcDigits(r.acctNo)) { s.noAcct++; s.noAcctSum += (r.out || 0) + (r.in || 0); }
         if (r.matchHow === 'suspect') s.suspect++;
         else if (!r.pv && r.out > 0) s.noPv++;
       });
       return s;
-    }, [rows, master]);
+    }, [rows, master, catFlow]);
 
     /* ยอดยกมาที่ประกาศไว้ในไฟล์ ราย (บัญชี|เดือน) */
     const declaredOpen = useMemo(() => {
@@ -2288,11 +2344,12 @@
       const needle = cfcNorm(q);
       return codeRows.filter(r => {
         if (tab !== 'all' && r.sug.tier !== tab) return false;
+        if (flowF && !flowBad(r)) return false;
         if (tab === 'all' && q === '' ) return true;
         if (!needle) return true;
         return cfcNorm([r.docNo, r.note, r.pvPayee, r.sug.cat, r.pv && r.pv.PL_PV_No].join(' ')).includes(needle);
       });
-    }, [codeRows, tab, q]);
+    }, [codeRows, tab, q, flowF, catFlow]);
     /* ปุ่มยืนยันทั้งก้อน — มีเฉพาะแท็บ "มั่นใจ": ยืนยันเฉพาะที่ระบบมั่นใจ + มีหมวดแล้ว + ที่แสดงอยู่ (ตามหมวด/คำค้นที่กรอง)
        ⚠️ ห้ามมีในแท็บ "ทั้งหมด" — ปุ่มเดียวจะยืนยันรวมรายการที่ระบบยังไม่มั่นใจไปด้วย */
     const pendingShown = useMemo(() => (tab === 'auto' ? shown.filter(r => r.sug.tier === 'auto' && r.sug.cat) : []), [shown, tab]);
@@ -2307,14 +2364,16 @@
       const map = Object.assign({}, rules);
       const who = (typeof WTPAuth !== 'undefined' && WTPAuth.currentUser && WTPAuth.currentUser()) || null;
       const meta = { cat, by: who ? (who.displayName || who.username) : '', at: new Date().toISOString() };
-      if (!cat) { delete map['doc:' + row.docNo]; learn(map, 'ล้างหมวดของ ' + row.docNo + ' แล้ว'); return; }
-      map['doc:' + row.docNo] = Object.assign({ n: 1 }, meta);
-      const tk = 'text:' + cfcNorm(row.matchText);
-      if (cfcNorm(row.matchText)) map[tk] = { cat, n: ((map[tk] && map[tk].cat === cat ? Number(map[tk].n) || 1 : 0) + 1), by: meta.by, at: meta.at };
+      /* ★ ยืนยัน = ผูกกับบรรทัดนี้ (line:<row.key>) — เลขเอกสารเดียวกันหลายบรรทัดลงคนละหมวดได้
+           กฎ doc:<เลข> แบบเก่า + docamt: ของบรรทัดนี้ลบทิ้ง (ไม่งั้นบรรทัดอื่นเลขเดียวกันถูกลากตาม / ชนะการยืนยันใหม่) */
+      delete map['doc:' + row.docNo]; delete map['docamt:' + cfcDocAmtKey(row.docNo, row.in, row.out)];
+      if (!cat) { delete map['line:' + row.key]; learn(map, 'ล้างหมวดของ ' + row.docNo + ' แล้ว'); return; }
+      map['line:' + row.key] = Object.assign({ n: 1 }, meta);
+      if (cfcNorm(row.matchText)) cfcRuleAdd(map, 'text:' + cfcNorm(row.matchText), cat, meta, catFlow);
       const mk = cfcNorm(row.memo || '');
-      if (mk.length > 3) map['memo:' + mk] = { cat, n: ((map['memo:' + mk] && map['memo:' + mk].cat === cat ? Number(map['memo:' + mk].n) || 1 : 0) + 1), by: meta.by, at: meta.at };
+      if (mk.length > 3) cfcRuleAdd(map, 'memo:' + mk, cat, meta, catFlow);
       const vk = cfcVendorKey(row.payee || row.pvPayee || '');
-      if (vk.length > 3) map['vendor:' + vk] = { cat, n: ((map['vendor:' + vk] && map['vendor:' + vk].cat === cat ? Number(map['vendor:' + vk].n) || 1 : 0) + 1), by: meta.by, at: meta.at };
+      if (vk.length > 3) cfcRuleAdd(map, 'vendor:' + vk, cat, meta, catFlow);
       learn(map, 'บันทึก "' + cat + '" + จำไว้ใช้ครั้งหน้าแล้ว');
     }
     /* ตัด/เอากลับรายการที่ไม่เกี่ยวข้อง — ตัดที่ชั้นแสดงผลเท่านั้น ไม่แตะข้อมูลต้นทาง */
@@ -2353,11 +2412,11 @@
       const who = (typeof WTPAuth !== 'undefined' && WTPAuth.currentUser && WTPAuth.currentUser()) || null;
       const by = who ? (who.displayName || who.username) : '', at = new Date().toISOString();
       cand.forEach(r => {
-        map['doc:' + r.docNo] = { cat: r.sug.cat, n: 1, by, at };
-        const tk = 'text:' + cfcNorm(r.matchText);
-        if (cfcNorm(r.matchText)) map[tk] = { cat: r.sug.cat, n: ((map[tk] && map[tk].cat === r.sug.cat ? Number(map[tk].n) || 1 : 0) + 1), by, at };
+        delete map['doc:' + r.docNo];
+        map['line:' + r.key] = { cat: r.sug.cat, n: 1, by, at };
+        if (cfcNorm(r.matchText)) cfcRuleAdd(map, 'text:' + cfcNorm(r.matchText), r.sug.cat, { by, at }, catFlow);
         const mk2 = cfcNorm(r.memo || '');
-        if (mk2.length > 3) map['memo:' + mk2] = { cat: r.sug.cat, n: ((map['memo:' + mk2] && map['memo:' + mk2].cat === r.sug.cat ? Number(map['memo:' + mk2].n) || 1 : 0) + 1), by, at };
+        if (mk2.length > 3) cfcRuleAdd(map, 'memo:' + mk2, r.sug.cat, { by, at }, catFlow);
       });
       learn(map, 'ยืนยัน ' + cand.length + ' รายการ (' + cats.length + ' หมวด) แล้ว');
       if (codeF) setCodeF('');
@@ -2379,8 +2438,22 @@
     function remapRuleCat(from, to) {
       const map = {}; let n = 0;
       Object.keys(rules).forEach(k => {
-        const v = rules[k];
-        if (v && v.cat === from) { n++; if (to) map[k] = Object.assign({}, v, { cat: to }); return; }
+        let v = rules[k];
+        if (v && v.alt && v.alt[from] != null) {        // หมวดอีกฝั่งเงินที่เก็บไว้ใต้คีย์เดียวกัน
+          const alt = Object.assign({}, v.alt); n++;
+          if (to && to !== v.cat) alt[to] = (Number(alt[to]) || 0) + (Number(alt[from]) || 1);
+          delete alt[from];
+          v = Object.assign({}, v); if (Object.keys(alt).length) v.alt = alt; else delete v.alt;
+        }
+        if (v && v.cat === from) {
+          n++;
+          if (to) map[k] = Object.assign({}, v, { cat: to });
+          else if (v.alt) {                              // ลบหมวดหลัก → หมวดอีกฝั่งขึ้นเป็นหลักแทน (ไม่ทิ้งทั้งกฎ)
+            const t = cfcTop(v.alt), alt = Object.assign({}, v.alt); delete alt[t[0]];
+            map[k] = Object.assign({}, v, { cat: t[0], n: t[1] }); if (Object.keys(alt).length) map[k].alt = alt; else delete map[k].alt;
+          }
+          return;
+        }
         map[k] = v;
       });
       return { map, n };
@@ -2512,20 +2585,25 @@
         }
         const canon = cfcCanonBuilder(nextMaster);
         const map = Object.assign({}, rules);
-        const at = new Date().toISOString();
+        const at = new Date().toISOString(), meta = { by: 'ไฟล์เดิม', at };
+        const flowNext = {}; nextMaster.forEach(m => { flowNext[m.name] = cfcFlowOf(m); });
         let learned = 0; const missed = {};
         p.history.forEach(h => {
           const cat = canon(h.cat);
           if (!cat) { missed[h.cat] = (missed[h.cat] || 0) + 1; return; }
           learned++;
           const text = [h.memo, h.payee].filter(Boolean).join(' ');
-          const tk = 'text:' + cfcNorm(text);
-          if (cfcNorm(text)) map[tk] = { cat, n: ((map[tk] && map[tk].cat === cat ? Number(map[tk].n) || 1 : 0) + 1), by: 'ไฟล์เดิม', at };
+          if (cfcNorm(text)) cfcRuleAdd(map, 'text:' + cfcNorm(text), cat, meta, flowNext);
           const mk = cfcNorm(h.memo || '');
-          if (mk.length > 3) map['memo:' + mk] = { cat, n: ((map['memo:' + mk] && map['memo:' + mk].cat === cat ? Number(map['memo:' + mk].n) || 1 : 0) + 1), by: 'ไฟล์เดิม', at };
+          if (mk.length > 3) cfcRuleAdd(map, 'memo:' + mk, cat, meta, flowNext);
           const vk = cfcVendorKey(h.payee || '');
-          if (vk.length > 3) map['vendor:' + vk] = { cat, n: ((map['vendor:' + vk] && map['vendor:' + vk].cat === cat ? Number(map['vendor:' + vk].n) || 1 : 0) + 1), by: 'ไฟล์เดิม', at };
-          if (h.docNo) map['doc:' + h.docNo] = { cat, n: 1, by: 'ไฟล์เดิม', at };
+          if (vk.length > 3) cfcRuleAdd(map, 'vendor:' + vk, cat, meta, flowNext);
+          /* ★ ไฟล์ลงหมวดรายบรรทัด → เก็บเป็น เลขเอกสาร + ยอด (เลขเดียวกัน 2 บรรทัดคนละหมวดได้)
+               doc:<เลข> ที่สอนจากไฟล์รอบก่อนลบทิ้ง (ทั้งใบ = ลากทุกบรรทัดไปหมวดเดียว) · ของที่คนยืนยันไม่แตะ */
+          if (h.docNo) {
+            if (map['doc:' + h.docNo] && map['doc:' + h.docNo].by === 'ไฟล์เดิม') delete map['doc:' + h.docNo];
+            map['docamt:' + cfcDocAmtKey(h.docNo, h.in, h.out)] = { cat, n: 1, by: 'ไฟล์เดิม', at };
+          }
         });
         const next = Object.assign({}, store, {
           master: { items: nextMaster, at },
@@ -2896,7 +2974,7 @@
           {[['all', 'ทั้งหมด', stat.n, C.mut], ['locked', CFC_TIER.locked.label, stat.locked, C.pos],
             ['auto', CFC_TIER.auto.label, stat.auto, C.info], ['ask', CFC_TIER.ask.label, stat.ask, C.warn],
             ['new', CFC_TIER.new.label, stat.new, C.neg]].map(([k, label, n, col]) => (
-            <button key={k} onClick={() => { setTab(k); if (k !== 'auto') setCodeF(''); }} style={{
+            <button key={k} onClick={() => { setTab(k); setFlowF(false); if (k !== 'auto') setCodeF(''); }} style={{
               cursor: 'pointer', border: '1px solid ' + (tab === k ? col : C.line), background: tab === k ? col : '#fff',
               color: tab === k ? '#fff' : C.ink, borderRadius: 12, padding: '8px 16px', fontSize: 13, fontWeight: 700,
             }}>{label} <span style={{ opacity: .8 }}>{n}</span></button>
@@ -3128,8 +3206,10 @@
         )}
 
         {/* แถบเตือน */}
-        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0 || stat.noAcct > 0 || stat.dup > 0 || (rows.cut || []).length > 0) && (
+        {(stat.suspect > 0 || stat.noPv > 0 || stat.orphan > 0 || stat.noAcct > 0 || stat.dup > 0 || stat.flowBad > 0 || flowF || (rows.cut || []).length > 0) && (
           <div style={Object.assign({}, card, { padding: '10px 16px', borderColor: '#f0dcb0', background: C.warnBg, fontSize: 12.5, color: C.warn })}>
+            {(stat.flowBad > 0 || flowF) && <div>⚠️ <strong>{stat.flowBad} รายการ</strong> หมวดสวนฝั่งเงิน — <strong>เงินเข้าแต่ลงหมวดจ่าย</strong> หรือเงินออกแต่ลงหมวดรับ (เงินเข้าควรเป็นหมวดรับ · เงินออกเป็นหมวดจ่าย){' '}
+              <button onClick={() => { const n = !flowF; setFlowF(n); if (n) { setTab('all'); setCodeF(''); } }} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, border: '1px solid ' + C.warn, background: '#fff', color: C.warn, borderRadius: 8, padding: '2px 10px' }}>{flowF ? 'ดูทั้งหมด' : 'ดูเฉพาะรายการนี้'}</button></div>}
             {stat.orphan > 0 && <div>⚠️ <strong>{stat.orphan} รายการ</strong> ลงหมวดที่<strong>ไม่มีในงบหน้าแรกแล้ว</strong> ({stat.orphanNames.slice(0, 3).join(' · ')}{stat.orphanNames.length > 3 ? ' และอีก ' + (stat.orphanNames.length - 3) : ''}) — ยอดจะไม่เข้าบรรทัดไหนในชีตสรุป ให้เพิ่มหมวดนี้กลับในไฟล์ CASH FLOW แล้วกด "สอนระบบ" ใหม่ หรือเลือกหมวดใหม่ให้รายการเหล่านี้</div>}
             {stat.suspect > 0 && <div>⚠️ <strong>{stat.suspect} รายการ</strong> เลขเช็คคล้ายใบสำคัญจ่ายในระบบแต่ <strong>ยอดไม่ตรง</strong> — ไม่ผูกให้โดยตั้งใจ (ของจริงเคยมีเลขเช็คพิมพ์ตกหลักแล้วไปชนใบอื่น) กดขยายแถวเพื่อดูใบที่ใกล้เคียง</div>}
             {(rows.cut || []).length > 0 && <div>🗑 <strong>ตัดออกจากงบ {(rows.cut || []).length} รายการ</strong> (รวม {cfcMoney((rows.cut || []).reduce((a, r) => a + Math.abs(r.out || r.in), 0))}) — รายการที่ทำเครื่องหมายว่าไม่เกี่ยวข้อง/คีย์ผิด{' '}
@@ -3195,6 +3275,7 @@
                             return (
                               <div style={{ fontSize: 10.5, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
                                 <span style={{ color: fm.color, fontWeight: 700 }}>{fm.mark} {fm.label}</span>
+                                {flowBad(r) && <CfcChip tone="bad" title={'รายการนี้เป็นเงิน' + (cfcRowDir(r) === 'in' ? 'เข้า' : 'ออก') + ' แต่หมวดที่เลือกเป็นฝั่ง' + fm.label + ' — ถ้าไม่ใช่รับคืน/จ่ายคืนจริง เลือกหมวด' + (cfcRowDir(r) === 'in' ? 'รับ' : 'จ่าย') + 'ใหม่'}>สวนฝั่งเงิน</CfcChip>}
                                 <span style={{ color: CFC_ACT_COLOR[r.sug.act] || C.mut }}>{CFC_ACT_TH[r.sug.act] || '(ไม่นับเป็นกิจกรรม)'}</span>
                                 {tab === 'auto' && r.sug.tier === 'auto' && codeF !== 'c:' + r.sug.cat &&
                                   <button onClick={() => setCodeF('c:' + r.sug.cat)} title="กรองเฉพาะรายการที่มั่นใจของหมวดนี้ แล้วยืนยันทั้งหมวดได้ทีเดียว"
@@ -3390,6 +3471,6 @@
   Object.assign(window, {
     cfcParseBankSheet, cfcParseSettleReport, cfcVoucherToRows, cfcSummaryAoa, cfcFlowOf, cfcInsertCat, cfcMergeAppCats, cfcRuleCatCount, cfcWithExtraCats, cfcStyleSummary, cfcStyleDetail, cfcStyleCheck, cfcPvToVoucher, cfcCoverKeys, cfcParseCashflowWorkbook, cfcBuildEngine, cfcBuildPvIndex,
     cfcLoadLocal, cfcAcctSummary, cfcPrevMonth, cfcAcctKey, cfcStmClosingByYm, cfcRunCashRows, cfcOpeningTotalAt, cfcAggByAcct, cfcDigits, CFC_BANK_SEED, cfcMatchPv, cfcRefParts, cfcSplitNote, cfcVendorKey, cfcISO, cfcCanonBuilder, CFC_MASTER_SEED, cfcAutoCatChips, cfcShortCat,
-    cfcDefaultYm, cfcApplyManual, cfcCatGroups, cfcCatSearch,
+    cfcDefaultYm, cfcApplyManual, cfcCatGroups, cfcCatSearch, cfcRuleAdd, cfcRowDir, cfcDocAmtKey,
   });
 })();
