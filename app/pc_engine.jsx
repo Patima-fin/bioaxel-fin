@@ -792,6 +792,14 @@
     if (col.type === 'date') { const iso = isoOf(v); return { v: iso ? fmtDate(iso) : (v == null ? '' : String(v)), t: 's' }; }
     return { v: (v == null ? '' : String(v)), t: 's' };
   }
+  // ยอดรวมต่อคอลัมน์ (เฉพาะ money — คอลัมน์อื่นคืน null) · ใช้ทั้ง PDF + Excel ให้ตัวเลขตรงกัน
+  function pcMoneyTotals(cols, rows) {
+    return cols.map(c => {
+      if (c.type !== 'money') return null;
+      const s = rows.reduce((acc, r) => { const n = toNum(c.get ? c.get(r) : ''); return n != null ? acc + n : acc; }, 0);
+      return Math.round(s * 100) / 100;
+    });
+  }
 
   // ── export ────────────────────────────────────────────────────────────────
   function exportCSV(rows, cols, filename) {
@@ -926,7 +934,18 @@
       const cell = pcCellXl(c, r);
       return cell.v;  // value only; format applied below
     })));
+    // แถวรวมท้ายตาราง — คอลัมน์เงินเป็นสูตร SUBTOTAL(109) → กรองแล้วยอดรวมตามแถวที่เห็น
+    const totRow = headRow + 1 + sorted.length;
+    const totals = pcMoneyTotals(cols, sorted);
+    aoa.push(cols.map((c, ci) => totals[ci] != null ? totals[ci] : (ci === 0 ? 'รวม' : '')));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+    if (sorted.length) totals.forEach((t, ci) => {
+      if (t == null) return;
+      const L = XLSX.utils.encode_col(ci);
+      ws[XLSX.utils.encode_cell({ r: totRow, c: ci })].f = `SUBTOTAL(109,${L}${headRow + 2}:${L}${totRow})`;
+    });
+    pcXlRow(ws, totRow, 0, lastCol, PCXL.totalRow);
+    cols.forEach((c, ci) => { if (c.type === 'money') pcXlFmt(ws, totRow, ci, FMT_BAHT, 'right'); });
     // column widths by type
     ws['!cols'] = cols.map(c => ({ wch: c.key === '__name' || c.key === 'raw:พื้นที่' ? 42 : c.type === 'money' ? 15 : c.type === 'date' ? 13 : c.label.length > 18 ? 22 : 13 }));
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: Math.min(6, lastCol) } }];
@@ -1115,9 +1134,11 @@
       thead th{background:#21703a;color:#fff;font-weight:600;font-size:10.5px;border:none}
       thead th.r,td.r{text-align:right}thead th.c,td.c{text-align:center}
       tbody tr:nth-child(even){background:#f7faff}
+      tfoot tr.tot td{font-weight:800;background:#eaf4ec;color:#0d1f3a;border-top:2px solid #21703a;border-bottom:none;font-size:11.5px}
+      tfoot{display:table-row-group}
       .pill{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:100px}
       .foot{margin-top:30px;padding-top:12px;border-top:1px solid #e6ecf4;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}
-      @media print{.noprint{display:none}body{padding:0}.wrap{padding:14px 18px}thead th{-webkit-print-color-adjust:exact;print-color-adjust:exact}.kpi,tbody tr:nth-child(even){-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+      @media print{.noprint{display:none}body{padding:0}.wrap{padding:14px 18px}thead th{-webkit-print-color-adjust:exact;print-color-adjust:exact}.kpi,tbody tr:nth-child(even),tfoot tr.tot td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
       .btnbar{position:fixed;top:12px;right:16px;display:flex;gap:8px;z-index:9}
       .btnbar button{font:600 12px/1 'IBM Plex Sans Thai',sans-serif;padding:9px 15px;border-radius:8px;border:none;cursor:pointer;background:#2e8b4a;color:#fff;box-shadow:0 4px 14px rgba(35,72,150,.3)}
       .btnbar button.sec{background:#fff;color:#475569;border:1px solid #cbd5e1;box-shadow:none}`;
@@ -1176,9 +1197,21 @@
         if (c.type === 'date') return `<td class="c num">${txt || '—'}</td>`;
         return `<td>${esc(txt || '—')}</td>`;
       };
+      // แถวรวมท้ายตาราง — รวมเฉพาะคอลัมน์เงิน (% / วันที่ / ข้อความ ไม่รวม)
+      const totals = pcMoneyTotals(useCols, sorted);
+      const firstMoney = useCols.findIndex(c => c.type === 'money');
+      const lblSpan = firstMoney < 0 ? useCols.length : firstMoney;
+      const foot = [];
+      if (lblSpan > 0) foot.push(`<td colspan="${lblSpan}">รวม ${rows.length.toLocaleString()} โครงการ</td>`);
+      for (let i = lblSpan; i < useCols.length; i++) {
+        const c = useCols[i];
+        foot.push(totals[i] == null ? '<td></td>'
+          : `<td class="r num"${c.key === '__ar' ? ' style="color:#b45309"' : ''}>${fmtBaht(totals[i])}</td>`);
+      }
       return `<h2>ทะเบียนโครงการ (${rows.length.toLocaleString()} โครงการ · ${useCols.length} คอลัมน์)</h2>
         <table><thead><tr>${useCols.map(c => `<th${align(c.type)}>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>
-        ${sorted.map(r => `<tr>${useCols.map(c => cellHtml(c, r)).join('')}</tr>`).join('')}</tbody></table>`;
+        ${sorted.map(r => `<tr>${useCols.map(c => cellHtml(c, r)).join('')}</tr>`).join('')}</tbody>
+        <tfoot><tr class="tot">${foot.join('')}</tr></tfoot></table>`;
     };
     let body = '';
     if (kind === 'summary') body = buildSummaryBody();
