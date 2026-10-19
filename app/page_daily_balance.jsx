@@ -86,6 +86,54 @@ function MoneyInput({ value, onChange, placeholder, disabled, autoFocus, style }
   );
 }
 
+// ── ใคร/เมื่อไหร่ที่บันทึกยอด — snapshot เก็บ enteredBy (username) + takenAt (ISO) ไว้ตั้งแต่แรก
+//   แต่หน้าไม่เคยโชว์ (คู่กับ WTP) · username → ชื่อจากตาราง users → WTP_CONFIG.USERS → session
+function dbEntryName(username, users) {
+  const u = String(username || '').trim();
+  if (!u || u === 'unknown') return '';
+  const key = u.toLowerCase();
+  const same = x => String((x && x.username) || '').trim().toLowerCase() === key;
+  const hit = (users || []).find(same) || ((window.WTP_CONFIG && WTP_CONFIG.USERS) || []).find(same);
+  if (hit && hit.displayName) return hit.displayName;
+  try {
+    const s = JSON.parse(localStorage.getItem('bio-session') || 'null');
+    if (s && same(s) && s.displayName) return s.displayName;
+  } catch (_) {}
+  return u;
+}
+function dbSavedAt(snap) {
+  const iso = snap && (snap.takenAt || snap.updatedAt);
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d : null;
+}
+function dbLocalISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// เวลาแบบสั้นในช่องสถานะ: บันทึกในวันเดียวกับยอด → แค่เวลา · คนละวัน (บันทึกย้อนหลัง) → ใส่วันที่ด้วย
+function dbSavedAtShort(d, entryDate) {
+  const t = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  if (dbLocalISO(d) === entryDate) return t;
+  return `${d.toLocaleDateString('th-TH-u-ca-gregory', { day: 'numeric', month: 'short' })} ${t}`;
+}
+function dbSavedAtFull(d) {
+  return `${d.toLocaleDateString('th-TH-u-ca-gregory', { day: 'numeric', month: 'short', year: 'numeric' })} ${d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`;
+}
+
+// บรรทัดเล็กใต้ป้าย "✓ บันทึกแล้ว" — ชื่อ · เวลา (ตัด … ถ้ายาว, เต็มๆ อยู่ใน tooltip)
+function DbSavedBy({ snap, users, entryDate, maxWidth }) {
+  if (!snap) return null;
+  const name = dbEntryName(snap.enteredBy, users);
+  const d = dbSavedAt(snap);
+  if (!name && !d) return null;
+  const tip = `บันทึกโดย ${name || 'ไม่ทราบชื่อ'}${d ? ' · ' + dbSavedAtFull(d) : ''}`;
+  return (
+    <div title={tip} style={{ fontSize: 10, lineHeight: 1.3, color: 'var(--ink-400)', maxWidth, margin: '1px auto 0',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      {name || '—'}{d ? ` · ${dbSavedAtShort(d, entryDate)}` : ''}
+    </div>
+  );
+}
+
 // Diff badge
 function DiffBadge({ delta }) {
   if (delta == null || isNaN(delta)) return null;
@@ -214,6 +262,19 @@ function DailyBalanceEntryPage({ data, setData, toast }) {
     const available = (newBal != null ? newBal : (yestBal || 0)) - (hold || 0);
     return { a, ac, yestBal, newBal, delta, hold, yestHold, latestHold, available, saved: !!todayByAc[ac] };
   });
+
+  // บันทึกล่าสุดของวันที่เลือก (ทุกบัญชี) — โชว์ที่หัวหน้า "อัปเดตล่าสุด … โดย …"
+  const lastSaved = dbMemo(() => {
+    let best = null, bestT = -Infinity;
+    Object.values(todayByAc).forEach(s => {
+      const d = dbSavedAt(s);
+      const t = d ? d.getTime() : -Infinity;
+      if (!best || t > bestT) { best = s; bestT = t; }
+    });
+    if (!best) return null;
+    const names = new Set(Object.values(todayByAc).map(s => dbEntryName(s.enteredBy, data.users)).filter(Boolean));
+    return { name: dbEntryName(best.enteredBy, data.users), at: dbSavedAt(best), people: names.size };
+  }, [todayByAc, data.users]);
 
   const mainRows    = rowsWithDiff(accountsByType.main);
   const dormantRows = rowsWithDiff(accountsByType.dormant);
@@ -426,6 +487,23 @@ function DailyBalanceEntryPage({ data, setData, toast }) {
               </span>
             )}
           </div>
+          {lastSaved && (lastSaved.at || lastSaved.name) && (
+            <div title={`อัปเดตล่าสุด${lastSaved.at ? ' ' + dbSavedAtFull(lastSaved.at) : ''}${lastSaved.name ? ' โดย ' + lastSaved.name : ''} — รายบัญชีดูใต้ป้าย ✓ บันทึกแล้ว ในช่องสถานะ`}
+              style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 6, rowGap: 2, maxWidth: '100%',
+                fontSize: 12.5, color: 'var(--ink-500)', background: 'var(--ink-100)',
+                border: '1px solid var(--ink-200)', borderRadius: 999, padding: '4px 10px', marginTop: 6 }}>
+              <Icon name="daily" size={13} />
+              <span style={{ whiteSpace: 'nowrap' }}>อัปเดตล่าสุด{lastSaved.at ? ` ${dbSavedAtFull(lastSaved.at)}` : ''}</span>
+              {lastSaved.name && (
+                <span style={{ display: 'inline-flex', gap: 4, minWidth: 0, whiteSpace: 'nowrap' }}>
+                  · โดย <strong style={{ color: 'var(--ink-700)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{lastSaved.name}</strong>
+                </span>
+              )}
+              {lastSaved.people > 1 && (
+                <span style={{ color: 'var(--ink-400)', whiteSpace: 'nowrap' }}>(ผู้บันทึกวันที่นี้รวม {lastSaved.people} คน)</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="page-head-r">
           <YmdPicker value={entryDate} onChange={v => setEntryDate(v || todayISO())} size="sm" />
@@ -611,17 +689,21 @@ function DailyBalanceEntryPage({ data, setData, toast }) {
                       </button>
                     )}
                   </td>
-                  <td style={{ textAlign: 'center' }}>
+                  {/* padding บน-ล่างบางกว่าช่องอื่น → บรรทัด "ชื่อ · เวลา" ใต้ป้ายไม่ดันให้แถวสูงขึ้นหลังกดบันทึก */}
+                  <td style={{ textAlign: 'center', whiteSpace: 'nowrap', paddingTop: 2, paddingBottom: 2 }}>
                     {r.saved
-                      ? <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Badge kind="b-green" dot={false}>✓ บันทึกแล้ว</Badge>
-                          {canEdit && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => deleteOne(r.ac)}
-                              title="ยกเลิก/ลบยอดที่บันทึกวันนี้" style={{ padding: '2px 6px', fontSize: 11, color: 'var(--bad)' }}>
-                              ✕
-                            </button>
-                          )}
-                        </div>
+                      ? <React.Fragment>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Badge kind="b-green" dot={false}>✓ บันทึกแล้ว</Badge>
+                            {canEdit && (
+                              <button className="btn btn-ghost btn-sm" onClick={() => deleteOne(r.ac)}
+                                title="ยกเลิก/ลบยอดที่บันทึกวันนี้" style={{ padding: '2px 6px', fontSize: 11, color: 'var(--bad)' }}>
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <DbSavedBy snap={todayByAc[r.ac]} users={data.users} entryDate={entryDate} maxWidth={106} />
+                        </React.Fragment>
                       : (draft[r.ac] !== undefined && draft[r.ac] !== ''
                           ? <button className="btn btn-primary btn-sm" onClick={() => saveOne(r.ac)} disabled={!canEdit}
                               style={{ padding: '3px 10px', fontSize: 11 }}>บันทึก</button>
@@ -664,7 +746,7 @@ function DailyBalanceEntryPage({ data, setData, toast }) {
                 <th style={{ width: 140, textAlign: 'right' }}>ยอดล่าสุด</th>
                 <th style={{ width: 180, textAlign: 'right' }}>ยอดใหม่ (ถ้าเปลี่ยน)</th>
                 <th style={{ width: 110, textAlign: 'right' }}>Δ</th>
-                <th style={{ width: 100, textAlign: 'center' }}>สถานะ</th>
+                <th style={{ width: 132, textAlign: 'center' }}>สถานะ</th>
               </tr>
             </thead>
             <tbody>
@@ -693,17 +775,20 @@ function DailyBalanceEntryPage({ data, setData, toast }) {
                     />
                   </td>
                   <td style={{ textAlign: 'right' }}><DiffBadge delta={r.delta} /></td>
-                  <td style={{ textAlign: 'center' }}>
+                  <td style={{ textAlign: 'center', paddingTop: 2, paddingBottom: 2 }}>
                     {r.saved
-                      ? <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <Badge kind="b-green" dot={false}>✓</Badge>
-                          {canEdit && (
-                            <button className="btn btn-ghost btn-sm" onClick={() => deleteOne(r.ac)}
-                              title="ยกเลิก/ลบยอดที่บันทึกวันนี้" style={{ padding: '2px 6px', fontSize: 11, color: 'var(--bad)' }}>
-                              ✕
-                            </button>
-                          )}
-                        </div>
+                      ? <React.Fragment>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Badge kind="b-green" dot={false}>✓</Badge>
+                            {canEdit && (
+                              <button className="btn btn-ghost btn-sm" onClick={() => deleteOne(r.ac)}
+                                title="ยกเลิก/ลบยอดที่บันทึกวันนี้" style={{ padding: '2px 6px', fontSize: 11, color: 'var(--bad)' }}>
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <DbSavedBy snap={todayByAc[r.ac]} users={data.users} entryDate={entryDate} maxWidth={112} />
+                        </React.Fragment>
                       : (draft[r.ac] !== undefined && draft[r.ac] !== ''
                           ? <button className="btn btn-primary btn-sm" onClick={() => saveOne(r.ac)} disabled={!canEdit}
                               style={{ padding: '3px 10px', fontSize: 11 }}>บันทึก</button>
