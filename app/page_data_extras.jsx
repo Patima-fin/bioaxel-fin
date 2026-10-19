@@ -2190,6 +2190,11 @@ function payableAging(row, today) {
   return { key: 'future', days };
 }
 const payableCreditorName = (r) => String(r.cust_name || '').trim() || '(ไม่ระบุชื่อ)';
+// ลำดับรายการย่อยตอนวางแผนจ่าย: วันครบกำหนด (ไม่ระบุขึ้นก่อน) → เลขที่ใบสำคัญ (เลขเรียงตามค่า)
+// เทียบวันครบกำหนดเป็น "วัน" — due2 มีทั้ง dd/MM/yyyy และ ISO ซึ่ง parse ได้คนละชั่วโมง ทำให้วันเดียวกันไม่เสมอกัน
+const payableDueDay = (s) => { const d = parseDue(s); return d ? d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate() : 0; };
+const payableDueVchCmp = (a, b) => (payableDueDay(a.due2) - payableDueDay(b.due2))
+  || String(a.vchno || '').localeCompare(String(b.vchno || ''), 'en', { numeric: true });
 
 // ── ตารางอายุหนี้ (AP Aging) 6 ระดับ — overdue days = today − due (บวก = เกินกำหนด) ──
 const PAYABLE_AGING6 = [
@@ -3845,6 +3850,7 @@ function DataPayablePage({ data, setData, toast }) {
       o.buckets[ag.key] = (o.buckets[ag.key] || 0) + np;
       if (ag.key === 'overdue') { o.overdue += np; o.overdueCount++; }
     });
+    map.forEach(o => o.rows.sort(payableDueVchCmp));
     return [...map.values()].sort((a, b) => b.overdue - a.overdue || b.net - a.net);
   }, [filtered]);
 
@@ -3859,7 +3865,7 @@ function DataPayablePage({ data, setData, toast }) {
       g.net += parseNum(r.netpayment);
     });
     PAYABLE_AGING.forEach(a => {
-      map[a.key].rows.sort((x, y) => (parseDue(x.due2) || new Date(0)) - (parseDue(y.due2) || new Date(0)));
+      map[a.key].rows.sort(payableDueVchCmp);
     });
     return PAYABLE_AGING.map(a => map[a.key]).filter(g => g.rows.length);
   }, [filtered]);
@@ -3911,7 +3917,8 @@ function DataPayablePage({ data, setData, toast }) {
         });
       });
     });
-    out.sort((a, b) => (parseDue(a.planDate) || new Date(0)) - (parseDue(b.planDate) || new Date(0)));
+    out.sort((a, b) => (payableDueDay(a.planDate) - payableDueDay(b.planDate))
+      || String(a.vchno).localeCompare(String(b.vchno), 'en', { numeric: true }));
     return out;
   }, [filtered, apPlansByVchno, rptFrom, rptTo]);
   const PLANNED_COLS = [
@@ -4852,7 +4859,7 @@ function DataPayablePage({ data, setData, toast }) {
                     {open && (
                       <tr>
                         <td colSpan={2 + PAYABLE_AGING6.length + (agingMatrix.hasNone ? 1 : 0)} style={{ padding: '0 16px 12px 30px', background: 'color-mix(in oklch, var(--brand-50) 38%, transparent)' }}>
-                          {renderDetailTable(o.rows.slice().sort((x, y) => (parseDue(x.due2) || new Date(0)) - (parseDue(y.due2) || new Date(0))))}
+                          {renderDetailTable(o.rows.slice().sort(payableDueVchCmp))}
                         </td>
                       </tr>
                     )}
