@@ -3074,6 +3074,7 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
           net: Number(iv.netExpected) || 0, status: iv.status, expectedReceive: iv.expectedReceive || '',
           lastLog: logs.length ? logs[logs.length - 1] : null,
           plan: bdArPlanOf(arPlanIdx, iv),
+          raw: iv,   // แผนเงินสดล่วงหน้า (bd_avg_forecast.jsx) ใช้โชว์ที่มาของยอดคาดรับ
         };
       });
   }, [raw.invoices, raw.projects, raw.debtLedger, arPlanIdx]);
@@ -3597,6 +3598,21 @@ const BankDiaryPage = ({ data: propData, setData, toast }) => {
         onEdit={(r) => setEditForecast(r)}
         canEdit={canEdit}
       />
+
+      {/* แผนเงินสดล่วงหน้า: เงินตอนนี้ + คาดรับจริง (ใบแจ้งหนี้/แผนรับ) − ค่าใช้จ่ายประมาณการจากจ่ายจริงใน Cash Flow
+          → ต้องหาเงินหมุนเวียนเพิ่มช่วงไหน เท่าไร — bd_avg_forecast.jsx (พอร์ตจาก WTP) */}
+      {typeof BDCashPlanPanel === 'function' && (
+        <BDCashPlanPanel
+          accounts={accounts}
+          arList={arList}
+          forecasts={forecastsRich}
+          overrides={raw.manualOverrides}
+          today={today}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          toast={toast}
+        />
+      )}
 
       {/* Reconcile Panel — โอนระหว่างบัญชี (ย่อไว้ใต้ประมาณการ · กดหัวการ์ดเพื่อกาง · sort ได้) */}
       <ReconcilePanel
