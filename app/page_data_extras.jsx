@@ -353,6 +353,14 @@ function DataCrudPage({ data, setData, toast, config }) {
   // Diff ชุด parsedRows กับ DB (ตาม dedupKey) → setImportPreview — ใช้ร่วมทั้ง path วาง/อัปโหลด (delimited)
   // และ path XML (config.xmlParser). parsedRows = object ที่ coerce type แล้ว (ทั้ง 2 path).
   const buildDiffPreview = (parsedRows, fieldByKey, blankSkipped, skippedCols) => {
+    // config.enrichImportRows(rows, data) → เติมข้อมูลจากตารางอื่นก่อนเทียบ (DATA PV: PO/WO จากเจ้าหนี้คงค้าง)
+    //   คืน array (แนบ .note ได้ = ข้อความโชว์บนพรีวิว)
+    let enrichNote = '';
+    if (config.enrichImportRows) {
+      const er = config.enrichImportRows(parsedRows, data);
+      enrichNote = er.note || '';
+      parsedRows = er;
+    }
     // dedupKey รับได้ทั้ง string เดี่ยว หรือ array (compound key เช่น ['PL_PV_No','AP_No'])
     const dedupKeys  = Array.isArray(config.dedupKey) ? config.dedupKey : [config.dedupKey];
     const primaryKey = dedupKeys[0];   // ใช้สำหรับ group ใน UI (เช่น PL_PV_No)
@@ -443,6 +451,7 @@ function DataCrudPage({ data, setData, toast, config }) {
     cat.dateRange    = (dateLo && dateHi) ? { lo: dateLo, hi: dateHi } : null;
     cat.dedupKeys    = dedupKeys;
     cat.primaryKey   = primaryKey;
+    cat.enrichNote   = enrichNote;
     setImportPreview(cat);
     setDeleteMissingChoice(false);
     setImportStats(null);
@@ -456,7 +465,9 @@ function DataCrudPage({ data, setData, toast, config }) {
   //     • ใบที่ไม่ใช่ PS (AV/AE…) ที่ยังไม่มี = เพิ่มให้ ← เหตุผลทั้งหมดของไฟล์นี้
   //   ไม่มี missing ในโหมดนี้ (ไฟล์ไม่ใช่แหล่งความจริงของทั้งตาราง)
   const buildApprovalPreview = (parsed) => {
-    const rows = parsed.rows || [];
+    let rows = parsed.rows || [];
+    let enrichNote = '';
+    if (config.enrichImportRows) { rows = config.enrichImportRows(rows, data); enrichNote = rows.note || ''; }
     const existing = data[config.dataKey] || [];
     const byNo = new Map();
     existing.forEach(r => {
@@ -479,6 +490,7 @@ function DataCrudPage({ data, setData, toast, config }) {
     cat.dedupKeys    = ['PL_PV_No'];
     cat.primaryKey   = 'PL_PV_No';
     cat.approval     = { total: rows.length, dupSkipped: parsed.dupSkipped || 0, canceled: parsed.canceled || 0, psPending };
+    cat.enrichNote   = enrichNote;
     setImportPreview(cat);
     setDeleteMissingChoice(false);
     setImportStats(null);
@@ -1037,6 +1049,14 @@ function DataCrudPage({ data, setData, toast, config }) {
                   </div>
                 )}
               </div>
+            )}
+            {importPreview.enrichNote && (
+              <div style={{
+                fontSize: 12, marginBottom: 10, padding: '7px 11px', borderRadius: 7,
+                background: 'color-mix(in oklch, var(--brand-500) 7%, transparent)',
+                border: '1px solid color-mix(in oklch, var(--brand-500) 25%, transparent)',
+                color: 'var(--ink-700)',
+              }}>{importPreview.enrichNote}</div>
             )}
             {importPreview.skippedCols?.length > 0 && (
               <div style={{
@@ -2053,6 +2073,245 @@ function DataBankPage({ data, setData, toast }) {
   );
 }
 
+// ═══ PO/WO ของใบจ่าย (PV) — ดึงจากเจ้าหนี้คงค้าง ════════════════════════════════
+//   รายงานจ่ายชำระหนี้ (291) ของ EXPRESS ไม่มีเลข PO/WO เลย แต่ "เจ้าหนี้คงค้างแบบละเอียด" (2A4) มีใน
+//   คอลัมน์ 20 (= payables.refno) และไฟล์มัดจำ (211) มีในรายละเอียด → จับคู่ด้วย "เลขที่บิล":
+//     • ใบ PS (มีบิลย่อย) : settles[].vchno ↔ payables.vchno
+//     • ใบ AV/AE (อนุมัติจ่าย ไม่มีบิลย่อย) : PL_PV_No ↔ payables.vchno (แถวมัดจำ)
+//   ต้องดึงตอนนำเข้า PV แล้วเก็บลงใบเลย (PO_No = "PO…, WO…" + settles[].refno) เพราะบิลที่จ่ายแล้ว
+//   จะถูกล้างออกจากเจ้าหนี้คงค้างในไม่ช้า — ล้างไปก่อนแล้วหาไม่เจออีก (ใช้ปุ่มเติมย้อนหลัง + ไฟล์ 2A4 เก่าแทน)
+//   ⚠️ บิล RO/RC/CV/C/CC ไม่มี PO/WO ในไฟล์ EXPRESS เลย (วัดจากไฟล์จริง 17 ไฟล์) → PV ที่จ่ายแต่บิลพวกนี้ว่างได้ ไม่ใช่บั๊ก
+//   ⚠️ เติมได้อย่างเดียว ไม่ลบ — PO/WO เดิมของใบถูกรวมไว้เสมอ (นำเข้าซ้ำหลังบิลถูกล้างไปแล้ว = ไม่หาย)
+function pvPoTokens(s) {
+  const out = [];
+  String(s || '').toUpperCase()
+    .replace(/(^|[^A-Z])(PO|WO)[\s-]+(?=\d)/g, '$1$2')       // "PO 0001" / "PO-0001" → "PO0001"
+    .split(/[\s,;/]+/)
+    .forEach(t => { if (t && !out.includes(t)) out.push(t); });
+  return out;
+}
+const pvPoKey = (v) => String(v || '').trim().toUpperCase();
+
+// เลขที่บิล → [PO/WO…] · แหล่ง: เจ้าหนี้คงค้างในระบบ + แถวจากไฟล์ที่โยนเข้ามา (ไม่บันทึกลงเจ้าหนี้)
+//   + "ความจำ" settles[].refno ของ PV ที่เคยเติมไว้ (บิลถูกล้างออกจากเจ้าหนี้แล้วก็ยังหาเจอ)
+function pvPoBuildLookup(payables, pvVouchers, extraRows) {
+  const m = new Map();
+  const add = (no, ref) => {
+    const k = pvPoKey(no), toks = pvPoTokens(ref);
+    if (!k || !toks.length) return;
+    const cur = m.get(k) || [];
+    toks.forEach(t => { if (!cur.includes(t)) cur.push(t); });
+    m.set(k, cur);
+  };
+  (payables || []).forEach(r => add(r.vchno, r.refno));
+  (extraRows || []).forEach(r => add(r.vchno, r.refno));
+  (pvVouchers || []).forEach(pv => (Array.isArray(pv.settles) ? pv.settles : []).forEach(s => s && add(s.vchno, s.refno)));
+  return m;
+}
+
+// เติม PO/WO ให้ PV 1 ใบ → object ใหม่เมื่อมีอะไรเพิ่ม ไม่งั้นคืนตัวเดิม (กัน diff หลอกไปหา sync)
+//   keep = PO/WO เดิมที่ต้องรวมไว้ (ของใบเดียวกันในระบบ ตอนนำเข้าไฟล์ทับ)
+function pvPoFill(pv, lookup, keep) {
+  if (!pv) return pv;
+  const toks = pvPoTokens(pv.PO_No);
+  const push = (arr) => (arr || []).forEach(t => { if (!toks.includes(t)) toks.push(t); });
+  push(pvPoTokens(keep));
+  push(lookup.get(pvPoKey(pv.PL_PV_No)));
+  let settlesChanged = false;
+  const settles = Array.isArray(pv.settles) ? pv.settles.map(s => {
+    if (!s) return s;
+    const st = pvPoTokens(s.refno);
+    (lookup.get(pvPoKey(s.vchno)) || []).forEach(t => { if (!st.includes(t)) st.push(t); });
+    push(st);
+    const ref = st.join(', ');
+    if (ref === String(s.refno || '')) return s;
+    settlesChanged = true;
+    return { ...s, refno: ref };
+  }) : pv.settles;
+  const po = toks.join(', ');
+  if (!settlesChanged && po === String(pv.PO_No || '')) return pv;
+  return { ...pv, PO_No: po, settles };
+}
+
+// เติมทั้งตาราง → { list (array เดิมถ้าไม่มีอะไรเปลี่ยน), changed: [{ before, after }] }
+function pvPoFillAll(pvList, lookup) {
+  const changed = [];
+  const list = (pvList || []).map(pv => {
+    const nx = pvPoFill(pv, lookup);
+    if (nx !== pv) changed.push({ before: pv, after: nx });
+    return nx;
+  });
+  return { list: changed.length ? list : pvList, changed };
+}
+
+// ตอนนำเข้า PV (config.enrichImportRows) — เติมก่อนเทียบกับของเดิม ⇒ ใบที่มีอยู่แล้วแต่ยังไม่มี PO/WO
+//   ขึ้นเป็น "แก้ไข" (— → PO…) แล้วได้เติมตอนกดยืนยัน
+function pvPoEnrichImport(rows, data) {
+  const lookup = pvPoBuildLookup(data.payables, data.pvVouchers);
+  const keepByNo = new Map();
+  (data.pvVouchers || []).forEach(pv => {
+    const k = pvPoKey(pv.PL_PV_No);
+    if (k && pv.PO_No) keepByNo.set(k, [keepByNo.get(k), pv.PO_No].filter(Boolean).join(', '));
+  });
+  const out = (rows || []).map(r => pvPoFill(r, lookup, keepByNo.get(pvPoKey(r.PL_PV_No))));
+  const withPo = out.filter(r => String(r.PO_No || '').trim()).length;
+  out.note = out.length
+    ? `🔗 PO/WO จากเจ้าหนี้คงค้าง: ได้ ${withPo} จาก ${out.length} ใบ`
+      + (withPo < out.length ? ' · ที่เหลือจ่ายบิลที่ไม่มี PO/WO (RO/RC/CV/C/CC) หรือบิลถูกล้างออกจากเจ้าหนี้ไปแล้ว — เติมย้อนหลังได้ด้วยไฟล์ 2A4 เก่า' : '')
+    : '';
+  return out;
+}
+
+// ตอนลบเจ้าหนี้ที่จ่ายแล้ว (ล้างจากแบนเนอร์ / ตัดตอนนำเข้า) — ยก PO/WO ของบิลที่กำลังจะหายไปใส่ PV ก่อน
+//   คืน array เดิมเมื่อไม่มีอะไรเปลี่ยน (กัน diff หลอกไปหา sync)
+function pvPoAbsorb(pvList, removedPayables) {
+  if (!removedPayables || !removedPayables.length) return pvList;
+  return pvPoFillAll(pvList, pvPoBuildLookup(removedPayables, null)).list;
+}
+
+// ── แถบ + หน้าต่าง "เติม PO/WO ย้อนหลัง" (หน้า DATA PV) ─────────────────────────
+//   แหล่ง 1 = เจ้าหนี้คงค้างที่อยู่ในระบบตอนนี้ (อัตโนมัติ)
+//   แหล่ง 2 = ไฟล์ XML เจ้าหนี้คงค้าง (2A4) / มัดจำ (211) รุ่นเก่า — อ่านเอา PO/WO อย่างเดียว ไม่บันทึกลงหน้าเจ้าหนี้
+//   เขียนเฉพาะ PV ที่ได้เลขเพิ่ม (id เดิม upsert ทับ ไม่ลบอะไร) · ไม่แตะ updatedAt (ไม่ใช่การนำเข้า PV รอบใหม่)
+function PvPoBackfillBar({ data, setData, toast }) {
+  const canEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
+  const [open, setOpen] = dxState(false);
+  const pending = dxMemo(() => {
+    if (!canEdit) return 0;
+    return pvPoFillAll(data.pvVouchers, pvPoBuildLookup(data.payables, data.pvVouchers)).changed.length;
+  }, [canEdit, data.pvVouchers, data.payables]);
+  if (!canEdit) return null;
+  const hasPending = pending > 0;
+  return (
+    <>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12,
+        padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+        background: hasPending ? 'color-mix(in oklch, var(--brand-500) 8%, transparent)' : 'transparent',
+        border: hasPending ? '1px solid color-mix(in oklch, var(--brand-500) 30%, transparent)' : '1px dashed var(--line, #e5e7eb)',
+      }}>
+        <span style={{ flex: 1, minWidth: 220, color: 'var(--ink-700)' }}>
+          {hasPending
+            ? <>🔗 พบ PO/WO ในเจ้าหนี้คงค้างที่ยังไม่ได้ลงใน PV <strong>{pending}</strong> ใบ</>
+            : <span style={{ color: 'var(--ink-500)' }}>🔗 PO/WO ของ PV ดึงจากเจ้าหนี้คงค้างให้ตอนนำเข้า · ใบเก่าที่ยังว่างเติมย้อนหลังได้ (ใช้ไฟล์ 2A4 เก่าได้)</span>}
+        </span>
+        <button className={`btn ${hasPending ? 'btn-primary' : 'btn-ghost'}`} style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => setOpen(true)}>
+          เติม PO/WO ย้อนหลัง
+        </button>
+      </div>
+      {open && <PvPoBackfillModal data={data} setData={setData} toast={toast} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function PvPoBackfillModal({ data, setData, toast, onClose }) {
+  const [files, setFiles] = dxState([]);        // [{ name, rows: [{vchno, refno}], withRef, kind }]
+  const [errs, setErrs]   = dxState([]);
+  const [busy, setBusy]   = dxState(false);
+  const extraRows = dxMemo(() => files.flatMap(f => f.rows), [files]);
+  const result = dxMemo(
+    () => pvPoFillAll(data.pvVouchers, pvPoBuildLookup(data.payables, data.pvVouchers, extraRows)),
+    [data.pvVouchers, data.payables, extraRows]);
+  const webRefCount = dxMemo(() => (data.payables || []).filter(r => pvPoTokens(r.refno).length).length, [data.payables]);
+  const emptyLeft = dxMemo(() => {
+    const done = new Set(result.changed.map(c => c.after.id));
+    return (data.pvVouchers || []).filter(pv => !done.has(pv.id) && !String(pv.PO_No || '').trim()).length;
+  }, [data.pvVouchers, result]);
+
+  const readFiles = async (fileList) => {
+    const list = Array.from(fileList || []).filter(f => /\.xml$/i.test(f.name));
+    if (!list.length) { toast('เลือกไฟล์ .xml ของ EXPRESS (เจ้าหนี้คงค้าง 2A4 / มัดจำ 211)'); return; }
+    setBusy(true);
+    const got = [], bad = [];
+    for (const f of list) {
+      try {
+        const text = await f.text();
+        if (!/เจ้าหนี้คงค้าง|เงินมัดจำคงค้าง|ตรวจสอบเงินทดรองจ่าย/.test(text)) { bad.push(`${f.name} — ไม่ใช่ไฟล์เจ้าหนี้คงค้าง/มัดจำ`); continue; }
+        const res = parsePayableXML(text);
+        const rows = (res.rows || []).map(r => ({ vchno: r.vchno, refno: r.refno })).filter(r => r.vchno);
+        got.push({ name: f.name, kind: res.kind, rows, withRef: rows.filter(r => pvPoTokens(r.refno).length).length });
+      } catch (e) { bad.push(`${f.name} — ${e.message}`); }
+    }
+    setFiles(prev => [...prev.filter(p => !got.some(g => g.name === p.name)), ...got]);
+    setErrs(bad);
+    setBusy(false);
+  };
+
+  const apply = () => {
+    if (!result.changed.length) return;
+    const ext = extraRows;
+    // คิดใหม่จาก state ล่าสุดใน updater (ระหว่างเปิดหน้าต่างค้างไว้ sync อาจดึงแถวใหม่เข้ามา)
+    setData(d => {
+      const r = pvPoFillAll(d.pvVouchers, pvPoBuildLookup(d.payables, d.pvVouchers, ext));
+      return r.changed.length ? { ...d, pvVouchers: r.list } : d;
+    });
+    toast(`เติม PO/WO ให้ PV ${result.changed.length} ใบแล้ว`);
+    onClose();
+  };
+
+  const shown = result.changed.slice().sort((a, b) => String(b.after.Pmt_Date || '').localeCompare(String(a.after.Pmt_Date || '')));
+  return (
+    <Modal open={true} maxWidth={760} title="เติม PO/WO ย้อนหลัง · DATA PV" onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
+        <button className="btn btn-primary" disabled={!result.changed.length} onClick={apply}>
+          <Icon name="check" size={13} /> เติมให้ {result.changed.length} ใบ
+        </button>
+      </>}>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-700)', lineHeight: 1.7, marginBottom: 10 }}>
+        จับคู่ <strong>เลขที่บิลที่ PV จ่าย</strong> กับเจ้าหนี้คงค้าง แล้วเอาเลข PO/WO มาใส่ใน PV (เติมอย่างเดียว ไม่ลบของเดิม)
+        <div style={{ color: 'var(--ink-500)' }}>
+          • เจ้าหนี้คงค้างในระบบตอนนี้: บิลที่มี PO/WO <strong>{webRefCount}</strong> ใบ
+          · บิลที่จ่ายไปแล้วมักถูกล้างออกไปแล้ว → ใส่ไฟล์ <strong>เจ้าหนี้คงค้าง (2A4)</strong> / <strong>มัดจำ (211)</strong> รุ่นเก่าเพิ่มได้ (อ่านเอาเลขอย่างเดียว ไม่บันทึกลงหน้าเจ้าหนี้)
+        </div>
+      </div>
+      <label style={{
+        display: 'block', padding: '12px 14px', borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+        border: '1.5px dashed color-mix(in oklch, var(--brand-500) 45%, transparent)', fontSize: 12.5, color: 'var(--brand-700)',
+        background: 'color-mix(in oklch, var(--brand-500) 5%, transparent)', marginBottom: 8,
+      }}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); readFiles(e.dataTransfer.files); }}>
+        {busy ? 'กำลังอ่านไฟล์…' : '📂 เลือก/ลากไฟล์ .xml เจ้าหนี้คงค้างเก่า (เลือกได้หลายไฟล์)'}
+        <input type="file" accept=".xml" multiple style={{ display: 'none' }} onChange={e => { readFiles(e.target.files); e.target.value = ''; }} />
+      </label>
+      {files.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--ink-600)', marginBottom: 8, display: 'grid', gap: 2 }}>
+          {files.map(f => (
+            <div key={f.name} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span>📄 {f.name}</span>
+              <span style={{ color: 'var(--ink-500)' }}>· {f.kind === 'deposit' ? 'มัดจำ' : 'เจ้าหนี้คงค้าง'} {f.rows.length} บิล · มี PO/WO {f.withRef}</span>
+              <button className="btn-icon" title="เอาไฟล์นี้ออก" onClick={() => setFiles(prev => prev.filter(p => p.name !== f.name))}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {errs.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--bad)', marginBottom: 8 }}>{errs.map((e, i) => <div key={i}>⚠️ {e}</div>)}</div>
+      )}
+      <div style={{ fontSize: 12.5, fontWeight: 700, margin: '6px 0' }}>
+        PV ที่จะได้ PO/WO เพิ่ม: <span style={{ color: 'var(--good)' }}>{result.changed.length}</span> ใบ
+        <span style={{ fontWeight: 400, color: 'var(--ink-500)' }}> · PV ที่ยังว่างหลังเติม {emptyLeft} ใบ (ส่วนใหญ่จ่ายบิล RO/RC/CV/C/CC ที่ไม่มี PO/WO ในไฟล์ EXPRESS)</span>
+      </div>
+      <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--line, #e5e7eb)', borderRadius: 8 }}>
+        {shown.length === 0 && <div className="muted" style={{ padding: 16, textAlign: 'center', fontSize: 12.5 }}>ไม่มีใบที่เติมได้เพิ่ม</div>}
+        {shown.slice(0, 300).map(({ before, after }) => (
+          <div key={after.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 10px', fontSize: 12, borderTop: '1px solid var(--ink-100, #eef1f5)' }}>
+            <span style={{ color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>{fmtDate(after.Pmt_Date) || '—'}</span>
+            <span style={{ fontFamily: 'ui-monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{after.PL_PV_No}</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{after.Payee}</span>
+            <span style={{ fontFamily: 'ui-monospace', color: 'var(--good)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {before.PO_No ? <span style={{ color: 'var(--ink-400)', fontWeight: 400 }}>{before.PO_No} + </span> : null}
+              {pvPoTokens(after.PO_No).filter(t => !pvPoTokens(before.PO_No).includes(t)).join(', ') || '(เลขในบิลย่อย)'}
+            </span>
+          </div>
+        ))}
+        {shown.length > 300 && <div className="muted" style={{ padding: 8, fontSize: 12, textAlign: 'center' }}>…อีก {shown.length - 300} ใบ</div>}
+      </div>
+    </Modal>
+  );
+}
+
 function DataPVPage({ data, setData, toast }) {
   return (
     <DataCrudPage data={data} setData={setData} toast={toast} config={{
@@ -2070,11 +2329,14 @@ function DataPVPage({ data, setData, toast }) {
       scopeDateField: 'Pmt_Date',         // เทียบ missing เฉพาะ row ที่อยู่ในช่วงวันที่ของไฟล์ import
       // ★ ใบที่มาจาก "ใบอนุมัติจ่าย" (AV/AE) ไม่มีทางอยู่ในไฟล์ PS → ห้ามนับเป็น "หาย" ตอนลงไฟล์ PS
       skipMissingFn: (r) => r.Doc_Src === 'อนุมัติจ่าย',
-      previewSubFields: ['Payee', 'cc_remark'],   // subtitle ใน preview
+      // ★ PO/WO ไม่มีในไฟล์จ่ายชำระหนี้ → ดึงจากเจ้าหนี้คงค้างด้วยเลขที่บิล (ดู pvPoEnrichImport)
+      enrichImportRows: pvPoEnrichImport,
+      banner: <PvPoBackfillBar data={data} setData={setData} toast={toast} />,
+      previewSubFields: ['Payee', 'PO_No', 'cc_remark'],   // subtitle ใน preview
       addLabel: 'เพิ่ม PV',
       singular: 'PV',
-      searchPlaceholder: 'ค้นหา PL_PV_No / Payee / AP_No / Ref_Code…',
-      searchKeys: ['PL_PV_No', 'Payee', 'AP_No', 'Ref_Code', 'cc_remark'],
+      searchPlaceholder: 'ค้นหา PL_PV_No / Payee / AP_No / PO-WO / Ref_Code…',
+      searchKeys: ['PL_PV_No', 'Payee', 'AP_No', 'PO_No', 'Ref_Code', 'cc_remark'],
       filters: [
         { key: 'HRD', label: 'HRD' }, { key: 'FIN', label: 'FIN' },
         { key: 'ACC', label: 'ACC' }, { key: 'PMD', label: 'PMD' },
@@ -2088,8 +2350,9 @@ function DataPVPage({ data, setData, toast }) {
         Remark: '', cc_remark: '',
         Amount: 0, Down_payment: 0, Deduct: 0, Vat: 0, Ret: 0,
         Before_WHT: 0, WHT: 0, Less_Other: 0, Total: 0, Minus_Other: 0, Net_Amount: 0,
-        settles: [],         // บิล/หนี้ที่เช็คนี้ไปจ่าย (จาก XML จ่ายชำระหนี้): [{vchno,billno,paid,note}]
+        settles: [],         // บิล/หนี้ที่เช็คนี้ไปจ่าย (จาก XML จ่ายชำระหนี้): [{vchno,billno,paid,note,refno}]
         Doc_Src: '',         // 'PS' = จากรายงานมีดีเทล · 'อนุมัติจ่าย' = จากใบอนุมัติ (ไม่มีบิลย่อย/WHT)
+        PO_No: '',           // "PO…, WO…" — ดึงจากเจ้าหนี้คงค้าง (payables.refno) ไม่ได้มาจากไฟล์จ่าย
       },
       readOnlyRows: true,    // PV records come from accounting system — don't edit them
       allowDelete: true,     // …but allow deleting stale entries that never actually paid out
@@ -2099,6 +2362,14 @@ function DataPVPage({ data, setData, toast }) {
         { key: 'PL_PV_No',   label: 'เลขที่ PV',    width: 120, mono: true, align: 'center' },
         { key: 'AP_No',      label: 'เลขที่ AP',    width: 120, mono: true, align: 'center' },
         { key: 'Payee',      label: 'ผู้รับเงิน' },
+        { key: 'PO_No', label: 'PO / WO', width: 130, align: 'center',
+          render: r => {
+            const t = pvPoTokens(r.PO_No);
+            if (!t.length) return <span style={{ color: 'var(--ink-300)' }}>—</span>;
+            return <span title={t.join('\n')} style={{ fontFamily: 'ui-monospace', fontSize: 12, color: 'var(--brand-700)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              {t[0]}{t.length > 1 && <span style={{ marginLeft: 4, padding: '0 5px', borderRadius: 8, fontSize: 10.5, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)' }}>+{t.length - 1}</span>}
+            </span>;
+          } },
         { key: 'WHT', label: 'WHT', align: 'right', headerAlign: 'right', width: 90, sortValue: r => parseNum(r.WHT),
           render: r => { const w = parseNum(r.WHT); return <span style={{ color: w ? 'oklch(58% 0.17 70)' : 'var(--ink-300)', fontVariantNumeric: 'tabular-nums' }}>{w ? fmtNum(w, 2) : '—'}</span>; } },
         { key: 'Net_Amount', label: 'ยอดสุทธิ', align: 'right', headerAlign: 'right', width: 130, sortValue: r => parseNum(r.Net_Amount),
@@ -2106,7 +2377,7 @@ function DataPVPage({ data, setData, toast }) {
         { key: 'settles', label: 'บิลที่จ่าย', align: 'center', width: 92, sortValue: r => (Array.isArray(r.settles) ? r.settles.length : 0),
           render: r => {
             const n = Array.isArray(r.settles) ? r.settles.length : 0;
-            if (n) return <span title={r.settles.map(s => `${s.vchno || s.docno || '?'}${s.paid ? ' · ' + fmtNum(s.paid, 2) : ''}`).join('\n')} style={{ display: 'inline-block', minWidth: 20, padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)', color: 'var(--brand-700)', fontWeight: 600, fontSize: 11.5 }}>{n} บิล</span>;
+            if (n) return <span title={r.settles.map(s => `${s.vchno || s.docno || '?'}${s.paid ? ' · ' + fmtNum(s.paid, 2) : ''}${s.refno ? ' · ' + s.refno : ''}`).join('\n')} style={{ display: 'inline-block', minWidth: 20, padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, var(--brand-500) 12%, transparent)', color: 'var(--brand-700)', fontWeight: 600, fontSize: 11.5 }}>{n} บิล</span>;
             // ใบจากใบอนุมัติจ่าย (AV/AE) — ไม่มีบิลย่อย/WHT โดยธรรมชาติ ไม่ใช่ข้อมูลขาด
             if (r.Doc_Src === 'อนุมัติจ่าย') return <span title="มาจากใบอนุมัติจ่าย (ไม่มีดีเทลบิล/WHT)" style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 9, background: 'color-mix(in oklch, oklch(60% 0.18 75) 14%, transparent)', color: 'oklch(48% 0.16 70)', fontWeight: 600, fontSize: 11 }}>ใบอนุมัติ</span>;
             return <span style={{ color: 'var(--ink-300)' }}>—</span>;
@@ -2122,9 +2393,10 @@ function DataPVPage({ data, setData, toast }) {
         // แถว 2: ผู้รับเงิน (span 2) | Ref Code
         { key: 'Payee',       label: 'ผู้รับเงิน',     type: 'text', span: 2 },
         { key: 'Ref_Code',    label: 'Ref Code',       type: 'text' },
-        // แถว 3: บัญชีธนาคาร | ประเภทการจ่าย
+        // แถว 3: บัญชีธนาคาร | ประเภทการจ่าย | PO/WO
         { key: 'Bank_AC',     label: 'บัญชีธนาคาร',   type: 'text' },
         { key: 'Type_of_Pmt', label: 'ประเภทการจ่าย', type: 'text' },
+        { key: 'PO_No',       label: 'PO / WO',        type: 'text' },
         { type: 'section', label: 'ยอดเงิน', icon: 'coin', cols: 3 },
         // แถว 1: Amount | WHT | VAT
         { key: 'Amount',     label: 'Amount (ก่อนหัก)', type: 'number' },
@@ -2761,8 +3033,14 @@ function parseDepositXML(xmlText) {
       else if (inNote) { if (clean(c1.v)) notes.push(clean(c1.v)); }
       else if (!desc && /^\d+\s+\S/.test(c1.v)) {
         desc = clean(c1.v.replace(/^\s*\d+\s+/, ''));                     // ตัดเลขลำดับ "  1  "
-        var po = desc.match(/PO[\s-]?\d+/i);                              // ดึงเลข PO ออกมาเป็น refno
-        if (po) pending.refno = po[0].replace(/\s/g, '');
+        // ดึงเลข PO / WO ออกมาเป็น refno (เดิมจับแค่ PO → "มัดจำค่าบริการ WO2200694" ได้ refno ว่าง)
+        //   เลขต้องยาว ≥4 หลัก + ข้างหน้าไม่ใช่ตัวอักษร (กัน "TWO 1" ฯลฯ) · หลายเลข = คั่นด้วย ", "
+        var refs = [];
+        (desc.match(/(?:^|[^A-Za-z])(?:PO|WO)[\s-]?\d{4,}/gi) || []).forEach(function (m) {
+          var t = m.replace(/^[^A-Za-z]/, '').replace(/[\s-]/g, '').toUpperCase();
+          if (refs.indexOf(t) < 0) refs.push(t);
+        });
+        if (refs.length) pending.refno = refs.join(', ');
       } else return;
       pending.remark = [desc, notes.join(' ')].filter(Boolean).join(' · ');
       return;
@@ -2815,6 +3093,9 @@ const _PAYABLE_DIFF_FIELDS = [
   { key: 'Balance_Amount1', label: 'ยอดคงเหลือ',    type: 'number' },
   { key: 'due2',            label: 'วันครบกำหนด',   type: 'date'   },
   { key: 'remark',          label: 'หมายเหตุ',      type: 'text'   },
+  // เลข PO/WO — DATA PV ดึงไปใช้ (pvPoEnrichImport) → ต้องอัปเดตตอนนำเข้าซ้ำด้วย
+  //   (เดิมไม่อยู่ในนี้ ⇒ แถวมัดจำที่เคยได้ refno ว่างเพราะตัวอ่านไม่จับ WO จะไม่มีวันถูกเติม)
+  { key: 'refno',           label: 'เลขที่ PO/WO',  type: 'text'   },
 ];
 const _PAYABLE_FIELD_BY_KEY = Object.fromEntries(_PAYABLE_DIFF_FIELDS.map(f => [f.key, f]));
 
@@ -3579,7 +3860,12 @@ function DataPayablePage({ data, setData, toast }) {
     if (!confirm(`พบ ${paidRows.length} รายการที่จ่ายแล้ว (มีใบจ่ายใน PV)${selfNote}\nยืนยันลบออกจากรายการคงค้าง (ชีต payables)?`)) return;
     const ids = new Set(paidRows.map(r => r.id).filter(Boolean));
     if (!ids.size) { toast('รายการที่จ่ายแล้วไม่มี id — ลบไม่ได้'); return; }
-    setData(d => ({ ...d, payables: (d.payables || []).filter(r => !ids.has(r.id)) }));
+    // ยก PO/WO ของบิลที่กำลังจะลบไปใส่ PV ที่จ่ายมันก่อน (ลบแล้วหาไม่เจออีก)
+    setData(d => ({
+      ...d,
+      payables: (d.payables || []).filter(r => !ids.has(r.id)),
+      pvVouchers: pvPoAbsorb(d.pvVouchers, (d.payables || []).filter(r => ids.has(r.id))),
+    }));
     toast(`ล้างรายการที่จ่ายแล้ว ${ids.size} รายการออกจากชีตแล้ว`);
   };
 
@@ -4380,6 +4666,8 @@ function DataPayablePage({ data, setData, toast }) {
       if (!ex) { added.push({ row: obj, key: v, primary: v }); return; }
       const diff = {};
       _PAYABLE_DIFF_FIELDS.forEach(f => {
+        // ไฟล์ไม่มีคอลัมน์นี้เลย (เช่นวาง TSV ที่ไม่มี refno) = ไม่แตะของเดิม ไม่ใช่ "ล้างเป็นค่าว่าง"
+        if (!(f.key in obj)) return;
         const oldRaw = ex[f.key];
         // ของเดิมว่าง: ตัวเลขไม่ถือว่า "เปลี่ยน" (กัน false-positive) · แต่ข้อความ/วันที่ที่ไฟล์มีค่ามา = เติมให้
         //   (เดิมข้ามหมด ⇒ หมายเหตุที่เคยว่างจะไม่มีวันถูกเติม แม้ไฟล์รอบใหม่มีมาครบ — แถวขึ้น "เหมือนเดิม")
@@ -4441,7 +4729,9 @@ function DataPayablePage({ data, setData, toast }) {
       const floatRefs = new Set((d.payables || [])
         .filter(r => removeIds.has(r.id) && isFloatingAp(r))
         .map(r => String(r.vchno || '').trim()).filter(Boolean));
-      return { ...d, payables: next, forecastEntries: dropFloatPlans(d, floatRefs) };
+      // บิลที่ถูกตัด/ลบในรอบนี้ → ยก PO/WO ไปใส่ PV ที่จ่ายมันก่อน (ลบแล้วหาไม่เจออีก)
+      const pvVouchers = pvPoAbsorb(d.pvVouchers, (d.payables || []).filter(r => removeIds.has(r.id)));
+      return { ...d, payables: next, forecastEntries: dropFloatPlans(d, floatRefs), pvVouchers };
     });
     const parts = [`เพิ่ม ${p.added.length}`, `แก้ ${p.changed.length}`];
     if (p.paidCut.length) parts.push(`ตัดจ่ายแล้ว ${p.paidCut.length}`);
