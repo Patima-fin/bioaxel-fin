@@ -602,7 +602,7 @@ const FUND_FC_MORE = [
   { k: 'lgBack', auto: true, sec: 'in', t: 'เงินสดค้ำประกันที่ครบกำหนดได้คืน', why: 'หลักประกันแบบเงินสดที่หมดอายุในช่วงนี้ (หน้าหลักประกัน)' },
   { k: 'vat', sec: 'out', t: 'ภาษีมูลค่าเพิ่มนำส่ง (ภ.พ.30)', why: 'เงินรับจากลูกค้ามี VAT 7/107 ต้องนำส่งเดือนถัดไป หลังหักภาษีซื้อ' },
   { k: 'cit', sec: 'out', t: 'ภาษีเงินได้นิติบุคคล', why: 'ภ.ง.ด.51 ครึ่งปี (ส.ค.) · ภ.ง.ด.50 ทั้งปี (พ.ค.)' },
-  { k: 'bankfee', sec: 'out', t: 'ค่าธรรมเนียม LG / ธนาคาร', why: 'ค่าออก LG ใบใหม่ของสัญญาที่จะเซ็น + ค่าธรรมเนียมวงเงินรายปี' },
+  { k: 'bankfee', sec: 'out', t: 'ค่าธรรมเนียมธนาคารอื่นๆ', why: 'ค่าธรรมเนียมวงเงินรายปี / ค่าธรรมเนียมอื่นของธนาคาร (ค่าธรรมเนียม LG ของสัญญาใหม่คิดในข้อ ข.2 แล้ว)' },
   { k: 'service', sec: 'out', t: 'บริการหลังการขาย / ซ่อม / ค่าปรับงานล่าช้า', why: 'งานที่ส่งมอบแล้วยังมีค่าใช้จ่ายตามมา' },
 ];
 
@@ -620,6 +620,10 @@ function fundFcOf(cfg) {
     incC: Object.assign({}, FUND_FC_INC_CYCLE, f.incC),
     invLag: fundN(f.invLag) != null ? Math.max(0, Number(f.invLag)) : 45, wip: f.wip && typeof f.wip === 'object' ? f.wip : {},
     open: { bal: f.open && f.open.bal === 'avail' ? 'avail' : 'ledger', off: f.open && Array.isArray(f.open.off) ? f.open.off.map(String) : [] },
+    // ค่าธรรมเนียม LG (ผู้ใช้ 2026-11-12 "เพิ่มค่าธรรมเนียม LG 1.25% วิธีคิดเหมือนกันเลย" = แบบ WTP): 1.25% ต่อปีของยอดค้ำ · ค้ำ 2 ปี · วิธีจ่ายยังไม่ยืนยัน (ok.lgFeePay) ค่าเริ่มปีละครั้งล่วงหน้า
+    //   yrsDrink ใช้กับโครงการ POG Drink ของ WTP — BIO ไม่มีผลิตภัณฑ์นั้น (fundFcIsDrink = false เสมอ) เก็บไว้ให้โค้ดตรงกัน
+    lgFee: (() => { const g = f.lgFee || {}; return { rate: fundN(g.rate) != null ? Number(g.rate) : 1.25, yrs: fundN(g.yrs) != null ? Math.max(0, Number(g.yrs)) : 2,
+      yrsDrink: fundN(g.yrsDrink) != null ? Math.max(0, Number(g.yrsDrink)) : 1, pay: g.pay === 'once' ? 'once' : 'yearly' }; })(),
     more: Object.assign({ principal: true }, f.more), ovr: f.ovr || {}, ok: Object.assign({ feeBase: true, intPay: true }, f.ok),
   };
 }
@@ -713,10 +717,14 @@ function fundFcLitInt(flows, rate, mode, lastDay, far) {
   }
   return { inPlan: all.filter(e => e.date <= lastDay), total };
 }
+function fundAddMonthsISO(iso, n) {
+  const mk = bdafAddM(iso.slice(0, 7), n), d = Math.min(Number(iso.slice(8, 10)) || 1, bdafDim(mk));
+  return mk + '-' + String(d).padStart(2, '0');
+}
 /* โครงการที่จะลงนาม → เงินรับ · ค่าคอม · ADV. · หลักประกัน · อากร · เงินกู้ LIT (เบิก/ค่าธรรมเนียม/ดอกเบี้ย/คืน) เรียงตามวันเซ็น
  *   นับเฉพาะแถวที่ไม่ปิดและไม่ใช่ "ยังไม่แน่นอน" · กลุ่ม "เซ็นแล้ว" = นับเฉพาะเงินรับ (หักใบแจ้งหนี้ที่ออกแล้ว + ที่รับแล้ว) และเงินกู้ */
 function fundFcPlan(pipe, fc, cfg, today, lastDay, arOpen, recvBy, lgRoom0) {
-  const ev = { rcv: [], comm: [], inst: [], inst1: [], inst2: [], fac1: [], fac2: [], fac3: [], lg: [], stamp: [], litIn: [], litFee: [], litInt: [], litRepay: [] };
+  const ev = { rcv: [], comm: [], inst: [], inst1: [], inst2: [], fac1: [], fac2: [], fac3: [], lg: [], lgFee: [], stamp: [], litIn: [], litFee: [], litInt: [], litRepay: [] };
   const per = [], lgPct = (Number(cfg.lgPct) || 0) / 100, rate = (Number(fc.lit.rate) || 0) / 100, far = fundAddDays(lastDay, 1100);
   let litLeft = fc.lit.limit, lgRoom = lgRoom0;
   pipe.filter(r => !r.off && r.group !== 'unsure' && Number(r.value) > 0)
@@ -729,7 +737,7 @@ function fundFcPlan(pipe, fc, cfg, today, lastDay, arOpen, recvBy, lgRoom0) {
       // เซ็นแล้ว: หักที่รับแล้วเฉพาะแถวที่ใส่มูลค่าเต็มสัญญา (แถวที่ดึงมาเป็นยอดค้างรับหลังโอนสิทธิ์ หักไปแล้ว)
       const rb = code && recvBy ? recvBy[code] : null;
       const less = (code && arOpen && arOpen[code]) || 0, got = (!isNew && rb && v >= rb.contract - 1) ? rb.got : 0;
-      const P = { r, v, sign, isNew, sched, gross, less, got, rcvBase: Math.max(0, gross - less - got), comm: 0, inst: null, lgNeed: 0, lgUse: 0, lgCash: 0, lgUnknown: false, stamp: 0, lit: null };
+      const P = { r, v, sign, isNew, sched, gross, less, got, rcvBase: Math.max(0, gross - less - got), comm: 0, inst: null, lgNeed: 0, lgUse: 0, lgCash: 0, lgFee: 0, lgUnknown: false, stamp: 0, lit: null };
       const base = ['มูลค่าสัญญา ' + fundB(v) + ' หัก ณ ที่จ่าย 1% (× 106/107) = ' + fundB(gross)];
       if (less > 0.5) base.push('หักใบแจ้งหนี้ที่ออกแล้วยังรอรับ ' + fundB(less) + ' (นับในข้อ 1 แล้ว)');
       if (got > 0.5) base.push('หักที่รับแล้ว ' + fundB(got));
@@ -767,6 +775,14 @@ function fundFcPlan(pipe, fc, cfg, today, lastDay, arOpen, recvBy, lgRoom0) {
           if (lgRoom == null) P.lgUnknown = true;
           else { P.lgUse = Math.min(Math.max(0, lgRoom), P.lgNeed); lgRoom -= P.lgUse; P.lgCash = P.lgNeed - P.lgUse; }
           if (P.lgCash > 0.5 && sign <= lastDay) ev.lg.push(Object.assign({ date: sign, amt: P.lgCash, note: ['หลักประกัน ' + fmtNum(lgPct * 100, 1) + '% ของ ' + fundB(v) + ' = ' + fundB(P.lgNeed), P.lgUse > 0.5 ? 'ใช้วงเงิน LG ที่เหลือ ' + fundB(P.lgUse) : 'วงเงิน LG หมดแล้ว', 'ต้องวางเงินสด (1 ต่อ 1) ' + fundB(P.lgCash)] }, tag));
+        }
+        // ค่าธรรมเนียม LG: คิดจากยอดค้ำประกันทั้งหมด (เหมือน WTP) · ยังไม่ตั้ง % หลักประกัน = 0
+        if (P.lgNeed > 0.5 && fc.lgFee.rate > 0) {
+          const drink = fundFcIsDrink(r), yrs = drink ? fc.lgFee.yrsDrink : fc.lgFee.yrs, perYr = P.lgNeed * fc.lgFee.rate / 100;
+          P.lgFee = perYr * yrs;
+          const base = ['หลักประกัน ' + fundB(P.lgNeed) + ' × ' + fmtNum(fc.lgFee.rate, 2) + '% ต่อปี = ' + fundB(perYr) + ' ต่อปี', 'ค้ำ ' + yrs + ' ปี · รวม ' + fundB(P.lgFee)];
+          if (fc.lgFee.pay === 'once') { if (sign <= lastDay) ev.lgFee.push(Object.assign({ date: sign, amt: P.lgFee, note: base.concat(['จ่ายครั้งเดียวทั้งระยะ ตอนออก LG (วันเซ็น)']) }, tag)); }
+          else for (let y = 0; y < yrs; y++) { const d = fundAddMonthsISO(sign, 12 * y); if (d <= lastDay) ev.lgFee.push(Object.assign({ date: d, amt: perYr, note: base.concat(['ปีที่ ' + (y + 1) + ' จ่ายล่วงหน้า' + (y ? ' ครบรอบ ' + y + ' ปี' : ' ตอนออก LG (วันเซ็น)')]) }, tag)); }
         }
         if (fc.more.stamp) { P.stamp = v * FUND_FC_STAMP / 100; if (sign <= lastDay) ev.stamp.push(Object.assign({ date: sign, amt: P.stamp, note: ['มูลค่าสัญญา ' + fundB(v) + ' × ' + FUND_FC_STAMP + '%'] }, tag)); }
       }
@@ -879,12 +895,12 @@ function fundFcExport(x) {
   const wb = X.utils.book_new(), R = (v) => Math.round(v || 0);
   const add = (name, aoa, widths) => { const ws = X.utils.aoa_to_sheet(aoa); ws['!cols'] = widths.map(w => ({ wch: w })); X.utils.book_append_sheet(wb, ws, name); };
   add('ประมาณการรับ-จ่าย', [['ประมาณการรับ-จ่าย ' + x.rangeLabel, 'ข้อมูล ณ ' + x.today], ['รายการ'].concat(x.F.map(bdafMShort), ['รวม'])]
-    .concat(x.lines.map(l => [l.label].concat(x.F.map(mk => (l.vals[mk] == null ? '' : R(l.vals[mk]))), [l.noTotal ? '' : R(x.F.reduce((s, mk) => s + (l.vals[mk] || 0), 0))]))),
+    .concat(x.lines.map(l => [l.label].concat(x.F.map(mk => (l.vals[mk] == null ? '' : R(l.vals[mk]))), [l.noTotal ? '' : R(l.tot != null ? l.tot : x.F.reduce((s, mk) => s + (l.vals[mk] || 0), 0))]))),
     [44].concat(x.F.map(() => 14), [16]));
-  add('โครงการ', [['โครงการ', 'รหัส', 'กลุ่ม', 'Type', 'ผลิตภัณฑ์', 'มูลค่าสัญญา', 'วันเซ็น', 'รับเงิน', 'เงินรับ (หัก 1%)', 'ค่าคอม', 'ค่าติดตั้งรวม', 'ติดตั้ง ADV.', 'ติดตั้งงวด 1', 'ติดตั้งงวดสุดท้าย', 'ค่าของโรงงานรวม', 'โรงงานงวด 1', 'โรงงานงวด 2', 'โรงงานงวด 3', 'หลักประกัน', 'วางเงินสด', 'เบิก LIT', 'ค่าธรรมเนียม LIT', 'ดอกเบี้ย LIT ทั้งก้อน', 'หมายเหตุ']]
+  add('โครงการ', [['โครงการ', 'รหัส', 'กลุ่ม', 'Type', 'ผลิตภัณฑ์', 'มูลค่าสัญญา', 'วันเซ็น', 'รับเงิน', 'เงินรับ (หัก 1%)', 'ค่าคอม', 'ค่าติดตั้งรวม', 'ติดตั้ง ADV.', 'ติดตั้งงวด 1', 'ติดตั้งงวดสุดท้าย', 'ค่าของโรงงานรวม', 'โรงงานงวด 1', 'โรงงานงวด 2', 'โรงงานงวด 3', 'หลักประกัน', 'วางเงินสด', 'ค่าธรรมเนียม LG (ทั้งระยะ)', 'เบิก LIT', 'ค่าธรรมเนียม LIT', 'ดอกเบี้ย LIT ทั้งก้อน', 'หมายเหตุ']]
     .concat(x.per.map(P => [P.r.name, P.r.code || '', (FUND_GROUP_OF[P.r.group] || {}).t || '', P.r.type || '', fundItemsText(P.r), R(P.v), P.r.signDate || '', fundFcPayName(P.r, x.fc) + ' · ' + fundFcInstText(fundFcInst(P.r, x.fc)),
-      R(P.rcvBase), R(P.comm), P.inst ? R(P.inst.total) : '', P.inst ? R(P.inst.adv) : '', P.inst ? R(P.inst.i1) : '', P.inst ? R(P.inst.i2) : '', P.fac ? R(P.fac.total) : '', P.fac ? R(P.fac.p[0]) : '', P.fac ? R(P.fac.p[1]) : '', P.fac ? R(P.fac.p[2]) : '', R(P.lgNeed), P.lgUnknown ? 'ยังไม่รู้วงเงิน' : R(P.lgCash), P.lit ? R(P.lit.gross) : '', P.lit ? R(P.lit.feeA + P.lit.feeB) : '', P.lit ? R(P.lit.intTotal) : '', P.r.note || ''])),
-    [34, 12, 12, 12, 30, 15, 12, 40, 15, 13, 14, 13, 13, 14, 15, 13, 13, 13, 13, 13, 14, 14, 15, 24]);
+      R(P.rcvBase), R(P.comm), P.inst ? R(P.inst.total) : '', P.inst ? R(P.inst.adv) : '', P.inst ? R(P.inst.i1) : '', P.inst ? R(P.inst.i2) : '', P.fac ? R(P.fac.total) : '', P.fac ? R(P.fac.p[0]) : '', P.fac ? R(P.fac.p[1]) : '', P.fac ? R(P.fac.p[2]) : '', R(P.lgNeed), P.lgUnknown ? 'ยังไม่รู้วงเงิน' : R(P.lgCash), R(P.lgFee), P.lit ? R(P.lit.gross) : '', P.lit ? R(P.lit.feeA + P.lit.feeB) : '', P.lit ? R(P.lit.intTotal) : '', P.r.note || ''])),
+    [34, 12, 12, 12, 30, 15, 12, 40, 15, 13, 14, 13, 13, 14, 15, 13, 13, 13, 13, 13, 15, 14, 14, 15, 24]);
   X.writeFile(wb, 'ประมาณการรับจ่าย_' + x.today + '.xlsx');
   return true;
 }
@@ -1436,6 +1452,12 @@ function FundFcSettings({ fc, cfg, canEdit, setFc, setOpt, setFx, setLgFree, set
   const line = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--ink-600)', padding: '4px 0' };
   const setTypes = (list) => setFc(f => Object.assign(f, { payTypes: list }));
   const issuers = fundLgIssuers(cfg);
+  const setOk = (k, v) => setFc(f => Object.assign(f, { ok: Object.assign({}, f.ok, { [k]: v }) }));
+  const okChip = (k) => (
+    <label style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 3, color: fc.ok[k] ? '#15803d' : '#92400e', cursor: canEdit ? 'pointer' : 'default' }}>
+      <input type="checkbox" disabled={!canEdit} checked={!!fc.ok[k]} onChange={e => setOk(k, e.target.checked)} />{fc.ok[k] ? 'ยืนยันแล้ว' : 'ยังไม่ยืนยัน'}
+    </label>
+  );
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, padding: '12px 16px 16px' }}>
       <div style={box}>
@@ -1478,6 +1500,11 @@ function FundFcSettings({ fc, cfg, canEdit, setFc, setOpt, setFx, setLgFree, set
           </div>
         ))}
         {!issuers.length && <div style={{ fontSize: 11.5, color: '#92400e' }}>ไม่มีธนาคารที่ออก LG ใบใหม่ = วางเงินสดทั้งหมด</div>}
+        <div style={line}>ค่าธรรมเนียม LG <FundNum disabled={!canEdit} value={fc.lgFee.rate} onChange={v => setFc(f => Object.assign(f, { lgFee: Object.assign({}, f.lgFee, { rate: v == null ? 0 : v }) }))} width={52} />% ต่อปีของยอดค้ำ ·
+          ค้ำ <FundNum disabled={!canEdit} value={fc.lgFee.yrs} onChange={v => setFc(f => Object.assign(f, { lgFee: Object.assign({}, f.lgFee, { yrs: v == null ? 2 : v }) }))} width={44} /> ปี · จ่าย
+          <select className="select input" disabled={!canEdit} value={fc.lgFee.pay} onChange={e => setFc(f => Object.assign(f, { lgFee: Object.assign({}, f.lgFee, { pay: e.target.value }) }))} style={{ padding: '2px 6px', fontSize: 12, width: 'auto' }}>
+            <option value="yearly">ปีละครั้ง (ล่วงหน้า)</option><option value="once">ครั้งเดียวตอนออก LG</option>
+          </select>{okChip('lgFeePay')}</div>
         <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 4 }}>ค่าติดตั้งและค่าของโรงงานต่อชุด ตั้งในกล่อง "ผู้รับเหมา" ด้านล่าง</div>
       </div>
 
@@ -1591,6 +1618,7 @@ const FUND_ICO = {
   dl: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'],
   ul: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'm17 8-5-5-5 5', 'M12 3v12'],
   alert: ['M12 9v4', 'M12 17h.01', 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'],
+  wallet: ['M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4', 'M4 6v12a2 2 0 0 0 2 2h14v-4', 'M18 12a2 2 0 0 0 0 4h4v-4z'],
 };
 function FundIco({ d, size }) {
   const s = size || 18;
@@ -1985,6 +2013,9 @@ function FundingPlanPage({ data, toast }) {
         fcAuto('lg', fundN(cfg.lgPct) == null ? 'หลักประกันสัญญา (ยังไม่ตั้ง %)' : 'หลักประกันสัญญา ' + fmtNum(Number(cfg.lgPct) || 0, 1) + '% (ส่วนที่ต้องวางเงินสด)',
         fp.ev.lg, { badge: 'LG', color: FC_C.proj, head: lgHead,
           sub: fundN(cfg.lgPct) == null ? 'ยังไม่นับ — ตั้ง % ที่ "เงื่อนไขที่ใช้คิด"' : lgRoom == null ? 'ยังไม่รู้วงเงิน LG' : lgCashFc > 0.5 ? 'วงเงิน LG ไม่พอ ต้องวางเงินสด ' + fundM(lgCashFc) : 'ใช้วงเงิน LG ได้ทั้งหมด (ต้องใช้ ' + fundM(lgNeedFc) + ')' }),
+        fcAuto('lgFee', 'ค่าธรรมเนียม LG ' + fmtNum(fc.lgFee.rate, 2) + '% ต่อปี', fp.ev.lgFee, { badge: 'LG', color: FC_C.proj,   // เหมือน WTP (ผู้ใช้ 2026-11-12)
+          sub: fundN(cfg.lgPct) == null ? 'ยังไม่นับ — ยังไม่ได้ตั้ง % หลักประกันสัญญา' : 'ค้ำ ' + fc.lgFee.yrs + ' ปี · ' + (fc.lgFee.pay === 'once' ? 'จ่ายครั้งเดียวตอนออก LG' : 'จ่ายปีละครั้ง ล่วงหน้า'),
+          how: 'ยอดค้ำประกัน (หลักประกันสัญญาของโครงการที่จะลงนาม) × ' + fmtNum(fc.lgFee.rate, 2) + '% ต่อปี · ค้ำ ' + fc.lgFee.yrs + ' ปี · ' + (fc.lgFee.pay === 'once' ? 'จ่ายครั้งเดียวทั้งระยะตอนออก LG' : 'จ่ายปีละครั้งล่วงหน้า ปีแรกวันออก LG (วันเซ็น)') }),
       ].concat(fc.more.stamp ? [fcAuto('stamp', 'อากรแสตมป์สัญญา ' + FUND_FC_STAMP + '%', fp.ev.stamp, { badge: 'อากร', color: FC_C.proj })] : [],
         // ผู้ใช้ 2026-11-11: หลักประกัน + อากร อยู่ก่อนค่าติดตั้งงวด 1 (เรียง: คอม · ADV. · หลักประกัน · อากร · ติดตั้งงวด 1 · งวดสุดท้าย · ค่าของโรงงาน · ผู้รับเหมาอื่น)
         [
@@ -2030,6 +2061,7 @@ function FundingPlanPage({ data, toast }) {
   const facUnk = fp.per.filter(P => P.isNew && P.sign && P.fac && P.fac.unk.length);
   if (FUND_PRODUCTS.length && (instUnk.length || facUnk.length)) fcWarn.push('ยังไม่รู้ค่าติดตั้ง/ค่าของโรงงานของ ' + Math.max(instUnk.length, facUnk.length) + ' โครงการ (ไม่นับ) — ต้องระบุผลิตภัณฑ์ในโครงการ');
   if (pickTotal - pickTyped > 0.5) fcWarn.push('ดอกเบี้ยหมวดอื่น ' + fundM(pickTotal - pickTyped) + ' ยังไม่ได้เลือกเดือนจ่าย (ไม่นับ) — พิมพ์ยอดในแถว "หมวดอื่น — เลือกเดือนจ่ายเอง" ข้อ ข.3');   // BIO
+  if (fp.ev.lgFee.length && !fc.ok.lgFeePay) fcWarn.push('รอยืนยัน: ค่าธรรมเนียม LG จ่ายปีละครั้งล่วงหน้า หรือครั้งเดียวทั้งระยะตอนออก LG (ตอนนี้นับ' + (fc.lgFee.pay === 'once' ? 'ครั้งเดียว' : 'ปีละครั้ง') + ') — ตั้งได้ที่เงื่อนไขที่ใช้คิด');
   if (facTotal - facTyped > 0.5) fcWarn.push('ค่าของโรงงาน ' + fundM(facTotal - facTyped) + ' ยังไม่ได้เลือกเดือนจ่าย (ไม่นับ) — พิมพ์ยอดในแถว "ค่าของโรงงาน" ข้อ ข.2');
   if (incList.length && !ov.incs) fcWarn.push('ยังไม่ได้นำเข้าไฟล์ดอกเบี้ย Incofin — ใช้ตารางดอกเบี้ยในระบบตามรอบไปก่อน (ปุ่มนำเข้าในแถว INCOFIN)');
   if (incNoFx.length) fcWarn.push('ดอกเบี้ย Incofin ตามไฟล์ยังไม่รวม — ใส่อัตราแลกเปลี่ยน ' + Array.from(new Set(incNoFx)).join('/'));
@@ -2055,6 +2087,8 @@ function FundingPlanPage({ data, toast }) {
       });
       put(s.tot, si ? fcOut : fcIn);
     });
+    lines.push({ label: 'รับ − จ่าย ของเดือน (ก − ข · ช่องเดือนไม่รวมเงินยกมา · ช่องรวม = ยกมา + ก − ข)', vals: F.reduce((o, mk, i) => Object.assign(o, { [mk]: fcIn[i] - fcOut[i] }), {}),
+      tot: (fcOpen[0] || 0) + F.reduce((s, mk, i) => s + fcIn[i] - fcOut[i], 0) });
     lines.push({ label: 'เงินคงเหลือปลายเดือน (ต้นเดือน + ก − ข)', vals: F.reduce((o, mk, i) => Object.assign(o, { [mk]: fcClose[i] }), {}), noTotal: true });
     const ok = fundFcExport({ F, today, rangeLabel: bdafMShort(F[0]) + ' – ' + bdafMShort(F[F.length - 1]), lines, per: fp.per, fc });
     if (toast) toast(ok ? 'ส่งออก Excel แล้ว' : 'ส่งออกไม่สำเร็จ');
@@ -2093,6 +2127,7 @@ function FundingPlanPage({ data, toast }) {
     const chipOf = (row) => {
       switch (row.key) {
         case 'iv': return rcvSkip > 0.5 ? 'ยังไม่นับ ' + fundMil(rcvSkip) + ' ล้าน' : '';
+        case 'lgFee': return fp.ev.lgFee.length && !fc.ok.lgFeePay ? 'รอยืนยันวิธีจ่าย' : '';
         case 'fac': return facLeft > 0.5 ? 'ยังไม่ได้เลือกจ่าย ' + fundMil(facLeft) + ' ล้าน' : '';
         case 'intPick': return pickTotal - pickTyped > 0.5 ? 'ยังไม่ได้เลือกจ่าย ' + fundMil(pickTotal - pickTyped) + ' ล้าน' : '';   // BIO
         case 'inst': return instUnk.length ? 'ยังไม่รู้ ' + instUnk.length + ' โครงการ' : '';
@@ -2301,6 +2336,7 @@ function FundingPlanPage({ data, toast }) {
       ['เงินกู้', <>ตอนนี้มีแต่<b>นิตาโฮลดิ้ง</b> · ยอดที่จะเบิกกรอกเองในข้อ ก.3 · ดอกเบี้ยและเงินต้นของสัญญาเดิมตามตารางหนี้ในระบบ</>],
       ['ค่าคอม', fundN((cfg.fc || {}).comm) == null ? unset : <><b>{fmtNum(fc.comm, 1)}%</b> ของมูลค่าสัญญา · {fc.commAt === 'rcv' ? 'จ่ายตามเงินรับ' : 'จ่ายวันเซ็นสัญญา'}</>],
       ['หลักประกันสัญญา', fundN(cfg.lgPct) == null ? unset : <><b>{fmtNum(Number(cfg.lgPct) || 0, 1)}%</b> วันเซ็น · ใช้วงเงิน LG ก่อน ไม่พอวางเงินสด · {issuers.length ? 'ออก LG ใบใหม่ได้ที่ ' + issuers.join(' / ') : 'ยังไม่ได้เลือกธนาคารที่ออก LG ใบใหม่'}</>],
+      ['ค่าธรรมเนียม LG', <><b>{fmtNum(fc.lgFee.rate, 2)}%</b> ต่อปีของยอดค้ำ · ค้ำ <b>{fc.lgFee.yrs} ปี</b> · {fc.ok.lgFeePay ? '' : 'ตอนนี้นับ'}{fc.lgFee.pay === 'once' ? 'จ่ายครั้งเดียวตอนออก LG' : 'จ่ายปีละครั้งล่วงหน้า'}{!fc.ok.lgFeePay && <> <span className="fund-xchip">รอยืนยัน</span></>}</>],
       ['รับเงินราชการ', <><b>งวดเดียว</b> {(fc.payTypes[0] && fc.payTypes[0].inst[0] && fc.payTypes[0].inst[0].d) || 120} วันหลังเซ็น · หัก ณ ที่จ่าย 1% · ถึงวันแล้วยังไม่ได้รับ = เลื่อน 30 วัน · ยังไม่ออก INV = รับหลังออก INV {fc.invLag} วัน</>],
       ['ผลิตภัณฑ์', FUND_PRODUCTS.length ? <>{FUND_PRODUCTS.length} รายการ · ค่าติดตั้ง/ค่าของโรงงานต่อชุดตั้งที่ "แก้เงื่อนไข"</> : <span style={{ color: '#8A5300' }}>รอข้อมูลผลิตภัณฑ์ BIO (ราคา · ค่าติดตั้ง · ค่าของโรงงาน) — ยังไม่นับค่าติดตั้ง/ค่าของโรงงาน</span>],
       ['ค่าของโรงงาน', <>เลือกเดือนจ่ายเอง (ต้องจ่ายทั้งหมด {fundM(facTotal)})</>],
@@ -2354,12 +2390,51 @@ function FundingPlanPage({ data, toast }) {
               <div className="fund-tile res" style={{ flex: '1.2 1 210px' }}>
                 <span className="fund-tile-k" style={{ color: '#C9D3E3' }}>เงินคงเหลือสุทธิ · สิ้น {bdafMShort(lastMk)}</span>
                 <div className="fund-tile-v"><b className="fund-num" style={{ color: resC }}>{mil(lastClose)}</b><span style={{ color: '#C9D3E3' }}>ล้าน</span></div>
-                <span className="fund-tile-s" style={{ color: '#AEB9CC' }}>เงินในบัญชี + รายรับ − ค่าใช้จ่าย (รวมผู้รับเหมาแล้ว)</span>
-                <div className="fund-tile-hr" />
-                <div className="fund-tile-net"><span>{endNeg ? 'ขาดเงินสุทธิ' : 'เหลือเงินสุทธิ'}</span><b className="fund-num" style={{ color: resC }}>{fundMil(lastClose)} ล้าน</b></div>
-                {neg
-                  ? <span className="fund-tile-chip" style={{ background: '#3A2433', color: '#FFC6CC' }}>ติดลบตั้งแต่สิ้น {bdafMShort(fcNeg[0].mk)}</span>
-                  : lowI != null && <span className="fund-tile-chip" style={{ background: '#1F3A3A', color: '#BDEFD9' }}>ต่ำสุดสิ้น {bdafMShort(F[lowI])} · {mil(fcClose[lowI])} ล้าน</span>}
+                {(() => {
+                  // เหมือน WTP (ผู้ใช้ 2026-11-12 "ทำให้ไบโอด้วย ... การ์ดคงเหลือสุทธิ"): ปลายช่วงติดลบ → รายการเริ่มที่เดือนแรกที่ติดลบ (ยอดที่ต่ำกว่าศูนย์)
+                  //   แล้วเดือนต่อไป = ติดลบเพิ่ม/ลดของเดือนนั้น รวมกันได้ยอดขาดพอดี · ไม่ติดลบปลายช่วง → ยกมา + รับ − จ่ายแต่ละเดือน
+                  //   สีชมพูเข้มขึ้นตามเดือน · เดือนที่รับมากกว่าจ่ายสีเขียว · แถบเรียงเดือนล่าสุดก่อน
+                  const PINK = ['#FFC8CD', '#FFA3AD', '#FF7A87', '#F86A79', '#F05566', '#E3455A', '#D63447'];
+                  const GREEN = ['#A8E9CF', '#93E2C3', '#7DDBB5', '#68D3A9', '#58CDA1', '#4CC79A', '#2AA97C'];
+                  let items;
+                  if (endNeg) {
+                    const i0 = fcClose.findIndex(v => v < -0.5);
+                    items = F.slice(i0).map((mk, j) => { const i = i0 + j, v = j ? fcClose[i] - fcClose[i - 1] : fcClose[i];
+                      return { k: mk, t: bdafMShort(mk) + (j ? (v > 0.5 ? ' · รับมากกว่าจ่าย' : '') : ' · เริ่มติดลบ'), v, tip: j ? 'รับ − จ่ายของเดือน' : 'สิ้นเดือนติดลบ (ส่วนที่ต่ำกว่าศูนย์)' }; });
+                  } else {
+                    items = [{ k: 'open', t: 'ยกมา (เงินในบัญชี)', v: fcOpenAmt, open: true, tip: 'เงินในบัญชีตอนนี้' }]
+                      .concat(F.map((mk, i) => ({ k: mk, t: bdafMShort(mk), v: fcIn[i] - fcOut[i], tip: 'รับ − จ่ายของเดือน' })));
+                  }
+                  const negs = items.filter(x => !x.open && x.v < -0.5), poss = items.filter(x => !x.open && x.v > 0.5);
+                  const colorOf = (x) => {
+                    if (x.open) return '#8DB8FF';
+                    const arr = x.v < 0 ? negs : poss, pal = x.v < 0 ? PINK : GREEN, k = arr.indexOf(x);
+                    return k < 0 ? '#AEB9CC' : pal[arr.length <= 1 ? pal.length - 2 : Math.round(k * (pal.length - 1) / (arr.length - 1))];
+                  };
+                  const bar = endNeg ? items.filter(x => Math.abs(x.v) > 0.5).reverse() : items.filter(x => x.v > 0.5).sort((p, q) => Math.abs(q.v) - Math.abs(p.v));
+                  const worst = negs.reduce((m, x) => (!m || x.v < m.v ? x : m), null);
+                  return (
+                    <React.Fragment>
+                      <span className="fund-tile-s" style={{ color: '#AEB9CC' }}>{endNeg ? 'ติดลบสะสมจากรับ − จ่ายของแต่ละเดือน' + (poss.length ? ' · เขียว = เดือนที่รับมากกว่าจ่าย' : '') : 'ยกมา + รับ − จ่ายของแต่ละเดือน'}</span>
+                      <div className="fund-tile-bar res" aria-hidden="true">{bar.map(x => <div key={x.k} style={{ flex: (Math.abs(x.v) / 1e6) + ' 1 0', background: colorOf(x) }} />)}</div>
+                      <div className="fund-res-legend">
+                        {items.map(x => (
+                          <div key={x.k} title={x.tip + ' · ' + fundB(x.v) + ' บาท'}>
+                            <i style={{ background: colorOf(x) }} /><span>{x.t}</span>
+                            <b className="fund-num" style={{ color: x.open ? '#fff' : x.v < -0.5 ? '#FF9DA6' : x.v > 0.5 ? '#7FE0B8' : '#AEB9CC' }}>{!x.open && x.v > 0.5 ? '+' : ''}{mil(x.v)}</b>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="fund-tile-hr" />
+                      <div className="fund-tile-net"><span>{endNeg ? 'รวมติดลบ · ขาดเงินสุทธิ' : 'เหลือเงินสุทธิ'}</span><b className="fund-num" style={{ color: resC }}>{fundMil(lastClose)} ล้าน</b></div>
+                      <div className="fund-tile-chips">
+                        {neg && <span className="fund-tile-chip" style={{ background: '#3A2433', color: '#FFC6CC' }}>{endNeg ? 'ติดลบตั้งแต่สิ้น ' : 'ติดลบช่วงสิ้น '}{bdafMShort(fcNeg[0].mk)}</span>}
+                        {endNeg && worst && <span className="fund-tile-chip" style={{ background: '#3A2433', color: '#FFC6CC' }}>ติดลบเพิ่มมากสุด {bdafMShort(worst.k)} · {mil(worst.v)}</span>}
+                        {!endNeg && lowI != null && <span className="fund-tile-chip" style={{ background: '#1F3A3A', color: '#BDEFD9' }}>ต่ำสุดสิ้น {bdafMShort(F[lowI])} · {mil(fcClose[lowI])} ล้าน</span>}
+                      </div>
+                    </React.Fragment>
+                  );
+                })()}
               </div>
             </div>
             {fcWarn.length > 0 && (
@@ -2391,8 +2466,8 @@ function FundingPlanPage({ data, toast }) {
                 {F.map(mk => <div key={mk} className="fund-xh"><b>{bdafMShort(mk)}</b>{mk === cm && <span>ที่เหลือของเดือน</span>}</div>)}
                 <div className="fund-xh"><b>รวม {nM} เดือน</b></div>
               </div>
-              <div className="fund-xr open fund-xbox">
-                <div className="fund-xl"><div className="fund-xlt">
+              <div className="fund-xr open tint">
+                <div className="fund-xl"><span className="fund-xico" style={{ background: '#2463D1' }}><FundIco d={FUND_ICO.wallet} size={17} /></span><div className="fund-xlt">
                   <div className="fund-xlh"><span className="fund-xname">เงินในบัญชีต้นเดือน</span><button type="button" className="fund-xlink no-present" onClick={() => setOpenPick(true)}>เลือกบัญชี ›</button></div>
                   <span className="fund-xnote">เดือนแรก = {balT} {fcOpening.n}/{fcOpening.of} บัญชี{asOfT}</span>
                 </div></div>
@@ -2400,6 +2475,20 @@ function FundingPlanPage({ data, toast }) {
                 <div className="fund-xt blank" />
               </div>
               {FC_SECS.map(secEl)}
+              {(() => {   // ก − ข ของแต่ละเดือน ไม่รวมเงินยกมา · ช่องรวม = ยอดยกมา + ก − ข ทั้งช่วง = เงินคงเหลือสิ้นช่วง (เหมือน WTP · ผู้ใช้ 2026-11-12)
+                const net = F.map((_, i) => fcIn[i] - fcOut[i]), tot = fcSum(net), carry = fcOpen[0] || 0, totC = carry + tot;
+                const cls = (v) => (v < -0.5 ? ' neg' : v > 0.5 ? ' pos' : ' zero');
+                const sgn = (v) => (v > 0.5 ? '+' : '') + txt(v);
+                return (
+                  <div className="fund-xr mnet tint">
+                    <div className="fund-xl"><span className="fund-xico" style={{ background: '#3D4A63' }}>ก−ข</span><div className="fund-xlt"><span className="fund-xname">รับ − จ่าย ของเดือน (ก − ข)</span><span className="fund-xnote">ช่องเดือนไม่รวมเงินยกมา · ช่องรวม = ยกมา + ก − ข</span></div></div>
+                    {net.map((v, i) => <div key={F[i]} className={'fund-xc num' + cls(v)}>{sgn(v)}</div>)}
+                    <div className={'fund-xt col' + cls(totC)} title={'ยกมา ' + fundB(carry) + ' + ก − ข ทั้งช่วง ' + (tot > 0.5 ? '+' : '') + fundB(tot) + ' = ' + fundB(totC)}>
+                      <span>{sgn(totC)}</span><span className="fund-xsub">รวมยกมา {mil(carry)} ล้าน</span>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="fund-xr res">
                 <div className="fund-xl"><div className="fund-xlt"><span className="fund-xname">เงินคงเหลือปลายเดือน</span><span className="fund-xnote">= เงินต้นเดือน + ก − ข</span></div></div>
                 {fcClose.map((v, i) => <div key={F[i]} className={'fund-xc num' + (v < -0.5 ? ' neg' : '') + (i === lastI ? ' hl' : '')}>{txt(v)}</div>)}
@@ -2619,8 +2708,16 @@ function FundingPlanPage({ data, toast }) {
         .fund-tile-rows span { flex: 1 1 auto; }
         .fund-tile-rows b { font-weight: 600; color: var(--fx-ink); }
         .fund-tile-hr { height: 1px; background: #2E3B55; }
+        .fund-tile-bar.res { height: 10px; background: rgba(255,255,255,.08); }
+        .fund-res-legend { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: #E2E8F0; }
+        .fund-res-legend > div { display: flex; align-items: center; gap: 10px; }
+        .fund-res-legend i { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 9px; }
+        .fund-res-legend span { flex: 1 1 auto; min-width: 0; }
+        .fund-res-legend b { font-weight: 700; white-space: nowrap; }
         .fund-tile-net { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 700; }
         .fund-tile-net b { font-size: 18px; }
+        .fund-tile-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .fund-tile-chips:empty { display: none; }
         .fund-tile-chip { align-self: flex-start; display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
         .fund-warn { border: 1px solid #F1DCB0; background: #FFF8EB; border-radius: 12px; color: #8A5300; font-size: 13.5px; }
         .fund-warn-h { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; box-sizing: border-box; }
@@ -2658,6 +2755,18 @@ function FundingPlanPage({ data, toast }) {
         .fund-xr.open .fund-xname { font-size: 15px; font-weight: 700; }
         .fund-xr.open .fund-xc { font-size: 15px; font-weight: 600; color: var(--fx-ink); }
         .fund-xt.blank { background: #F7F9FC; }
+        /* แถว ก − ข + แถวเงินต้นเดือน: พื้นฟ้าอ่อน (เหมือน WTP · ผู้ใช้ 2026-11-12) */
+        .fund-xr.mnet { min-height: 64px; }
+        .fund-xr.mnet .fund-xname { font-size: 15.5px; font-weight: 700; color: var(--fx-ink); }
+        .fund-xr.mnet .fund-xc { font-size: 15.5px; font-weight: 700; }
+        .fund-xr.mnet .fund-xt { font-size: 16px; font-weight: 800; }
+        .fund-sheet .fund-xr.mnet .fund-xc.pos, .fund-sheet .fund-xr.mnet .fund-xt.pos { color: #0B7255; }
+        .fund-xr.tint { background: #EAF0FA; border: 1px solid #C3D2EA; border-radius: 14px; overflow: clip; min-height: 72px; }
+        .fund-xr.tint .fund-xt { background: #DDE6F5; border-left-color: #C3D2EA; }
+        .fund-xr.tint .fund-xnote { color: #46526A; }
+        .fund-xico { width: 32px; height: 32px; flex: 0 0 32px; display: flex; align-items: center; justify-content: center; border-radius: 9px; color: #fff; font-size: 11.5px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+        .fund-xt.col { flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; }
+        .fund-xsub { font-size: 11.5px; font-weight: 500; color: #46526A; }
         .fund-xlink { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; font-weight: 600; color: #2463D1; cursor: pointer; }
         .fund-xlink:hover { color: #1A4CA6; text-decoration: underline; }
         .fund-xsec.in { --t-c: var(--fin-c); --t-soft: var(--fin-soft); --t-grp: var(--fin-grp); --t-gtot: var(--fin-gtot); --t-sep: var(--fin-sep); --t-bar: var(--fin-bar); --t-sub: var(--fin-sub); }
