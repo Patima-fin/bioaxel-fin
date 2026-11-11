@@ -92,6 +92,60 @@ function fundParseAmt(s) {
   return t !== '' && isFinite(n) ? Math.round(n * mul * 100) / 100 : undefined;
 }
 /* ยอดรายเดือนที่กรอกเอง (m = { 'YYYY-MM': บาท }) · แถวที่ยังไม่เคยกรอกรายเดือน = ยอดเท่ากันทุกเดือนแบบเดิม */
+/* BIO: รายละเอียดของแถวค่าใช้จ่ายประจำ (ผู้ใช้ 2026-11-11 "รายการของ ADMIN ใส่ยอดตามรูปนี้เป็นดีเทล ตอนกดดู")
+ *   ยอดต่อเดือนของแต่ละรายการ · ผลรวม = ยอดของแถวทุกเดือน (ช่องสีเทา) · พิมพ์ทับรายเดือนได้ (cfg.fixed.m.<k>)
+ *   แก้ในหน้าต่างรายละเอียด → เก็บ cfg.fixed.items.<k> = [{ n, a }] (มีแล้ว = ใช้แทนค่าเริ่มนี้ · [] = ไม่มีรายละเอียด) */
+const FUND_FIXED_DETAIL_DEF = {
+  admin: [   // รูปจากผู้ใช้ 2026-11-11 · รวม 2,739,700 บาท/เดือน
+    { n: 'เงินเดือน', a: 2200000 }, { n: 'ประกันสังคม', a: 100000 }, { n: 'ค่างวดรถ', a: 16000 }, { n: 'ค่ากูเกิ้ล', a: 27000 },
+    { n: 'กองทุนสำรองเลี้ยงชีพ', a: 150000 }, { n: 'ค่าเช่าโกดัง', a: 46000 }, { n: 'ค่าเช่าโรงงานสุพรรณ', a: 15000 }, { n: 'ค่าโทรศัพท์รวม', a: 7300 },
+    { n: 'ค่าน้ำมัน', a: 50000 }, { n: 'ภ.ง.ด.', a: 110000 }, { n: 'ค่าไฟ', a: 6000 }, { n: 'กยศ.', a: 10000 }, { n: 'ค่าอินเทอร์เน็ตรวม', a: 2400 },
+  ],
+};
+function fundFixedDetail(cfg, k) {
+  const it = cfg.fixed && cfg.fixed.items && cfg.fixed.items[k];
+  return (Array.isArray(it) ? it : (FUND_FIXED_DETAIL_DEF[k] || [])).filter(x => x && (String(x.n || '').trim() || Number(x.a)));
+}
+/* หน้าต่างรายละเอียดของแถวค่าใช้จ่ายประจำ — ดูได้ทุกคน (รวมโหมดนำเสนอ) · แก้ได้เฉพาะคนที่แก้ได้และไม่ได้อยู่ในโหมดนำเสนอ */
+function FundFixedDetailModal({ part, items, typedN, canEdit, onSave, onClearTyped, onClose }) {
+  const [draft, setDraft] = React.useState(() => items.map((x, i) => ({ id: i + 1, n: x.n || '', a: fundN(x.a) })));
+  const dirty = JSON.stringify(draft.map(x => [x.n.trim(), x.a || 0])) !== JSON.stringify(items.map(x => [String(x.n || '').trim(), Number(x.a) || 0]));
+  const total = draft.reduce((t, x) => t + (Number(x.a) || 0), 0);
+  const set = (id, patch) => setDraft(d => d.map(x => (x.id === id ? Object.assign({}, x, patch) : x)));
+  const th = { padding: '8px 10px', fontSize: 12.5, color: 'var(--ink-500)', fontWeight: 600, borderBottom: '1px solid var(--line)', textAlign: 'left', whiteSpace: 'nowrap' };
+  const td = { padding: '7px 10px', borderBottom: '1px solid var(--line-soft)', fontSize: 14 };
+  return (
+    <BDAFShell title={'รายละเอียด — ' + part.t} sub={part.th + ' · ยอดต่อเดือน · ผลรวมใช้เป็นยอดของแถวนี้ทุกเดือนในตาราง (พิมพ์ทับรายเดือนได้)'} onClose={onClose} width={640}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><th style={{ ...th, width: 56 }}>ลำดับ</th><th style={th}>รายการ</th><th style={{ ...th, textAlign: 'right' }}>จำนวนเงิน (บาท/เดือน)</th>{canEdit && <th style={{ ...th, width: 40 }} />}</tr></thead>
+        <tbody>
+          {draft.map((x, i) => (
+            <tr key={x.id}>
+              <td style={{ ...td, color: 'var(--ink-500)' }}>{i + 1}</td>
+              <td style={td}>{canEdit ? <input className="input" value={x.n} placeholder="ชื่อรายการ" onChange={e => set(x.id, { n: e.target.value })} style={{ width: '100%', padding: '4px 8px' }} /> : x.n}</td>
+              <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{canEdit ? <FundNum value={x.a} onChange={v => set(x.id, { a: v })} width={140} /> : fundB(x.a)}</td>
+              {canEdit && <td style={{ ...td, textAlign: 'center' }}><button type="button" className="btn btn-sm" title="ลบรายการนี้" onClick={() => setDraft(d => d.filter(y => y.id !== x.id))}>✕</button></td>}
+            </tr>
+          ))}
+          <tr>
+            <td style={td} /><td style={{ ...td, fontWeight: 700 }}>รวมรายจ่ายทั้งหมดต่อเดือน</td>
+            <td style={{ ...td, textAlign: 'right', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fundB(total)}</td>{canEdit && <td style={td} />}
+          </tr>
+        </tbody>
+      </table>
+      {canEdit && <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+        <button type="button" className="btn btn-sm" onClick={() => setDraft(d => d.concat([{ id: Date.now(), n: '', a: null }]))}>＋ เพิ่มรายการ</button>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn btn-sm" onClick={onClose}>ปิด</button>
+        <button type="button" className="btn btn-sm btn-primary" disabled={!dirty} onClick={() => onSave(draft.filter(x => x.n.trim() || Number(x.a)).map(x => ({ n: x.n.trim(), a: Number(x.a) || 0 })))}>บันทึก</button>
+      </div>}
+      {typedN > 0 && <div style={{ marginTop: 12, padding: '8px 12px', background: '#FFF8EB', borderRadius: 8, fontSize: 12.5, color: '#8A5300', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        มี {typedN} เดือนที่พิมพ์ยอดทับไว้ในตาราง (เดือนนั้นไม่ใช้ยอดรวมนี้)
+        {canEdit && <button type="button" className="btn btn-sm" onClick={onClearTyped}>ล้างที่พิมพ์ทับ ใช้ยอดรวมนี้ทุกเดือน</button>}
+      </div>}
+    </BDAFShell>
+  );
+}
 function fundFixedVal(fx, k, mk) {
   const m = fx.m && fx.m[k];
   return m && typeof m === 'object' ? fundN(m[mk]) : fundN(fx[k]);
@@ -1567,6 +1621,7 @@ function FundingPlanPage({ data, toast }) {
   const [fold, setFold] = React.useState(pref0.fold || {});
   const [srcKey, setSrcKey] = React.useState(null);
   const [rcvOpen, setRcvOpen] = React.useState(false);
+  const [detK, setDetK] = React.useState(null);   // BIO: แถวค่าใช้จ่ายประจำที่เปิดดูรายละเอียด
   const [pjMore, setPjMore] = React.useState({});
   React.useEffect(() => { fundSavePrefs({ open, fold }); }, [open, fold]);
   const tog = (k) => setOpen(p => Object.assign({}, p, { [k]: !p[k] }));
@@ -1610,8 +1665,10 @@ function FundingPlanPage({ data, toast }) {
   // ผู้ใช้ 2026-11-09: กรอกยอดเองแต่ละเดือน (Selling / Administrative / Finance) · ช่องว่าง = 0 · ยังไม่กรอกสักช่อง = ใช้ค่าเฉลี่ยไปก่อน
   const fx = cfg.fixed || {};
   const fixedParts = FUND_FIXED_PARTS.map(p => {
-    const vals = F.map(mk => fundFixedVal(fx, p.k, mk));
-    return Object.assign({}, p, { vals, empty: vals.filter(v => v == null).length });
+    // BIO: มีรายละเอียด → ช่องที่ไม่ได้พิมพ์ทับ = ผลรวมรายละเอียด (ช่องสีเทา)
+    const typed = F.map(mk => fundFixedVal(fx, p.k, mk)), det = fundFixedDetail(cfg, p.k), detSum = det.reduce((t, x) => t + (Number(x.a) || 0), 0);
+    const vals = det.length ? typed.map(v => (v != null ? v : detSum)) : typed;
+    return Object.assign({}, p, { vals, typed, det, detSum, empty: vals.filter(v => v == null).length });
   });
   const extraRows = cfg.extra || [];
   const avgLinesAll = view.cats.filter(c => c.cat !== 2).reduce((a, c) => a.concat(c.lines.filter(x => !fundIsDebtLine(x.l))), []);
@@ -1647,6 +1704,9 @@ function FundingPlanPage({ data, toast }) {
     o.fixed = f;
     return o;
   });
+  // BIO: รายละเอียดแถวค่าใช้จ่ายประจำ · ล้างยอดที่พิมพ์ทับรายเดือนของแถวนั้น
+  const setFixedItems = (k, list) => saveCfg(o => { const f = Object.assign({}, o.fixed); f.items = Object.assign({}, f.items, { [k]: list }); o.fixed = f; return o; });
+  const clearFixedTyped = (k) => saveCfg(o => { const f = Object.assign({}, o.fixed), m = Object.assign({}, f.m); delete m[k]; f.m = m; delete f[k]; delete f.amount; o.fixed = f; return o; });
   const setExtraCells = (id, patch) => saveCfg(o => {
     o.extra = (o.extra || []).map(x => {
       if (x.id !== id) return x;
@@ -2060,10 +2120,20 @@ function FundingPlanPage({ data, toast }) {
         onCell = (mk, v) => setOvr(row.key, mk, v);
       } else if (row.fixed) {
         const p = row.fixed, fill = fundFillPatch(F, p.vals);
-        name = <span className="fund-xname">{p.t}</span>;
-        cellVal = (mk) => p.vals[F.indexOf(mk)];
+        // BIO: กดชื่อแถว = ดู/แก้รายละเอียด · มีรายละเอียด → ช่องสีเทา = ผลรวม พิมพ์ทับรายเดือนได้
+        name = p.det.length || canEdit
+          ? <button type="button" className="fund-xname" title="ดูรายละเอียดรายการ" onClick={() => setDetK(p.k)}>{p.t}<span className="fund-glink-go">รายละเอียด ›</span></button>
+          : <span className="fund-xname">{p.t}</span>;
         onCell = (mk, v) => setFixedCells(p.k, { [mk]: v });
-        onFill = Object.keys(fill).length ? () => setFixedCells(p.k, fill) : null;
+        if (p.det.length) {
+          const nT = p.typed.filter(v => v != null).length;
+          note = (note ? note + ' · ' : '') + p.det.length + ' รายการ ' + fundB(p.detSum) + '/เดือน' + (nT ? ' · แก้เอง ' + nT + ' เดือน' : '');
+          cellVal = (mk) => p.typed[F.indexOf(mk)];
+          sys = F.reduce((o, mk) => { o[mk] = p.detSum; return o; }, {});
+        } else {
+          cellVal = (mk) => p.vals[F.indexOf(mk)];
+          onFill = Object.keys(fill).length ? () => setFixedCells(p.k, fill) : null;
+        }
       } else {
         const x = row.x, fill = fundFillPatch(F, row.vals), sug = x.sug ? FUND_FC_MORE.find(m => m.k === x.sug) : null;
         name = <FundNameInput value={x.name} disabled={!canEdit} onSave={nm => setExtra(x.id, { name: nm })} />;
@@ -2737,6 +2807,13 @@ function FundingPlanPage({ data, toast }) {
         const row = fcAllRows[srcKey];
         return <FundFcSrcModal title={(row.neg ? '− ' : '') + row.label} how={row.how || row.sub} items={row.items} F={F} sys={row.sys} ovr={fc.ovr[row.key]} head={row.head}
           canEdit={canEdit} onClearOvr={() => clearOvr(row.key)} onClose={() => setSrcKey(null)} />;
+      })()}
+      {detK && (() => {   /* BIO: รายละเอียดแถวค่าใช้จ่ายประจำ */
+        const p = fixedParts.find(x => x.k === detK);
+        if (!p) return null;
+        const ed = canEdit && !fundPresenting();
+        return <FundFixedDetailModal key={detK} part={p} items={p.det} typedN={p.typed.filter(v => v != null).length} canEdit={ed}
+          onSave={(list) => { setFixedItems(p.k, list); setDetK(null); if (toast) toast('บันทึกรายละเอียด ' + p.t); }} onClearTyped={() => clearFixedTyped(p.k)} onClose={() => setDetK(null)} />;
       })()}
       {rcvOpen && <BDAFRcvModal rcv={rcv} F={F} today={today} init={{}} onClose={() => setRcvOpen(false)} />}
     </div>
