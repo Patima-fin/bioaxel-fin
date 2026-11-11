@@ -1526,8 +1526,8 @@ function FundOpenModal({ accounts, fc, canEdit, setFc, onClose }) {
 }
 
 /* ── หน้าตาตามแบบที่ผู้ใช้ทำใน Claude Design (2026-11-11 "ทำให้เหมือนอันนี้") ──
- *   ตัวเลขภาพรวมเป็นล้าน 2 ตำแหน่ง · ตารางเป็นบาท · สี ก = เขียว #0B7255 · ข = ส้ม #B14A0C · ผลลัพธ์ = กรมท่า #14213A */
-const FUND_TILE_IN  = ['#0B7255', '#3DAA82', '#9FD8C1', '#CDEBDD'];
+ *   ตัวเลขภาพรวมเป็นล้าน 2 ตำแหน่ง · ตารางเป็นบาท · สี ก = ตัวแปร --fin-* (WTP ฟ้า POG · BIO เขียว) · ข = ส้ม #B14A0C · ผลลัพธ์ = กรมท่า #14213A */
+const FUND_TILE_IN  = ['var(--fin-c)', 'var(--fin-p2)', 'var(--fin-p3)', 'var(--fin-p4)'];   // สีจริงอยู่ที่ --fin-* (WTP ฟ้า POG · BIO เขียว)
 const FUND_TILE_OUT = ['#B14A0C', '#DD7633', '#EFA56E', '#F7CFAE'];
 const FUND_ICO = {
   down: ['m6 9 6 6 6-6'], up: ['m18 15-6-6-6 6'], right: ['m9 18 6-6-6-6'], check: ['M20 6 9 17l-5-5'], plus: ['M12 5v14', 'M5 12h14'],
@@ -2251,9 +2251,9 @@ function FundingPlanPage({ data, toast }) {
                 <span className="fund-tile-s">{balT} {fcOpening.n} จาก {fcOpening.of} บัญชี{fcOpening.asOf ? ' · ณ ' + fmtDate(fcOpening.asOf) : ''}</span>
               </div>
               <div className="fund-op" aria-hidden="true">+</div>
-              <div className="fund-tile" style={{ flex: '1.3 1 220px', background: '#F0F8F4', border: '1px solid #CDE8DC' }}>
-                <span className="fund-tile-k" style={{ color: '#0B7255' }}><span className="fund-tag" style={{ background: '#0B7255' }}>ก</span>รวมรายรับ</span>
-                <div className="fund-tile-v"><b className="fund-num" style={{ color: '#0B7255' }}>{mil(fcInSum)}</b><span style={{ color: '#2F6B57' }}>ล้าน</span></div>
+              <div className="fund-tile" style={{ flex: '1.3 1 220px', background: 'var(--fin-tile)', border: '1px solid var(--fin-tile-line)' }}>
+                <span className="fund-tile-k" style={{ color: 'var(--fin-c)' }}><span className="fund-tag" style={{ background: 'var(--fin-c)' }}>ก</span>รวมรายรับ</span>
+                <div className="fund-tile-v"><b className="fund-num" style={{ color: 'var(--fin-c)' }}>{mil(fcInSum)}</b><span style={{ color: 'var(--fin-sub)' }}>ล้าน</span></div>
                 {tileParts(inParts)}
               </div>
               <div className="fund-op" aria-hidden="true">−</div>
@@ -2290,7 +2290,7 @@ function FundingPlanPage({ data, toast }) {
         <section aria-label="ประมาณการรับ-จ่ายรายเดือน">
           {secHead(2, 'ประมาณการรับ-จ่ายรายเดือน', 'อ่านจากบนลงล่าง: เงินต้นเดือน + ก − ข = เงินคงเหลือปลายเดือน', (
             <div className="fund-legend">
-              <span style={{ background: '#E6F4EE', color: '#0B7255' }}>ก รายรับ</span>
+              <span style={{ background: 'var(--fin-soft)', color: 'var(--fin-c)' }}>ก รายรับ</span>
               <span style={{ background: '#FCEEE3', color: '#B14A0C' }}>ข ค่าใช้จ่าย</span>
               <span style={{ background: '#14213A', color: '#fff' }}>ผลลัพธ์</span>
               <span style={{ background: '#fff', border: '1px solid #D5DDE8', color: '#3D4A63' }}>หน่วย: บาท</span>
@@ -2322,7 +2322,7 @@ function FundingPlanPage({ data, toast }) {
           <p className="fund-foot-note no-present">กดชื่อแถวดูที่มา · ตัวเลขสีเทา = ระบบคิด พิมพ์ทับได้ (ลบให้ว่าง = กลับไปใช้ยอดระบบ) · แถวกรอกเอง ช่องว่าง = 0 · พิมพ์ 2.5ล = 2,500,000 · กดชื่อกลุ่ม = พับ/กาง · ตัวเลขสีแดง = ติดลบ · – = ไม่มีรายการ</p>
         </section>
 
-        <section aria-label="โครงการที่จะลงนาม">
+        <section className="no-present" aria-label="โครงการที่จะลงนาม">   {/* ผู้ใช้ 2026-11-11: โหมดนำเสนอไม่โชว์ข้อ 3–4 */}
           {foldHead(3, 'โครงการที่จะลงนาม (ฝ่ายขาย)', ov.pipe.length
             ? <>
                 <span>{ov.pipe.length} โครงการ</span>
@@ -2393,7 +2393,7 @@ function FundingPlanPage({ data, toast }) {
           )}
         </section>
 
-        <section aria-label="เงื่อนไขที่ใช้คิด และรายการที่อาจตกหล่น">
+        <section className="no-present" aria-label="เงื่อนไขที่ใช้คิด และรายการที่อาจตกหล่น">
           {foldHead(4, 'เงื่อนไขที่ใช้คิด และรายการที่อาจตกหล่น', <>
             <span>รับเงินราชการงวดเดียว {(fc.payTypes[0] && fc.payTypes[0].inst[0] && fc.payTypes[0].inst[0].d) || 120} วัน · ค่าคอม {fundN((cfg.fc || {}).comm) == null ? 'ยังไม่ตั้ง' : fmtNum(fc.comm, 1) + '%'} · หลักประกัน {fundN(cfg.lgPct) == null ? 'ยังไม่ตั้ง' : fmtNum(Number(cfg.lgPct) || 0, 1) + '%'}</span>
             <span className="fund-xchip">รายการที่อาจตกหล่น นับแล้ว {nMore} จาก {FUND_FC_MORE.length}</span>
@@ -2482,6 +2482,8 @@ function FundingPlanPage({ data, toast }) {
         .fund-xr:hover .fund-gadd-in, .fund-gadd-in:focus { opacity: 1; background: #EEF3FD; }
         /* ── หน้าตาตามแบบ Claude Design ของผู้ใช้ (2026-11-11) ── */
         .fund-page { --fx-ink: #14213A; --fx-ink2: #3D4A63; --fx-mute: #5E6A82; --fx-line: #E2E8F0; --fx-neg: #C2283A; color: var(--fx-ink); }
+        /* สีฝั่งรายรับ (ก) — BIO = เขียว (ตามแบบ Claude Design) · ค่าอื่นเหมือนกันทั้ง 2 บริษัท */
+        .fund-page { --fin-c: #0B7255; --fin-bar: #085E46; --fin-soft: #E6F4EE; --fin-grp: #F1F8F4; --fin-gtot: #E2F1E9; --fin-sep: #CFE3D9; --fin-sub: #2F6B57; --fin-tile: #F0F8F4; --fin-tile-line: #CDE8DC; --fin-p2: #3DAA82; --fin-p3: #9FD8C1; --fin-p4: #CDEBDD; --fin-on-dark: #8FE3C1; }
         .fund-page .fund-num { font-family: 'IBM Plex Sans', 'IBM Plex Sans Thai', sans-serif; font-variant-numeric: tabular-nums; }
         .fund-page .mute { color: var(--fx-mute); }
         .fund-stack { display: flex; flex-direction: column; gap: 44px; }
@@ -2570,7 +2572,7 @@ function FundingPlanPage({ data, toast }) {
         .fund-xt.blank { background: #F7F9FC; }
         .fund-xlink { border: 0; background: none; padding: 0; font: inherit; font-size: 13px; font-weight: 600; color: #2463D1; cursor: pointer; }
         .fund-xlink:hover { color: #1A4CA6; text-decoration: underline; }
-        .fund-xsec.in { --t-c: #0B7255; --t-soft: #E6F4EE; --t-grp: #F1F8F4; --t-gtot: #E2F1E9; --t-sep: #CFE3D9; --t-bar: #085E46; --t-sub: #2F6B57; }
+        .fund-xsec.in { --t-c: var(--fin-c); --t-soft: var(--fin-soft); --t-grp: var(--fin-grp); --t-gtot: var(--fin-gtot); --t-sep: var(--fin-sep); --t-bar: var(--fin-bar); --t-sub: var(--fin-sub); }
         .fund-xsec.out { --t-c: #B14A0C; --t-soft: #FCEEE3; --t-grp: #FDF5EE; --t-gtot: #F9E6D6; --t-sep: #EED8C6; --t-bar: #943D09; --t-sub: #8E4A1F; }
         .fund-xsech { min-height: 50px; display: flex; align-items: center; background: var(--t-soft); }
         .fund-xsech-in { position: sticky; left: 0; display: flex; align-items: center; gap: 10px; padding: 0 20px; }
@@ -2629,7 +2631,7 @@ function FundingPlanPage({ data, toast }) {
         .fund-pj-r .pl { padding-left: 58px !important; }
         .fund-pj-r .b { font-weight: 700; color: var(--fx-ink); }
         .fund-pj-r .s { font-size: 13px !important; }
-        .fund-pj-r .g { color: #0B7255; font-weight: 600; }
+        .fund-pj-r .g { color: var(--fin-c); font-weight: 600; }
         .fund-pj-r .sm { font-size: 12px; }
         .fund-pj-r.head { align-items: end; border-bottom: 1px solid var(--fx-line); }
         .fund-pj-r.head > div { padding-top: 14px; padding-bottom: 12px; font-size: 12.5px; font-weight: 600; color: var(--fx-mute); }
@@ -2658,8 +2660,8 @@ function FundingPlanPage({ data, toast }) {
         .fund-pj-when b { font-size: 14px; font-weight: 600; color: var(--fx-ink); }
         .fund-pj-when span { font-size: 12.5px; color: var(--fx-mute); }
         .fund-pj-lit { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
-        .fund-pj-lit input { width: 16px; height: 16px; accent-color: #0B7255; cursor: pointer; margin: 0; }
-        .fund-pj-ico { display: none; color: #0B7255; }
+        .fund-pj-lit input { width: 16px; height: 16px; accent-color: var(--fin-c); cursor: pointer; margin: 0; }
+        .fund-pj-ico { display: none; color: var(--fin-c); }
         .fund-pj-why { font-size: 12px; color: #8A5300; }
         .fund-pj-more { border-top: 1px solid #EEF2F7; padding: 4px 16px 4px 58px; }
         .fund-pj-more button { min-height: 44px; padding: 0; border: 0; background: none; font-family: inherit; font-size: 14px; font-weight: 600; color: #2463D1; cursor: pointer; }
@@ -2678,7 +2680,7 @@ function FundingPlanPage({ data, toast }) {
         .fund-mi-m span { font-size: 12.5px; color: var(--fx-mute); }
         .fund-mi-r { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
         .fund-mi-r b { font-size: 15px; font-weight: 700; }
-        .fund-mi-r b.g { color: #0B7255; }
+        .fund-mi-r b.g { color: var(--fin-c); }
         .fund-mi-r b.w { color: #8A5300; }
         .fund-mi-r .mute { font-size: 13px; }
         .fund-mi-r .st { font-size: 12px; font-weight: 600; }
