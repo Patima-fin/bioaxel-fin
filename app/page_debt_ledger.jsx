@@ -399,7 +399,10 @@ function buildAutoSchedule(master, events, asOf, cfg) {
 
   // จุดแบ่งงวด: วันเริ่ม, วันครบ, ต้นเดือนทุกเดือน, วันที่มี event
   const bset = new Set([start, end]);
-  let cur = _monthStartStr(_addMonthStr(start, 1));
+  // ★ ต้นเดือนถัดไปต้องคิดจาก "วันที่ 1" — เดิม _addMonthStr(start, 1) บวกเดือนจากวันเริ่มตรง ๆ
+  //   วันเริ่ม 29–31 จึงล้นเดือน (31/01 + 1 = 03/03) → ข้ามต้นเดือนถัดไป → 2 เดือนรวมเป็นแถวเดียว
+  //   (ของจริง BHG-8 เริ่ม 31/03/2025: มี.ค. ได้ 31 วัน 51,808.22 + เม.ย. หาย · BHG-2 เริ่ม 31/05/2024 พ.ค.+มิ.ย. รวมกัน)
+  let cur = _monthEndStr(start);
   while (cur < end) { bset.add(cur); cur = _monthStartStr(_addMonthStr(cur, 1)); }
   evs.forEach(e => bset.add(e.date));
   // แบ่งแถวที่รอยต่อช่วงสัญญาด้วย (วันเริ่มต่อสัญญา + วันครบช่วงสุดท้าย) → เดือนที่ต่อสัญญากลางเดือน
