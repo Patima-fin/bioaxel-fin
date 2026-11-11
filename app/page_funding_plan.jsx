@@ -3,7 +3,8 @@
  *     · ไม่เกี่ยวกับ LIT (ลีซอิท) เลย — ไม่มีแถวเบิก/ดอก/คืน LIT · ไม่มีคอลัมน์เบิก LIT · ไม่มีกล่องตั้งค่า LIT
  *     · รับเงินจากราชการงวดเดียวเท่านั้น 120 วันหลังเซ็น (FUND_FC_PAYTYPES · FUND_RCV_DEFAULT)
  *     · เงินกู้ตอนนี้มีแต่นิตาโฮลดิ้ง → ก.3 "เงินกู้" เป็นแถวกรอกเอง (sec 'loan') · ดอกเบี้ย/เงินต้นเดิมตามตารางหนี้ในระบบ
- *     · ดอกเบี้ยจ่ายทุกเดือนอย่างเดียว — ไม่มีรอบ INCOFIN · ไม่มีรายไตรมาส (FUND_QUARTER_CATS = []) · ไม่มีเช็ครอขึ้น
+ *     · ดอกเบี้ย (ผู้ใช้ 2026-11-11): ตปท./สกุลต่างประเทศ = จ่ายทุกเดือน · WCI = จ่ายทุกไตรมาส · หมวดอื่น = เลือกเดือนจ่ายเอง (แถวเริ่ม 0)
+ *       ไม่มีรอบ INCOFIN · ไม่มีเช็ครอขึ้น (FUND_QUARTER_CATS · FUND_MONTH_CATS · fundFcDebtSplit → pick)
  *     · ผลิตภัณฑ์ BIO ผู้ใช้จะส่งข้อมูลให้ทีหลัง → FUND_PRODUCTS / FUND_FC_INSTALL / FUND_FC_FACTORY ว่าง (ค่าติดตั้ง/ค่าของโรงงานยังไม่นับ + เตือน)
  *     · % ค่าคอม / % หลักประกัน ผู้ใช้ยังไม่ได้บอกสำหรับ BIO → ไม่ตั้งค่าเริ่ม (นับ 0 + เตือน · ตั้งได้ที่ "เงื่อนไขที่ใช้คิด") — ห้ามเดา
  *     · ใบแจ้งหนี้คงค้างใช้ ivBuildRows + bdArPlanOf แบบ Bank Daily ของ BIO (bdafReceipts ของ BIO รับรูปแบบนั้น) · ไม่มี bdNormAR / bdForecastSettled / bdafUseCf ใน BIO → มีตัวของหน้าเอง (fundFcSettled / fundUseCf)
@@ -109,7 +110,8 @@ function fundFillPatch(months, vals) {
 }
 const FUND_RCV_DEFAULT = { d1: 120, p1: 100, gap: 0 };   // BIO: รับเงินราชการงวดเดียว 120 วัน ·        // ผู้ใช้แจ้ง: เซ็นแล้ว ~120 วันได้งวด 1 (40%) · อีก 60 วันได้งวดสุดท้าย (60%)
 const FUND_DEBT_GROUPS = ['60100', '60200', '60400', '60500'];   // เงินต้น+ดอกเบี้ยใน Cash Flow — มีในตารางหนี้แล้ว
-const FUND_QUARTER_CATS = [];   // BIO: ดอกเบี้ยจ่ายทุกเดือนอย่างเดียว ·                       // ดอกเบี้ยรวมจ่ายสิ้นไตรมาส
+const FUND_QUARTER_CATS = ['WCI'];   // BIO: ผู้ใช้ 2026-11-11 "WCI จ่ายทุกไตรมาส" (รวมจ่ายสิ้นเดือนไตรมาส)
+const FUND_MONTH_CATS = ['ตปท.'];    // BIO: "ต่างประเทศ จ่ายทุกเดือน" (+ สัญญาสกุลต่างประเทศทุกหมวด) · หมวดอื่น = เลือกเดือนจ่ายเอง
 
 const FUND_GROUPS = [
   { k: 'signed',   t: 'เซ็นแล้ว',       c: '#15803d', bg: '#f0fdf4' },
@@ -794,10 +796,11 @@ function fundFcLgBack(rows, today, lastDay) {
 }
 /* ดอกเบี้ย/เงินต้นเงินกู้เดิม แยกตามรอบจ่าย · ลีซอิทที่มีอยู่ไปอยู่แถวเช็คล่วงหน้า */
 function fundFcDebtSplit(debt) {
-  const cls = { month: [], quarter: [], incofin: [], principal: [] };
+  const cls = { month: [], quarter: [], incofin: [], pick: [], principal: [] };
   debt.rows.forEach(d => {
     if (d.m.leasitSource === true || d.m.leasitSource === 'true') return;
-    const k = d.cat === 'Incofin' ? 'incofin' : FUND_QUARTER_CATS.indexOf(d.cat) >= 0 ? 'quarter' : 'month';
+    // BIO: WCI = ไตรมาส · ตปท./สกุลต่างประเทศ = ทุกเดือน · หมวดอื่น = เลือกเดือนจ่ายเอง (pick)
+    const k = d.cat === 'Incofin' ? 'incofin' : FUND_QUARTER_CATS.indexOf(d.cat) >= 0 ? 'quarter' : (FUND_MONTH_CATS.indexOf(d.cat) >= 0 || (d.cur && d.cur !== 'THB')) ? 'month' : 'pick';
     d.evs.forEach(e => {
       const it = { date: e.date, amt: -e.amt, t: d.name || '—', ref: (d.no || '') + (d.cat ? ' · ' + d.cat : ''), did: d.id, no: d.no,
         note: e.kind === 'principal' ? ['เงินต้นคงเหลือ ' + (d.cur !== 'THB' ? d.cur + ' ' : '') + fundB(d.bal) + ' ครบ ' + fmtDate(d.due) + ' · เลือก "คืนจริง"']
@@ -1457,7 +1460,7 @@ function FundFcSettings({ fc, cfg, canEdit, setFc, setOpt, setFx, setLgFree, set
       <div style={box}>
         <div style={h}>ดอกเบี้ยเงินกู้เดิม</div>
         <div style={{ fontSize: 12.5, color: 'var(--ink-600)', lineHeight: 1.7 }}>
-          ยอดจากตารางดอกเบี้ย (Debt Ledger) · จ่ายทุกสิ้นเดือน · ไม่มีตารางเดือนไหน = ประมาณจากยอดคงเหลือ × อัตรา
+          ยอดจากตารางดอกเบี้ย (Debt Ledger) · ตปท./สกุลต่างประเทศ จ่ายทุกเดือน · WCI จ่ายทุกไตรมาส · หมวดอื่นเลือกเดือนจ่ายเองในตาราง · ไม่มีตารางเดือนไหน = ประมาณจากยอดคงเหลือ × อัตรา
         </div>
         {fxCurs.length > 0 && <div style={{ ...line, marginTop: 8 }}>อัตราแลกเปลี่ยน
           {fxCurs.map(cur => <span key={cur} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{cur} <FundNum disabled={!canEdit} value={cfg.fx[cur]} onChange={v => setFx(cur, v)} placeholder="ยังไม่รู้" width={70} /> บาท{!cfg.fx[cur] && <FundChip t="ยังไม่รวม" tone="warn" />}</span>)}
@@ -1885,6 +1888,15 @@ function FundingPlanPage({ data, toast }) {
     how: 'ยอดเบิกตามไฟล์ FACTORY ของโครงการที่จะลงนาม · ระบบไม่ลงเดือนให้ พิมพ์ยอดลงช่องเดือนที่เลือกจ่ายเอง · รายการข้างล่างคือยอดตามงวดและวันอ้างอิง' }),
     { sys: F.reduce((o, mk) => { o[mk] = 0; return o; }, {}) });
   const facTyped = F.reduce((t, mk) => t + fcVal(facRow, mk), 0);
+  // BIO: ดอกเบี้ยหมวดอื่น (ไม่ใช่ WCI / ตปท.) — ผู้ใช้ "รอเลือกรายการจ่ายเอง" → แถวเริ่ม 0 พิมพ์ยอดลงเดือนที่เลือกจ่าย · รายการในหน้าต่างที่มา = ยอดตามตารางดอกเบี้ยรายเดือนไว้อ้างอิง
+  const pickAll = fcSplit.pick.map(e => Object.assign({}, e, { note: (e.note || []).concat(['ยอดอ้างอิงตามตารางดอกเบี้ย (สิ้นเดือน) — ไม่นับในตาราง จนกว่าจะพิมพ์ยอดลงเดือนที่เลือกจ่าย']) }));
+  const pickTotal = pickAll.reduce((t, e) => t + e.amt, 0);
+  const pickRow = Object.assign(fcAuto('intPick', 'หมวดอื่น — เลือกเดือนจ่ายเอง', pickAll, { badge: 'เลือก', color: FC_C.int,
+    how: 'ดอกเบี้ยของสัญญาหมวดอื่น (ไม่ใช่ WCI / ต่างประเทศ) · ระบบไม่ลงเดือนให้ พิมพ์ยอดลงช่องเดือนที่เลือกจ่ายเอง · รายการข้างล่างคือยอดตามตารางดอกเบี้ยรายเดือนไว้อ้างอิง' }),
+    { sys: F.reduce((o, mk) => { o[mk] = 0; return o; }, {}) });
+  const pickTyped = F.reduce((t, mk) => t + fcVal(pickRow, mk), 0);
+  const pickCats = Array.from(new Set(fcSplit.pick.map(i => i.ref.split(' · ')[1]).filter(Boolean)));
+  pickRow.sub = (pickCats.length ? pickCats.join(' · ') + ' · ' : '') + 'ตามตาราง ' + fundM(pickTotal) + ' · เลือกจ่ายแล้ว ' + fundM(pickTyped) + (pickTotal - pickTyped > 0.5 ? ' · ยังไม่ได้เลือก ' + fundM(pickTotal - pickTyped) : '');
   facRow.sub = 'ต้องจ่ายทั้งหมด ' + fundM(facTotal) + ' · เลือกจ่ายแล้ว ' + fundM(facTyped) + (facTotal - facTyped > 0.5 ? ' · ยังไม่ได้เลือก ' + fundM(facTotal - facTyped) : '');
   const FC_SECS = [
     { k: 'in', t: 'ก. คาดการณ์รับเงิน', tot: 'รวมรายรับ (ก)', groups: [
@@ -1922,9 +1934,12 @@ function FundingPlanPage({ data, toast }) {
         ],
         fc.more.wip ? [fcAuto('wip', 'งานที่กำลังทำ: ต้นทุนที่เหลือ (ประมาณ)', wipItems, { badge: 'งาน', color: FC_C.con })] : [],
         fcMan('contractor', FC_C.con, 'ผรม')) },
-      { key: 'g7', t: '3. ดอกเบี้ย', rows: [   // BIO: จ่ายทุกเดือนอย่างเดียว · ไม่มี INCOFIN / เช็ครอขึ้น / LIT
-        fcAuto('intM', 'จ่ายทุกเดือน', fcSplit.month.concat(fcSplit.quarter, fcSplit.incofin), { badge: 'เดือน', color: FC_C.int, sub: Array.from(new Set(fcSplit.month.map(i => i.ref.split(' · ')[1]).filter(Boolean))).join(' · ') || 'ตามตารางดอกเบี้ย (Debt Ledger) · จ่ายสิ้นเดือน',
-          how: 'ดอกเบี้ยจากตาราง Debt Ledger ของสัญญาที่ยัง Active · จ่ายทุกสิ้นเดือน · ไม่มีตาราง = ประมาณจากยอดคงเหลือ × อัตรา' }),
+      { key: 'g7', t: '3. ดอกเบี้ย', rows: [   // BIO: ตปท. ทุกเดือน · WCI ทุกไตรมาส · หมวดอื่นเลือกเดือนจ่ายเอง · ไม่มี INCOFIN / เช็ครอขึ้น / LIT
+        fcAuto('intM', 'ต่างประเทศ — จ่ายทุกเดือน', fcSplit.month.concat(fcSplit.incofin), { badge: 'เดือน', color: FC_C.int, sub: (Array.from(new Set(fcSplit.month.map(i => i.ref.split(' · ')[1]).filter(Boolean))).join(' · ') || 'ตปท. / สกุลต่างประเทศ') + ' · จ่ายสิ้นเดือน',
+          how: 'ดอกเบี้ยจากตาราง Debt Ledger ของสัญญาหมวด ตปท. และสัญญาสกุลต่างประเทศ · จ่ายทุกสิ้นเดือน · คูณอัตราแลกเปลี่ยนที่ตั้งไว้' }),
+        fcAuto('intQ', 'WCI — จ่ายทุกไตรมาส', fcSplit.quarter, { badge: 'ไตรมาส', color: FC_C.int, sub: 'รวมดอกเบี้ย 3 เดือน จ่ายสิ้นเดือนไตรมาส (มี.ค. · มิ.ย. · ก.ย. · ธ.ค.)',
+          how: 'ดอกเบี้ยจากตาราง Debt Ledger ของสัญญา WCI · รวม 3 เดือนไปจ่ายสิ้นเดือนไตรมาส' }),
+        pickRow,
       ] },
       { key: 'g8', t: '4. คืนเงินกู้ และอื่นๆ', add: 'other', rows: [].concat(fc.more.principal ? [fcAuto('principal', 'เงินต้นเงินกู้เดิมที่ครบกำหนด', fcSplit.principal, { badge: 'ต้น', color: FC_C.oth, head: principalHead,
           sub: fcSplit.principal.length ? fcSplit.principal.length + ' สัญญาที่เลือกคืนจริง' : 'นับว่าต่อสัญญาทั้งหมด · กดเลือกคืนรายสัญญา' })] : [],
@@ -1954,6 +1969,7 @@ function FundingPlanPage({ data, toast }) {
   if (pipeNoSign) fcWarn.push(pipeNoSign + ' โครงการยังไม่มีวันเซ็น — ยังไม่นับเงินรับ ค่าใช้จ่าย และเงินกู้');
   const facUnk = fp.per.filter(P => P.isNew && P.sign && P.fac && P.fac.unk.length);
   if (FUND_PRODUCTS.length && (instUnk.length || facUnk.length)) fcWarn.push('ยังไม่รู้ค่าติดตั้ง/ค่าของโรงงานของ ' + Math.max(instUnk.length, facUnk.length) + ' โครงการ (ไม่นับ) — ต้องระบุผลิตภัณฑ์ในโครงการ');
+  if (pickTotal - pickTyped > 0.5) fcWarn.push('ดอกเบี้ยหมวดอื่น ' + fundM(pickTotal - pickTyped) + ' ยังไม่ได้เลือกเดือนจ่าย (ไม่นับ) — พิมพ์ยอดในแถว "หมวดอื่น — เลือกเดือนจ่ายเอง" ข้อ ข.3');   // BIO
   if (facTotal - facTyped > 0.5) fcWarn.push('ค่าของโรงงาน ' + fundM(facTotal - facTyped) + ' ยังไม่ได้เลือกเดือนจ่าย (ไม่นับ) — พิมพ์ยอดในแถว "ค่าของโรงงาน" ข้อ ข.2');
   if (incList.length && !ov.incs) fcWarn.push('ยังไม่ได้นำเข้าไฟล์ดอกเบี้ย Incofin — ใช้ตารางดอกเบี้ยในระบบตามรอบไปก่อน (ปุ่มนำเข้าในแถว INCOFIN)');
   if (incNoFx.length) fcWarn.push('ดอกเบี้ย Incofin ตามไฟล์ยังไม่รวม — ใส่อัตราแลกเปลี่ยน ' + Array.from(new Set(incNoFx)).join('/'));
@@ -2018,6 +2034,7 @@ function FundingPlanPage({ data, toast }) {
       switch (row.key) {
         case 'iv': return rcvSkip > 0.5 ? 'ยังไม่นับ ' + fundMil(rcvSkip) + ' ล้าน' : '';
         case 'fac': return facLeft > 0.5 ? 'ยังไม่ได้เลือกจ่าย ' + fundMil(facLeft) + ' ล้าน' : '';
+        case 'intPick': return pickTotal - pickTyped > 0.5 ? 'ยังไม่ได้เลือกจ่าย ' + fundMil(pickTotal - pickTyped) + ' ล้าน' : '';   // BIO
         case 'inst': return instUnk.length ? 'ยังไม่รู้ ' + instUnk.length + ' โครงการ' : '';
         case 'intInc': return incList.length && !ov.incs ? 'ยังไม่นำเข้าไฟล์' : incNoFx.length ? 'ยังไม่มีอัตราแลกเปลี่ยน' : '';
         case 'litIn': return litPer.length && fc.lit.limit == null ? 'ยังไม่รู้วงเงิน' : litPer.some(P => P.lit.cut) ? 'วงเงินไม่พอ' : '';
@@ -2157,6 +2174,7 @@ function FundingPlanPage({ data, toast }) {
         : <>เงินพอจ่ายทุกเดือนถึงสิ้น {bdafMShort(lastMk)} — เหลือ <span className="pos">{fundMil(lastClose)} ล้านบาท</span></>;
     const subs = [];
     if (!neg && lowI != null && lowI !== lastI) subs.push('ต่ำสุดสิ้น ' + bdafMShort(F[lowI]) + ' เหลือ ' + fundMil(fcClose[lowI]) + ' ล้าน');
+    if (pickTotal - pickTyped > 0.5) subs.push('ยังไม่รวมดอกเบี้ยหมวดอื่น ' + fundMil(pickTotal - pickTyped) + ' ล้าน ที่ยังไม่ได้เลือกเดือนจ่าย');   // BIO
     if (facLeft > 0.5) subs.push('ยังไม่รวมค่าของโรงงาน ' + fundMil(facLeft) + ' ล้าน ที่ยังไม่ได้เลือกเดือนจ่าย');
     const resC = endNeg ? '#FF9DA6' : '#8FE3C1';
 
@@ -2216,7 +2234,7 @@ function FundingPlanPage({ data, toast }) {
       ['รับเงินราชการ', <><b>งวดเดียว</b> {(fc.payTypes[0] && fc.payTypes[0].inst[0] && fc.payTypes[0].inst[0].d) || 120} วันหลังเซ็น · หัก ณ ที่จ่าย 1% · ถึงวันแล้วยังไม่ได้รับ = เลื่อน 30 วัน · ยังไม่ออก INV = รับหลังออก INV {fc.invLag} วัน</>],
       ['ผลิตภัณฑ์', FUND_PRODUCTS.length ? <>{FUND_PRODUCTS.length} รายการ · ค่าติดตั้ง/ค่าของโรงงานต่อชุดตั้งที่ "แก้เงื่อนไข"</> : <span style={{ color: '#8A5300' }}>รอข้อมูลผลิตภัณฑ์ BIO (ราคา · ค่าติดตั้ง · ค่าของโรงงาน) — ยังไม่นับค่าติดตั้ง/ค่าของโรงงาน</span>],
       ['ค่าของโรงงาน', <>เลือกเดือนจ่ายเอง (ต้องจ่ายทั้งหมด {fundM(facTotal)})</>],
-      ['ดอกเบี้ยเงินกู้เดิม', <>ตาม Debt Ledger · <b>จ่ายทุกสิ้นเดือน</b> · ไม่มีตาราง = ประมาณจากยอดคงเหลือ × อัตรา</>],
+      ['ดอกเบี้ยเงินกู้เดิม', <>ตาม Debt Ledger · <b>ตปท. จ่ายทุกเดือน</b> · <b>WCI จ่ายทุกไตรมาส</b> (สิ้นเดือนไตรมาส) · <b>หมวดอื่นเลือกเดือนจ่ายเอง</b> · ไม่มีตาราง = ประมาณจากยอดคงเหลือ × อัตรา</>],
     ].concat(fcFxCurs.length ? [['อัตราแลกเปลี่ยน', fcFxCurs.map(c => c + ' ' + (cfg.fx[c] ? fmtNum(Number(cfg.fx[c]), 2) + ' บาท' : 'ยังไม่ใส่')).join(' · ')]] : []);
 
     return (
