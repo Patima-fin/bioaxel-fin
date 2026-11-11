@@ -55,6 +55,7 @@ const PAGE_GROUPS = [
     ['iv_report',         'รายงานติดตาม IV',        'invoice'],
     ['receipts',          'ประวัติรับเงิน',          'receivables'],
     ['bank_diary',        'Bank Daily',             'bank'],
+    ['funding_plan',      'แผนการเงินล่วงหน้า',     'money'],
     ['bank_recon',        'กระทบยอดธนาคาร',         'bank'],
     ['cf_coding',         'งบกระทบยอดกระแสเงินสด',  'chart'],
     ['interest_calc',     'คำนวณดอกเบี้ย',          'money'],
@@ -674,6 +675,7 @@ function App() {
     iv_report:   { label: 'รายงานติดตาม IV',         title: 'IV Tracking Report', icon: 'invoice' },
     receipts:    { label: 'ประวัติรับเงิน',           title: 'Receipts History', icon: 'receivables' },
     bank_diary:    { label: 'Bank Daily',               title: 'Bank Daily',      icon: 'bank' },
+    funding_plan:  { label: 'แผนการเงินล่วงหน้า',      title: 'Forward Financial Plan', icon: 'money' },
     bank_recon:    { label: 'กระทบยอดธนาคาร',          title: 'Bank Reconciliation', icon: 'bank' },
     interest_calc: { label: 'คำนวณดอกเบี้ย',          title: 'Interest Schedule Calculator', icon: 'money' },
     sts_calc:      { label: 'STS Calculator',          title: 'STS Encompass Fee Calculator', icon: 'money' },
@@ -714,6 +716,7 @@ function App() {
     case 'iv_report':      page = <IvReportStandalonePage data={data} setData={setData} toast={pushToast} />; break;
     case 'receipts':       page = <ReceiptsPage data={data} />; break;
     case 'bank_diary':     page = <BankDiaryPage data={data} setData={setData} toast={pushToast} />; break;
+    case 'funding_plan':   page = <FundingPlanPage data={data} toast={pushToast} />; break;
     case 'bank_recon':     page = <BankReconPage data={data} setData={setData} toast={pushToast} />; break;
     case 'interest_calc':  page = <InterestCalcPage data={data} />; break;
     case 'sts_calc':       page = <StsCalcPage data={data} />; break;
@@ -1069,6 +1072,7 @@ function Topbar({ route, routes, data, onReset, onMenuClick }) {
   const r = routes[route] || routes.daily;
   const today = new Date().toLocaleDateString('th-TH-u-ca-gregory', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
   const isPresentation = ['daily', 'warroom1', 'warroom2', 'cashflow', 'cashflow_present', 'pnl', 'balance_sheet', 'projects', 'budget', 'investor'].includes(route);
+  const canPresent = route === 'funding_plan';   // หน้ารายงานที่มีโหมดนำเสนอด้วย (เมนูยังอยู่กลุ่มเดิม · คู่กับ WTP 2026-11-11)
   return (
     <div className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
@@ -1088,7 +1092,7 @@ function Topbar({ route, routes, data, onReset, onMenuClick }) {
         </div>
       </div>
       <div className="tb-actions">
-        {isPresentation && <PresentModeToggle />}
+        {(isPresentation || canPresent) && <PresentModeToggle />}
         <div className="tb-search">
           <Icon name="search" size={14} />
           <input placeholder="ค้นหาโครงการ / IV…" />
