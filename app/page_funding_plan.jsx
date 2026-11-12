@@ -1296,7 +1296,7 @@ function FundRowModal({ row, cfg, fc, canEdit, onSave, onDelete, onClose }) {
 }
 
 /* ── นำเข้าไฟล์ฝ่ายขาย (govsales "contract_forecast" · ผู้ใช้ 2026-11-11 "ข้อมูลของฝ่ายขาย ใช้หน้า POG") ──
- *   หาแถวหัวตารางจากชื่อคอลัมน์ (ชื่อโครงการ + มูลค่าโครงการ) ในชีตที่เลือก (ค่าเริ่ม POG) · 1 แถว = 1 โครงการ · จับคู่กับ Pipeline เดิมด้วยรหัสโครงการ
+ *   หาแถวหัวตารางจากชื่อคอลัมน์ (รหัสโครงการ + วันที่คาดว่าจะลงนาม · ไฟล์มี 3 หน้าตาแล้ว ดู fundFcParseSales) ในชีตที่เลือก (ค่าเริ่ม POG) · 1 แถว = 1 โครงการ · จับคู่กับ Pipeline เดิมด้วยรหัสโครงการ
  *   วันที่คาดว่าจะลงนามในไฟล์เป็นวันที่ Excel ที่ใส่ปี พ.ศ. (ปี 2569) บางแถวเป็นข้อความ dd/mm/2570 → แปลงเป็น ค.ศ. (fundFcXlDate)
  *   รหัสผลิตภัณฑ์ในไฟล์ PIIS / PII / STIIS = POG TANK II+Solar / POG TANK II / S TANK II+Solar ในระบบ (fundFcProdCode)
  *   นำเข้าซ้ำ: อัปเดตชื่อ มูลค่า ผลิตภัณฑ์ วันเซ็น หมายเหตุ · คงค่าที่ตั้งเองไว้ (กลุ่ม แบบรับเงิน เบิก LIT ค่าติดตั้งที่ใส่เอง)
@@ -1321,34 +1321,53 @@ function fundFcProdCode(code, text) {
   if (/DRINK/.test(t)) return /PLUS/.test(t) ? 'PDP' : /HOUSE/.test(t) ? 'PDH' : 'PD';
   return '';
 }
+/* ไฟล์ฝ่ายขายออกมาแล้ว 3 หน้าตา (ผู้ใช้ 2026-11-12 "ไฟล์ของฝ่ายขายที่ได้มาใหม่มันไม่เหมือนเดิม") — อ่านจากชื่อคอลัมน์ ไม่ยึดตำแหน่ง:
+ *   แบบ ต.ค. 69: หัวแถว 1 · ชื่อโครงการ (เต็ม) / (แบบสั้น) · มูลค่า (บาท) · รหัสประเภทสินค้า · ประเภทงบประมาณ (แหล่งงบ)
+ *   แบบ 11 พ.ย. 69: หัวแถว 3 (มีชื่อรายงาน 2 แถวบน) · ชื่อโครงการ · รายละเอียดพื้นที่ · มูลค่าโครงการ · ผลิตภัณฑ์ (รหัส) · อปท. · SOLA/BBL · เหตุผลที่ล่าช้า / หมายเหตุก่อนสัญญา
+ *   แบบ 12 พ.ย. 69: หัวแถว 1 · ชื่อเต็มโครงการ (จากไฟล์ต้นฉบับ) (บางแถวว่าง → ใช้ชื่อที่ระบบสร้าง) · งบประมาณที่เสนอ · ประเภทสินค้า · หน่วยงาน · บริษัท
+ *     · ไม่มีช่องพื้นที่ (ประกอบจาก หมู่บ้าน/หมู่ที่/ตำบล/อำเภอ/จังหวัด — หมู่ที่บางแถวเป็นเลขเปล่า → "ม.N") · ไม่มีหมายเหตุ · มีช่องใหม่ "สถานะใบจัดสรร" (เก็บไว้ที่ alloc)
+ *   แถวหัวตาราง = แถวที่มีทั้ง "รหัสโครงการ" และ "วันที่คาดว่าจะลงนาม" (ชีต Pivot มีแค่ "… (เดือน)" เลยไม่ถูกเลือก)
+ *   ไฟล์ที่ไม่มีช่องหมายเหตุ → note = undefined = ไม่แตะหมายเหตุเดิมตอนนำเข้าซ้ำ (ไม่งั้นทุกโครงการขึ้น "อัปเดต หมายเหตุ" แล้วหมายเหตุหาย)
+ *   มูลค่าในไฟล์ใหม่มีเศษทศนิยมลอย (1600000.0000000002) → ปัดเป็นสตางค์ */
 function fundFcParseSales(wb, sheet) {
   const ws = wb.Sheets[sheet];
   if (!ws) return { err: 'ไม่พบชีต ' + sheet, rows: [] };
   const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
   const norm = (x) => String(x == null ? '' : x).replace(/\s+/g, '').toLowerCase();
-  const hi = aoa.findIndex(r => r.some(c => norm(c) === 'ชื่อโครงการ') && r.some(c => norm(c) === 'มูลค่าโครงการ'));
-  if (hi < 0) return { err: 'ไม่พบหัวตาราง (ชื่อโครงการ / มูลค่าโครงการ) ในชีต ' + sheet, rows: [] };
+  const hi = aoa.findIndex(r => r.some(c => norm(c) === 'รหัสโครงการ') && r.some(c => norm(c) === 'วันที่คาดว่าจะลงนาม'));
+  if (hi < 0) return { err: 'ไม่พบหัวตาราง (รหัสโครงการ / วันที่คาดว่าจะลงนาม) ในชีต ' + sheet, rows: [] };
   const H = aoa[hi].map(norm);
   const col = (...names) => { for (const n of names) { const i = H.indexOf(norm(n)); if (i >= 0) return i; } return -1; };
-  const C = { name: col('ชื่อโครงการ'), area: col('รายละเอียดพื้นที่'), value: col('มูลค่าโครงการ'), prodT: col('ผลิตภัณฑ์'), org: col('อปท.', 'อปท'), budget: col('SOLA/BBL'),
-    code: col('รหัสโครงการ'), sub: col('บริษัท SUB', 'บริษัทSUB'), prov: col('จังหวัด'), prodC: col('ผลิตภัณฑ์ (รหัส)', 'ผลิตภัณฑ์(รหัส)'), sign: col('วันที่คาดว่าจะลงนาม'),
-    why: col('เหตุผลที่ล่าช้า (ก่อนสัญญา)', 'เหตุผลที่ล่าช้า'), note: col('หมายเหตุก่อนสัญญา') };
-  if (C.sign < 0) return { err: 'ไม่พบคอลัมน์ "วันที่คาดว่าจะลงนาม"', rows: [] };
+  const C = { full: col('ชื่อเต็มโครงการ (จากไฟล์ต้นฉบับ)', 'ชื่อโครงการ (เต็ม)', 'ชื่อโครงการ'), short: col('ชื่อโครงการ (ชื่อที่ระบบสร้าง)', 'ชื่อโครงการ (แบบสั้น)'),
+    area: col('รายละเอียดพื้นที่'), value: col('มูลค่าโครงการ', 'งบประมาณที่เสนอ', 'มูลค่า (บาท)'), prodT: col('ผลิตภัณฑ์', 'ชื่อผลิตภัณฑ์ (เต็ม)'),
+    org: col('อปท.', 'อปท', 'หน่วยงาน'), budget: col('SOLA/BBL', 'ประเภทงบประมาณ (แหล่งงบ)'), budgetName: col('ชื่องบประมาณ'),
+    code: col('รหัสโครงการ'), sub: col('บริษัท SUB', 'บริษัท'), prov: col('จังหวัด'), amp: col('อำเภอ'), tam: col('ตำบล'), moo: col('หมู่ที่'), vill: col('ชื่อหมู่บ้าน'),
+    prodC: col('ผลิตภัณฑ์ (รหัส)', 'รหัสประเภทสินค้า', 'ประเภทสินค้า'), sign: col('วันที่คาดว่าจะลงนาม'),
+    why: col('เหตุผลที่ล่าช้า (ก่อนสัญญา)', 'เหตุผลที่ล่าช้า'), note: col('หมายเหตุก่อนสัญญา'), alloc: col('สถานะใบจัดสรร') };
+  if (C.value < 0) return { err: 'ไม่พบคอลัมน์มูลค่า (มูลค่าโครงการ / งบประมาณที่เสนอ) ในชีต ' + sheet, rows: [] };
   const g = (r, k) => (C[k] >= 0 ? r[C[k]] : '');
+  const t = (r, k) => String(g(r, k) == null ? '' : g(r, k)).replace(/\s+/g, ' ').trim();
+  const hasNote = C.why >= 0 || C.note >= 0;
+  const areaOf = (r) => {
+    if (C.area >= 0) return t(r, 'area');
+    const vill = t(r, 'vill'), moo = t(r, 'moo'), tam = t(r, 'tam'), amp = t(r, 'amp'), prov = t(r, 'prov');
+    return [vill === '-' ? '' : vill, /^\d+$/.test(moo) ? 'ม.' + moo : moo, tam ? 'ต.' + tam : '', amp ? 'อ.' + amp : '', prov ? 'จ.' + prov : ''].filter(Boolean).join(' ');
+  };
+  const budgetOf = (r) => { const b = t(r, 'budget'); if (b) return b; const n = t(r, 'budgetName'); return /SOLA/i.test(n) ? 'SOLA' : /BBL/i.test(n) ? 'BBL' : n; };
   const rows = [];
   aoa.slice(hi + 1).forEach((r, i) => {
-    const name = String(g(r, 'name') || '').trim(), value = Number(String(g(r, 'value')).replace(/[,\s]/g, '')) || 0;
+    const name = t(r, 'full') || t(r, 'short'), value = Math.round((Number(String(g(r, 'value')).replace(/[,\s]/g, '')) || 0) * 100) / 100;
     if (!name || !(value > 0)) return;
     const pc = fundFcProdCode(g(r, 'prodC'), g(r, 'prodT')), pr = fundProdOf(pc);
     let qty = 1, price = value;
     if (pr) { const q = value / pr.price; if (Math.round(q) >= 1 && Math.abs(q - Math.round(q)) < 0.01) { qty = Math.round(q); price = value / qty; } }
-    const org = String(g(r, 'org') || '').trim();
-    rows.push({ line: hi + i + 2, code: String(g(r, 'code') || '').trim(), name: (org ? org + ' — ' : '') + name, full: name, value, signDate: fundFcXlDate(g(r, 'sign')), signRaw: g(r, 'sign'),
-      items: [pr ? { code: pc, qty, price } : { code: 'other', name: String(g(r, 'prodT') || 'ไม่ระบุ'), qty: 1, price: value }], prodOk: !!pr,
-      type: String(g(r, 'prodT') || '').trim(), province: String(g(r, 'prov') || '').trim(), org, budget: String(g(r, 'budget') || '').trim(), sub: String(g(r, 'sub') || '').trim(),
-      area: String(g(r, 'area') || '').trim(), note: [g(r, 'why'), g(r, 'note')].map(x => String(x || '').trim()).filter(Boolean).join(' — ') });
+    const org = t(r, 'org');
+    rows.push({ line: hi + i + 2, code: t(r, 'code'), name: (org ? org + ' — ' : '') + name, full: name, value, signDate: fundFcXlDate(g(r, 'sign')), signRaw: g(r, 'sign'),
+      items: [pr ? { code: pc, qty, price } : { code: 'other', name: t(r, 'prodT') || 'ไม่ระบุ', qty: 1, price: value }], prodOk: !!pr,
+      type: t(r, 'prodT'), province: t(r, 'prov'), org, budget: budgetOf(r), sub: t(r, 'sub'), area: areaOf(r),
+      note: hasNote ? [t(r, 'why'), t(r, 'note')].filter(Boolean).join(' — ') : undefined, alloc: C.alloc >= 0 ? t(r, 'alloc') : undefined });
   });
-  return { rows, header: hi + 1 };
+  return { rows, header: hi + 1, hasNote, hasAlloc: C.alloc >= 0 };
 }
 function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
   const [wb, setWb] = React.useState(null);
@@ -1365,7 +1384,7 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
       try {
         const w = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
         setWb(w);
-        setSheet(w.SheetNames.find(n => /^pog$/i.test(n.trim())) || w.SheetNames[0]);
+        setSheet(w.SheetNames.find(n => /^(bio|ba)$/i.test(n.trim())) || w.SheetNames[0]);   // BIO ใช้ชีต BIO (ไฟล์ 11 พ.ย. 69 ชื่อ BA) — เดิมติดโค้ด WTP เลือกชีต POG
       } catch (x) { setErr('อ่านไฟล์ไม่ได้: ' + (x && x.message)); }
     };
     rd.readAsArrayBuffer(f);
@@ -1385,7 +1404,8 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
       const ch = [];
       if ((old.signDate || '') !== x.signDate) ch.push('วันเซ็น ' + (old.signDate ? fmtDate(old.signDate) : '—') + ' → ' + (x.signDate ? fmtDate(x.signDate) : '—'));
       if (Math.abs((Number(old.value) || 0) - x.value) > 0.5) ch.push('มูลค่า ' + fundB(old.value) + ' → ' + fundB(x.value));
-      if ((old.note || '') !== x.note) ch.push('หมายเหตุ');
+      if (x.note !== undefined && (old.note || '') !== x.note) ch.push('หมายเหตุ');   // ไฟล์แบบใหม่ไม่มีช่องหมายเหตุ = ไม่เทียบ/ไม่แตะ
+      if (x.alloc && old.alloc && old.alloc !== x.alloc) ch.push('ใบจัดสรร ' + old.alloc + ' → ' + x.alloc);
       (ch.length ? upd : same).push(Object.assign({}, x, { old, ch }));
     });
     const gone = pipe.filter(r => r.src === 'govsales' && fundCode(r.code) && !seen.has(fundCode(r.code)));
@@ -1410,7 +1430,7 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
         {wb && <label>ชีต <select className="select input" value={sheet} onChange={e => setSheet(e.target.value)} style={{ padding: '3px 6px', width: 'auto' }}>{wb.SheetNames.map(n => <option key={n} value={n}>{n}</option>)}</select></label>}
         {wb && <label>โครงการใหม่รับเงินแบบ <select className="select input" value={payType} onChange={e => setPayType(e.target.value)} style={{ padding: '3px 6px', width: 'auto' }}>{fc.payTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
       </div>
-      {!wb && <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>ไฟล์ Excel จากฝ่ายขาย (แบบ govsales contract_forecast) · เลือกชีตได้ · อ่านจากชื่อคอลัมน์ (ชื่อโครงการ · มูลค่าโครงการ · ผลิตภัณฑ์ (รหัส) · รหัสโครงการ · วันที่คาดว่าจะลงนาม)</div>}
+      {!wb && <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>ไฟล์ Excel จากฝ่ายขาย (แบบ govsales contract_forecast) · ใช้ชีต BIO (ไฟล์เก่าชื่อ BA) · เลือกชีตอื่นได้ · อ่านจากชื่อคอลัมน์ ใช้ได้ทั้งไฟล์แบบเดิมและแบบใหม่ (ต้องมี รหัสโครงการ · วันที่คาดว่าจะลงนาม · มูลค่าโครงการ หรือ งบประมาณที่เสนอ)</div>}
       {err && <div style={{ color: 'var(--bad)', fontSize: 13 }}>{err}</div>}
       {parsed && parsed.err && <div style={{ color: 'var(--bad)', fontSize: 13 }}>{parsed.err}</div>}
       {plan && (
@@ -1427,7 +1447,7 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
           </div>
           <div style={{ maxHeight: 380, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}><tr><th style={th}></th><th style={th}>รหัส</th><th style={th}>โครงการ</th><th style={th}>ผลิตภัณฑ์</th><th style={{ ...th, textAlign: 'right' }}>มูลค่า</th><th style={th}>วันเซ็น</th></tr></thead>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}><tr><th style={th}></th><th style={th}>รหัส</th><th style={th}>โครงการ</th><th style={th}>ผลิตภัณฑ์</th><th style={{ ...th, textAlign: 'right' }}>มูลค่า</th><th style={th}>วันเซ็น</th>{parsed.hasAlloc && <th style={th}>ใบจัดสรร</th>}</tr></thead>
               <tbody>
                 {plan.add.concat(plan.upd).map((x, i) => (
                   <tr key={i}>
@@ -1437,6 +1457,7 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11.5 }}>{x.prodOk ? fundItemName(x.items[0]) + (x.items[0].qty > 1 ? ' × ' + x.items[0].qty : '') : <span style={{ color: '#92400e' }}>{x.type || 'ไม่ระบุ'}</span>}</td>
                     <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fundB(x.value)}</td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>{x.signDate ? fmtDate(x.signDate) : <span style={{ color: '#92400e' }}>{String(x.signRaw || '—')}</span>}</td>
+                    {parsed.hasAlloc && <td style={{ ...td, whiteSpace: 'nowrap', fontSize: 11.5, color: /อนุมัติแล้ว/.test(x.alloc || '') ? '#047857' : 'var(--ink-500)' }}>{x.alloc || '—'}</td>}
                   </tr>
                 ))}
                 {plan.gone.map(r => (
@@ -1447,14 +1468,16 @@ function FundSalesImportModal({ pipe, fc, canEdit, onApply, onClose }) {
                     <td style={{ ...td, fontSize: 11.5 }}>{fundItemsText(r)}</td>
                     <td style={{ ...td, textAlign: 'right' }}>{fundB(r.value)}</td>
                     <td style={td}>{r.signDate ? fmtDate(r.signDate) : '—'}</td>
+                    {parsed.hasAlloc && <td style={{ ...td, fontSize: 11.5, color: 'var(--ink-500)' }}>{r.alloc || '—'}</td>}
                   </tr>
                 ))}
-                {!plan.add.length && !plan.upd.length && !plan.gone.length && <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--ink-500)', padding: 16 }}>ข้อมูลตรงกับที่มีอยู่แล้วทั้งหมด</td></tr>}
+                {!plan.add.length && !plan.upd.length && !plan.gone.length && <tr><td colSpan={parsed.hasAlloc ? 7 : 6} style={{ ...td, textAlign: 'center', color: 'var(--ink-500)', padding: 16 }}>ข้อมูลตรงกับที่มีอยู่แล้วทั้งหมด</td></tr>}
               </tbody>
             </table>
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 8, lineHeight: 1.6 }}>
             โครงการใหม่เข้ากลุ่ม "กำลังจะเซ็น" · ยังไม่ติ๊กเบิก LIT · นำเข้าซ้ำ = อัปเดตตามรหัสโครงการ แต่ไม่ทับกลุ่ม แบบรับเงิน การเบิก LIT และค่าติดตั้งที่ตั้งเองไว้
+            {!parsed.hasNote && <div>ไฟล์นี้ไม่มีช่องเหตุผลที่ล่าช้า / หมายเหตุ — หมายเหตุที่มีอยู่ในระบบคงไว้ตามเดิม</div>}
           </div>
         </React.Fragment>
       )}
@@ -2010,7 +2033,8 @@ function FundingPlanPage({ data, toast }) {
   const applySales = (plan, o) => {
     if (!canEdit || !plan) return;
     const stamp = Date.now().toString(36);
-    const fromFile = (x) => ({ name: x.name, full: x.full, value: x.value, signDate: x.signDate, note: x.note, type: x.type, province: x.province, org: x.org, budget: x.budget, sub: x.sub, area: x.area, srcFile: o.file, srcAt: today });
+    // ช่องที่ไฟล์ไม่มี (undefined — เช่นหมายเหตุในไฟล์แบบ 12 พ.ย. 69) ไม่เขียนทับของเดิม
+    const fromFile = (x) => { const o2 = { name: x.name, full: x.full, value: x.value, signDate: x.signDate, note: x.note, type: x.type, province: x.province, org: x.org, budget: x.budget, sub: x.sub, area: x.area, alloc: x.alloc, srcFile: o.file, srcAt: today }; Object.keys(o2).forEach(k => { if (o2[k] === undefined) delete o2[k]; }); return o2; };
     plan.add.forEach((x, i) => {
       const row = Object.assign({ code: x.code, valueMode: 'items', items: x.items, group: 'soon', payType: o.payType, useLit: false, src: 'govsales', lender: 'auto', stage: 'pre', assignable: '' }, fromFile(x));
       WTPOverride.setRaw(FUND_PIPE + 'g' + stamp + i.toString(36) + Math.random().toString(36).slice(2, 5), JSON.stringify(row));
