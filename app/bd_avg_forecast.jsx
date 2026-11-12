@@ -863,7 +863,7 @@ function BDAFRcvDetail({ it, today }) {
     </div>
   );
 }
-function BDAFRcvModal({ rcv, F, today, init, onClose }) {
+function BDAFRcvModal({ rcv, F, today, init, onClose, extra }) {   // extra (ไม่บังคับ) = { th, cell(item), head } — หน้าแผนการเงินล่วงหน้าใช้โชว์ค่าติดตั้งที่ต้องจ่ายตามเงินรับ
   const [tab, setTab] = React.useState(init.tab || 'in');
   const [mk, setMk]   = React.useState(init.mk || '');
   const [src, setSrc] = React.useState(init.src || '');
@@ -879,6 +879,7 @@ function BDAFRcvModal({ rcv, F, today, init, onClose }) {
   return (
     <BDAFShell title="➕ เงินเข้า — มาจากไหน" onClose={onClose}
       sub={'กดแต่ละแถวเพื่อดูที่มาและวิธีคิดยอด · ' + (tab === 'in' ? 'นับในแผน ' + list.length + ' รายการ รวม ' + fmtNum(Math.round(sum(list)), 0) + ' บาท' : 'ยังไม่นับ ' + list.length + ' รายการ รวม ' + fmtNum(Math.round(sum(list)), 0) + ' บาท')}>
+      {extra && extra.head}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
         <button style={bdafChip(tab === 'in')} onClick={() => pick(() => setTab('in'))}>นับในแผน {rcv.items.length} · {bdafC(sum(rcv.items))}</button>
         <button style={bdafChip(tab === 'skip')} onClick={() => pick(() => setTab('skip'))}>ยังไม่นับ {skipAll.length} · {bdafC(sum(skipAll))}</button>
@@ -904,9 +905,10 @@ function BDAFRcvModal({ rcv, F, today, init, onClose }) {
           <th style={th}>เลขที่</th>
           <th style={th}>โครงการ / รายการ</th>
           <th style={{ ...th, textAlign: 'right' }}>ยอดสุทธิ</th>
+          {extra && tab === 'in' && <th style={th}>{extra.th}</th>}
         </tr></thead>
         <tbody>
-          {list.length === 0 && <tr><td colSpan={5} style={{ padding: 16, textAlign: 'center', color: 'var(--ink-400)' }}>ไม่มีรายการ</td></tr>}
+          {list.length === 0 && <tr><td colSpan={extra && tab === 'in' ? 6 : 5} style={{ padding: 16, textAlign: 'center', color: 'var(--ink-400)' }}>ไม่มีรายการ</td></tr>}
           {list.map((it, i) => {
             const tg = BDAF_SRC_TAG[it.src] || BDAF_SRC_TAG.other;
             const on = openI === i;
@@ -925,8 +927,9 @@ function BDAFRcvModal({ rcv, F, today, init, onClose }) {
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--line-soft)', fontFamily: 'ui-monospace', fontSize: 11.5, whiteSpace: 'nowrap' }}>{it.ref || '—'}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--line-soft)', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name || '—'}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtNum(Math.round(it.amt), 0)}</td>
+                  {extra && tab === 'in' && <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--line-soft)', fontSize: 12 }} onClick={e => e.stopPropagation()}>{extra.cell(it)}</td>}
                 </tr>
-                {on && <tr><td colSpan={5} style={{ padding: '0 8px 8px 28px', borderBottom: '1px solid var(--line)', background: '#fbfcfd' }}><BDAFRcvDetail it={it} today={today} /></td></tr>}
+                {on && <tr><td colSpan={extra && tab === 'in' ? 6 : 5} style={{ padding: '0 8px 8px 28px', borderBottom: '1px solid var(--line)', background: '#fbfcfd' }}><BDAFRcvDetail it={it} today={today} /></td></tr>}
               </React.Fragment>
             );
           })}

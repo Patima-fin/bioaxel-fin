@@ -468,17 +468,139 @@ function fundJobs(data, projs, fcs, arOpen, finance, cfg, today, lastDay, pipe) 
         // รับไปแล้วกี่ % ของสัญญา → เหลือเฉพาะงวดที่ยังไม่ได้รับ (เช่น ได้งวด 1 แล้ว = เหลืองวดสุดท้ายอย่างเดียว)
         const got = Math.min(1, (Number(p.received) || 0) / v);
         let acc = 0;
-        const rest = fundRcvPlan(cfg).map(o => { const lo = acc; acc += o.share; return { day: o.day, w: Math.max(0, acc - Math.max(lo, got)) }; }).filter(o => o.w > 1e-6);
+        // j = งวดรับเงินที่เท่าไร (1 = งวดแรก · rp.length = งวดสุดท้าย) — ใช้ผูกค่าติดตั้งผู้รับเหมาที่ต้องจ่ายหลังรับเงินงวดนั้น (fundInstOld)
+        const rp = fundRcvPlan(cfg);
+        x.rcvGot = got; x.rcvN = rp.length;
+        const rest = rp.map((o, j) => { const lo = acc; acc += o.share; return { day: o.day, j: j + 1, w: Math.max(0, acc - Math.max(lo, got)) }; }).filter(o => o.w > 1e-6);
         const W = rest.reduce((t, o) => t + o.w, 0);
-        (W ? rest : [{ day: fundRcvPlan(cfg).slice(-1)[0].day, w: 1 }]).forEach(o => {
+        (W ? rest : [{ day: rp.slice(-1)[0].day, j: rp.length, w: 1 }]).forEach(o => {
           const d0 = fundAddDays(s, o.day), date = d0 < today ? fundAddDays(today, 30) : d0, a = x.rcv * o.w / (W || 1);
-          if (date <= lastDay) { evs.push({ date, amt: a, kind: 'wipIn', t: x.name, ref: c, note: ['ค้างรับตามหน้าโครงการ ' + fundB(p.outstandingAR) + ' หัก ณ ที่จ่าย 1% แล้ว ลบใบแจ้งหนี้ที่ออกแล้ว' + (debt ? ' และภาระหนี้โอนสิทธิ์ ' + fundB(debt) : '') + ' = ' + fundB(x.rcv), 'ยังไม่ได้ออกใบแจ้งหนี้ · วันรับประมาณจากวันเริ่มสัญญา ' + fmtDate(s) + ' + ' + o.day + ' วัน' + (d0 < today ? ' (เลยมาแล้ว เลื่อนไปอีก 30 วัน)' : '')] }); x.rcvPlan += a; }
+          if (date <= lastDay) { evs.push({ date, amt: a, kind: 'wipIn', arInst: o.j, arN: rp.length, t: x.name, ref: c, note: ['ค้างรับตามหน้าโครงการ ' + fundB(p.outstandingAR) + ' หัก ณ ที่จ่าย 1% แล้ว ลบใบแจ้งหนี้ที่ออกแล้ว' + (debt ? ' และภาระหนี้โอนสิทธิ์ ' + fundB(debt) : '') + ' = ' + fundB(x.rcv), 'ยังไม่ได้ออกใบแจ้งหนี้ · วันรับประมาณจากวันเริ่มสัญญา ' + fmtDate(s) + ' + ' + o.day + ' วัน' + (d0 < today ? ' (เลยมาแล้ว เลื่อนไปอีก 30 วัน)' : '')] }); x.rcvPlan += a; }
         });
       }
     }
     wip.push(x);
   });
   return { evs, ap, wip };
+}
+/* BIO: ไม่มีหน้า BACK TO BACK (page_payment_recon.jsx ของ WTP) → ยกเฉพาะส่วนที่ fundInstOld ใช้มาไว้ที่นี่ (ชื่อ fundB2b* กันชนชื่อ global)
+ *   ใบ APS: จ่ายแล้ว = pvVouchers (รหัสโครงการจาก Project_Dpt) · ค้างจ่าย = payables (รหัสจาก pre_des) · งวดจาก remark (ADV / งวด N)
+ *   งวดรับเงินของโครงการ = PCU.deriveProjects (ใบแจ้งหนี้ผูกงวด) · ประเภทผลิตภัณฑ์จาก suffix ท้ายรหัส (PD/PDP/PDH = ผู้รับเหมา 1 งวด) */
+function fundB2bNum(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  const n = Number(String(v).replace(/[, ]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+function fundB2bNorm(c) {
+  const s = String(c == null ? '' : c).trim();
+  const m = s.match(/^(.+?)-[A-Z]{2,6}$/);
+  return (m ? m[1] : s).toUpperCase();
+}
+function fundB2bCode(text) {
+  const s = String(text == null ? '' : text);
+  let m = s.match(/Project\s*:\s*\(\d+\)\s*([A-Za-z]{2,5}\d{2,4})/);
+  if (m) return m[1].toUpperCase();
+  m = s.match(/\(\s*(?:Project\s*:\s*)?([A-Za-z]{2,5}\d{2,4})\b/);
+  if (m) return m[1].toUpperCase();
+  m = s.match(/^\s*([A-Za-z]{2,5}\d{2,4})\s*-/);
+  if (m) return m[1].toUpperCase();
+  m = s.match(/\b([A-Za-z]{2,5}\d{2,4})\b/);
+  if (m) return m[1].toUpperCase();
+  return '';
+}
+function fundB2bInst(remark) {
+  const t = String(remark == null ? '' : remark);
+  const m = t.match(/งวด\s*(?:ที่\s*)?(\d+)/);
+  if (m) return 'งวด ' + m[1];
+  if (/คืน.*ประกัน|ขอคืนเงิน|retention/i.test(t)) return 'คืนประกัน';
+  if (/ตัดมัดจำ|เคลีย/i.test(t)) return 'อื่นๆ';
+  if (/advance|adv\b|มัดจำ|เงินล่วงหน้า|จ่ายล่วงหน้า|เริ่มงาน/i.test(t)) return 'ADV';
+  return 'อื่นๆ';
+}
+function fundB2bProd(text) {
+  const m = String(text == null ? '' : text).match(/[A-Za-z]{2,5}\d{2,4}-([A-Za-z]{2,6})\b/);
+  return m ? m[1].toUpperCase() : '';
+}
+function fundB2bBuild(data) {
+  const PCU = window.PCU, invoices = data.invoices || [], payables = data.payables || [], pvs = data.pvVouchers || [];
+  let base = data.projects || [];
+  try { const local = PCU && PCU.loadLocalProjects ? (PCU.loadLocalProjects() || []) : []; if (PCU && PCU.mergeProjectSources) base = PCU.mergeProjectSources(base, local); } catch (_) {}
+  const derived = PCU && PCU.deriveProjects ? PCU.deriveProjects(base, invoices, data.receipts || []) : [];
+  const prod = {}, setP = (c, p) => { if (c && p && !prod[c]) prod[c] = p; };
+  invoices.forEach(iv => setP(fundB2bNorm(iv.jobNo || iv.contractRef || iv.projectCode || ''), fundB2bProd(iv.jobNo || iv.projectCode || '')));
+  pvs.forEach(v => setP(fundB2bCode(v.Project_Dpt), fundB2bProd(v.Project_Dpt)));
+  payables.forEach(p => setP(fundB2bCode(p.pre_des), fundB2bProd(p.pre_des)));
+  const paid = {}, paidNo = new Set(), owe = {};
+  pvs.forEach(v => {
+    if (!(String(v.Type || '').trim().toUpperCase() === 'APS' || String(v.AP_No || '').trim().toUpperCase().startsWith('APS'))) return;
+    const code = fundB2bCode(v.Project_Dpt) || fundB2bCode(v.jobname);
+    if (!code) return;
+    const ap = String(v.AP_No || '').trim();
+    if (ap) paidNo.add(ap);
+    (paid[code] = paid[code] || []).push({ amount: fundB2bNum(v.Net_Amount), inst: fundB2bInst(v.cc_remark || v.Remark) });
+  });
+  payables.forEach(p => {
+    const no = String(p.vchno || p.docno || '').trim();
+    if (!no.toUpperCase().startsWith('APS') || paidNo.has(no)) return;
+    const code = fundB2bCode(p.pre_des) || fundB2bCode(p.jobname);
+    if (!code) return;
+    (owe[code] = owe[code] || []).push({ vchno: no, vendor: p.cust_name || p.jobname || '', amount: fundB2bNum(p.netpayment != null ? p.netpayment : (p.Amount != null ? p.Amount : p.net_new)), inst: fundB2bInst(p.remark) });
+  });
+  const projects = derived.filter(d => d.status === 'Work in progress' || d.status === 'Finish').map(d => {
+    const ncode = fundB2bNorm(d.contractNo);
+    const arRaw = (d.installments || []).filter(it => it.invoice || it.amount > 0), single = arRaw.length === 1;
+    let arItems = arRaw.map(it => { const inv = it.invoice || {}; return { no: it.no, label: single ? 'ครั้งเดียว' : 'งวด ' + it.no, invoiceNo: inv.ivNo || '—', amount: it.amount || fundB2bNum(inv.balance) }; });
+    const cAmt = d.contractAmt || 0, full = cAmt > 0 ? arItems.findIndex(a => a.invoiceNo !== '—' && a.amount >= cAmt * 0.99) : -1;
+    if (full >= 0 && arItems.length > 1) arItems = [Object.assign({}, arItems[full], { label: 'ครั้งเดียว' })];
+    const g = {}, G = (k) => (g[k] = g[k] || { key: k, paidAmt: 0, outAmt: 0, outRows: [] });
+    (paid[ncode] || []).forEach(r => { G(r.inst).paidAmt += r.amount; });
+    (owe[ncode] || []).forEach(r => { const x = G(r.inst); x.outAmt += r.amount; x.outRows.push(r); });
+    const pt = String(prod[ncode] || '').toUpperCase();
+    return { code: d.contractNo, ncode, productType: pt, expectedNguad: ({ PD: 1, PDP: 1, PDH: 1 })[pt] ? 1 : 2, arItems, apGroups: Object.values(g), contractor: '' };
+  });
+  return { projects };
+}
+/* ค่าติดตั้งผู้รับเหมาของโครงการที่เซ็นแล้ว (ผู้ใช้ 2026-11-12: "ยังไม่ได้รับเงิน = ยังไม่ได้จ่ายค่าติดตั้ง แต่รับเงินแล้ว 7–14 วันต้องจ่าย
+ *   อยากเห็นยอดเพื่อเอาไปเพิ่มเป็นค่าติดตั้งงวด 1 / งวด 2 ใน ข.2") — ข้อมูลชุดเดียวกับหน้า BACK TO BACK (prBuildAll):
+ *   ใบ APS แยก ADV / งวด N · จ่ายแล้ว = PV · ตั้งหนี้แล้วยังไม่จ่าย = AP (ยอดจริง)
+ *   งวดที่ยังไม่มีเอกสาร = ประมาณจากยอด ADV ตามสัดส่วนผู้รับเหมา (FUND_FC_INST_SPLIT: ถัง ADV 40 · งวด 1 40 · งวด 2 20 /
+ *   POG Drink ADV 35 · งวดสุดท้าย 65) · ไม่มี ADV ในระบบ (PV เริ่ม ม.ค. 68) = ไม่รู้ยอด
+ *   คืน { [รหัสโครงการ]: { drink, adv, inst: [{ n, row: 'inst1'|'inst2', st: 'ap'|'est'|'unk'|'paid', amt, paid }], arIv: { เลข INV: งวดรับที่ }, arN } }
+ *   ไม่นับในตาราง — ผู้ใช้เลือกเอาไปพิมพ์ในแถว ข.2 เอง */
+function fundInstOld(data) {
+  let all;
+  try { all = fundB2bBuild(data); } catch (_) { return {}; }   // BIO: ไม่มีหน้า BACK TO BACK → อ่านใบ APS เอง (fundB2bBuild)
+  const out = {};
+  (all.projects || []).forEach(p => {
+    const g = {};
+    (p.apGroups || []).forEach(x => { g[x.key] = x; });
+    const drink = p.expectedNguad === 1, split = FUND_FC_INST_SPLIT[drink ? 'drink' : 'tank'];
+    const advP = split[0].p, adv = g.ADV ? g.ADV.paidAmt + g.ADV.outAmt : 0;
+    const inst = [];
+    for (let n = 1; n <= p.expectedNguad; n++) {
+      const x = g['งวด ' + n], sp = drink ? split[1] : split[Math.min(n, split.length - 1)];
+      const row = drink || n >= p.expectedNguad ? 'inst2' : 'inst1';
+      const paid = x ? x.paidAmt : 0, owe = x ? x.outAmt : 0;
+      if (owe > 0.5) inst.push({ n, row, st: 'ap', amt: owe, paid, vendor: (x.outRows[0] || {}).vendor || '', docs: x.outRows.map(r => r.vchno).filter(Boolean) });
+      else if (paid > 0.5) inst.push({ n, row, st: 'paid', amt: 0, paid });
+      else if (adv > 0.5) inst.push({ n, row, st: 'est', amt: adv * sp.p / advP, paid: 0, how: 'ADV ' + fundB(adv) + ' × ' + sp.p + '/' + advP });
+      else inst.push({ n, row, st: 'unk', amt: 0, paid: 0 });
+    }
+    const arIv = {};
+    (p.arItems || []).forEach(a => { if (a.invoiceNo && a.invoiceNo !== '—') arIv[String(a.invoiceNo).trim()] = a.label === 'ครั้งเดียว' ? 0 : a.no; });
+    out[p.ncode] = { code: p.code, drink, adv, inst, arIv, arN: (p.arItems || []).length, vendor: p.contractor };
+  });
+  return out;
+}
+/* ค่าติดตั้งที่ต้องจ่ายหลังรับเงินงวด arNo (จาก arN งวด) ของโครงการ · arNo 0 = รับทั้งก้อน → ทุกงวดที่ยังไม่จ่าย
+ *   ถัง: รับงวด N → จ่ายผู้รับเหมางวด N (รับงวดสุดท้าย → งวดที่ N ขึ้นไป) · POG Drink: รับงวดสุดท้าย → จ่ายงวดเดียวของผู้รับเหมา */
+function fundInstDue(io, arNo, arN) {
+  if (!io) return [];
+  const open = io.inst.filter(i => i.st !== 'paid');
+  if (!arNo) return open;
+  if (io.drink) return arNo >= arN ? open : [];
+  return open.filter(i => (arNo >= arN ? i.n >= arNo : i.n === arNo));
 }
 /* หลักประกันที่ยังไม่ได้คืน: LG แยกธนาคาร + เงินสด · ครบในช่วงแผน · เลยกำหนดแล้วยังไม่ได้คืน */
 function fundLgBook(rows, today, lastDay) {
@@ -902,6 +1024,75 @@ function fundFcExport(x) {
       R(P.rcvBase), R(P.comm), P.inst ? R(P.inst.total) : '', P.inst ? R(P.inst.adv) : '', P.inst ? R(P.inst.i1) : '', P.inst ? R(P.inst.i2) : '', P.fac ? R(P.fac.total) : '', P.fac ? R(P.fac.p[0]) : '', P.fac ? R(P.fac.p[1]) : '', P.fac ? R(P.fac.p[2]) : '', R(P.lgNeed), P.lgUnknown ? 'ยังไม่รู้วงเงิน' : R(P.lgCash), R(P.lgFee), P.lit ? R(P.lit.gross) : '', P.lit ? R(P.lit.feeA + P.lit.feeB) : '', P.lit ? R(P.lit.intTotal) : '', P.r.note || ''])),
     [34, 12, 12, 12, 30, 15, 12, 40, 15, 13, 14, 13, 13, 14, 15, 13, 13, 13, 13, 13, 15, 14, 14, 15, 24]);
   X.writeFile(wb, 'ประมาณการรับจ่าย_' + x.today + '.xlsx');
+  return true;
+}
+
+/* ส่งออก Excel ตาราง "โครงการที่จะลงนาม" ตามที่เห็นบนจอ (ผู้ใช้ 2026-11-12 "อยากให้ EXPORT EXCEL ได้ด้วย")
+ *   กลุ่มตามเดือนเซ็น = แถวหัวกลุ่มพร้อมยอดรวมกลุ่ม · โครงการรายแถว · แถวรวมที่นับในแผนท้ายตาราง (ตัวเลขเดียวกับบนจอ)
+ *   เพิ่มที่บนจอไม่มี: แยกงวดค่าติดตั้ง / ค่าของโรงงาน / ค่าธรรมเนียม LG · BIO: ไม่มี LIT — คอลัมน์ท้าย = เงินรับจากราชการ (หัก 1%) แบบตารางบนจอ · ชื่อสไตล์ FUND_XLS (XL ของหน้าเงินกู้เป็น global อยู่แล้ว) */
+const FUND_XLS_BD = { style: 'thin', color: { rgb: 'D5DDE8' } };
+const FUND_XLS = {
+  title: { font: { bold: true, sz: 14, color: { rgb: '14213A' } } },
+  sub: { font: { sz: 11, color: { rgb: '5E6A82' } } },
+  th: { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '14213A' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: { top: FUND_XLS_BD, bottom: FUND_XLS_BD, left: FUND_XLS_BD, right: FUND_XLS_BD } },
+  grp: { font: { bold: true, color: { rgb: '14213A' } }, fill: { fgColor: { rgb: 'EAF0FA' } }, alignment: { vertical: 'center' }, border: { top: FUND_XLS_BD, bottom: FUND_XLS_BD } },
+  row: { alignment: { vertical: 'top', wrapText: true }, border: { bottom: FUND_XLS_BD } },
+  tot: { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '14213A' } }, alignment: { vertical: 'center' } },
+};
+function fundPjExport(x) {
+  const X = window.XLSX;
+  if (!X) return false;
+  const R = (v) => Math.round(v || 0), N = (v) => (Math.abs(v || 0) < 0.5 ? '' : R(v));
+  const head = ['ลำดับ', 'หน่วยงาน / โครงการ', 'พื้นที่', 'รหัส', 'ผลิตภัณฑ์', 'มูลค่าสัญญา', 'วันเซ็น (ที่ใช้คิด)', 'วันเซ็นตามฝ่ายขาย', 'แบบรับเงิน', 'วันรับเงิน',
+    'ค่าคอม', 'ค่าติดตั้งรวม', 'ติดตั้ง ADV.', 'ติดตั้งงวด 1', 'ติดตั้งงวดสุดท้าย', 'ค่าของโรงงานรวม', 'โรงงานงวด 1', 'โรงงานงวด 2', 'โรงงานงวด 3',
+    'หลักประกันรวม', 'ใช้วงเงิน LG', 'วางเงินสด', 'ค่าธรรมเนียม LG (ทั้งระยะ)', 'เงินรับจากราชการ (หัก 1%)', 'หมายเหตุ'];   // BIO: ไม่มี LIT
+  const NC = head.length, money = new Set([5].concat(Array.from({ length: 14 }, (_, i) => i + 10)));
+  const aoa = [[x.title], [x.sub], [], head], kinds = [null, null, null, 'th'];
+  const sumOf = (rows, fn) => rows.reduce((s, r) => { const P = x.perBy[r.id]; return s + (P ? Number(fn(P)) || 0 : 0); }, 0);
+  const nums = (rows) => [sumOf(rows, P => P.comm), sumOf(rows, P => P.inst && P.inst.total), sumOf(rows, P => P.inst && P.inst.adv), sumOf(rows, P => P.inst && P.inst.i1), sumOf(rows, P => P.inst && P.inst.i2),
+    sumOf(rows, P => P.fac && P.fac.total), sumOf(rows, P => P.fac && P.fac.p[0]), sumOf(rows, P => P.fac && P.fac.p[1]), sumOf(rows, P => P.fac && P.fac.p[2]),
+    sumOf(rows, P => P.lgNeed), sumOf(rows, P => P.lgUse), sumOf(rows, P => P.lgCash), sumOf(rows, P => P.lgFee)];
+  let seq = 0;
+  x.groups.forEach(g => {
+    const n = nums(g.rows);
+    aoa.push([g.label + ' · ' + g.rows.length + ' โครงการ' + (g.note ? ' · ' + g.note : ''), '', '', '', '', R(g.val), '', '', '', ''].concat(n.map(N), [N(sumOf(g.rows, P => P.rcvBase))], ['']));
+    kinds.push('grp');
+    g.rows.forEach(r => {
+      const P = x.perBy[r.id], mv = x.movedBy[r.id];
+      const prods = Array.from(new Set((r.items || []).filter(it => Number(it.qty) > 0).map(it => fundItemName(it) + (Number(it.qty) > 1 ? ' × ' + fmtNum(Number(it.qty), 0) : '')))).join(', ') || r.type || '';
+      const unk = (o) => (o && o.unk.length && !(o.total > 0.5) ? 'ยังไม่รู้' : null);
+      aoa.push([++seq, r.org || r.name || '', r.org ? (r.area || r.full || '') : [r.type, r.province].filter(Boolean).join(' · '), r.code || '', prods, R(r.value),
+        P && P.sign ? fmtDate(P.sign) : (r.signDate ? fmtDate(r.signDate) : ''), r.signDate ? fmtDate(r.signDate) + (mv ? ' (เลื่อนไป ' + bdafMShort(mv.to) + ')' : '') : '',
+        P ? fundFcPayName(r, x.fc) : (FUND_GROUP_OF[r.group] || {}).t || 'ไม่นับ', P ? P.sched.map(s => fmtDate(s.date)).join(' · ') : '',
+        P ? N(P.comm) : '', P && P.inst ? (unk(P.inst) || N(P.inst.total)) : '', P && P.inst ? N(P.inst.adv) : '', P && P.inst ? N(P.inst.i1) : '', P && P.inst ? N(P.inst.i2) : '',
+        P && P.fac ? (unk(P.fac) || N(P.fac.total)) : '', P && P.fac ? N(P.fac.p[0]) : '', P && P.fac ? N(P.fac.p[1]) : '', P && P.fac ? N(P.fac.p[2]) : '',
+        P ? N(P.lgNeed) : '', P && !P.lgUnknown ? N(P.lgUse) : (P && P.lgNeed > 0.5 ? 'ยังไม่รู้วงเงิน' : ''), P && !P.lgUnknown ? N(P.lgCash) : '', P ? N(P.lgFee) : '',
+        P ? N(P.rcvBase) : '', r.note || '']);
+      kinds.push('row');
+    });
+  });
+  const inPlan = x.groups.reduce((a, g) => a.concat(g.rows.filter(r => x.perBy[r.id])), []);
+  aoa.push(['รวมที่นับในแผน · ' + inPlan.length + ' โครงการ', '', '', '', '', R(inPlan.reduce((s, r) => s + x.perBy[r.id].v, 0)), '', '', '', ''].concat(nums(inPlan).map(N), [N(inPlan.reduce((t, r) => t + x.perBy[r.id].rcvBase, 0))], ['']));
+  kinds.push('tot');
+  const ws = X.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [6, 34, 30, 14, 26, 14, 13, 22, 16, 22, 12, 13, 12, 12, 13, 14, 12, 12, 12, 13, 13, 12, 13, 16, 24].map(w => ({ wch: w }));
+  // หัวเรื่อง 2 บรรทัด + ชื่อกลุ่ม/แถวรวม กินช่อง ลำดับ…ผลิตภัณฑ์ (ไม่งั้นข้อความถูกตัดที่ช่องลำดับที่แคบ)
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }]
+    .concat(kinds.map((k, r) => (k === 'grp' || k === 'tot' ? { s: { r, c: 0 }, e: { r, c: 4 } } : null)).filter(Boolean));
+  kinds.forEach((k, r) => {
+    for (let c = 0; c < NC; c++) {
+      const addr = X.utils.encode_cell({ r, c });
+      if (r === 0 || r === 1) { if (ws[addr]) ws[addr].s = r ? FUND_XLS.sub : FUND_XLS.title; continue; }
+      if (!k) continue;
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      const st = Object.assign({}, FUND_XLS[k]);
+      if (ws[addr].t === 'n' && money.has(c)) { ws[addr].z = '#,##0'; st.alignment = Object.assign({}, st.alignment, { horizontal: 'right' }); }
+      ws[addr].s = st;
+    }
+  });
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, ws, 'โครงการที่จะลงนาม');
+  X.writeFile(wb, 'โครงการที่จะลงนาม_' + x.today + '.xlsx');
   return true;
 }
 
@@ -1398,7 +1589,7 @@ function FundPickModal({ data, taken, onPick, onClose }) {
   );
 }
 /* ที่มาของตัวเลขในแถว: รายการทีละบรรทัด (กดดูวิธีคิด) กรองรายเดือนได้ · ยอดที่แก้เองบอกไว้ด้านบน */
-function FundFcSrcModal({ title, how, items, F, sys, ovr, head, canEdit, onClearOvr, onClose }) {
+function FundFcSrcModal({ title, how, items, F, sys, ovr, head, extra, canEdit, onClearOvr, onClose }) {   // extra = { th, cell(item) } คอลัมน์เพิ่ม (ค่าติดตั้งที่ต้องจ่ายตามเงินรับ)
   const [mk, setMk] = React.useState('');
   const [openI, setOpenI] = React.useState(-1);
   const list = (items || []).filter(it => !mk || String(it.date).slice(0, 7) === mk).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)) || b.amt - a.amt);
@@ -1422,9 +1613,9 @@ function FundFcSrcModal({ title, how, items, F, sys, ovr, head, canEdit, onClear
         </div>
       )}
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-        <thead><tr><th style={th}>วันที่</th><th style={th}>รายการ</th><th style={th}>อ้างอิง</th><th style={{ ...th, textAlign: 'right' }}>ยอด</th></tr></thead>
+        <thead><tr><th style={th}>วันที่</th><th style={th}>รายการ</th><th style={th}>อ้างอิง</th><th style={{ ...th, textAlign: 'right' }}>ยอด</th>{extra && <th style={th}>{extra.th}</th>}</tr></thead>
         <tbody>
-          {list.length === 0 && <tr><td colSpan={4} style={{ ...td, padding: 16, textAlign: 'center', color: 'var(--ink-400)' }}>ไม่มีรายการในช่วงที่ดู</td></tr>}
+          {list.length === 0 && <tr><td colSpan={extra ? 5 : 4} style={{ ...td, padding: 16, textAlign: 'center', color: 'var(--ink-400)' }}>ไม่มีรายการในช่วงที่ดู</td></tr>}
           {list.map((it, i) => {
             const on = openI === i;
             return (
@@ -1434,12 +1625,13 @@ function FundFcSrcModal({ title, how, items, F, sys, ovr, head, canEdit, onClear
                   <td style={{ ...td, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.t || '—'}</td>
                   <td style={{ ...td, fontSize: 11.5, color: 'var(--ink-600)', whiteSpace: 'nowrap' }}>{it.ref || ''}</td>
                   <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, whiteSpace: 'nowrap' }}>{fundB(it.amt)}</td>
+                  {extra && <td style={{ ...td, fontSize: 12 }}>{extra.cell(it)}</td>}
                 </tr>
-                {on && <tr><td colSpan={4} style={{ padding: '6px 8px 10px 28px', borderBottom: '1px solid var(--line)', background: '#fbfcfd', fontSize: 12, lineHeight: 1.75, color: 'var(--ink-700)' }}>{(it.note || []).map((n, j) => <div key={j}>{n}</div>)}</td></tr>}
+                {on && <tr><td colSpan={extra ? 5 : 4} style={{ padding: '6px 8px 10px 28px', borderBottom: '1px solid var(--line)', background: '#fbfcfd', fontSize: 12, lineHeight: 1.75, color: 'var(--ink-700)' }}>{(it.note || []).map((n, j) => <div key={j}>{n}</div>)}</td></tr>}
               </React.Fragment>
             );
           })}
-          {list.length > 0 && <tr><td colSpan={3} style={{ ...td, fontWeight: 700 }}>รวม {list.length} รายการ</td><td style={{ ...td, textAlign: 'right', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fundB(sum(list))}</td></tr>}
+          {list.length > 0 && <tr><td colSpan={3} style={{ ...td, fontWeight: 700 }}>รวม {list.length} รายการ</td><td style={{ ...td, textAlign: 'right', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fundB(sum(list))}</td>{extra && <td style={td} />}</tr>}
         </tbody>
       </table>
     </BDAFShell>
@@ -1681,6 +1873,8 @@ function FundingPlanPage({ data, toast }) {
         expectedReceive: iv.expectedReceive || '', lastLog: logs.length ? logs[logs.length - 1] : null, plan: bdArPlanOf(idx, iv), raw: iv };
     });
   }, [data.invoices, data.projects, data.debtLedger, data.forecastEntries]);
+  // ค่าติดตั้งผู้รับเหมาของงานเดิม (ใบ APS · fundB2bBuild) — โชว์ในหน้าต่างเงินรับ "ออก INV แล้ว" / "ยังไม่ออก INV" · ไม่นับในตาราง (เหมือน WTP · ผู้ใช้ 2026-11-12)
+  const instOld = React.useMemo(() => fundInstOld(data), [data.projects, data.invoices, data.receipts, data.payables, data.pvVouchers]);
   const arAll   = React.useMemo(() => arList.map(x => ({ id: x.id, ivNo: x.ivNo, jobNo: x.jobNo, project: x.projectName, amount: x.net, status: x.status, expectedReceive: x.expectedReceive, raw: x.raw })), [arList]);
   const fcs     = React.useMemo(() => fundForecasts(data, arAll), [data.forecastEntries, data.pvVouchers, arAll]);
   const rcv     = React.useMemo(() => bdafReceipts(arList, fcs, today, F), [arList, fcs, today, F]);
@@ -1859,14 +2053,88 @@ function FundingPlanPage({ data, toast }) {
     const head = 'ยังไม่ออก INV ' + fundB(amt) + (own ? ' (ใส่ยอดเอง · ระบบคิด ' + fundB(x.rcv) + ')' : ' = ค้างรับตามหน้าโครงการ หัก ณ ที่จ่าย 1% ลบใบแจ้งหนี้ที่ออกแล้ว' + (x.debt ? ' และภาระหนี้โอนสิทธิ์' : ''));
     if (o.inv) {
       const d0 = fundAddDays(o.inv, fc.invLag), d = d0 < today ? today : d0;
-      if (d <= lastDay) wipInItems.push({ date: d, amt, t: x.name, ref: x.code, note: [head, 'คาดออก INV ' + fmtDate(o.inv) + ' + รับเงินหลังออก INV ' + fc.invLag + ' วัน = ' + fmtDate(d0)] });
+      if (d <= lastDay) wipInItems.push({ date: d, amt, t: x.name, ref: x.code, arNo: 0, note: [head, 'คาดออก INV ' + fmtDate(o.inv) + ' + รับเงินหลังออก INV ' + fc.invLag + ' วัน = ' + fmtDate(d0)] });
       return;
     }
     jobs.evs.filter(e => e.kind === 'wipIn' && e.ref === x.code).forEach(e => {
       const d = e.date < wipEarliest ? wipEarliest : e.date;
-      if (d <= lastDay) wipInItems.push({ date: d, amt: e.amt * k, t: x.name, ref: x.code, note: [head, 'งวดตามสัญญา (เริ่ม ' + fmtDate(x.start) + ')' + (e.date < wipEarliest ? ' → ยังไม่ออก INV จึงนับเร็วสุดวันนี้ + ' + fc.invLag + ' วัน (' + fmtDate(wipEarliest) + ')' : ' ' + fmtDate(e.date)), 'ใส่วันคาดออก INV เองได้ในหน้าต่างนี้'] });
+      if (d <= lastDay) wipInItems.push({ date: d, amt: e.amt * k, t: x.name, ref: x.code, arNo: e.arInst, arN: e.arN, note: [head, 'งวดตามสัญญา (เริ่ม ' + fmtDate(x.start) + ')' + (e.date < wipEarliest ? ' → ยังไม่ออก INV จึงนับเร็วสุดวันนี้ + ' + fc.invLag + ' วัน (' + fmtDate(wipEarliest) + ')' : ' ' + fmtDate(e.date)), 'ใส่วันคาดออก INV เองได้ในหน้าต่างนี้'] });
     });
   });
+  // ค่าติดตั้งผู้รับเหมาที่ต้องจ่ายหลังรับเงินแต่ละก้อน (fundInstOld · จ่ายหลังรับเงิน fc.instPay วัน) — ไว้ดูแล้วพิมพ์ลง ข.2 เอง ไม่นับในตาราง
+  const instOf = (code) => (code ? instOld[fundB2bNorm(code)] : null) || null;
+  const instName = (io, i) => (io && io.drink ? 'งวดเดียว' : 'งวด ' + i.n);
+  const instWhy = (i) => (i.st === 'ap' ? 'ตั้งหนี้แล้ว ' + (i.docs || []).join(', ') : i.st === 'est' ? 'ประมาณจาก ' + i.how : 'ไม่รู้ยอด — ไม่มี ADV ในระบบ');
+  const instPayOf = (date, list) => list.map(i => Object.assign({}, i, { pay: fundAddDays(date, fc.instPay) }));
+  wipInItems.forEach(it => {
+    const io = instOf(it.ref);
+    it.inst = instPayOf(it.date, fundInstDue(io, it.arNo, it.arN));
+    it.io = io;
+    if (it.inst.length) it.note = it.note.concat(it.inst.map(i => 'ค่าติดตั้ง' + instName(io, i) + ' ' + (i.st === 'unk' ? '(ไม่รู้ยอด)' : fundB(i.amt)) + ' · ' + instWhy(i) + ' · จ่ายประมาณ ' + fmtDate(i.pay) + ' (รับเงิน + ' + fc.instPay + ' วัน)'));
+  });
+  // ใบแจ้งหนี้ที่ออกแล้ว: เลข INV → งวดรับที่เท่าไรของโครงการ (ตารางงวดหน้า BACK TO BACK) → งวดผู้รับเหมาที่ต้องจ่ายตาม
+  const ivInst = new Map();
+  rcv.items.forEach(it => {
+    const io = it.ar ? instOf(it.ar.jobNo) : null;
+    if (!io) return;
+    const no = io.arIv[String(it.ref || '').trim()], open = io.inst.filter(i => i.st !== 'paid');
+    if (no == null && open.length > 1) { ivInst.set(it, { io, list: [], unknown: open.length }); return; }
+    const list = instPayOf(it.date, no == null ? open : fundInstDue(io, no, io.arN));
+    if (list.length) ivInst.set(it, { io, list });
+  });
+  // ตารางสรุปตามเดือนที่ต้องจ่าย (แยกแถว ข.2 "ค่าติดตั้งงวด 1" / "งวดสุดท้าย") + ยอดที่อยู่ในแถวนั้นตอนนี้ ไว้พิมพ์รวมเอง
+  const instRowNow = (key, mk) => { const o = fc.ovr[key]; return o && o[mk] != null ? Number(o[mk]) : (fundFcBucket(fp.ev[key], F)[mk] || 0); };
+  const instCell = (io, list, unknown) => (
+    unknown ? <span style={{ fontSize: 11.5, color: 'var(--ink-400)' }} title="ใบแจ้งหนี้นี้ไม่อยู่ในตารางงวดของโครงการ และเหลือหลายงวด">ไม่รู้ว่าเป็นงวดไหน ({unknown} งวด)</span>
+      : !list.length ? <span style={{ color: 'var(--ink-400)' }}>—</span>
+        : list.map((i, j) => (
+          <div key={j} title={instWhy(i)} style={{ whiteSpace: 'nowrap', lineHeight: 1.5 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--ink-500)' }}>{instName(io, i)} </span>
+            {i.st === 'unk' ? <span style={{ fontSize: 11.5, color: '#8A5300' }}>ไม่รู้ยอด</span> : <b style={{ fontVariantNumeric: 'tabular-nums' }}>{fundB(i.amt)}</b>}
+            <span style={{ fontSize: 10.5, fontWeight: 600, marginLeft: 5, padding: '0 6px', borderRadius: 999, background: i.st === 'ap' ? '#E3ECFB' : '#F1F5F9', color: i.st === 'ap' ? '#1F4E9E' : '#5E6A82' }}>{i.st === 'ap' ? 'ตั้งหนี้แล้ว' : i.st === 'est' ? 'ประมาณ' : 'ไม่มี ADV'}</span>
+            {i.pay && i.st !== 'unk' && <span style={{ fontSize: 11, color: 'var(--ink-500)' }}> · จ่าย ~{bdafDShort(i.pay)}</span>}
+          </div>
+        ))
+  );
+  const instSummary = (lists, src) => {
+    const all = [].concat(...lists), F0 = F[F.length - 1];
+    if (!all.length) return null;
+    const by = {}; let later = 0, unk = 0;
+    all.forEach(i => {
+      if (i.st === 'unk') { unk++; return; }
+      const mk = i.pay.slice(0, 7);
+      if (mk > F0) { later += i.amt; return; }
+      const o = by[mk] = by[mk] || { inst1: 0, inst2: 0 };
+      o[i.row] += i.amt;
+    });
+    const mks = Object.keys(by).sort(), tot = (k) => mks.reduce((s, mk) => s + by[mk][k], 0);
+    const c = { padding: '5px 8px', borderBottom: '1px solid var(--line-soft)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
+    const h = Object.assign({}, c, { fontSize: 11.5, fontWeight: 600, color: 'var(--ink-500)', borderBottom: '1px solid var(--line)' });
+    return (
+      <div style={{ margin: '10px 0 12px', padding: '10px 12px', border: '1px solid #F3D9C4', background: '#FFFaf5', borderRadius: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: '#B14A0C', marginBottom: 2 }}>ค่าติดตั้งผู้รับเหมาที่ต้องจ่ายหลังรับเงินในหน้าต่างนี้ (ยังไม่นับในตาราง)</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginBottom: 6 }}>จ่ายหลังรับเงิน {fc.instPay} วัน · ข้อมูลใบ APS ผู้รับเหมา — ถ้าจะนับ ให้พิมพ์เพิ่มในแถว "ค่าติดตั้งงวด 1" / "ค่าติดตั้งงวดสุดท้าย" ข้อ ข.2 เดือนเดียวกัน{src ? ' · ' + src : ''}</div>
+        {mks.length > 0 && (
+          <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <thead><tr><th style={Object.assign({}, h, { textAlign: 'left' })}>เดือนที่จ่าย</th><th style={h}>งวด 1</th><th style={h}>งวดสุดท้าย</th><th style={h}>รวม</th><th style={Object.assign({}, h, { color: 'var(--ink-400)' })}>ในแถว ข.2 ตอนนี้ (งวด 1 / สุดท้าย)</th></tr></thead>
+            <tbody>
+              {mks.map(mk => (
+                <tr key={mk}>
+                  <td style={Object.assign({}, c, { textAlign: 'left' })}>{bdafMShort(mk)}</td>
+                  <td style={c}>{by[mk].inst1 > 0.5 ? fundB(by[mk].inst1) : '–'}</td>
+                  <td style={c}>{by[mk].inst2 > 0.5 ? fundB(by[mk].inst2) : '–'}</td>
+                  <td style={Object.assign({}, c, { fontWeight: 700 })}>{fundB(by[mk].inst1 + by[mk].inst2)}</td>
+                  <td style={Object.assign({}, c, { color: 'var(--ink-400)' })}>{fundB(instRowNow('inst1', mk))} / {fundB(instRowNow('inst2', mk))}</td>
+                </tr>
+              ))}
+              <tr><td style={Object.assign({}, c, { textAlign: 'left', fontWeight: 700 })}>รวม</td><td style={Object.assign({}, c, { fontWeight: 700 })}>{fundB(tot('inst1'))}</td><td style={Object.assign({}, c, { fontWeight: 700 })}>{fundB(tot('inst2'))}</td><td style={Object.assign({}, c, { fontWeight: 800 })}>{fundB(tot('inst1') + tot('inst2'))}</td><td style={c} /></tr>
+            </tbody>
+          </table>
+        )}
+        {(later > 0.5 || unk > 0) && <div style={{ fontSize: 11.5, color: '#8A5300', marginTop: 6 }}>{[later > 0.5 ? 'จ่ายหลังช่วงที่ดู ' + fundB(later) : '', unk ? 'ไม่รู้ยอด ' + unk + ' งวด (ไม่มี ADV ในระบบ — PV เริ่ม ม.ค. 68)' : ''].filter(Boolean).join(' · ')}</div>}
+      </div>
+    );
+  };
   const setWip = (code, patch) => setFc(f => {
     const all = Object.assign({}, f.wip), cur = Object.assign({}, all[code], patch);
     Object.keys(cur).forEach(k2 => { if (cur[k2] == null || cur[k2] === '' || cur[k2] === false) delete cur[k2]; });
@@ -1883,7 +2151,7 @@ function FundingPlanPage({ data, toast }) {
       {wipList.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--ink-500)' }}>ไม่มีโครงการที่กำลังทำซึ่งยังมียอดที่ยังไม่ออก INV</div> : (
         <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
           <table className="fund-tbl fund-sticky-head">
-            <thead><tr><th style={{ textAlign: 'center' }}>นับ</th><th className="l">โครงการ</th><th>มูลค่าสัญญา</th><th>รับแล้ว</th><th>ออก INV แล้วรอรับ</th><th>ยังไม่ออก INV</th><th>ยอดที่นับ</th><th className="l">วันคาดออก INV</th><th className="l">คาดรับ</th></tr></thead>
+            <thead><tr><th style={{ textAlign: 'center' }}>นับ</th><th className="l">โครงการ</th><th>มูลค่าสัญญา</th><th>รับแล้ว</th><th>ออก INV แล้วรอรับ</th><th>ยังไม่ออก INV</th><th className="l" title="ค่าติดตั้งผู้รับเหมาที่ยังไม่ได้จ่าย (ใบ APS) · จ่ายหลังรับเงิน">ค่าติดตั้งที่ยังต้องจ่าย</th><th>ยอดที่นับ</th><th className="l">วันคาดออก INV</th><th className="l">คาดรับ</th></tr></thead>
             <tbody>
               {wipList.map(x => {
                 const o = fc.wip[x.code] || {}, dates = wipInItems.filter(i => i.ref === x.code).map(i => bdafDShort(i.date));
@@ -1896,6 +2164,15 @@ function FundingPlanPage({ data, toast }) {
                     <td style={num}>{fundB(x.got)}</td>
                     <td style={num}>{x.ar > 0.5 ? fundB(x.ar) : '—'}</td>
                     <td style={num}>{fundB(x.rcv)}</td>
+                    <td style={{ fontSize: 12.5 }}>{(() => {
+                      // งวดผู้รับเหมาที่ยังไม่จ่ายทั้งหมดของโครงการ · วันจ่ายตามเงินรับก้อนที่ผูกไว้ (ไม่มี = รับเงินงวดนั้นแล้ว/หลังช่วงที่ดู)
+                      const io = instOf(x.code);
+                      if (!io) return <span style={{ color: 'var(--ink-400)' }} title="ไม่มีใบ APS ของโครงการนี้ในระบบ">ไม่มีข้อมูล</span>;
+                      const open = io.inst.filter(i => i.st !== 'paid');
+                      if (!open.length) return <span style={{ color: '#0B7255', fontSize: 12 }}>จ่ายครบแล้ว</span>;
+                      const att = [].concat(...wipInItems.filter(i => i.ref === x.code).map(i => i.inst));
+                      return instCell(io, open.map(i => att.find(a => a.n === i.n) || i));
+                    })()}</td>
                     <td style={num}><FundNum disabled={!canEdit} value={o.amt} onChange={v => setWip(x.code, { amt: v })} placeholder={fundB(x.rcv)} width={110} /></td>
                     <td><input className="input" type="date" disabled={!canEdit} value={o.inv || ''} onChange={e => setWip(x.code, { inv: e.target.value })} style={{ padding: '2px 4px', fontSize: 12, width: 130 }} /></td>
                     <td style={{ fontSize: 12, whiteSpace: 'nowrap', color: o.off ? 'var(--ink-400)' : undefined }}>{o.off ? 'ไม่นับ' : dates.join(' · ') || 'หลังช่วงที่ดู'}</td>
@@ -1907,6 +2184,7 @@ function FundingPlanPage({ data, toast }) {
         </div>
       )}
       <div style={{ fontSize: 11.5, color: 'var(--ink-500)', marginTop: 6 }}>ยอดที่นับว่าง = ใช้ยอดระบบ · ติ๊ก "นับ" ออก = ไม่นับโครงการนี้ · ใส่วันคาดออก INV = รับเงินวันนั้น + {fc.invLag} วัน</div>
+      {instSummary(wipInItems.map(i => i.inst))}
     </div>
   );
   const apItems = fcEv(jobs.evs.filter(e => e.kind === 'proj' && e.sub === 'ap'), -1);
@@ -1993,7 +2271,8 @@ function FundingPlanPage({ data, toast }) {
           sub: ivItems.length + ' รายการ' + (rcvSkip > 0.5 ? ' · ที่ยังไม่นับ = ไม่มีวันคาดรับ / รอตรวจรับ' : '') }),
         fcAuto('wipIn', 'งวดที่ยังไม่ออก INV (ประมาณ)', wipInItems, { badge: 'งวด', color: FC_C.est, head: wipHead,
           sub: wipList.length + ' โครงการ · ยังไม่ออก INV = รับเร็วสุดหลังวันนี้ ' + fc.invLag + ' วัน' + (Object.keys(fc.wip).length ? ' · แก้เอง ' + Object.keys(fc.wip).length + ' โครงการ' : '') + ' · กดเพื่อแก้รายโครงการ',
-          how: 'โครงการที่กำลังทำ ยอดที่ยังไม่ออกใบแจ้งหนี้ · ปกติรับเงินหลังออก INV 30–45 วัน · แก้ยอด วันคาดออก INV หรือไม่นับ ได้รายโครงการ' }),
+          how: 'โครงการที่กำลังทำ ยอดที่ยังไม่ออกใบแจ้งหนี้ · ปกติรับเงินหลังออก INV 30–45 วัน · แก้ยอด วันคาดออก INV หรือไม่นับ ได้รายโครงการ',
+          extra: { th: 'ค่าติดตั้งที่ต้องจ่ายตาม', cell: (it) => instCell(it.io, it.inst || []) } }),
       ].concat(rcvOtherItems.length ? [fcAuto('rcvOther', 'รับอื่นที่คีย์ไว้ใน Bank Daily', rcvOtherItems, { badge: 'คีย์', color: FC_C.est, rcvModal: true })] : []) },
       { key: 'g2', t: '2. โครงการที่จะลงนาม (ฝ่ายขาย)', single: true, rows: [
         fcAuto('pipe', '2. โครงการที่จะลงนาม (ฝ่ายขาย)', fp.ev.rcv, { badge: 'ขาย', color: FC_C.pipe, sub: pipeN + ' โครงการ · ตามวันเซ็น + แบบรับเงิน · หัก ณ ที่จ่าย 1%',
@@ -2302,6 +2581,12 @@ function FundingPlanPage({ data, toast }) {
     const pjMax = Math.max(1, ...pjGroups.map(g => g.val));
     const peak = pjGroups.filter(g => g.k[0] === 'm').reduce((m, g) => (!m || g.rows.length > m.rows.length ? g : m), null);
     const gStr = (use, cash) => [use > 0.5 ? 'LG ' + fundB(use) : '', cash > 0.5 ? 'เงินสด ' + fundB(cash) : ''].filter(Boolean).join(' · ') || '–';
+    const doExportPj = () => {
+      const ok = fundPjExport({ groups: pjGroups, perBy, movedBy: {}, fc, today,   // BIO: ไม่มีแผนลงนามรายเดือน (ไม่มีการเลื่อนวันเซ็น)
+        title: 'โครงการที่จะลงนาม (ฝ่ายขาย) · ข้อมูล ณ ' + fmtDate(today),
+        sub: ov.pipe.length + ' โครงการ · มูลค่า ' + fundB(pipeTotal) + ' บาท · นับในแผน ' + pipeN + ' โครงการ' });
+      if (toast) toast(ok ? 'ส่งออก Excel แล้ว' : 'ส่งออกไม่สำเร็จ');
+    };
     const pjOpenOf = (g, i) => (fold['pj:' + g.k] != null ? !!fold['pj:' + g.k] : i === 0);
     const PJ_LIM = 5;
     const pjRow = (r) => {
@@ -2499,7 +2784,7 @@ function FundingPlanPage({ data, toast }) {
           <p className="fund-foot-note no-present">กดชื่อแถวดูที่มา · ตัวเลขสีเทา = ระบบคิด พิมพ์ทับได้ (ลบให้ว่าง = กลับไปใช้ยอดระบบ) · แถวกรอกเอง ช่องว่าง = 0 · พิมพ์ 2.5ล = 2,500,000 · กดชื่อกลุ่ม = พับ/กาง · ตัวเลขสีแดง = ติดลบ · – = ไม่มีรายการ</p>
         </section>
 
-        <section className="no-present" aria-label="โครงการที่จะลงนาม">   {/* ผู้ใช้ 2026-11-11: โหมดนำเสนอไม่โชว์ข้อ 3–4 */}
+        <section aria-label="โครงการที่จะลงนาม">   {/* ผู้ใช้ 2026-11-11 ซ่อนข้อ 3–4 ตอนนำเสนอ → 2026-11-12 "แก้โหมดนำเสนอให้เห็นข้อ 3 ด้วย ทั้ง 2 บ." (ข้อ 4 ยังซ่อน) · ปุ่ม/ติ๊ก/หมายเหตุในข้อ 3 ยังเป็น no-present · กดแถวไม่เปิดฟอร์ม (fundPresenting) */}
           {foldHead(3, 'โครงการที่จะลงนาม (ฝ่ายขาย)', ov.pipe.length
             ? <>
                 <span>{ov.pipe.length} โครงการ</span>
@@ -2511,11 +2796,12 @@ function FundingPlanPage({ data, toast }) {
             : <span>ยังไม่มีโครงการ — นำเข้าไฟล์ฝ่ายขาย หรือเลือกจากหน้าโครงการ</span>, !!open.pj, () => tog('pj'))}
           {open.pj && (
             <div className="fund-pj-wrap">
-              {canEdit && (
+              {(canEdit || ov.pipe.length > 0) && (
                 <div className="fund-pj-acts no-present">
-                  <button type="button" className="fund-btn sm" onClick={() => setImporting(true)}><FundIco d={FUND_ICO.ul} size={16} />นำเข้าไฟล์ฝ่ายขาย</button>
-                  <button type="button" className="fund-btn sm" onClick={() => setPicking(true)}>เลือกจากหน้าโครงการ</button>
-                  <button type="button" className="fund-btn sm pri" onClick={() => setEditRow({ group: 'soon', lender: 'auto', stage: 'pre', assignable: '', payType: fc.payTypes[0].id, useLit: false })}><FundIco d={FUND_ICO.plus} size={16} />เพิ่มเอง</button>
+                  {ov.pipe.length > 0 && <button type="button" className="fund-btn sm" onClick={doExportPj}><FundIco d={FUND_ICO.dl} size={16} />ส่งออก Excel</button>}
+                  {canEdit && <button type="button" className="fund-btn sm" onClick={() => setImporting(true)}><FundIco d={FUND_ICO.ul} size={16} />นำเข้าไฟล์ฝ่ายขาย</button>}
+                  {canEdit && <button type="button" className="fund-btn sm" onClick={() => setPicking(true)}>เลือกจากหน้าโครงการ</button>}
+                  {canEdit && <button type="button" className="fund-btn sm pri" onClick={() => setEditRow({ group: 'soon', lender: 'auto', stage: 'pre', assignable: '', payType: fc.payTypes[0].id, useLit: false })}><FundIco d={FUND_ICO.plus} size={16} />เพิ่มเอง</button>}
                 </div>
               )}
               {ov.pipe.length === 0
@@ -2914,7 +3200,7 @@ function FundingPlanPage({ data, toast }) {
         onApply={(o) => { if (canEdit) WTPOverride.setRaw(FUND_INC_KEY, JSON.stringify(o)); setIncImporting(false); if (toast) toast('ใช้ตารางดอกเบี้ย Incofin จากไฟล์ ' + o.file); }} onClose={() => setIncImporting(false)} />}
       {srcKey && fcAllRows[srcKey] && (() => {
         const row = fcAllRows[srcKey];
-        return <FundFcSrcModal title={(row.neg ? '− ' : '') + row.label} how={row.how || row.sub} items={row.items} F={F} sys={row.sys} ovr={fc.ovr[row.key]} head={row.head}
+        return <FundFcSrcModal title={(row.neg ? '− ' : '') + row.label} how={row.how || row.sub} items={row.items} F={F} sys={row.sys} ovr={fc.ovr[row.key]} head={row.head} extra={row.extra}
           canEdit={canEdit} onClearOvr={() => clearOvr(row.key)} onClose={() => setSrcKey(null)} />;
       })()}
       {detK && (() => {   /* BIO: รายละเอียดแถวค่าใช้จ่ายประจำ */
@@ -2924,7 +3210,9 @@ function FundingPlanPage({ data, toast }) {
         return <FundFixedDetailModal key={detK} part={p} items={p.det} typedN={p.typed.filter(v => v != null).length} canEdit={ed}
           onSave={(list) => { setFixedItems(p.k, list); setDetK(null); if (toast) toast('บันทึกรายละเอียด ' + p.t); }} onClearTyped={() => clearFixedTyped(p.k)} onClose={() => setDetK(null)} />;
       })()}
-      {rcvOpen && <BDAFRcvModal rcv={rcv} F={F} today={today} init={{}} onClose={() => setRcvOpen(false)} />}
+      {rcvOpen && <BDAFRcvModal rcv={rcv} F={F} today={today} init={{}} onClose={() => setRcvOpen(false)}
+        extra={{ th: 'ค่าติดตั้งที่ต้องจ่ายตาม', cell: (it) => { const x = ivInst.get(it); return x ? instCell(x.io, x.list, x.unknown) : <span style={{ color: 'var(--ink-400)' }}>—</span>; },
+          head: instSummary(Array.from(ivInst.values()).map(x => x.list), 'เฉพาะใบแจ้งหนี้ที่นับในแผน') }} />}
     </div>
   );
 }
