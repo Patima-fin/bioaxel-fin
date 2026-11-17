@@ -3724,6 +3724,103 @@ function FloatingApModal({ open, data, defaultPayDate, onClose, onSubmit }) {
   );
 }
 
+// ── ป๊อปอัป "ใบเจ้าหนี้ที่จ่ายแล้ว" — ดูรายการก่อนลบ + ติ๊กเลือก (มีเลือกทั้งหมด) → ลบเฉพาะที่เลือก ──
+//   แบบเดียวกับ PaidViaPvModal ของ Water POG (เริ่มไม่ติ๊กสักรายการ · ยืนยันอีกชั้นที่ปุ่มล่าง)
+//   แต่ "จ่ายแล้วไหม" ใช้กติกาของ BIO (buildPayablePaidCheck: 'bill' / 'self') — list ทำมาจากหน้า
+function PaidApCleanupModal({ list, canDelete, onRemove, onClose }) {
+  const [sel, setSel] = dxState(() => new Set());
+  const [ask, setAsk] = dxState(false);
+  const allIds = list.map(x => x.id);
+  const allSel = allIds.length > 0 && allIds.every(id => sel.has(id));
+  const someSel = sel.size > 0 && !allSel;
+  const toggle = (id) => { setAsk(false); setSel(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const toggleAll = () => { setAsk(false); setSel(allSel ? new Set() : new Set(allIds)); };
+  const sumAll = list.reduce((s, x) => s + x.net, 0);
+  const sumSel = list.reduce((s, x) => s + (sel.has(x.id) ? x.net : 0), 0);
+  const th = { textAlign: 'left', fontSize: 11, color: 'var(--ink-500)', fontWeight: 700, padding: '7px 8px', borderBottom: '1px solid var(--ink-150, var(--ink-100))', position: 'sticky', top: 0, background: 'var(--surface, #fff)', zIndex: 1, whiteSpace: 'nowrap' };
+  const td = { padding: '6px 8px', verticalAlign: 'top' };
+  return (
+    <Modal open title={`ใบเจ้าหนี้ที่จ่ายแล้ว (${list.length}) — ตรวจก่อนลบออกจากเจ้าหนี้คงค้าง`} maxWidth={920} onClose={onClose}
+      footer={<>
+        <span style={{ marginRight: 'auto', alignSelf: 'center', fontSize: 12.5, color: 'var(--ink-600)' }}>
+          {sel.size
+            ? <>เลือก <strong>{sel.size}</strong> รายการ · รวม <strong style={{ color: 'var(--bad)' }}>{fmtNum(sumSel, 2)}</strong> บาท</>
+            : <>ทั้งหมด {list.length} รายการ · รวม {fmtNum(sumAll, 2)} บาท</>}
+        </span>
+        <button className="btn btn-ghost" onClick={onClose}>ปิด</button>
+        {canDelete && (ask
+          ? <>
+              <span style={{ alignSelf: 'center', color: 'var(--bad)', fontSize: 12.5, fontWeight: 600 }}>ลบ {sel.size} รายการออกจากเจ้าหนี้คงค้าง?</span>
+              <button className="btn btn-ghost" onClick={() => setAsk(false)}>ยกเลิก</button>
+              <button className="btn btn-primary" style={{ background: 'var(--bad)', borderColor: 'var(--bad)' }}
+                onClick={() => { onRemove([...sel]); onClose(); }}>
+                <Icon name="trash" size={13} /> ยืนยันลบ
+              </button>
+            </>
+          : <button className="btn btn-danger" disabled={!sel.size} onClick={() => setAsk(true)}>
+              <Icon name="trash" size={13} /> ลบที่เลือก ({sel.size})
+            </button>)}
+      </>}>
+      <div style={{ fontSize: 12, color: 'var(--ink-600)', lineHeight: 1.55, marginBottom: 10 }}>
+        ใบเหล่านี้มีใบจ่ายในหน้า PV แล้ว จึงไม่ใช่เจ้าหนี้คงค้าง · ติ๊กเลือกรายการที่จะลบ (หรือ "เลือกทั้งหมด") แล้วกด <strong>ลบที่เลือก</strong>
+        {' '}· เลข PO/WO ของบิลที่ลบจะถูกยกไปเก็บที่ใบจ่าย (PV) ให้ก่อน
+        {!canDelete && <div style={{ marginTop: 6, color: 'var(--warn, #b45309)', fontWeight: 600 }}>ดูได้อย่างเดียว — การลบต้องเป็นสิทธิ์ที่แก้ไขข้อมูลได้</div>}
+      </div>
+      <div style={{ maxHeight: '58vh', overflow: 'auto', border: '1px solid var(--ink-100)', borderRadius: 8 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              {canDelete && <th style={{ ...th, width: 34, textAlign: 'center' }}>
+                <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = someSel; }}
+                  onChange={toggleAll} title="เลือกทั้งหมด" style={{ cursor: 'pointer' }} />
+              </th>}
+              <th style={th}>เลขที่</th>
+              <th style={{ ...th, textAlign: 'center' }}>วันที่</th>
+              <th style={th}>เจ้าหนี้</th>
+              <th style={{ ...th, textAlign: 'right' }}>ยอดสุทธิ</th>
+              <th style={th}>จ่ายแล้วด้วยใบจ่าย (PV)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(x => {
+              const on = sel.has(x.id);
+              return (
+                <tr key={x.id} onClick={() => canDelete && toggle(x.id)}
+                  style={{ cursor: canDelete ? 'pointer' : 'default', background: on ? 'color-mix(in oklch, var(--bad) 7%, var(--surface, #fff))' : undefined, borderBottom: '1px solid var(--ink-100)' }}>
+                  {canDelete && <td style={{ ...td, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(x.id)} style={{ cursor: 'pointer' }} />
+                  </td>}
+                  <td style={{ ...td, fontFamily: 'ui-monospace, monospace', color: 'var(--brand-700)', fontWeight: 600, whiteSpace: 'nowrap' }}>{x.vchno || '—'}</td>
+                  <td style={{ ...td, textAlign: 'center', whiteSpace: 'nowrap', color: 'var(--ink-600)' }}>{x.vchdate ? fmtDate(x.vchdate) : '—'}</td>
+                  <td style={{ ...td, color: 'var(--ink-800)' }}>
+                    {x.cust_name || '—'}
+                    {x.remark && <div style={{ fontSize: 11, color: 'var(--ink-500)' }}>{x.remark}</div>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtNum(x.net, 2)}</td>
+                  <td style={{ ...td, fontSize: 11.5, color: 'var(--ink-600)' }}>
+                    {x.pvs.length
+                      ? x.pvs.map((p, i) => (
+                          <div key={i} style={{ whiteSpace: 'nowrap' }}>
+                            <span style={{ fontFamily: 'ui-monospace, monospace', color: 'var(--ink-800)' }}>{p.no || '—'}</span>
+                            {p.date && <span> · {fmtDate(p.date)}</span>}
+                            {p.amt ? <span> · {fmtNum(p.amt, 2)}</span> : null}
+                          </div>
+                        ))
+                      : '—'}
+                    {x.kind === 'self' && (
+                      <div style={{ fontSize: 10.5, color: 'var(--ink-500)' }}>เลขเดียวกับใบจ่าย (ยอดจ่าย ≥ 95% ของบิล)</div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
+  );
+}
+
 function DataPayablePage({ data, setData, toast }) {
   const [edit, setEdit]             = dxState(null);
   const [query, setQuery]           = dxState('');
@@ -3853,21 +3950,33 @@ function DataPayablePage({ data, setData, toast }) {
     return { rows: floats, total: floats.reduce((s, r) => s + parseNum(r.netpayment), 0), dupIds };
   }, [rows]);
 
-  // ล้างรายการที่จ่ายแล้วออกจากชีต — ลบจริงผ่าน sync (replaceAll + baseIds ลบเฉพาะ id ที่ตัดออก)
-  const cleanPaidNow = () => {
-    if (!paidRows.length) return;
-    const selfNote = paidSelfCount ? `\n(ในนี้ ${paidSelfCount} รายการ = เลขที่ตรงกับใบจ่าย AV/AE/PC และยอดจ่ายครอบยอดในบิล)` : '';
-    if (!confirm(`พบ ${paidRows.length} รายการที่จ่ายแล้ว (มีใบจ่ายใน PV)${selfNote}\nยืนยันลบออกจากรายการคงค้าง (ชีต payables)?`)) return;
-    const ids = new Set(paidRows.map(r => r.id).filter(Boolean));
-    if (!ids.size) { toast('รายการที่จ่ายแล้วไม่มี id — ลบไม่ได้'); return; }
-    // ยก PO/WO ของบิลที่กำลังจะลบไปใส่ PV ที่จ่ายมันก่อน (ลบแล้วหาไม่เจออีก)
-    setData(d => ({
-      ...d,
-      payables: (d.payables || []).filter(r => !ids.has(r.id)),
-      pvVouchers: pvPoAbsorb(d.pvVouchers, (d.payables || []).filter(r => ids.has(r.id))),
-    }));
-    toast(`ล้างรายการที่จ่ายแล้ว ${ids.size} รายการออกจากชีตแล้ว`);
-  };
+  // รายการสำหรับป๊อปอัป "ใบเจ้าหนี้ที่จ่ายแล้ว" — แนบใบจ่าย (PV) ที่จ่ายแต่ละใบไว้ให้ดูก่อนลบ
+  //   'bill' → PV ที่มีเลขนี้ใน AP_No / settles[] · 'self' → PV ที่ PL_PV_No = เลขที่ใบเจ้าหนี้
+  const [showPaidModal, setShowPaidModal] = dxState(false);
+  const paidList = dxMemo(() => {
+    if (!paidRows.length) return [];
+    const byBill = new Map(), bySelf = new Map();
+    const push = (m, k, pv) => { if (!k) return; const a = m.get(k); if (a) a.push(pv); else m.set(k, [pv]); };
+    (data.pvVouchers || []).forEach(pv => {
+      pvSettledDocs(pv).forEach(d => push(byBill, d, pv));
+      push(bySelf, String((pv && pv.PL_PV_No) || '').trim(), pv);
+    });
+    return paidRows.map(r => {
+      const v = String(r.vchno || '').trim();
+      const kind = payablePaidKind(r);
+      const seen = new Set(), pvs = [];
+      ((kind === 'self' ? bySelf : byBill).get(v) || []).forEach(pv => {
+        const no = String(pv.PL_PV_No || '').trim(), amt = parseNum(pv.Net_Amount);
+        const k = no + '|' + amt.toFixed(2);
+        if (seen.has(k)) return;
+        seen.add(k);
+        pvs.push({ no, date: pv.Pmt_Date || '', amt });
+      });
+      pvs.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      return { id: r.id, vchno: v, vchdate: r.vchdate || '', cust_name: payableCreditorName(r), remark: r.remark || '',
+               net: parseNum(r.netpayment), kind, pvs };
+    }).sort((a, b) => a.cust_name.localeCompare(b.cust_name, 'th') || a.vchno.localeCompare(b.vchno, 'th', { numeric: true }));
+  }, [paidRows, data.pvVouchers, payablePaidKind]);
 
   const getDocType = (vchno) => {
     if (!vchno) return 'other';
@@ -4614,6 +4723,27 @@ function DataPayablePage({ data, setData, toast }) {
     toast(`ลบ ${set.size} รายการแล้ว` + floatPlanNote(imp));
   };
 
+  // ลบใบเจ้าหนี้ที่จ่ายแล้ว "เฉพาะที่ติ๊กเลือก" ในป๊อปอัป PaidApCleanupModal (ป๊อปอัปยืนยันให้แล้ว ไม่ถามซ้ำ)
+  //   ยก PO/WO ของบิลที่กำลังจะลบไปใส่ PV ที่จ่ายมันก่อน (ลบแล้วหาไม่เจออีก) · ใบลอยในชุด = ลบแผนจ่ายที่ผูกกันด้วย
+  //   ลบเกิน max(8, 50% ของตาราง) → ต้องยิง forceDeleteRows ไม่งั้นเกราะ mass-delete ปัดทิ้งเงียบ ๆ แล้วแถวเด้งกลับ
+  const cleanPaid = (idsIn) => {
+    const ids = new Set((idsIn || []).filter(Boolean));
+    if (!ids.size) { toast('รายการที่เลือกไม่มี id — ลบไม่ได้'); return; }
+    const imp = floatPlanImpact(ids);
+    const total = (data.payables || []).length;
+    setData(d => ({
+      ...d,
+      payables: (d.payables || []).filter(r => !ids.has(r.id)),
+      pvVouchers: pvPoAbsorb(d.pvVouchers, (d.payables || []).filter(r => ids.has(r.id))),
+      forecastEntries: dropFloatPlans(d, imp.refs),
+    }));
+    if (window.WTPData && typeof window.WTPData.forceDeleteRows === 'function' && ids.size > Math.max(8, total * 0.5)) {
+      const list = [...ids];
+      setTimeout(() => { try { window.WTPData.forceDeleteRows('payables', list); } catch (_) {} }, 60);
+    }
+    toast(`ล้างใบเจ้าหนี้ที่จ่ายแล้ว ${ids.size} รายการออกจากรายการคงค้างแล้ว` + floatPlanNote(imp));
+  };
+
   const resetImport = () => {
     setShowImport(false); setImportText(''); setImportPasteOpen(false);
     setImportFileName(''); setImportPreview(null); setSelectedMissing(new Set()); setXmlParsedRows(null);
@@ -4817,11 +4947,16 @@ function DataPayablePage({ data, setData, toast }) {
               </div>
             )}
           </div>
-          <button className="btn btn-primary" onClick={cleanPaidNow}
+          <button className="btn btn-primary" onClick={() => setShowPaidModal(true)}
+            title="เปิดดูรายการทั้งหมดก่อน แล้วติ๊กเลือกรายการที่จะลบ"
             style={{ background: 'var(--bad)', borderColor: 'var(--bad)', flex: '0 0 auto' }}>
-            <Icon name="trash" size={14} /> ล้างออกจากชีต ({paidRows.length})
+            <Icon name="search" size={14} /> ดูรายการ / เลือกลบ ({paidRows.length})
           </button>
         </div>
+      )}
+      {showPaidModal && paidList.length > 0 && (
+        <PaidApCleanupModal list={paidList} canDelete={canEdit}
+          onRemove={cleanPaid} onClose={() => setShowPaidModal(false)} />
       )}
 
       {/* 🏷 Banner — ตั้งหนี้ลอยที่ยังค้าง (ของชั่วคราว ต้องลบเมื่อใบจริงเข้าระบบ) */}
