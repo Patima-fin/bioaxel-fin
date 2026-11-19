@@ -3896,6 +3896,26 @@ function floatPickCutoff(n) {
 // วันที่ใช้ได้จริง (yyyy-mm-dd) — ใช้ทั้งในป๊อปอัปและใน addFloatingApBatch ⇒ เกณฑ์เดียวกัน
 function floatIsIso(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim()); }
 
+// จัดรูปยอดเงิน "ระหว่างพิมพ์" ให้มีจุลภาค แล้วคืนตำแหน่งเคอร์เซอร์ใหม่มาด้วย
+// ⚠️ ต้องคืนเคอร์เซอร์เอง — ใส่จุลภาคแล้วความยาวข้อความเปลี่ยน ถ้าไม่ย้ายตาม เคอร์เซอร์จะเด้งไป
+//    ท้ายช่องทุกครั้งที่พิมพ์ (แก้เลขกลางก้อนไม่ได้เลย) · เทียบตำแหน่งด้วย "จำนวนตัวเลข/จุดที่อยู่
+//    ซ้ายเคอร์เซอร์" ซึ่งไม่เปลี่ยนไปตามจุลภาค · ทศนิยมตัดที่ 2 ตำแหน่ง · ยังพิมพ์ค้างไว้ได้ (เช่น "1,200.")
+function floatAmtFormat(raw, caret) {
+  const s = String(raw == null ? '' : raw);
+  const pos = Math.max(0, Math.min(Number(caret) || 0, s.length));
+  const keptBefore = (s.slice(0, pos).match(/[\d.]/g) || []).length;
+  let body = s.replace(/[^\d.]/g, '');
+  const dot = body.indexOf('.');
+  if (dot >= 0) body = body.slice(0, dot + 1) + body.slice(dot + 1).replace(/\./g, '');   // จุดเดียวพอ
+  const parts = body.split('.');
+  const int = (parts[0] || '').replace(/^0+(?=\d)/, '');                                  // 007 → 7 (แต่ "0" คงไว้)
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const text = parts.length > 1 ? grouped + '.' + parts[1].slice(0, 2) : grouped;
+  let i = 0, seen = 0;
+  while (i < text.length && seen < keptBefore) { if (/[\d.]/.test(text[i])) seen++; i++; }
+  return { text: text, caret: i };
+}
+
 function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
   const [step, setStep]     = dxState('pick');    // 'pick' = ค้นหา/ติ๊ก · 'review' = ดูแต่ที่ติ๊ก + ใส่วันที่รายรายการ
   const [mode, setMode]     = dxState('payee');   // 'payee' = ยุบตามผู้รับเงิน (ใช้ยอดครั้งล่าสุด) · 'voucher' = รายใบ PV
@@ -3958,13 +3978,13 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
   const cands = dxMemo(() => {
     let xs;
     if (mode === 'voucher') {
-      xs = inRange.map(v => ({ key: v.key, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, sub: v.note }));
+      xs = inRange.map(v => ({ key: v.key, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, lastNote: v.note, sub: v.note }));
     } else {
       const m = new Map();
       inRange.forEach(v => {
         let o = m.get(v.name);
         // ตัวแรกที่เจอ = ครั้งล่าสุด (inRange เรียงใหม่→เก่าแล้ว) ⇒ ยอด/วันที่/เลขที่ยึดจากตัวนั้น
-        if (!o) { o = { key: 'payee:' + v.name, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, times: 0, sum: 0 }; m.set(v.name, o); }
+        if (!o) { o = { key: 'payee:' + v.name, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, lastNote: v.note, times: 0, sum: 0 }; m.set(v.name, o); }
         o.times++; o.sum += v.amt;
       });
       xs = [...m.values()].map(o => ({ ...o, sub: `จ่ายมา ${o.times} ครั้ง · รวม ${fmtNum(o.sum, 2)} บาท` }));
@@ -4004,7 +4024,8 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
   // ยอดตั้งต้นใส่เป็นข้อความมีจุลภาค (อ่านง่ายกว่า 9123.44) — parseNum ถอดจุลภาคให้อยู่แล้ว
   const initAmt = (c) => fmtNum(c.amt, 2);
   const mkItem  = (c) => ({ key: c.key, name: c.name, amt: initAmt(c), payDate: payDate || '', due: due || '',
-                            srcNo: c.lastNo || '', srcIso: c.lastIso || '', sub: c.sub || '' });
+                            srcNo: c.lastNo || '', srcIso: c.lastIso || '', sub: c.sub || '',
+                            note: c.lastNote || '' });
   const toggle = (c) => setPicked(p => {
     const n = { ...p };
     if (n[c.key]) delete n[c.key]; else n[c.key] = mkItem(c);
@@ -4022,11 +4043,24 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
     setPicked(p => { const n = {}; Object.keys(p).forEach(k => { n[k] = { ...p[k], [field]: v }; }); return n; });
   };
 
+  // พิมพ์ยอดแล้วเห็นจุลภาคทันที (ใช้ตัวเดียวกันทั้ง 2 ขั้น)
+  // ⚠️ ต้องเขียนค่าลง DOM เอง "ก่อน" แล้วค่อยตั้งเคอร์เซอร์ แล้วค่อย setState —
+  //    ถ้าปล่อยให้ React เขียนค่าให้ เคอร์เซอร์จะเด้งไปท้ายช่องทุกครั้งที่ความยาวเปลี่ยน
+  //    (ลองคืนเคอร์เซอร์ใน requestAnimationFrame แล้ว ไม่ทัน — React ตั้งค่าใหม่ทีหลัง)
+  //    ตอน re-render ค่าที่ React ถืออยู่จะเท่ากับใน DOM พอดี มันจึงไม่แตะช่องซ้ำ เคอร์เซอร์เลยอยู่ที่เดิม
+  const onAmtInput = (e, setter) => {
+    const el = e.target;
+    const r = floatAmtFormat(el.value, el.selectionStart);
+    el.value = r.text;
+    try { el.setSelectionRange(r.caret, r.caret); } catch (_) {}
+    setter(r.text);
+  };
+
   const submit = () => {
     // ⚠️ ส่งวันที่ไปรายรายการ — opts.payDate เป็นแค่ค่าสำรองของฝั่งผู้รับ (addFloatingApBatch)
     const items = pickedList
       .filter(it => String(it.name || '').trim() && parseNum(it.amt) > 0 && floatIsIso(it.payDate))
-      .map(it => ({ name: it.name, amount: it.amt, payDate: it.payDate, due: it.due, srcNo: it.srcNo, srcIso: it.srcIso }));
+      .map(it => ({ name: it.name, amount: it.amt, payDate: it.payDate, due: it.due, note: it.note, srcNo: it.srcNo, srcIso: it.srcIso }));
     onSubmit(items, { bankAc, payDate });   // payDate = ค่าสำรองเท่านั้น · วันครบกำหนดไม่ส่งระดับชุด (ดู addFloatingApBatch)
   };
 
@@ -4038,7 +4072,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
     border: `1px solid color-mix(in oklch, ${color} 40%, transparent)`, borderRadius: 5, padding: '0 6px' });
 
   return (
-    <Modal open={open} title="⧉ คัดจากที่เคยจ่าย → ตั้งหนี้ลอย" maxWidth={940} onClose={onClose}
+    <Modal open={open} title="⧉ คัดจากที่เคยจ่าย → ตั้งหนี้ลอย" maxWidth={1060} onClose={onClose}
       footer={<>
         <span style={{ marginRight: 'auto', fontSize: 12, fontWeight: 600, color: nPick ? 'var(--brand-700)' : 'var(--ink-400)' }}>
           {nPick
@@ -4166,7 +4200,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
                     {/* ยังไม่ติ๊ก = ช่องว่าง (ไม่ใส่ยอดเป็น placeholder — จะอ่านเหมือนคอลัมน์ "ยอดเดิม" ซ้ำสอง)
                         คลิกเข้าช่องนี้ = ติ๊กให้เลย แล้วเติมยอดครั้งล่าสุดไว้ให้แก้ */}
                     <input type="text" inputMode="decimal" value={on ? picked[c.key].amt : ''} placeholder="—"
-                      onChange={e => setAmt(c, e.target.value)}
+                      onChange={e => onAmtInput(e, v => setAmt(c, v))}
                       onFocus={() => { if (!on) setAmt(c, initAmt(c)); }}
                       style={{ ...inp, height: 30, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace',
                                color: amtOk ? 'var(--bad)' : 'var(--ink-500)',
@@ -4216,6 +4250,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
             <tr>
               <th style={{ width: 30, textAlign: 'right' }}>#</th>
               <th>ผู้รับเงิน</th>
+              <th style={{ minWidth: 150 }}>หมายเหตุ</th>
               <th style={{ width: 128, textAlign: 'right' }}>ยอดที่จะตั้ง{req}</th>
               <th style={{ width: 146 }}>วันที่คาดจ่าย{req}</th>
               <th style={{ width: 146 }}>วันครบกำหนด</th>
@@ -4224,7 +4259,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
           </thead>
           <tbody>
             {nPick === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: '26px 10px', fontSize: 12.5 }}>
+              <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: '26px 10px', fontSize: 12.5 }}>
                 ยังไม่ได้ติ๊กรายการ — กลับไปขั้น ① แล้วติ๊กรายการที่จะตั้งค้างไว้
               </td></tr>
             )}
@@ -4245,8 +4280,14 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
                       {nf > 0 && <span style={chip('oklch(55% 0.16 75)')} title="ชื่อนี้มีใบลอยค้างอยู่แล้ว — ตั้งซ้ำแล้วยอดคาดการณ์จะเบิ้ล">🏷 มีใบลอยค้าง {nf}</span>}
                     </div>
                   </td>
+                  <td>
+                    {/* ยกหมายเหตุของใบที่คัดมาไว้ให้ก่อน — ส่วนใหญ่เป็นรายการเดิม แก้แค่เดือน/รายละเอียด */}
+                    <input type="text" value={it.note || ''} placeholder="— ไม่มีหมายเหตุ —"
+                      onChange={e => patch(it.key, { note: e.target.value })}
+                      style={{ ...inp, height: 30, fontSize: 12 }} />
+                  </td>
                   <td style={{ textAlign: 'right' }}>
-                    <input type="text" inputMode="decimal" value={it.amt} onChange={e => patch(it.key, { amt: e.target.value })}
+                    <input type="text" inputMode="decimal" value={it.amt} onChange={e => onAmtInput(e, v => patch(it.key, { amt: v }))}
                       style={{ ...inp, height: 30, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace',
                                color: amtOk ? 'var(--bad)' : 'var(--ink-500)',
                                borderColor: amtOk ? 'var(--ink-150)' : 'var(--bad)' }} />
@@ -4270,7 +4311,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
           {nPick > 0 && (
             <tfoot>
               <tr>
-                <td colSpan={2} style={{ fontWeight: 700, color: 'var(--ink-700)' }}>รวม {nPick} รายการ</td>
+                <td colSpan={3} style={{ fontWeight: 700, color: 'var(--ink-700)' }}>รวม {nPick} รายการ</td>
                 <td style={{ textAlign: 'right', fontWeight: 800, fontFamily: 'ui-monospace', color: 'var(--bad)' }}>{fmtNum(sumPick, 2)}</td>
                 <td colSpan={3} />
               </tr>
@@ -4622,7 +4663,9 @@ function DataPayablePage({ data, setData, toast }) {
       //    (ป๊อปอัปมีปุ่มเติมวันให้ทุกรายการอยู่แล้ว ⇒ ช่องว่างคือ "ตั้งใจไม่ใส่" ไม่ใช่ "ยังไม่ได้ใส่")
       const due     = floatIsIso(it.due) ? String(it.due).trim() : payDate;
       // อ้างอิงใบต้นทางไว้ในหมายเหตุ — ตามรอยได้ว่าคัดมาจากใบไหน (ตรวจย้อนตอนลบใบลอย)
-      const remark = FLOAT_AP_REMARK + (it.srcNo ? ` · คัดจาก ${it.srcNo}` : '');
+      // หมายเหตุที่พิมพ์เอง/ยกมาจากใบต้นทางมาก่อน — ข้อความตั้งต้นใช้เฉพาะตอนเว้นว่าง
+      const note   = String(it.note || '').trim();
+      const remark = (note || FLOAT_AP_REMARK) + (it.srcNo ? ` · คัดจาก ${it.srcNo}` : '');
       const pair = buildFloatApPair({ no: nos[i], name, amt, bankAc: o.bankAc, payDate, due, remark, dptCode: '', today });
       apRows.push(pair.ap); feRows.push(pair.fe); days.push(payDate); total += amt;
     });
