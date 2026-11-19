@@ -3868,6 +3868,14 @@ function PaidApCleanupModal({ list, canDelete, onRemove, onClose }) {
  * แหล่งข้อมูล = data.pvVouchers (ใบสำคัญจ่าย = เงินที่ออกจากบัญชีจริง)
  *   ⚠️ ตัดใบ Net_Amount ≤ 0 ทิ้ง — ใบยอด 0 (ตัดหนี้ / เขียนลดมัดจำ) ไม่ใช่เงินที่ออก
  *      จากบัญชี (Bank Daily ก็ข้ามใบพวกนี้) คัดมาตั้งหนี้เมื่อไหร่ยอดคาดการณ์เกินจริงทันที
+ *
+ * ทำงาน 2 ขั้น (step) — ค้นหา/ติ๊กหลายรอบก่อน แล้วค่อยลงวันที่ทีเดียว:
+ *   ① 'pick'   = ค้นหา → ติ๊ก → ค้นหาคำใหม่ → ติ๊กเพิ่ม (ที่ติ๊กไว้ไม่หาย)
+ *   ② 'review' = โชว์ "แค่รายการที่ติ๊กไว้" + ใส่ยอด/วันที่คาดจ่าย/วันครบกำหนด รายรายการ
+ *   ⚠️ บันทึกได้จากขั้น ② เท่านั้น — วันที่คาดจ่ายเป็นค่ารายรายการ ไม่ใช่ค่าเดียวทั้งชุด
+ *      (ช่องวันที่ด้านบนของขั้น ② = "เติมให้ทุกรายการ" + ค่าตั้งต้นของรายการที่ติ๊กใหม่)
+ *   ⚠️ picked เก็บ "ตัวรายการทั้งก้อน" ไม่ใช่แค่ยอด — ขั้น ② ต้องโชว์ของที่ติ๊กไว้ได้
+ *      แม้ตัวกรอง/คำค้น/โหมดตอนนี้จะไม่เหลือแถวนั้นใน cands แล้ว
  */
 const FLOAT_PICK_RANGES = [
   { key: '3',   label: 'ย้อนหลัง 3 เดือน' },
@@ -3885,14 +3893,18 @@ function floatPickCutoff(n) {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
+// วันที่ใช้ได้จริง (yyyy-mm-dd) — ใช้ทั้งในป๊อปอัปและใน addFloatingApBatch ⇒ เกณฑ์เดียวกัน
+function floatIsIso(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim()); }
 
 function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
+  const [step, setStep]     = dxState('pick');    // 'pick' = ค้นหา/ติ๊ก · 'review' = ดูแต่ที่ติ๊ก + ใส่วันที่รายรายการ
   const [mode, setMode]     = dxState('payee');   // 'payee' = ยุบตามผู้รับเงิน (ใช้ยอดครั้งล่าสุด) · 'voucher' = รายใบ PV
   const [range, setRange]   = dxState('12');
   const [q, setQ]           = dxState('');
-  const [picked, setPicked] = dxState(() => ({}));   // key ของรายการที่ติ๊ก → ยอดที่จะตั้ง (string แก้ได้)
+  // key → { key, name, amt, payDate, due, srcNo, srcIso, sub } (ยอด/วันที่แก้ได้รายรายการ)
+  const [picked, setPicked] = dxState(() => ({}));
   const [bankAc, setBankAc] = dxState('');
-  const [payDate, setPay]   = dxState(defaultPayDate || '');
+  const [payDate, setPay]   = dxState(defaultPayDate || '');   // ค่าร่วม: ค่าตั้งต้นของที่ติ๊กใหม่ + ปุ่มเติมให้ทุกรายการ
   const [due, setDue]       = dxState('');
 
   // บัญชีที่ยังใช้งาน (ตัด closed/dormant) — เกณฑ์เดียวกับ FloatingApModal
@@ -3962,10 +3974,12 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
     return xs;
   }, [inRange, mode, q]);
 
-  // เปลี่ยนโหมด/ช่วงเวลา = key ของรายการเปลี่ยนชุด ⇒ ล้างที่ติ๊กไว้ (กันค้างเป็น key ที่ไม่มีอยู่จริง)
-  dxEffect(() => { if (open) setPicked({}); }, [open, mode, range]);
+  // ⚠️ เปลี่ยนโหมด/ช่วงเวลา/คำค้น "ห้ามล้างที่ติ๊กไว้" — ท่าใช้งานจริงคือค้นหาทีละคำแล้วติ๊กสะสม
+  //    (picked เก็บตัวรายการทั้งก้อน ⇒ key ที่หลุดจากตัวกรองไปแล้วยังโชว์ในขั้น ② ได้ ไม่ค้างเป็นคีย์ลอย)
+  //    ล้างเฉพาะตอนเปิดป๊อปอัปใหม่
   dxEffect(() => {
     if (!open) return;
+    setPicked({}); setStep('pick');
     setQ(''); setPay(defaultPayDate || ''); setDue('');
     // บัญชีตั้งต้น = บัญชีที่ใบล่าสุดใช้จ่าย (ถ้ายังใช้งานอยู่) · ไม่งั้นบัญชีเดียวที่มี
     // ⚠️ BIO มีหลายบัญชี และใบ AV/AE ไม่มี Bank_AC เลย ⇒ ต้องข้ามใบที่บัญชีไม่อยู่ในรายการ
@@ -3975,31 +3989,45 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
 
   if (!open) return null;
 
-  const pickedKeys = Object.keys(picked);
-  const nPick   = pickedKeys.length;
-  const sumPick = pickedKeys.reduce((s, k) => s + parseNum(picked[k]), 0);
-  const badAmt  = pickedKeys.some(k => !(parseNum(picked[k]) > 0));
-  const ready   = nPick > 0 && !badAmt && !!bankAc && !!payDate;
-  const allOn   = cands.length > 0 && cands.every(c => picked[c.key] != null);
+  const pickedKeys = Object.keys(picked);          // ลำดับ = ลำดับที่ติ๊ก (คีย์เป็นสตริง จึงไม่ถูกจัดใหม่)
+  const pickedList = pickedKeys.map(k => picked[k]);
+  const nPick   = pickedList.length;
+  const sumPick = pickedList.reduce((s, it) => s + parseNum(it.amt), 0);
+  const nBadAmt = pickedList.filter(it => !(parseNum(it.amt) > 0)).length;
+  const nNoDate = pickedList.filter(it => !floatIsIso(it.payDate)).length;
+  const ready   = nPick > 0 && !nBadAmt && !nNoDate && !!bankAc;
+  const allOn   = cands.length > 0 && cands.every(c => picked[c.key]);
+  // ชื่อเดียวกันติ๊กได้หลายแถว (ยุบตามชื่อ + รายใบ PV = คนละคีย์) ⇒ เตือนในขั้น ② อย่างเดียว ไม่บล็อก
+  const dupName = new Map();
+  pickedList.forEach(it => dupName.set(it.name, (dupName.get(it.name) || 0) + 1));
 
   // ยอดตั้งต้นใส่เป็นข้อความมีจุลภาค (อ่านง่ายกว่า 9123.44) — parseNum ถอดจุลภาคให้อยู่แล้ว
   const initAmt = (c) => fmtNum(c.amt, 2);
+  const mkItem  = (c) => ({ key: c.key, name: c.name, amt: initAmt(c), payDate: payDate || '', due: due || '',
+                            srcNo: c.lastNo || '', srcIso: c.lastIso || '', sub: c.sub || '' });
   const toggle = (c) => setPicked(p => {
     const n = { ...p };
-    if (n[c.key] != null) delete n[c.key]; else n[c.key] = initAmt(c);
+    if (n[c.key]) delete n[c.key]; else n[c.key] = mkItem(c);
     return n;
   });
-  const setAmt    = (c, v) => setPicked(p => ({ ...p, [c.key]: v }));
-  const pickAll   = () => setPicked(p => { const n = { ...p }; cands.forEach(c => { if (n[c.key] == null) n[c.key] = initAmt(c); }); return n; });
+  const drop      = (key)     => setPicked(p => { const n = { ...p }; delete n[key]; return n; });
+  const patch     = (key, kv) => setPicked(p => (p[key] ? { ...p, [key]: { ...p[key], ...kv } } : p));
+  const setAmt    = (c, v)    => setPicked(p => (p[c.key] ? { ...p, [c.key]: { ...p[c.key], amt: v } }
+                                                          : { ...p, [c.key]: { ...mkItem(c), amt: v } }));
+  const pickAll   = () => setPicked(p => { const n = { ...p }; cands.forEach(c => { if (!n[c.key]) n[c.key] = mkItem(c); }); return n; });
   const clearAll  = () => setPicked(p => { const n = { ...p }; cands.forEach(c => { delete n[c.key]; }); return n; });
+  // ช่องวันที่ด้านบนของขั้น ② = เติมให้ "ทุกรายการที่ติ๊กไว้" ทันที (ไม่ใช่ค่าที่รอไปใช้ตอนบันทึก)
+  const fillAll   = (field, v) => {
+    if (field === 'payDate') setPay(v); else setDue(v);
+    setPicked(p => { const n = {}; Object.keys(p).forEach(k => { n[k] = { ...p[k], [field]: v }; }); return n; });
+  };
 
   const submit = () => {
-    const byKey = new Map(cands.map(c => [c.key, c]));
-    const items = pickedKeys.map(k => {
-      const c = byKey.get(k);
-      return c ? { name: c.name, amount: picked[k], srcNo: c.lastNo, srcIso: c.lastIso } : null;
-    }).filter(it => it && it.name && parseNum(it.amount) > 0);
-    onSubmit(items, { bankAc, payDate, due });
+    // ⚠️ ส่งวันที่ไปรายรายการ — opts.payDate เป็นแค่ค่าสำรองของฝั่งผู้รับ (addFloatingApBatch)
+    const items = pickedList
+      .filter(it => String(it.name || '').trim() && parseNum(it.amt) > 0 && floatIsIso(it.payDate))
+      .map(it => ({ name: it.name, amount: it.amt, payDate: it.payDate, due: it.due, srcNo: it.srcNo, srcIso: it.srcIso }));
+    onSubmit(items, { bankAc, payDate });   // payDate = ค่าสำรองเท่านั้น · วันครบกำหนดไม่ส่งระดับชุด (ดู addFloatingApBatch)
   };
 
   const lbl  = { fontSize: 12, color: 'var(--ink-600)', fontWeight: 600 };
@@ -4014,24 +4042,55 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
       footer={<>
         <span style={{ marginRight: 'auto', fontSize: 12, fontWeight: 600, color: nPick ? 'var(--brand-700)' : 'var(--ink-400)' }}>
           {nPick
-            ? <>เลือก {nPick} รายการ · รวม <strong style={{ fontFamily: 'ui-monospace' }}>{fmtNum(sumPick, 2)}</strong> บาท
-                {badAmt  && <span style={{ color: 'var(--bad)' }}> · มีรายการที่ยอดยังไม่ถูกต้อง</span>}
-                {!bankAc && <span style={{ color: 'var(--bad)' }}> · เลือกบัญชีก่อน</span>}
-                {!payDate && <span style={{ color: 'var(--bad)' }}> · เลือกวันที่คาดจ่ายก่อน</span>}</>
-            : 'ติ๊กรายการที่จะตั้งค้างไว้ — ยอดแก้ได้รายรายการ'}
+            ? <>เลือกไว้ {nPick} รายการ · รวม <strong style={{ fontFamily: 'ui-monospace' }}>{fmtNum(sumPick, 2)}</strong> บาท
+                {step === 'pick'
+                  ? <span style={{ fontWeight: 500, color: 'var(--ink-500)' }}> · ค้นหาคำใหม่แล้วติ๊กเพิ่มได้ ที่ติ๊กไว้ไม่หาย</span>
+                  : <>
+                      {nBadAmt > 0 && <span style={{ color: 'var(--bad)' }}> · ยอดยังไม่ถูกต้อง {nBadAmt} รายการ</span>}
+                      {nNoDate > 0 && <span style={{ color: 'var(--bad)' }}> · ยังไม่ใส่วันที่คาดจ่าย {nNoDate} รายการ</span>}
+                      {!bankAc && <span style={{ color: 'var(--bad)' }}> · เลือกบัญชีก่อน</span>}
+                    </>}</>
+            : 'ติ๊กรายการที่จะตั้งค้างไว้ — ค้นหาแล้วติ๊กสะสมได้หลายรอบ'}
         </span>
+        {step === 'review' && (
+          <button className="btn btn-ghost" onClick={() => setStep('pick')}>← เลือกเพิ่ม</button>
+        )}
         <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
-        <button className="btn btn-primary" disabled={!ready} onClick={submit}>
-          <Icon name="check" size={13} /> {nPick ? `เพิ่ม ${nPick} รายการ` : 'เพิ่มรายการ'} + ส่งไป Bank Daily
-        </button>
+        {/* ⚠️ บันทึกได้จากขั้น ② เท่านั้น — กันบันทึกทั้งชุดก่อนได้เห็นวันที่ของทุกรายการ */}
+        {step === 'pick'
+          ? <button className="btn btn-primary" disabled={!nPick} onClick={() => setStep('review')}>
+              ถัดไป → ตรวจ + ใส่วันที่{nPick ? ` (${nPick} รายการ)` : ''}
+            </button>
+          : <button className="btn btn-primary" disabled={!ready} onClick={submit}>
+              <Icon name="check" size={13} /> บันทึก {nPick} รายการ + ส่งไป Bank Daily
+            </button>}
       </>}>
 
       <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ink-700)', background: 'color-mix(in oklch, oklch(70% 0.16 75) 12%, transparent)',
                     border: '1px solid color-mix(in oklch, oklch(65% 0.16 75) 35%, transparent)', borderRadius: 8, padding: '9px 12px', marginBottom: 14 }}>
         คัดรายการจาก <strong>ใบสำคัญจ่ายที่เคยจ่ายแล้ว</strong> มาตั้งค้างไว้ — ได้ <strong>ใบลอยแบบเดิมทุกอย่าง</strong> (ป้าย 🏷 ตั้งหนี้ลอย ·
         ยอดไปโผล่ที่ Bank Daily · <strong style={{ color: 'var(--bad)' }}>ตอนของจริงมาค่อยลบตัวลอยออก</strong>) แค่ไม่ต้องคีย์ชื่อกับยอดทีละใบ ·
-        วันที่คาดจ่าย/บัญชี ใช้ค่าเดียวกันทั้งชุด (แก้รายใบทีหลังได้ที่ปุ่มวางแผนจ่าย)
+        ค้นหาแล้วติ๊กสะสมได้หลายรอบ → ขั้น ② ดูแต่รายการที่ติ๊กไว้ ใส่ <strong>ยอด/วันที่คาดจ่ายรายรายการ</strong> แล้วบันทึกทีเดียวทั้งชุด
       </div>
+
+      {/* แท็บ 2 ขั้น — ① ติ๊ก (ค้นหาหลายรอบได้) → ② ดูแต่ที่ติ๊ก + ใส่วันที่ แล้วบันทึก */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        {[{ k: 'pick', t: '① เลือกรายการ' }, { k: 'review', t: `② ตรวจ + ใส่วันที่${nPick ? ` (${nPick})` : ''}` }].map(o => {
+          const on = step === o.k, off = o.k === 'review' && !nPick;
+          return (
+            <button key={o.k} onClick={() => { if (!off) setStep(o.k); }} disabled={off}
+              title={off ? 'ติ๊กรายการในขั้น ① ก่อน' : undefined}
+              style={{ fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, padding: '7px 14px', borderRadius: 8,
+                       cursor: off ? 'not-allowed' : 'pointer', opacity: off ? 0.5 : 1,
+                       border: `1px solid ${on ? 'var(--brand-600)' : 'var(--ink-150)'}`,
+                       background: on ? 'var(--brand-600)' : 'var(--panel)',
+                       color: on ? '#fff' : 'var(--ink-600)' }}>{o.t}</button>
+          );
+        })}
+      </div>
+
+      {/* ───── ขั้น ① เลือกรายการ ───── */}
+      {step === 'pick' && (<>
 
       {/* แถวเครื่องมือ — โหมดยุบ/รายใบ · ช่วงเวลา · ค้นหา */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
@@ -4051,25 +4110,6 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
         <button className="btn btn-ghost" style={{ height: 34 }} onClick={allOn ? clearAll : pickAll} disabled={!cands.length}>
           {allOn ? 'ล้างการเลือก' : `ติ๊กทั้งหมด (${cands.length})`}
         </button>
-      </div>
-
-      {/* ค่าร่วมของทั้งชุด */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px 14px', marginBottom: 12 }}>
-        <div className="field">
-          <label style={lbl}>บัญชีที่จะจ่าย{req}</label>
-          <select value={bankAc} onChange={e => setBankAc(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
-            <option value="">— เลือกบัญชี —</option>
-            {banks.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label style={lbl}>วันที่คาดจ่าย{req}</label>
-          <input type="date" value={payDate} onChange={e => setPay(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
-        </div>
-        <div className="field">
-          <label style={lbl}>วันครบกำหนด</label>
-          <input type="date" value={due} onChange={e => setDue(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
-        </div>
       </div>
 
       <div style={{ maxHeight: 'min(42vh, 340px)', overflow: 'auto', border: '1px solid var(--ink-100)', borderRadius: 9 }}>
@@ -4095,10 +4135,10 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
               </td></tr>
             )}
             {cands.map(c => {
-              const on  = picked[c.key] != null;
+              const on  = !!picked[c.key];
               const nf  = already.flo.get(c.name) || 0;
               const nr  = already.real.get(c.name) || 0;
-              const amtOk = on && parseNum(picked[c.key]) > 0;
+              const amtOk = on && parseNum(picked[c.key].amt) > 0;
               return (
                 <tr key={c.key} style={{ background: on ? 'var(--brand-50)' : undefined }}>
                   <td style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => toggle(c)}>
@@ -4125,7 +4165,7 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
                   <td style={{ textAlign: 'right' }}>
                     {/* ยังไม่ติ๊ก = ช่องว่าง (ไม่ใส่ยอดเป็น placeholder — จะอ่านเหมือนคอลัมน์ "ยอดเดิม" ซ้ำสอง)
                         คลิกเข้าช่องนี้ = ติ๊กให้เลย แล้วเติมยอดครั้งล่าสุดไว้ให้แก้ */}
-                    <input type="text" inputMode="decimal" value={on ? picked[c.key] : ''} placeholder="—"
+                    <input type="text" inputMode="decimal" value={on ? picked[c.key].amt : ''} placeholder="—"
                       onChange={e => setAmt(c, e.target.value)}
                       onFocus={() => { if (!on) setAmt(c, initAmt(c)); }}
                       style={{ ...inp, height: 30, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace',
@@ -4142,8 +4182,108 @@ function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
         {mode === 'payee'
           ? 'ยุบตามผู้รับเงิน — 1 แถว = 1 ชื่อ ยอดตั้งต้นคือยอดที่จ่ายครั้งล่าสุด'
           : 'รายใบ PV — 1 แถว = 1 ใบที่เคยจ่าย (ใบที่ยอดสุทธิ 0 ไม่อยู่ในรายการ)'}
+        {' · เปลี่ยนช่วงเวลา/คำค้นได้ ที่ติ๊กไว้ไม่หาย'}
         {banks.length === 0 && <span style={{ color: 'var(--bad)' }}> · ยังไม่มีบัญชีธนาคารในระบบ — เพิ่มที่หน้า DATA BANK ก่อน</span>}
       </div>
+
+      </>)}
+
+      {/* ───── ขั้น ② ตรวจ + ใส่วันที่รายรายการ ───── */}
+      {step === 'review' && (<>
+
+      {/* บัญชี = ค่าเดียวทั้งชุด · 2 ช่องวันที่ = "เติมให้ทุกรายการ" (แก้รายรายการได้ที่ตารางล่าง) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px 14px', marginBottom: 12 }}>
+        <div className="field">
+          <label style={lbl}>บัญชีที่จะจ่าย{req} <span style={{ fontWeight: 500, color: 'var(--ink-400)' }}>(ทั้งชุด)</span></label>
+          <select value={bankAc} onChange={e => setBankAc(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
+            <option value="">— เลือกบัญชี —</option>
+            {banks.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label style={lbl}>เติมวันที่คาดจ่ายให้ทุกรายการ</label>
+          <input type="date" value={payDate} onChange={e => fillAll('payDate', e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+        </div>
+        <div className="field">
+          <label style={lbl}>เติมวันครบกำหนดให้ทุกรายการ</label>
+          <input type="date" value={due} onChange={e => fillAll('due', e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 'min(46vh, 380px)', overflow: 'auto', border: '1px solid var(--ink-100)', borderRadius: 9 }}>
+        <table className="tbl tbl-compact" style={{ width: '100%', fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 30, textAlign: 'right' }}>#</th>
+              <th>ผู้รับเงิน</th>
+              <th style={{ width: 128, textAlign: 'right' }}>ยอดที่จะตั้ง{req}</th>
+              <th style={{ width: 146 }}>วันที่คาดจ่าย{req}</th>
+              <th style={{ width: 146 }}>วันครบกำหนด</th>
+              <th style={{ width: 38 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {nPick === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: '26px 10px', fontSize: 12.5 }}>
+                ยังไม่ได้ติ๊กรายการ — กลับไปขั้น ① แล้วติ๊กรายการที่จะตั้งค้างไว้
+              </td></tr>
+            )}
+            {pickedList.map((it, i) => {
+              const amtOk = parseNum(it.amt) > 0;
+              const dOk   = floatIsIso(it.payDate);
+              const dup   = (dupName.get(it.name) || 0) > 1;
+              const nf    = already.flo.get(it.name) || 0;
+              return (
+                <tr key={it.key}>
+                  <td style={{ textAlign: 'right', color: 'var(--ink-400)', fontSize: 11 }}>{i + 1}</td>
+                  <td>
+                    <div style={{ fontWeight: 600, color: 'var(--ink-800)' }}>{it.name}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 2, fontSize: 11, color: 'var(--ink-500)' }}>
+                      <span style={{ fontFamily: 'ui-monospace' }}>{it.srcNo || '—'}</span>
+                      <span>จ่ายล่าสุด {fmtDate(it.srcIso)}</span>
+                      {dup   && <span style={chip('oklch(55% 0.16 75)')} title="ชื่อนี้ติ๊กไว้มากกว่า 1 แถว (เช่น ติ๊กทั้งแบบยุบตามชื่อและรายใบ PV) — บันทึกแล้วจะได้ใบลอยหลายใบ">ชื่อซ้ำในชุดนี้</span>}
+                      {nf > 0 && <span style={chip('oklch(55% 0.16 75)')} title="ชื่อนี้มีใบลอยค้างอยู่แล้ว — ตั้งซ้ำแล้วยอดคาดการณ์จะเบิ้ล">🏷 มีใบลอยค้าง {nf}</span>}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <input type="text" inputMode="decimal" value={it.amt} onChange={e => patch(it.key, { amt: e.target.value })}
+                      style={{ ...inp, height: 30, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace',
+                               color: amtOk ? 'var(--bad)' : 'var(--ink-500)',
+                               borderColor: amtOk ? 'var(--ink-150)' : 'var(--bad)' }} />
+                  </td>
+                  <td>
+                    <input type="date" value={it.payDate} onChange={e => patch(it.key, { payDate: e.target.value })}
+                      style={{ ...inp, height: 30, cursor: 'pointer', borderColor: dOk ? 'var(--ink-150)' : 'var(--bad)' }} />
+                  </td>
+                  <td>
+                    <input type="date" value={it.due} onChange={e => patch(it.key, { due: e.target.value })}
+                      style={{ ...inp, height: 30, cursor: 'pointer' }} />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="btn btn-ghost" title="เอาออกจากชุดนี้" onClick={() => drop(it.key)}
+                      style={{ height: 26, padding: '0 8px', fontSize: 12 }}>✕</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {nPick > 0 && (
+            <tfoot>
+              <tr>
+                <td colSpan={2} style={{ fontWeight: 700, color: 'var(--ink-700)' }}>รวม {nPick} รายการ</td>
+                <td style={{ textAlign: 'right', fontWeight: 800, fontFamily: 'ui-monospace', color: 'var(--bad)' }}>{fmtNum(sumPick, 2)}</td>
+                <td colSpan={3} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+        วันครบกำหนดเว้นว่าง = ใช้วันที่คาดจ่ายของรายการนั้นเอง · ✕ = เอาออกจากชุด (ยังกลับไปติ๊กเพิ่มได้ที่ขั้น ①)
+        {banks.length === 0 && <span style={{ color: 'var(--bad)' }}> · ยังไม่มีบัญชีธนาคารในระบบ — เพิ่มที่หน้า DATA BANK ก่อน</span>}
+      </div>
+
+      </>)}
     </Modal>
   );
 }
@@ -4453,27 +4593,38 @@ function DataPayablePage({ data, setData, toast }) {
 
   // ── คัดจากที่เคยจ่าย: ติ๊กหลายรายการ → ตั้งหนี้ลอยทีเดียวทั้งชุด ───────────────
   //    ใช้ buildFloatApPair ตัวเดียวกับการตั้งทีละใบ ⇒ ของที่ได้เหมือนกันทุกฟิลด์
+  //    items = [{ name, amount, payDate, due, srcNo, srcIso }] — วันที่มาเป็นรายรายการ
   //    ⚠️ ขอเลขที่ทั้งชุดครั้งเดียวด้วย makeFloatApNos — เรียก makeFloatApNo ใน loop
   //       จะได้เลขซ้ำกันทุกใบ (Date.now() เดียวกัน) แล้ว REF_DOC ผูกแผนจ่ายผิดใบ
   const addFloatingApBatch = (items, opts) => {
+    const o    = opts || {};
     const list = (items || []).filter(it => it && String(it.name || '').trim() && parseNum(it.amount) > 0);
-    if (!list.length)          { toast('ยังไม่ได้เลือกรายการ'); return; }
-    if (!opts || !opts.bankAc) { toast('เลือกบัญชีธนาคารที่จะจ่าย'); return; }
-    if (!opts.payDate)         { toast('เลือกวันที่คาดจ่าย'); return; }
+    if (!list.length) { toast('ยังไม่ได้เลือกรายการ'); return; }
+    if (!o.bankAc)    { toast('เลือกบัญชีธนาคารที่จะจ่าย'); return; }
+
+    // ⚠️ วันที่คาดจ่าย/วันครบกำหนด เป็นค่า "รายรายการ" — opts.* เป็นแค่ค่าสำรองของรายการที่ไม่ได้ใส่มา
+    //    ตกทั้งคู่ = หยุดทั้งชุด ไม่งั้นได้แผนจ่ายวันว่าง แล้ว Bank Daily กรองทิ้งเงียบ ๆ
+    const dateOf = (it) => (floatIsIso(it.payDate) ? String(it.payDate).trim()
+                          : floatIsIso(o.payDate)  ? String(o.payDate).trim() : '');
+    const nMiss  = list.filter(it => !dateOf(it)).length;
+    if (nMiss) { toast(`ยังไม่ได้ใส่วันที่คาดจ่าย ${nMiss} รายการ`); return; }
 
     const today = isoOfDate(new Date());
-    const due   = opts.due || opts.payDate;                        // เว้นว่าง = ใช้วันที่คาดจ่าย
     const nos   = makeFloatApNos(data.payables, list.length);
 
-    const apRows = [], feRows = [];
+    const apRows = [], feRows = [], days = [];
     let total = 0;
     list.forEach((it, i) => {
-      const name = String(it.name).trim();
-      const amt  = parseNum(it.amount);
+      const name    = String(it.name).trim();
+      const amt     = parseNum(it.amount);
+      const payDate = dateOf(it);
+      // ⚠️ วันครบกำหนดเว้นว่าง = วันที่คาดจ่าย "ของรายการนั้น" — ห้ามตกไปใช้ค่าของทั้งชุด
+      //    (ป๊อปอัปมีปุ่มเติมวันให้ทุกรายการอยู่แล้ว ⇒ ช่องว่างคือ "ตั้งใจไม่ใส่" ไม่ใช่ "ยังไม่ได้ใส่")
+      const due     = floatIsIso(it.due) ? String(it.due).trim() : payDate;
       // อ้างอิงใบต้นทางไว้ในหมายเหตุ — ตามรอยได้ว่าคัดมาจากใบไหน (ตรวจย้อนตอนลบใบลอย)
       const remark = FLOAT_AP_REMARK + (it.srcNo ? ` · คัดจาก ${it.srcNo}` : '');
-      const pair = buildFloatApPair({ no: nos[i], name, amt, bankAc: opts.bankAc, payDate: opts.payDate, due, remark, dptCode: '', today });
-      apRows.push(pair.ap); feRows.push(pair.fe); total += amt;
+      const pair = buildFloatApPair({ no: nos[i], name, amt, bankAc: o.bankAc, payDate, due, remark, dptCode: '', today });
+      apRows.push(pair.ap); feRows.push(pair.fe); days.push(payDate); total += amt;
     });
 
     setData(d => ({
@@ -4482,7 +4633,10 @@ function DataPayablePage({ data, setData, toast }) {
       forecastEntries: [...(d.forecastEntries || []), ...feRows],
     }));
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
-    toast(`เพิ่มตั้งหนี้ลอย ${apRows.length} รายการ · รวม ${fmtNum(total, 2)} บาท · ยอดไปโชว์ที่ Bank Daily`);
+    // บอกวันที่ที่ลงไปจริงด้วย — คัดทีเดียวหลายรายการแล้ววันที่เพี้ยนจะเห็นตรงนี้ทันที
+    const uniq = [...new Set(days)].sort();
+    const when = uniq.length === 1 ? fmtDate(uniq[0]) : `${fmtDate(uniq[0])}–${fmtDate(uniq[uniq.length - 1])}`;
+    toast(`เพิ่มตั้งหนี้ลอย ${apRows.length} รายการ · รวม ${fmtNum(total, 2)} บาท · คาดจ่าย ${when} · ยอดไปโชว์ที่ Bank Daily`);
     setShowFloatPick(false);
   };
 
