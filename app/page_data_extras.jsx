@@ -3569,12 +3569,50 @@ function isFloatingAp(row) {
   return String((row && row.vchno) || '').trim().toUpperCase().startsWith(FLOAT_AP_PREFIX);
 }
 // เลขที่เอกสาร = FLOAT- + รหัสจากเวลาที่กด (base36) — กันซ้ำกับเลขที่ที่มีอยู่แล้ว
-function makeFloatApNo(existingRows) {
+// ⚠️ ตั้งหลายใบในคลิกเดียว (คัดจากที่เคยจ่าย) ต้องขอเลขทีเดียวทั้งชุดผ่านตัวนี้ —
+//    เรียก makeFloatApNo() ซ้ำ ๆ ใน loop จะได้เลขเดียวกันทุกใบ (Date.now() เท่ากันในมิลลิวินาทีเดียว)
+//    ⇒ 2 แถวคนละใบจะ REF_DOC ชนกัน แผนจ่ายผูกผิดใบแบบไม่มีอะไรฟ้อง
+function makeFloatApNos(existingRows, n) {
   const used = new Set((existingRows || []).map(r => String(r.vchno || '').trim().toUpperCase()));
   const base = FLOAT_AP_PREFIX + Date.now().toString(36).toUpperCase();
-  let no = base, i = 1;
-  while (used.has(no)) no = base + '-' + (i++);
-  return no;
+  const out = [];
+  let i = 0;
+  for (let k = 0; k < Math.max(1, n || 1); k++) {
+    let no = k === 0 ? base : base + '-' + (++i);
+    while (used.has(no)) no = base + '-' + (++i);
+    used.add(no);
+    out.push(no);
+  }
+  return out;
+}
+function makeFloatApNo(existingRows) {
+  return makeFloatApNos(existingRows, 1)[0];
+}
+/* สร้าง "คู่แถว" ของใบลอย 1 ใบ — payables + forecastEntries ที่ผูกกันด้วย REF_DOC = เลขที่ใบ
+ * ⚠️ ที่เดียวที่ประกอบคู่นี้ — ทั้งตั้งทีละใบและคัดจากที่เคยจ่ายต้องเรียกตัวนี้เสมอ
+ *    (แยกกันประกอบเมื่อไหร่ ฝั่งใดฝั่งหนึ่งจะขาดฟิลด์แล้วยอดไม่ไป Bank Daily แบบเงียบ ๆ)
+ * ⚠️ รูปแบบ DESCRIPTION ห้ามเพี้ยน — `จ่าย <ชื่อ> (<vchno>) [ตั้งหนี้ลอย]` คือสิ่งที่
+ *    bdVendorCanon/vendorName ใน page_bank_diary.jsx แกะเพื่อจัดกลุ่มเจ้าหนี้ให้ตรงกับใบจริง
+ * CATEGORY/cf_category ปล่อยว่างโดยตั้งใจ — Bank Daily จัดหมวดจากชื่อเจ้าหนี้ + หมายเหตุให้เอง
+ *    (ดู bdRowCat) ใส่มาเองเสี่ยงล็อกหมวดผิดไว้ถาวร */
+function buildFloatApPair({ no, name, amt, bankAc, payDate, due, remark, dptCode, today }) {
+  return {
+    ap: dxStampMeta({
+      id: WTPData.newId(),
+      vchno: no, vchdate: today, due2: due,
+      cust_name: name, netpayment: amt, Amount: amt,
+      dpt_code: dptCode || '', remark,
+    }),
+    // รูปแบบ field ตรงกับ _newApRow (แผนจ่าย AP ปกติ) — Bank Daily/หน้าอื่นจึงอ่านได้เหมือนกัน
+    fe: {
+      id: WTPData.newId(), DATE: today, PAYMENT_DATE: payDate, EXPENSE_TYPE: 'AP',
+      DESCRIPTION: `จ่าย ${name} (${no}) ${FLOAT_AP_TAG}`,
+      JOB_NO: null, PROJECT_NAME: null, AMOUNT: String(-Math.abs(amt)),   // ติดลบ = เงินไหลออก
+      Bank_AC: bankAc, STATUS: 'PLANNED', CATEGORY: null,
+      IS_ACCRUED: null, NOTE: remark, ACTUAL_AMOUNT: null, ACTUAL_DATE: null,
+      REF_DOC: no, BOOKED_AT: null, CFS_ACTIVITY: null,                   // ★ กุญแจเชื่อม 2 รายการ
+    },
+  };
 }
 // ป้ายกำกับบนตาราง — แยกใบลอยออกจากใบจริงด้วยตาเปล่า
 function FloatApTag({ dup }) {
@@ -3821,6 +3859,295 @@ function PaidApCleanupModal({ list, canDelete, onRemove, onClose }) {
   );
 }
 
+/* ═══ คัดจากที่เคยจ่าย → ตั้งหนี้ลอยหลายใบในคลิกเดียว ═══════════════════════════
+ * รายการที่ต้องตั้งหนี้ลอยส่วนใหญ่เป็นรายการเดิมที่จ่ายซ้ำแทบทุกเดือน (ค่าเช่า /
+ * ที่ปรึกษา / ค่าใช้จ่ายประจำ) ⇒ "ติ๊กจากใบที่เคยจ่าย" เร็วกว่าคีย์ชื่อ+ยอดทีละใบ
+ * ของที่ได้ = ใบลอยแบบเดิมเป๊ะ ๆ ไม่ใช่ของใหม่คนละชนิด — ประกอบแถวด้วย
+ *   buildFloatApPair ตัวเดียวกับ ＋ตั้งหนี้ลอย ⇒ ป้าย 🏷 / แบนเนอร์ / ตัวกรอง FLOAT /
+ *   การลบแบบ cascade (floatPlanImpact + dropFloatPlans) ทำงานเหมือนกันทั้งหมด
+ * แหล่งข้อมูล = data.pvVouchers (ใบสำคัญจ่าย = เงินที่ออกจากบัญชีจริง)
+ *   ⚠️ ตัดใบ Net_Amount ≤ 0 ทิ้ง — ใบยอด 0 (ตัดหนี้ / เขียนลดมัดจำ) ไม่ใช่เงินที่ออก
+ *      จากบัญชี (Bank Daily ก็ข้ามใบพวกนี้) คัดมาตั้งหนี้เมื่อไหร่ยอดคาดการณ์เกินจริงทันที
+ */
+const FLOAT_PICK_RANGES = [
+  { key: '3',   label: 'ย้อนหลัง 3 เดือน' },
+  { key: '6',   label: 'ย้อนหลัง 6 เดือน' },
+  { key: '12',  label: 'ย้อนหลัง 12 เดือน' },
+  { key: 'all', label: 'ทั้งหมด' },
+];
+// ย้อนหลัง n เดือนจากวันนี้ — ⚠️ setDate(1) ก่อนถอยเดือน ไม่งั้น 31 ต.ค. ลบ 1 เดือน = 1 ต.ค.
+function floatPickCutoff(n) {
+  const d = new Date(), day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - n);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function FloatApPickModal({ open, data, defaultPayDate, onClose, onSubmit }) {
+  const [mode, setMode]     = dxState('payee');   // 'payee' = ยุบตามผู้รับเงิน (ใช้ยอดครั้งล่าสุด) · 'voucher' = รายใบ PV
+  const [range, setRange]   = dxState('12');
+  const [q, setQ]           = dxState('');
+  const [picked, setPicked] = dxState(() => ({}));   // key ของรายการที่ติ๊ก → ยอดที่จะตั้ง (string แก้ได้)
+  const [bankAc, setBankAc] = dxState('');
+  const [payDate, setPay]   = dxState(defaultPayDate || '');
+  const [due, setDue]       = dxState('');
+
+  // บัญชีที่ยังใช้งาน (ตัด closed/dormant) — เกณฑ์เดียวกับ FloatingApModal
+  const banks = dxMemo(() => (data.bankAccounts || [])
+    .filter(b => { const t = String(b.accountType || b.account_type || '').toLowerCase(); return t !== 'closed' && t !== 'dormant'; })
+    .map(b => {
+      const ac = b.Bank_AC || b.bankAc || b.bank_ac || b.accountNo || b.account_no || '';
+      const nm = b.BANK_NAME || b.bankName || b.bank_name || '';
+      return { value: ac, label: ac ? `${nm} · ${ac}` : (nm || '— ไม่ทราบบัญชี —') };
+    })
+    .filter(o => o.value), [data.bankAccounts]);
+
+  // ใบสำคัญจ่ายที่เป็น "เงินออกจริง" เรียงใหม่→เก่า (ตัวแรกของแต่ละชื่อ = ครั้งล่าสุด)
+  const paid = dxMemo(() => {
+    const xs = [];
+    (data.pvVouchers || []).forEach((pv, i) => {
+      const amt  = parseNum(pv.Net_Amount);
+      const name = String(pv.Payee || '').trim();
+      if (!(amt > 0) || !name) return;   // ยอด 0 = ตัดหนี้/ไม่มีเงินออก · ไม่มีชื่อ = ตั้งหนี้ไม่ได้
+      const d  = parseDateFlexible(pv.Pmt_Date);
+      xs.push({
+        key:  'pv:' + String(pv.id || `${pv.PL_PV_No || ''}|${pv.AP_No || ''}|${i}`),
+        name, amt,
+        ms:   d ? d.getTime() : 0,
+        iso:  String(pv.Pmt_Date || '').trim(),
+        no:   String(pv.PL_PV_No || pv.AP_No || '').trim(),
+        bank: String(pv.Bank_AC || '').trim(),
+        note: String(pv.cc_remark || pv.Remark || '').trim(),
+      });
+    });
+    return xs.sort((a, b) => b.ms - a.ms);
+  }, [data.pvVouchers]);
+
+  const inRange = dxMemo(() => {
+    if (range === 'all') return paid;
+    const cut = floatPickCutoff(Number(range));
+    return paid.filter(v => v.ms >= cut);   // ใบที่ไม่มีวันที่ (ms=0) โชว์เฉพาะตอนเลือก "ทั้งหมด"
+  }, [paid, range]);
+
+  // ป้ายเตือนกันตั้งซ้ำ — ชื่อนี้มีใบลอยค้าง / มีใบจริงค้างอยู่ในระบบแล้วกี่ใบ
+  const already = dxMemo(() => {
+    const flo = new Map(), real = new Map();
+    (data.payables || []).forEach(r => {
+      const nm = String(r.cust_name || '').trim(); if (!nm) return;
+      const m = isFloatingAp(r) ? flo : real;
+      m.set(nm, (m.get(nm) || 0) + 1);
+    });
+    return { flo, real };
+  }, [data.payables]);
+
+  const cands = dxMemo(() => {
+    let xs;
+    if (mode === 'voucher') {
+      xs = inRange.map(v => ({ key: v.key, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, sub: v.note }));
+    } else {
+      const m = new Map();
+      inRange.forEach(v => {
+        let o = m.get(v.name);
+        // ตัวแรกที่เจอ = ครั้งล่าสุด (inRange เรียงใหม่→เก่าแล้ว) ⇒ ยอด/วันที่/เลขที่ยึดจากตัวนั้น
+        if (!o) { o = { key: 'payee:' + v.name, name: v.name, amt: v.amt, lastIso: v.iso, lastNo: v.no, times: 0, sum: 0 }; m.set(v.name, o); }
+        o.times++; o.sum += v.amt;
+      });
+      xs = [...m.values()].map(o => ({ ...o, sub: `จ่ายมา ${o.times} ครั้ง · รวม ${fmtNum(o.sum, 2)} บาท` }));
+    }
+    const qq = q.trim().toLowerCase();
+    if (qq) xs = xs.filter(c => `${c.name} ${c.lastNo || ''} ${c.sub || ''}`.toLowerCase().includes(qq));
+    return xs;
+  }, [inRange, mode, q]);
+
+  // เปลี่ยนโหมด/ช่วงเวลา = key ของรายการเปลี่ยนชุด ⇒ ล้างที่ติ๊กไว้ (กันค้างเป็น key ที่ไม่มีอยู่จริง)
+  dxEffect(() => { if (open) setPicked({}); }, [open, mode, range]);
+  dxEffect(() => {
+    if (!open) return;
+    setQ(''); setPay(defaultPayDate || ''); setDue('');
+    // บัญชีตั้งต้น = บัญชีที่ใบล่าสุดใช้จ่าย (ถ้ายังใช้งานอยู่) · ไม่งั้นบัญชีเดียวที่มี
+    // ⚠️ BIO มีหลายบัญชี และใบ AV/AE ไม่มี Bank_AC เลย ⇒ ต้องข้ามใบที่บัญชีไม่อยู่ในรายการ
+    const last = paid.find(v => v.bank && banks.some(b => b.value === v.bank));
+    setBankAc(last ? last.bank : (banks.length === 1 ? banks[0].value : ''));
+  }, [open]);
+
+  if (!open) return null;
+
+  const pickedKeys = Object.keys(picked);
+  const nPick   = pickedKeys.length;
+  const sumPick = pickedKeys.reduce((s, k) => s + parseNum(picked[k]), 0);
+  const badAmt  = pickedKeys.some(k => !(parseNum(picked[k]) > 0));
+  const ready   = nPick > 0 && !badAmt && !!bankAc && !!payDate;
+  const allOn   = cands.length > 0 && cands.every(c => picked[c.key] != null);
+
+  // ยอดตั้งต้นใส่เป็นข้อความมีจุลภาค (อ่านง่ายกว่า 9123.44) — parseNum ถอดจุลภาคให้อยู่แล้ว
+  const initAmt = (c) => fmtNum(c.amt, 2);
+  const toggle = (c) => setPicked(p => {
+    const n = { ...p };
+    if (n[c.key] != null) delete n[c.key]; else n[c.key] = initAmt(c);
+    return n;
+  });
+  const setAmt    = (c, v) => setPicked(p => ({ ...p, [c.key]: v }));
+  const pickAll   = () => setPicked(p => { const n = { ...p }; cands.forEach(c => { if (n[c.key] == null) n[c.key] = initAmt(c); }); return n; });
+  const clearAll  = () => setPicked(p => { const n = { ...p }; cands.forEach(c => { delete n[c.key]; }); return n; });
+
+  const submit = () => {
+    const byKey = new Map(cands.map(c => [c.key, c]));
+    const items = pickedKeys.map(k => {
+      const c = byKey.get(k);
+      return c ? { name: c.name, amount: picked[k], srcNo: c.lastNo, srcIso: c.lastIso } : null;
+    }).filter(it => it && it.name && parseNum(it.amount) > 0);
+    onSubmit(items, { bankAc, payDate, due });
+  };
+
+  const lbl  = { fontSize: 12, color: 'var(--ink-600)', fontWeight: 600 };
+  const inp  = { height: 34, width: '100%', borderRadius: 7, border: '1px solid var(--ink-150)', padding: '0 10px', fontSize: 13, fontFamily: 'inherit', background: 'var(--panel)', color: 'var(--ink-800)' };
+  const req  = <span style={{ color: 'var(--bad)', marginLeft: 3 }}>*</span>;
+  const chip = (color) => ({ display: 'inline-block', fontSize: 10, fontWeight: 700, lineHeight: 1.6, whiteSpace: 'nowrap',
+    color, background: `color-mix(in oklch, ${color} 12%, transparent)`,
+    border: `1px solid color-mix(in oklch, ${color} 40%, transparent)`, borderRadius: 5, padding: '0 6px' });
+
+  return (
+    <Modal open={open} title="⧉ คัดจากที่เคยจ่าย → ตั้งหนี้ลอย" maxWidth={940} onClose={onClose}
+      footer={<>
+        <span style={{ marginRight: 'auto', fontSize: 12, fontWeight: 600, color: nPick ? 'var(--brand-700)' : 'var(--ink-400)' }}>
+          {nPick
+            ? <>เลือก {nPick} รายการ · รวม <strong style={{ fontFamily: 'ui-monospace' }}>{fmtNum(sumPick, 2)}</strong> บาท
+                {badAmt  && <span style={{ color: 'var(--bad)' }}> · มีรายการที่ยอดยังไม่ถูกต้อง</span>}
+                {!bankAc && <span style={{ color: 'var(--bad)' }}> · เลือกบัญชีก่อน</span>}
+                {!payDate && <span style={{ color: 'var(--bad)' }}> · เลือกวันที่คาดจ่ายก่อน</span>}</>
+            : 'ติ๊กรายการที่จะตั้งค้างไว้ — ยอดแก้ได้รายรายการ'}
+        </span>
+        <button className="btn btn-ghost" onClick={onClose}>ยกเลิก</button>
+        <button className="btn btn-primary" disabled={!ready} onClick={submit}>
+          <Icon name="check" size={13} /> {nPick ? `เพิ่ม ${nPick} รายการ` : 'เพิ่มรายการ'} + ส่งไป Bank Daily
+        </button>
+      </>}>
+
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--ink-700)', background: 'color-mix(in oklch, oklch(70% 0.16 75) 12%, transparent)',
+                    border: '1px solid color-mix(in oklch, oklch(65% 0.16 75) 35%, transparent)', borderRadius: 8, padding: '9px 12px', marginBottom: 14 }}>
+        คัดรายการจาก <strong>ใบสำคัญจ่ายที่เคยจ่ายแล้ว</strong> มาตั้งค้างไว้ — ได้ <strong>ใบลอยแบบเดิมทุกอย่าง</strong> (ป้าย 🏷 ตั้งหนี้ลอย ·
+        ยอดไปโผล่ที่ Bank Daily · <strong style={{ color: 'var(--bad)' }}>ตอนของจริงมาค่อยลบตัวลอยออก</strong>) แค่ไม่ต้องคีย์ชื่อกับยอดทีละใบ ·
+        วันที่คาดจ่าย/บัญชี ใช้ค่าเดียวกันทั้งชุด (แก้รายใบทีหลังได้ที่ปุ่มวางแผนจ่าย)
+      </div>
+
+      {/* แถวเครื่องมือ — โหมดยุบ/รายใบ · ช่วงเวลา · ค้นหา */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ display: 'inline-flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ink-150)' }}>
+          {[{ k: 'payee', t: 'ยุบตามผู้รับเงิน' }, { k: 'voucher', t: 'รายใบ PV' }].map(o => (
+            <button key={o.k} onClick={() => setMode(o.k)}
+              style={{ border: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, padding: '7px 12px',
+                       background: mode === o.k ? 'var(--brand-600)' : 'var(--panel)',
+                       color: mode === o.k ? '#fff' : 'var(--ink-600)' }}>{o.t}</button>
+          ))}
+        </div>
+        <select value={range} onChange={e => setRange(e.target.value)} style={{ ...inp, width: 'auto', cursor: 'pointer' }}>
+          {FLOAT_PICK_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาชื่อผู้รับเงิน / เลขที่ PV…"
+          style={{ ...inp, flex: '1 1 180px', minWidth: 150 }} />
+        <button className="btn btn-ghost" style={{ height: 34 }} onClick={allOn ? clearAll : pickAll} disabled={!cands.length}>
+          {allOn ? 'ล้างการเลือก' : `ติ๊กทั้งหมด (${cands.length})`}
+        </button>
+      </div>
+
+      {/* ค่าร่วมของทั้งชุด */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px 14px', marginBottom: 12 }}>
+        <div className="field">
+          <label style={lbl}>บัญชีที่จะจ่าย{req}</label>
+          <select value={bankAc} onChange={e => setBankAc(e.target.value)} style={{ ...inp, cursor: 'pointer' }}>
+            <option value="">— เลือกบัญชี —</option>
+            {banks.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label style={lbl}>วันที่คาดจ่าย{req}</label>
+          <input type="date" value={payDate} onChange={e => setPay(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+        </div>
+        <div className="field">
+          <label style={lbl}>วันครบกำหนด</label>
+          <input type="date" value={due} onChange={e => setDue(e.target.value)} style={{ ...inp, cursor: 'pointer' }} />
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 'min(42vh, 340px)', overflow: 'auto', border: '1px solid var(--ink-100)', borderRadius: 9 }}>
+        <table className="tbl tbl-compact" style={{ width: '100%', fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 36, textAlign: 'center' }}>
+                <input type="checkbox" checked={allOn} onChange={() => (allOn ? clearAll() : pickAll())}
+                  disabled={!cands.length} style={{ cursor: 'pointer', width: 15, height: 15 }} title="ติ๊ก/ล้างทั้งหมดที่เห็น" />
+              </th>
+              <th>{mode === 'payee' ? 'ผู้รับเงิน' : 'ผู้รับเงิน / หมายเหตุ'}</th>
+              <th style={{ width: 118 }}>จ่ายครั้งล่าสุด</th>
+              <th style={{ width: 104, textAlign: 'right' }}>ยอดเดิม</th>
+              <th style={{ width: 132, textAlign: 'right' }}>ยอดที่จะตั้ง</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cands.length === 0 && (
+              <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--ink-400)', padding: '26px 10px', fontSize: 12.5 }}>
+                {(data.pvVouchers || []).length === 0
+                  ? 'ยังไม่มีใบสำคัญจ่ายในระบบ — นำเข้าที่หน้า DATA PV ก่อน'
+                  : 'ไม่พบรายการที่เคยจ่ายในช่วงเวลา/คำค้นนี้'}
+              </td></tr>
+            )}
+            {cands.map(c => {
+              const on  = picked[c.key] != null;
+              const nf  = already.flo.get(c.name) || 0;
+              const nr  = already.real.get(c.name) || 0;
+              const amtOk = on && parseNum(picked[c.key]) > 0;
+              return (
+                <tr key={c.key} style={{ background: on ? 'var(--brand-50)' : undefined }}>
+                  <td style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => toggle(c)}>
+                    {/* ⚠️ stopPropagation — คลิกที่ตัวช่องติ๊กจะเด้งขึ้นไปโดน onClick ของ <td> ด้วย
+                        ⇒ toggle 2 ครั้ง = ติ๊กแล้วหลุดทันที (คลิกที่อื่นในแถวยังติ๊กได้ตามปกติ) */}
+                    <input type="checkbox" checked={on} onChange={() => toggle(c)}
+                      onClick={e => e.stopPropagation()} style={{ cursor: 'pointer', width: 15, height: 15 }} />
+                  </td>
+                  <td style={{ cursor: 'pointer' }} onClick={() => toggle(c)}>
+                    <div style={{ fontWeight: 600, color: 'var(--ink-800)' }}>{c.name}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 2, fontSize: 11, color: 'var(--ink-500)' }}>
+                      {c.sub ? <span>{c.sub}</span> : null}
+                      {nf > 0 && <span style={chip('oklch(55% 0.16 75)')} title="ชื่อนี้มีใบลอยค้างอยู่แล้ว — ตั้งซ้ำแล้วยอดคาดการณ์จะเบิ้ล">🏷 มีใบลอยค้าง {nf}</span>}
+                      {nr > 0 && <span style={chip('var(--ink-500)')} title="ชื่อนี้มีเจ้าหนี้ใบจริงค้างอยู่แล้ว — บัญชีอาจตั้งหนี้มาแล้ว">มีใบจริงค้าง {nr}</span>}
+                    </div>
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap', cursor: 'pointer', color: 'var(--ink-600)' }} onClick={() => toggle(c)}>
+                    {fmtDate(c.lastIso)}
+                    <div style={{ fontSize: 10.5, color: 'var(--ink-400)', fontFamily: 'ui-monospace' }}>{c.lastNo || '—'}</div>
+                  </td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap', cursor: 'pointer', color: 'var(--ink-500)', fontVariantNumeric: 'tabular-nums' }} onClick={() => toggle(c)}>
+                    {fmtNum(c.amt, 2)}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {/* ยังไม่ติ๊ก = ช่องว่าง (ไม่ใส่ยอดเป็น placeholder — จะอ่านเหมือนคอลัมน์ "ยอดเดิม" ซ้ำสอง)
+                        คลิกเข้าช่องนี้ = ติ๊กให้เลย แล้วเติมยอดครั้งล่าสุดไว้ให้แก้ */}
+                    <input type="text" inputMode="decimal" value={on ? picked[c.key] : ''} placeholder="—"
+                      onChange={e => setAmt(c, e.target.value)}
+                      onFocus={() => { if (!on) setAmt(c, initAmt(c)); }}
+                      style={{ ...inp, height: 30, textAlign: 'right', fontWeight: 700, fontFamily: 'ui-monospace',
+                               color: amtOk ? 'var(--bad)' : 'var(--ink-500)',
+                               borderColor: on && !amtOk ? 'var(--bad)' : 'var(--ink-150)' }} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+        {mode === 'payee'
+          ? 'ยุบตามผู้รับเงิน — 1 แถว = 1 ชื่อ ยอดตั้งต้นคือยอดที่จ่ายครั้งล่าสุด'
+          : 'รายใบ PV — 1 แถว = 1 ใบที่เคยจ่าย (ใบที่ยอดสุทธิ 0 ไม่อยู่ในรายการ)'}
+        {banks.length === 0 && <span style={{ color: 'var(--bad)' }}> · ยังไม่มีบัญชีธนาคารในระบบ — เพิ่มที่หน้า DATA BANK ก่อน</span>}
+      </div>
+    </Modal>
+  );
+}
+
 function DataPayablePage({ data, setData, toast }) {
   const [edit, setEdit]             = dxState(null);
   const [query, setQuery]           = dxState('');
@@ -3852,7 +4179,8 @@ function DataPayablePage({ data, setData, toast }) {
   const [rptFrom, setRptFrom]         = dxState('');      // ISO ช่วงวันที่
   const [rptTo, setRptTo]             = dxState('');
   const matrixRef = React.useRef(null);                  // capture เป็นรูป
-  const [showFloat, setShowFloat]     = dxState(false);  // ป๊อปอัป "ตั้งหนี้ลอย"
+  const [showFloat, setShowFloat]     = dxState(false);  // ป๊อปอัป "ตั้งหนี้ลอย" (ทีละใบ)
+  const [showFloatPick, setShowFloatPick] = dxState(false);  // ป๊อปอัป "คัดจากที่เคยจ่าย" (หลายใบ)
   const canEdit = window.WTPAuth ? window.WTPAuth.can('canEdit') : true;
   // ตั้งหนี้ลอย = ADMIN เท่านั้น (สิทธิ์ระดับเดียวกับ "ลบข้อมูล" = manager)
   const isAdmin = window.WTPAuth ? window.WTPAuth.can('canDelete') : true;
@@ -4083,6 +4411,14 @@ function DataPayablePage({ data, setData, toast }) {
     REF_DOC: ap.vchno || null, BOOKED_AT: null, CFS_ACTIVITY: null,
   });
 
+  // วันที่คาดจ่ายตั้งต้นของทั้ง 2 ป๊อปอัปตั้งหนี้ลอย = วันของข้อมูลล่าสุด แต่ไม่ย้อนหลังกว่าวันนี้
+  // (data.meta.asOf ของ BIO เป็นค่า seed ค้าง — ตั้งวันย้อนหลัง Bank Daily จะกรองทิ้งเงียบ ๆ)
+  const floatDefaultPayDate = dxMemo(() => {
+    const today = isoOfDate(new Date());
+    const asOf  = String((data.meta && data.meta.asOf) || '');
+    return /^\d{4}-\d{2}-\d{2}$/.test(asOf) && asOf > today ? asOf : today;
+  }, [data.meta && data.meta.asOf]);
+
   // ── ตั้งหนี้ลอย: กด 1 ครั้ง → สร้าง 2 แถวผูกกันด้วยเลขที่ FLOAT-xxxx ──────────
   //    (1) payables (เห็นในหน้านี้)  (2) forecastEntries AP (ยอดไปโผล่ Bank Daily)
   //    ⚠️ สร้างแค่ (1) ยอดจะไม่ไปไหน — REF_DOC ของ (2) ต้องเป็นเลขที่เดียวกันเสมอ
@@ -4101,21 +4437,9 @@ function DataPayablePage({ data, setData, toast }) {
     const remark = String(form.remark || '').trim() || FLOAT_AP_REMARK;
     const dptCode = String(form.dpt || '').trim();
 
-    const apRow = dxStampMeta({
-      id: WTPData.newId(),
-      vchno: no, vchdate: today, due2: due,
-      cust_name: name, netpayment: amt, Amount: amt,
-      dpt_code: dptCode, remark,
+    const { ap: apRow, fe: feRow } = buildFloatApPair({
+      no, name, amt, bankAc: form.bankAc, payDate: form.payDate, due, remark, dptCode, today,
     });
-    // รูปแบบ field ตรงกับ _newApRow (แผนจ่าย AP ปกติ) — Bank Daily/หน้าอื่นจึงอ่านได้เหมือนกัน
-    const feRow = {
-      id: WTPData.newId(), DATE: today, PAYMENT_DATE: form.payDate, EXPENSE_TYPE: 'AP',
-      DESCRIPTION: `จ่าย ${name} (${no}) ${FLOAT_AP_TAG}`,
-      JOB_NO: null, PROJECT_NAME: null, AMOUNT: String(-Math.abs(amt)),   // ติดลบ = เงินไหลออก
-      Bank_AC: form.bankAc, STATUS: 'PLANNED', CATEGORY: null,
-      IS_ACCRUED: null, NOTE: remark, ACTUAL_AMOUNT: null, ACTUAL_DATE: null,
-      REF_DOC: no, BOOKED_AT: null, CFS_ACTIVITY: null,                   // ★ กุญแจเชื่อม 2 รายการ
-    };
 
     setData(d => ({
       ...d,
@@ -4125,6 +4449,41 @@ function DataPayablePage({ data, setData, toast }) {
     if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
     toast(`เพิ่มตั้งหนี้ลอยแล้ว · ${no} · ยอดไปโชว์ที่ Bank Daily`);
     setShowFloat(false);
+  };
+
+  // ── คัดจากที่เคยจ่าย: ติ๊กหลายรายการ → ตั้งหนี้ลอยทีเดียวทั้งชุด ───────────────
+  //    ใช้ buildFloatApPair ตัวเดียวกับการตั้งทีละใบ ⇒ ของที่ได้เหมือนกันทุกฟิลด์
+  //    ⚠️ ขอเลขที่ทั้งชุดครั้งเดียวด้วย makeFloatApNos — เรียก makeFloatApNo ใน loop
+  //       จะได้เลขซ้ำกันทุกใบ (Date.now() เดียวกัน) แล้ว REF_DOC ผูกแผนจ่ายผิดใบ
+  const addFloatingApBatch = (items, opts) => {
+    const list = (items || []).filter(it => it && String(it.name || '').trim() && parseNum(it.amount) > 0);
+    if (!list.length)          { toast('ยังไม่ได้เลือกรายการ'); return; }
+    if (!opts || !opts.bankAc) { toast('เลือกบัญชีธนาคารที่จะจ่าย'); return; }
+    if (!opts.payDate)         { toast('เลือกวันที่คาดจ่าย'); return; }
+
+    const today = isoOfDate(new Date());
+    const due   = opts.due || opts.payDate;                        // เว้นว่าง = ใช้วันที่คาดจ่าย
+    const nos   = makeFloatApNos(data.payables, list.length);
+
+    const apRows = [], feRows = [];
+    let total = 0;
+    list.forEach((it, i) => {
+      const name = String(it.name).trim();
+      const amt  = parseNum(it.amount);
+      // อ้างอิงใบต้นทางไว้ในหมายเหตุ — ตามรอยได้ว่าคัดมาจากใบไหน (ตรวจย้อนตอนลบใบลอย)
+      const remark = FLOAT_AP_REMARK + (it.srcNo ? ` · คัดจาก ${it.srcNo}` : '');
+      const pair = buildFloatApPair({ no: nos[i], name, amt, bankAc: opts.bankAc, payDate: opts.payDate, due, remark, dptCode: '', today });
+      apRows.push(pair.ap); feRows.push(pair.fe); total += amt;
+    });
+
+    setData(d => ({
+      ...d,
+      payables: [...apRows, ...(d.payables || [])],                // แทรกบนสุด — เห็นทันทีว่าเพิ่งเพิ่ม
+      forecastEntries: [...(d.forecastEntries || []), ...feRows],
+    }));
+    if (window.WTPData && typeof window.WTPData.forceSyncNow === 'function') window.WTPData.forceSyncNow();
+    toast(`เพิ่มตั้งหนี้ลอย ${apRows.length} รายการ · รวม ${fmtNum(total, 2)} บาท · ยอดไปโชว์ที่ Bank Daily`);
+    setShowFloatPick(false);
   };
 
   // ใบเดียว — แบ่งจ่ายหลายงวด: reconcile forecast AP ของใบนี้ตาม lines (เพิ่ม/แก้/ลบ)
@@ -4920,6 +5279,12 @@ function DataPayablePage({ data, setData, toast }) {
           </button>
           {/* ตั้งหนี้ลอย — ADMIN เท่านั้น (สิทธิ์เดียวกับลบข้อมูล) */}
           {isAdmin && (
+            <button className="btn btn-ghost" onClick={() => setShowFloatPick(true)}
+              title="ติ๊กจากรายการที่เคยจ่าย (ใบสำคัญจ่าย) มาตั้งหนี้ลอยทีเดียวหลายรายการ — ไม่ต้องคีย์ชื่อ/ยอดทีละใบ (เฉพาะ ADMIN)">
+              <Icon name="copy" size={14} /> คัดจากที่เคยจ่าย
+            </button>
+          )}
+          {isAdmin && (
             <button className="btn btn-primary" onClick={() => setShowFloat(true)}
               title="เพิ่ม AP ที่ประมาณการไว้แต่ยังตั้งหนี้ไม่ถึงการเงิน — ยอดจะไปโชว์ที่ Bank Daily (เฉพาะ ADMIN)">
               <Icon name="plus" size={14} /> ตั้งหนี้ลอย
@@ -5308,18 +5673,26 @@ function DataPayablePage({ data, setData, toast }) {
       )}
 
       {/* ตั้งหนี้ลอย — วันที่คาดจ่ายตั้งต้น = วันของข้อมูลล่าสุด แต่ไม่ย้อนหลังกว่าวันนี้
-          (data.meta.asOf ของ BIO เป็นค่า seed ค้าง — ถ้าตั้งวันย้อนหลัง Bank Daily จะกรองทิ้งเงียบๆ) */}
+          (data.meta.asOf ของ BIO เป็นค่า seed ค้าง — ถ้าตั้งวันย้อนหลัง Bank Daily จะกรองทิ้งเงียบๆ)
+          ⚠️ ทั้ง 2 ป๊อปอัปต้องใช้ค่าตั้งต้นเดียวกัน — แยกสูตรกันเมื่อไหร่ ตัวหนึ่งจะตั้งวันย้อนหลังได้ */}
       {showFloat && (
         <FloatingApModal
           open={showFloat}
           data={data}
-          defaultPayDate={(() => {
-            const today = isoOfDate(new Date());
-            const asOf  = String((data.meta && data.meta.asOf) || '');
-            return /^\d{4}-\d{2}-\d{2}$/.test(asOf) && asOf > today ? asOf : today;
-          })()}
+          defaultPayDate={floatDefaultPayDate}
           onClose={() => setShowFloat(false)}
           onSubmit={addFloatingAp}
+        />
+      )}
+
+      {/* คัดจากที่เคยจ่าย → ตั้งหนี้ลอยหลายใบในคลิกเดียว */}
+      {showFloatPick && (
+        <FloatApPickModal
+          open={showFloatPick}
+          data={data}
+          defaultPayDate={floatDefaultPayDate}
+          onClose={() => setShowFloatPick(false)}
+          onSubmit={addFloatingApBatch}
         />
       )}
 
