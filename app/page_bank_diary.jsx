@@ -2483,13 +2483,6 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   const sp  = (px) => Math.round(px * k);
   const pad = (css) => String(css).replace(/(\d+(?:\.\d+)?)px/g, (m, d) => sp(parseFloat(d)) + 'px');
 
-  /* รวมยอดของรายการที่เหลือ (แถว "…อีก N ใบ" — ไม่ตัดข้อมูลเงียบ ๆ) */
-  const restOf = (list) => {
-    const byAcct = {}; let total = 0;
-    list.forEach(e => { const a = Math.abs(e.it.signed); byAcct[e.acctNo] = (byAcct[e.acctNo] || 0) + a; total += a; });
-    return { byAcct, total };
-  };
-
   if (!rows.length) return null;   // ไม่มีบัญชีที่เลือก = ไม่ต้องแสดงใบสรุป
 
   /* ── ย้ายหมวดเอง (override) ────────────────────────────────────────────
@@ -2589,19 +2582,16 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
   );
 
   /* 1 เจ้าหนี้ = 1 บรรทัด (หลายใบยุบรวม ติดเลขจำนวน) · กดชื่อกางดูรายใบ
-   *   เรียงตามวันครบกำหนดก่อนเสมอ (ดู bdGroupByCreditor) */
+   *   เรียงตามวันครบกำหนดก่อนเสมอ (ดู bdGroupByCreditor)
+   *   ⚠️ แสดงครบทุกราย/ทุกใบ — ห้ามยุบเป็นแถว "…อีก N ราย/ใบ"
+   *      (เตยขอ 2026-11-24: ต้องเห็นว่าใครยอดเท่าไร ไม่ใช่ยอดรวมก้อนที่เหลือ) */
   const itemLines = (body, list, padLeft, kp, canMove, scope) => {
     const groups = bdGroupByCreditor(list);
     if (!groups.length) { body.push(emptyRow(kp + '-empty', canMove ? SK.cream : SK.emptyBg)); return; }
-    const CAP = 20;
-    const keepKeys = groups.length <= CAP ? null
-      : new Set(groups.slice().sort((a, b) => b.total - a.total).slice(0, CAP).map(g => g.key));
-    const shown = keepKeys ? groups.filter(g => keepKeys.has(g.key)) : groups;
-    const rest  = keepKeys ? groups.filter(g => !keepKeys.has(g.key)) : [];
     const cellSty = { textAlign: 'right', padding: pad('5px 12px'), fontVariantNumeric: 'tabular-nums',
                       whiteSpace: 'nowrap', color: 'var(--ink-700)', borderTop: '1px solid ' + SK.rowLine, fontSize: fz(11.5) };
 
-    shown.forEach((g, k) => {
+    groups.forEach((g, k) => {
       const rowKey  = kp + '|' + g.key;
       const open3   = (rowKey in openRow);
       const gScope  = openRow[rowKey] || scope;
@@ -2637,8 +2627,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
       if (!open3) return;
       const docs = g.entries.filter(e => !gScope || e.acctNo === gScope)
                             .slice().sort((a, b) => (a.it.date || '') < (b.it.date || '') ? -1 : 1);
-      const DCAP = 25;
-      docs.slice(0, DCAP).forEach((e, j) => {
+      docs.forEach((e, j) => {
         const it = e.it, dk = bdDocKey(it);
         const note = [it.sub, it.remark].filter(Boolean).join(' · ');
         body.push(
@@ -2662,31 +2651,7 @@ function BDMainSummary({ views, today, periodEnd, periodLabel, canEdit, apList }
           </tr>
         );
       });
-      if (docs.length > DCAP) {
-        const r2 = restOf(docs.slice(DCAP));
-        body.push(
-          <tr key={kp + 'g' + k + 'more'} style={{ background: SK.subBg, fontSize: fz(11.5) }}>
-            <td style={{ padding: pad('4px 12px'), paddingLeft: padLeft + sp(26), borderLeft: '2px solid ' + SK.rail, color: 'var(--ink-400)' }}>
-              …อีก {docs.length - DCAP} ใบ
-            </td>
-            {rows.map(r => <td key={r.acctNo} style={{ ...cellSty, borderTop: 'none' }}>{r2.byAcct[r.acctNo] ? fmtMoney(r2.byAcct[r.acctNo]) : ''}</td>)}
-            <td style={{ ...cellSty, borderTop: 'none', background: SK.totCol }}>{fmtMoney(r2.total)}</td>
-          </tr>
-        );
-      }
     });
-    if (rest.length) {
-      const byAcct = {}; let total = 0;
-      rest.forEach(g => { Object.keys(g.byAcct).forEach(a => { byAcct[a] = (byAcct[a] || 0) + g.byAcct[a]; }); total += g.total; });
-      body.push(
-        <tr key={kp + '-more'} style={{ background: '#fff', fontSize: fz(11.5) }}>
-          <td style={{ padding: pad('5px 12px'), paddingLeft: padLeft, borderLeft: '2px solid ' + SK.rail,
-            borderTop: '1px solid ' + SK.rowLine, color: 'var(--ink-400)' }}>…อีก {rest.length} ราย</td>
-          {rows.map(r => <td key={r.acctNo} style={cellSty}>{byAcct[r.acctNo] ? fmtMoney(byAcct[r.acctNo]) : ''}</td>)}
-          <td style={{ ...cellSty, background: SK.totCol }}>{fmtMoney(total)}</td>
-        </tr>
-      );
-    }
   };
 
   /* กาง "ค่าใช้จ่ายถึงกำหนดชำระ" → หมวด 1-4 (เฉพาะหมวดที่มีรายการ) → กางต่อดูเจ้าหนี้ได้ */
