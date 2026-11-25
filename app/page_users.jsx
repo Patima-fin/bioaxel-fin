@@ -11,7 +11,20 @@ const ROLE_LABELS = {
   staff:   { label: 'Staff',   color: 'b-blue',   desc: 'แก้ไขข้อมูลได้ แต่ลบไม่ได้' },
   manager: { label: 'Manager', color: 'b-green',  desc: 'ทุกอย่าง รวมจัดการ users + audit log' },
   owner:   { label: 'Owner',   color: 'b-violet', desc: 'ดูได้ทุกหน้า แต่แก้/ลบไม่ได้' },
+  presenter: { label: 'ผู้นำเสนอ', color: 'b-amber', desc: 'บัญชีพรีเซนต์ เห็นแค่ 3 งบการเงิน ดูอย่างเดียว' },
 };
+
+// ─── บัญชีผู้นำเสนอ (2026-11-25 · แบบ Water POG) ─────────────────────────────
+//   บัญชีกลาง 1 บัญชี ชื่อผู้ใช้ = WTP_CONFIG.PRESENTER_USERNAME (role 'presenter' ใน Supabase Auth —
+//   สร้าง/ตั้งรหัสที่ tools/supabase-auth-setup.html · รหัสของบัญชีนี้ = "รหัสพิเศษ")
+//   + ช่องติ๊ก "🎤 เข้าบัญชีผู้นำเสนอได้" รายคน (users.canPresent = 'true' — สตริงแบบ notifyDailyBalance)
+//   → คนที่ติ๊กพิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสพิเศษ แล้วเข้าบัญชีผู้นำเสนอ (LoginPage → authSignInPresenterAlias)
+const uPresenterName = () => String((window.WTP_CONFIG && window.WTP_CONFIG.PRESENTER_USERNAME) || 'presenter').trim().toLowerCase();
+const uIsActive = (v) => {
+  const a = String(v == null ? 'true' : v).toLowerCase().trim();
+  return a !== 'false' && a !== 'no' && a !== '0' && a !== 'inactive' && a !== 'disabled';
+};
+const uCanPresent = (u) => !!u && u.role !== 'presenter' && String(u.canPresent || '') === 'true';
 
 // ─── helpers: "หน้าที่เข้าถึงได้" รายคน (ฟิลด์ `pages` = CSV, ว่าง = ตาม role) ──
 // กลุ่ม/ชื่อหน้า มาจาก window.WTP_PAGE_GROUPS ใน app.jsx — เพิ่มหน้าใหม่ที่นั่นที่เดียว
@@ -99,10 +112,20 @@ function UsersPage({ data, setData, toast }) {
 
   // KPI
   const roleCounts = uMemo(() => {
-    const c = { manager: 0, staff: 0, viewer: 0, owner: 0 };
+    const c = { manager: 0, staff: 0, viewer: 0, owner: 0, presenter: 0 };
     combinedRows.forEach(u => { if (c[u.role] != null) c[u.role]++; });
     return c;
   }, [combinedRows]);
+
+  // บัญชีผู้นำเสนอ (Role ผู้นำเสนอ) ที่เปิดใช้อยู่ + คนที่ติ๊ก 🎤 — ใช้เตือนตอนตั้งผิดแบบ
+  //   (ฝั่ง POG 25 พ.ย. 69: สร้างบัญชีเป็น Manager + ติ๊ก 🎤 เข้าใจว่าติ๊กแล้ว = บัญชีผู้นำเสนอ
+  //   → ไม่มีบัญชี Role ผู้นำเสนอเลย ทาง "ชื่อตัวเอง + รหัสพิเศษ" จึงใช้ไม่ได้ และบัญชีนั้นเข้าได้เต็มสิทธิ์)
+  const presenterInfo = uMemo(() => ({
+    name:    uPresenterName(),
+    accts:   combinedRows.filter(u => u.role === 'presenter' && uIsActive(u.active)),
+    aliases: combinedRows.filter(u => uIsActive(u.active) && uCanPresent(u)),
+  }), [combinedRows]);
+  const presenterMain = presenterInfo.accts.find(u => String(u.username || '').trim().toLowerCase() === presenterInfo.name);
 
   // ── Presence: ใครออนไลน์อยู่ (จากตาราง presence — heartbeat ทุก ~5 นาที) ──────
   const agoLabel = (ms) => {
@@ -129,6 +152,7 @@ function UsersPage({ data, setData, toast }) {
   // ── CRUD handlers ──────────────────────────────────────────────────────
   const save = (row0) => {
     const row = { ...row0, pages: uStripPages(row0.pages, row0.role) };
+    if (row.role === 'presenter') row.canPresent = '';   // บัญชีผู้นำเสนอเองไม่ต้องมีธง 🎤
     // Validate
     if (!row.username || !row.username.trim()) { toast('กรุณากรอก username'); return; }
     // ★ USE_SUPABASE_AUTH:true → รหัสผ่านอยู่ฝั่ง Supabase Auth (ช่องนี้ไม่ได้ใช้ login แล้ว)
@@ -269,6 +293,20 @@ function UsersPage({ data, setData, toast }) {
         <KpiTile animate={false} label="Viewer (ผู้บริหารดู)" value={roleCounts.viewer}  accent="var(--ink-400)"          icon="daily" unit=" คน" digits={0} />
       </div>
 
+      {/* ติ๊ก 🎤 ให้คนแล้ว แต่ยังไม่มีแถวบัญชีผู้นำเสนอ (ชื่อ = PRESENTER_USERNAME) → ติ๊กไปก็ใช้ไม่ได้ */}
+      {presenterInfo.aliases.length > 0 && !presenterMain && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 12, background: '#fffbeb', border: '1px solid #fcd34d',
+                                       fontSize: 13, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 260, lineHeight: 1.6 }}>
+            ⚠️ <b>ยังไม่มีบัญชีผู้นำเสนอ</b> — คนที่ติ๊ก 🎤 ไว้ ({presenterInfo.aliases.map(u => u.username).join(', ')}) จึงยังเข้าบัญชีผู้นำเสนอไม่ได้ ·
+            ต้องมีบัญชีชื่อผู้ใช้ <code>{presenterInfo.name}</code> ที่เป็น Role <b>"ผู้นำเสนอ"</b> ทั้งในตารางนี้และใน
+            <code> tools/supabase-auth-setup.html</code> (รหัสผ่านของบัญชีนั้น = รหัสพิเศษ)
+          </span>
+          <button className="btn btn-sm" style={{ flex: 'none' }}
+            onClick={() => setEdit({ ...emptyUser, username: presenterInfo.name, displayName: 'ผู้นำเสนอ', role: 'presenter' })}>＋ สร้างบัญชีผู้นำเสนอ</button>
+        </div>
+      )}
+
       {/* Presence: ใครออนไลน์อยู่ */}
       <div className="card anim-in" style={{ padding: 14, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: presenceRows.length ? 10 : 0, flexWrap: 'wrap', gap: 8 }}>
@@ -364,6 +402,10 @@ function UsersPage({ data, setData, toast }) {
                     </td>
                     <td>
                       <Badge kind={meta.color} dot={false}>{meta.label}</Badge>
+                      {uCanPresent(u) && (
+                        <span title="พิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสของบัญชีผู้นำเสนอ → เข้าบัญชีผู้นำเสนอ"
+                          style={{ marginLeft: 4, fontSize: 11, whiteSpace: 'nowrap' }}>🎤</span>
+                      )}
                     </td>
                     <td style={{ fontSize: 12 }}>
                       {(() => {
@@ -427,6 +469,10 @@ function UsersPage({ data, setData, toast }) {
               ผู้ใช้ที่เปิดเว็บค้างอยู่จะเห็นผลภายใน ~2 นาที (รอบ sync) ไม่ต้อง logout</li>
           <li><b>Role ยังคุมสิทธิ์แก้ไขเสมอ</b> — การติ๊กเปิดหน้าให้ Viewer/Owner จะได้แค่ "เห็น" ไม่ได้สิทธิ์แก้
               (ฝั่งฐานข้อมูลกันด้วย RLS ตาม role อีกชั้น) · หน้ากลุ่ม <b>ระบบ</b> เปิดให้เฉพาะ Manager</li>
+          <li><b>🎤 ผู้นำเสนอ</b> = บัญชีกลางสำหรับพรีเซนต์ เห็นแค่ 3 งบการเงิน ดูอย่างเดียว · ตั้ง 2 ขั้น:
+              ① สร้างบัญชีชื่อผู้ใช้ <code>{presenterInfo.name}</code> Role <b>"ผู้นำเสนอ"</b> ที่นี่ และใน <code>tools/supabase-auth-setup.html</code>
+              (role = presenter · รหัสผ่านของบัญชีนี้ = รหัสพิเศษ) ② ติ๊ก "เข้าบัญชีผู้นำเสนอได้" ให้คนที่จะพรีเซนต์ (มี 🎤 ข้าง Role)
+              → คนนั้นพิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสพิเศษ แล้วเข้าบัญชีผู้นำเสนอได้เลย · การติ๊ก 🎤 ไม่ได้เปลี่ยนสิทธิ์ของบัญชีตัวเอง</li>
           <li>ผู้ใช้ที่อยู่ใน <code>config.js</code> (สีส้ม) แก้ใน UI ไม่ได้ — ใช้เป็น bootstrap account สำหรับ first-time login
               (ตั้งสิทธิ์รายหน้าไม่ได้ ต้องนำเข้าชีตก่อน)</li>
           <li>ผู้ใช้ใน Sheet (สีเขียว) สามารถแก้/ลบได้ที่นี่</li>
@@ -440,6 +486,7 @@ function UsersPage({ data, setData, toast }) {
       {edit !== null && (
         <UserEditModal
           row={edit}
+          presenterInfo={presenterInfo}
           onSave={save}
           onClose={() => setEdit(null)}
         />
@@ -538,7 +585,7 @@ function UserPagePicker({ role, value, onChange }) {
 }
 
 // ─── Edit/Add modal ───────────────────────────────────────────────────────
-function UserEditModal({ row, onSave, onClose }) {
+function UserEditModal({ row, presenterInfo, onSave, onClose }) {
   const [draft, setDraft] = uState(null);
   const [showPw, setShowPw] = uState(false);
   const authViaSupabase = !!(window.WTP_CONFIG && window.WTP_CONFIG.USE_SUPABASE_AUTH);
@@ -547,6 +594,13 @@ function UserEditModal({ row, onSave, onClose }) {
   if (!row || !draft) return null;
 
   const set = (k, v) => setDraft(d => ({ ...d, [k]: v }));
+  // บัญชีผู้นำเสนอ "อื่น" ที่มีอยู่ (ไม่นับแถวที่กำลังแก้) + คนที่ติ๊ก 🎤 — ใช้ในกล่องผู้นำเสนอด้านล่าง
+  const pInfo = presenterInfo || { name: uPresenterName(), accts: [], aliases: [] };
+  const otherMain = pInfo.accts.some(u => String(u.id) !== String(row.id) &&
+    String(u.username || '').trim().toLowerCase() === pInfo.name);
+  const aliasNames = pInfo.aliases.filter(u => String(u.id) !== String(row.id)).map(u => u.username);
+  const roleLabel = (ROLE_LABELS[draft.role] || {}).label || draft.role;
+  const draftName = String(draft.username || '').trim().toLowerCase();
 
   return (
     <Modal open={!!row} title={row.id ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้ใหม่'}
@@ -642,6 +696,51 @@ function UserEditModal({ row, onSave, onClose }) {
           </label>
         </div>
       </div>
+
+      {/* ── บัญชีผู้นำเสนอ (2026-11-25 · แบบ Water POG) ───────────────────────── */}
+      {draft.role === 'presenter' ? (
+        <div style={{ marginTop: 16, padding: 12, background: '#fffbeb', borderRadius: 10, border: '1px solid #fcd34d', fontSize: 12.5, lineHeight: 1.6, color: 'var(--ink-700)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>🎤 บัญชีผู้นำเสนอ</div>
+          เห็นแค่ 3 งบการเงิน (งบกระแสเงินสด · งบกำไรขาดทุน · งบแสดงฐานะการเงิน) ดูอย่างเดียว · ล็อกอินแล้วเปิดที่งบกระแสเงินสดทันที<br />
+          <b>รหัสผ่านของบัญชีนี้ = รหัสพิเศษ</b> — คนที่ติ๊ก "เข้าบัญชีผู้นำเสนอได้" ไว้ พิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสนี้ แล้วระบบพาเข้าบัญชีนี้ให้<br />
+          ต้องสร้างบัญชีนี้ใน <code>tools/supabase-auth-setup.html</code> ด้วย (role = <b>presenter</b>) — ตั้งรหัสพิเศษที่นั่น · Role ในตารางนี้มีไว้ให้หน้าเว็บรู้จักบัญชีเท่านั้น<br />
+          {draftName && draftName !== pInfo.name && (
+            <div style={{ marginTop: 4, color: '#b45309' }}>
+              ⚠️ ทางเข้าด้วยชื่อตัวเอง + รหัสพิเศษ ใช้กับบัญชีชื่อ <code>{pInfo.name}</code> เท่านั้น (ตั้งไว้ใน config.js) —
+              บัญชีชื่ออื่นที่เป็นผู้นำเสนอเข้าได้ด้วยชื่อของตัวเองเท่านั้น
+            </div>
+          )}
+          <span className="muted" style={{ fontSize: 12 }}>
+            {aliasNames.length
+              ? <>ติ๊ก 🎤 ไว้แล้ว: <b>{aliasNames.join(', ')}</b></>
+              : 'ยังไม่มีใครถูกติ๊ก 🎤 — ตอนนี้เข้าได้ด้วยชื่อผู้ใช้ของบัญชีนี้ + รหัสนี้เท่านั้น'}
+          </span>
+        </div>
+      ) : (
+        <div style={{ marginTop: 16, padding: 12, background: 'var(--ink-50)', borderRadius: 10, border: '1px solid var(--ink-200)', fontSize: 13 }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={String(draft.canPresent || '') === 'true'}
+              onChange={e => set('canPresent', e.target.checked ? 'true' : '')} style={{ marginTop: 3 }} />
+            <span>
+              <b>🎤 เข้าบัญชีผู้นำเสนอได้</b>
+              <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                พิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสของบัญชีผู้นำเสนอ → เข้าบัญชีผู้นำเสนอ (เห็นแค่ 3 งบการเงิน) · พิมพ์รหัสของตัวเอง = เข้าบัญชีตัวเองตามปกติ
+              </span>
+            </span>
+          </label>
+          {/* ติ๊กแล้วบัญชีนี้ไม่ได้กลายเป็นบัญชีผู้นำเสนอ — ฝั่ง POG เคยตั้ง Manager + ติ๊ก แล้วคิดว่าจะเห็นแค่ 3 งบ */}
+          {String(draft.canPresent || '') === 'true' && (
+            <div style={{ marginTop: 8, marginLeft: 24, fontSize: 12, lineHeight: 1.6, color: 'var(--ink-700)' }}>
+              บัญชีนี้ยังเป็น <b>{roleLabel}</b> ตามเดิม — ถ้าจะให้บัญชีนี้เห็นแค่ 3 งบ ให้เปลี่ยน Role เป็น <b>"ผู้นำเสนอ"</b> แทนการติ๊กช่องนี้
+              {!otherMain && (
+                <div style={{ marginTop: 4, color: '#b45309' }}>
+                  ⚠️ ยังไม่มีบัญชีผู้นำเสนอชื่อ <code>{pInfo.name}</code> ในระบบ — ติ๊กไว้ได้ แต่ยังใช้ไม่ได้จนกว่าจะสร้างบัญชีนั้น (Role "ผู้นำเสนอ")
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

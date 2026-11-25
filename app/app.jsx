@@ -42,11 +42,15 @@ const PAGE_GROUPS = [
     ['warroom1',         'War Room · รายรับ',      'receivables'],
     ['warroom2',         'War Room · รายปี',       'forecast'],
     ['cashflow',         'Weekly Forecast',        'chart'],
-    ['cashflow_present', 'พรีเซนต์ Cash Flow',     'chart'],
-    ['pnl',              'งบกำไรขาดทุน (P&L)',    'forecast'],
-    ['balance_sheet',    'งบแสดงฐานะการเงิน',      'money'],
     ['budget',           'Budget Control Center',  'projects'],
     ['investor',         'Investor Dashboard',     'chart'],
+  ] },
+  // กลุ่ม "งบการเงิน" (2026-11-25 · แบบ Water POG) — 3 งบอยู่ด้วยกัน · บัญชีผู้นำเสนอเห็นแค่กลุ่มนี้
+  //   "งบกระแสเงินสด" = หน้า #cashflow_present เดิม (ชื่อเมนูเดิม "พรีเซนต์ Cash Flow")
+  { key: 'fin', label: 'งบการเงิน', items: [
+    ['cashflow_present', 'งบกระแสเงินสด',          'chart'],
+    ['pnl',              'งบกำไรขาดทุน (P&L)',    'forecast'],
+    ['balance_sheet',    'งบแสดงฐานะการเงิน',      'money'],
   ] },
   { key: 'reports', label: 'รายงาน / วิเคราะห์', items: [
     ['recurring',         'ค่าใช้จ่ายประจำ',        'forecast'],
@@ -128,6 +132,14 @@ const ROLE_PERMS = {
   // เจ้าของ — ดูได้ทุกหน้า แต่แก้/ลบไม่ได้ + ไม่เห็น audit + users + บันทึก/บัญชีธนาคาร
   owner: {
     pages: '*', excludePages: new Set(['users', 'audit_log', 'backup', 'daily_balance', 'data_bank', 'bank_diary', 'bank_recon']),
+    canEdit: false, canDelete: false, canApprove: false, canManageUsers: false,
+  },
+  // ผู้นำเสนอ (2026-11-25 · แบบ Water POG) — บัญชีกลางสำหรับพรีเซนต์ เห็นแค่กลุ่ม "งบการเงิน" 3 หน้า
+  //   ดูอย่างเดียว (RLS: role นี้ไม่อยู่ใน staff/manager = เขียนไม่ได้ ยกเว้นตาราง execNotes ของโหมดบทวิเคราะห์)
+  //   เข้าได้ 2 ทาง: ชื่อผู้ใช้ของบัญชีนี้ (WTP_CONFIG.PRESENTER_USERNAME) + รหัส หรือชื่อผู้ใช้ของคนที่ถูกติ๊ก
+  //   "🎤 เข้าบัญชีผู้นำเสนอได้" (users.canPresent='true') + รหัสของบัญชีนี้ — ดู LoginPage / authSignInPresenterAlias
+  presenter: {
+    pages: new Set(['cashflow_present', 'pnl', 'balance_sheet']),
     canEdit: false, canDelete: false, canApprove: false, canManageUsers: false,
   },
 };
@@ -225,10 +237,15 @@ function App() {
     localStorage.setItem('bio-session', JSON.stringify(session));
     setCurrentUser(session);
     setIsLoggedIn(true);
-    try { WTPData.logEvent && WTPData.logEvent('login', { actor: session, summary: 'เข้าสู่ระบบ' }); } catch (_) {}
+    const summary = session.presentedBy
+      ? 'เข้าสู่ระบบ (บัญชีผู้นำเสนอ · เข้าโดย ' + session.presentedBy + (session.presentedByUser ? ' / ' + session.presentedByUser : '') + ')'
+      : 'เข้าสู่ระบบ';
+    try { WTPData.logEvent && WTPData.logEvent('login', { actor: session, summary }); } catch (_) {}
     // ทุกคนที่ login เข้ามาต้องเจอหน้า Home ก่อนเสมอ (ไม่ว่า hash เดิมจะค้างหน้าไหน)
-    try { window.location.hash = '#home'; } catch (_) {}
-    setRoute('home');
+    //   ยกเว้นคนที่ไม่มีสิทธิ์หน้า Home (เช่น บัญชีผู้นำเสนอ) → หน้าแรกที่เข้าได้ = งบกระแสเงินสด
+    const landing = window.WTPAuth.canViewPage('home') ? 'home' : window.WTPAuth.firstAllowedPage(PAGE_ORDER);
+    try { window.location.hash = '#' + landing; } catch (_) {}
+    setRoute(landing);
   };
   const handleLogout = () => {
     try { WTPData.logEvent && WTPData.logEvent('logout', { actor: currentUser, summary: 'ออกจากระบบ' }); } catch (_) {}
@@ -668,7 +685,7 @@ function App() {
     warroom2: { label: 'War Room — รายปี (หน้า 2)', title: 'Annual Cash Flow', icon: 'forecast' },
     cashflow: { label: 'Weekly Forecast', title: 'Weekly Forecast', icon: 'chart' },
     recurring: { label: 'ค่าใช้จ่ายประจำ', title: 'Recurring Expenses', icon: 'forecast' },
-    cashflow_present: { label: 'พรีเซนต์ Cash Flow', title: 'Cash Flow Presentation', icon: 'chart' },
+    cashflow_present: { label: 'งบกระแสเงินสด', title: 'Cash Flow Statement', icon: 'chart' },
     cf_coding:   { label: 'งบกระทบยอดกระแสเงินสด', title: 'Cash Flow Reconciliation', icon: 'chart' },
     debt:        { label: 'ภาระหนี้ทั้งหมด',       title: 'Debt Register',   icon: 'money' },
     debt_ledger: { label: 'Debt Ledger · ดอกเบี้ย', title: 'Debt Ledger',     icon: 'money' },
@@ -796,7 +813,7 @@ function App() {
 }
 
 function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, currentUser, onLogout, isOpen, onClose, collapsed = false, onToggleCollapse }) {
-  const [sec, setSec] = aState({ dash: true, reports: true, manage: true, system: true });
+  const [sec, setSec] = aState({ dash: true, fin: true, reports: true, manage: true, system: true });
   const tog = k => setSec(p => ({ ...p, [k]: !p[k] }));
 
   // Helper — format "X วินาที/นาทีที่แล้ว"
@@ -977,6 +994,9 @@ function Sidebar({ route, go, routes, data, sidebarStyle, syncInfo = {}, current
         <div className="sb-avatar">{currentUser ? currentUser.displayName.slice(0,2) : 'FA'}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-800)' }}>{currentUser ? currentUser.displayName : 'ฝ่ายการเงิน'}</div>
+          {currentUser && currentUser.presentedBy && (
+            <div style={{ fontSize: 10.5, color: 'var(--ink-500)' }} title="เข้าบัญชีผู้นำเสนอด้วยชื่อผู้ใช้ของคนนี้">🎤 เข้าโดย {currentUser.presentedBy}</div>
+          )}
           <div style={{ fontSize: 10.5, color: 'var(--ink-400)', display:'flex', alignItems:'center', gap:4 }}>
             <span style={{ width:5, height:5, borderRadius:'50%', background: syncDot, flexShrink:0 }} />
             <span>{syncLabel}</span>
@@ -1119,9 +1139,21 @@ function LoginPage({ onLogin }) {
     setError('');
     // ── Phase 4: login ผ่าน Supabase Auth (เมื่อเปิด flag) — รหัส hash ฝั่ง server, role จาก app_metadata
     if ((window.WTP_CONFIG && window.WTP_CONFIG.USE_SUPABASE_AUTH) && WTPData.authSignIn) {
+      const badPw = () => { setLoading(false); setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); };
+      // เน็ตหลุด/เซิร์ฟเวอร์ไม่ตอบ ≠ รหัสผิด — แยกข้อความให้ผู้ใช้รู้ว่าต้องลองใหม่ ไม่ใช่เปลี่ยนรหัส
+      const isNetErr = (err) => !!err && (err.name === 'AuthRetryableFetchError' || err.status === 0 ||
+        /failed to fetch|networkerror|load failed/i.test(String(err.message || '')));
       WTPData.authSignIn(username, password)
         .then(userObj => { setLoading(false); onLogin(userObj); })
-        .catch(() => { setLoading(false); setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); });
+        .catch(err => {
+          if (isNetErr(err)) { setLoading(false); setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ตแล้วลองใหม่'); return; }
+          // ★ บัญชีผู้นำเสนอ (2026-11-25): รหัสของตัวเองไม่ผ่าน → ลอง "ชื่อตัวเอง + รหัสของบัญชีผู้นำเสนอ"
+          //   (คนนั้นต้องถูกติ๊ก 🎤 ในหน้าจัดการผู้ใช้) · ไม่ผ่าน/ไม่ได้ติ๊ก = ข้อความเดียวกับรหัสผิด (ไม่บอกว่ารหัสถูกครึ่งทาง)
+          if (!WTPData.authSignInPresenterAlias) { badPw(); return; }
+          WTPData.authSignInPresenterAlias(username, password)
+            .then(userObj => { setLoading(false); onLogin(userObj); })
+            .catch(badPw);
+        });
       return;
     }
     const uIn = String(username || '').trim().toLowerCase();

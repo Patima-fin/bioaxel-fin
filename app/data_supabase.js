@@ -78,7 +78,8 @@
 
   // ตาราง analytics ที่อ่าน/เขียนแบบ on-demand (ไม่ preload, ไม่อยู่ใน realtime/diff loop) —
   // หน้า P&L/Budget เรียกผ่าน fetchSheetRows (อ่าน) + WTPData.writeTable (นำเข้า)
-  var SHEET_TABLES = ['pnlBase', 'budgetHo', 'cashflowPresent', 'cfCoding'];
+  //   execNotes = โน้ตผู้นำเสนอ (✦ บทวิเคราะห์ · exec_notes.js · 2026-11-25) — ต้องรัน supabase/exec-notes.sql ก่อน
+  var SHEET_TABLES = ['pnlBase', 'budgetHo', 'cashflowPresent', 'cfCoding', 'execNotes'];
   var SHEET_TABLE_SET = {}; SHEET_TABLES.forEach(function (t) { SHEET_TABLE_SET[t] = true; });
 
   // entity ที่ data.js ตัดออกจาก localStorage (กัน quota) → load() ไม่มี → ต้องใช้ React state / cachedData
@@ -786,6 +787,40 @@
         role:        meta.role || 'viewer',
       };
     });
+  };
+  // ── บัญชีผู้นำเสนอ (2026-11-25 · แบบ Water POG): พิมพ์ "ชื่อผู้ใช้ของตัวเอง + รหัสของบัญชีผู้นำเสนอ" ──
+  //   หน้า login เรียกหลังเข้าด้วยชื่อตัวเองไม่ผ่าน → ลองเข้าบัญชีผู้นำเสนอ (cfg.PRESENTER_USERNAME)
+  //   ด้วยรหัสเดียวกัน → ผ่านแล้วอ่านตาราง users (อ่านได้เพราะล็อกอินแล้ว) ว่าคนที่พิมพ์ชื่อมา
+  //   ถูกติ๊ก canPresent='true' และยังเปิดใช้งาน → ไม่ใช่ = ออกจากระบบทันที + error kind 'not-allowed'
+  //   ★ สิทธิ์จริงยังเป็นของบัญชีผู้นำเสนอ (JWT role = presenter → RLS ดูอย่างเดียว) — ช่องติ๊กแค่บอกว่า
+  //     ใครใช้รหัสพิเศษเข้าด้วยชื่อตัวเองได้ (เหมือน Benya/POG) ตัวกันจริงคือรหัสของบัญชีนี้
+  WTPData.authSignInPresenterAlias = function (byUsername, password) {
+    var by = String(byUsername == null ? '' : byUsername).trim().toLowerCase();
+    var presenter = String(cfg.PRESENTER_USERNAME || 'presenter').trim().toLowerCase();
+    var fail = function (kind) { var e = new Error(kind); e.kind = kind; return e; };
+    if (!by || by === presenter) return Promise.reject(fail('bad-credentials'));
+    return WTPData.authSignIn(presenter, password).then(function (u) {
+      var kick = function (kind) {
+        return sb.auth.signOut().then(function () { throw fail(kind); }, function () { throw fail(kind); });
+      };
+      if (u.role !== 'presenter') return kick('bad-credentials');   // รหัสไปตรงบัญชีที่ไม่ใช่ role ผู้นำเสนอ = ไม่นับ
+      return sb.from('users').select('id,data').then(function (res) {
+        if (res.error) return kick('not-allowed');
+        var row = (res.data || []).map(function (r) { return r && r.data; }).filter(Boolean).find(function (d) {
+          return String(d.username || '').trim().toLowerCase() === by;
+        });
+        var act = row ? String(row.active == null ? 'true' : row.active).trim().toLowerCase() : '';
+        var active = row && ['false', 'no', '0', 'inactive', 'disabled'].indexOf(act) < 0;
+        if (!row || !active || String(row.canPresent || '') !== 'true') return kick('not-allowed');
+        return {
+          username:    u.username,
+          displayName: u.displayName,
+          role:        'presenter',
+          presentedBy: row.displayName || row.username || by,
+          presentedByUser: by,
+        };
+      });
+    }, function () { throw fail('bad-credentials'); });
   };
   WTPData.authSignOut = function () {
     try { return sb.auth.signOut().then(function () {}, function () {}); } catch (_) { return Promise.resolve(); }

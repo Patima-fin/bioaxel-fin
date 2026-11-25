@@ -1,46 +1,35 @@
 /* =====================================================================
- * Cash Flow Presentation (#cashflow_present) — BIOAXEL
+ * งบกระแสเงินสด (#cashflow_present) — BIOAXEL
  * ---------------------------------------------------------------------
- *  Executive Cash Flow Dashboard (tabbed) — สไตล์อิงตัวอย่าง "Executive
- *  Cash Flow Dashboard" ที่ผู้ใช้ชอบ. 3 แท็บ:
- *    1) ภาพรวม (Executive Summary)  — KPI + waterfall + รายเดือน + insights
- *    2) งบกระแสเงินสด               — ตารางงบจากไฟล์สรุป (กดแถว → รายการ STM)
- *    3) รายการ (Transaction Explorer) — ตารางรายการ STM + ค้นหา/กรอง/sort
- *  อัปโหลด 2 ไฟล์: STM (รายการเดินบัญชี) + งบกระแสเงินสดรายเดือน (สรุป)
- *  Self-contained: พึ่ง window.React + window.XLSX. prefix `cfp`/`Cfp`.
- *  ★ ข้อมูล "ส่วนกลาง" sync ผ่าน Supabase (ตาราง cashflowPresent, 1 แถว id='current')
- *    → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน. localStorage `bio-cfpresent-v1` = cache/offline
- *    ต่อเครื่อง. ต้องรัน supabase/cashflow-present.sql ครั้งเดียวก่อน (ไม่งั้น degrade เป็น local).
+ *  หน้าตา = หน้า "งบกระแสเงินสด" ของ Water POG (2026-11-25) — ผู้ใช้ขอ "ปรับแก้รูปแบบหน้างบกระแสเงินสด
+ *  ให้เหมือนของป๊อก ยกเว้นเรื่องสี ขอโทนสีเหมือนเดิม" (= โทนเขียว BIO เดิม):
+ *    5 แท็บ Executive Summary · Category Analysis · Bank Accounts · Transaction Explorer · งบกระแสเงินสด
+ *    + ตัวเลือกช่วงเวลา (ทั้งปี / ไตรมาส / เดือน) ใช้กับทุกแท็บ + KPI ทางการเงิน 8 ใบ
+ *    + กดตัวเลข/แท่งกราฟ/แถว → ป๊อปอัพรายการ · ส่งออก Excel/CSV · พิมพ์ PDF (หัวข้อเดียว / ทั้งรายงาน)
+ *  ส่วนที่ 1 = ตัวอ่านไฟล์ของ BIO ชุดเดิม (ไม่แตะ): STM รายการเดินบัญชี (รายบัญชี / ชีต "รวมทุกบัญชี")
+ *    + งบกระแสเงินสดสรุป · หน้า #cf_coding ส่งข้อมูลเข้ามาผ่านตัวอ่านตัวเดียวกัน (window.cfpParseStm …)
+ *  ส่วนที่ 2 = โค้ดวาดหน้าชุดเดียวกับ POG (ed* — ต้นทางคือหน้า execdash ของเว็บ Benya) แก้เฉพาะจุด ★ BIO
+ *    (สีเขียว BIO · ชื่อบริษัท/โลโก้ · ข้อความอัปไฟล์ · ไม่มีคอลัมน์รหัส) — ถ้าแก้หน้าตาให้แก้คู่กับ POG
+ *    (frontend/app/page_cashflow_present.jsx ของ waterpog-fin) · ส่วนที่ 3 = หน้า React ที่ถือข้อมูล/อัปโหลด
+ *  ★ ข้อมูล "ส่วนกลาง" sync ผ่าน Supabase (ตาราง cashflowPresent, 1 แถว id='current') → ทุกคน/ผู้บริหาร
+ *    เห็นชุดเดียวกัน · localStorage `bio-cfpresent-v1` = cache ต่อเครื่อง · `bio-cfp-ed-ui` = แท็บ/ช่วงที่เลือก
+ *  ★ summary (งบสรุป) / catMap / acctTypes ที่หน้าเดิมเคยใช้ยังเก็บอยู่ในแถวข้อมูล (หน้าใหม่ไม่ได้ใช้แสดง — ไม่ลบทิ้ง)
  * ===================================================================== */
 (function () {
   const { useState, useEffect, useMemo, useRef } = React;
   const CFP_LS = 'bio-cfpresent-v1';
   // ── team-share ผ่าน Supabase: เก็บ 1 แถว (id='current') ในตาราง cashflowPresent
-  //    → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน (เดิม localStorage ต่อเครื่อง = เห็นแค่คนอัป).
   //    อ่าน/เขียนผ่าน WTPData.fetchSheetRows/writeTable (cashflowPresent ∈ SHEET_TABLES).
   //    ต้องรัน supabase/cashflow-present.sql ครั้งเดียวก่อน (ไม่งั้น write จะ error → degrade เป็น local).
   const CFP_TABLE = 'cashflowPresent';
   const CFP_ROW_ID = 'current';
   function cfpCanSync() { return !!(window.WTPData && window.WTPData.fetchSheetRows && window.WTPData.writeTable && window.WTP_CONFIG && window.WTP_CONFIG.BACKEND === 'supabase'); }
   function cfpCurrentUser() { try { var s = JSON.parse(localStorage.getItem('bio-session') || 'null'); return s ? (s.displayName || s.username || '') : ''; } catch (e) { return ''; } }
-  function cfpWhen(ts) { try { var d = new Date(ts); var p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); } catch (e) { return ''; } }
   const CFP_MONTHS = { 1: 'ม.ค.', 2: 'ก.พ.', 3: 'มี.ค.', 4: 'เม.ย.', 5: 'พ.ค.', 6: 'มิ.ย.', 7: 'ก.ค.', 8: 'ส.ค.', 9: 'ก.ย.', 10: 'ต.ค.', 11: 'พ.ย.', 12: 'ธ.ค.' };
 
-  // palette (อิงตัวอย่าง Executive Cash Flow Dashboard)
-  const C = {
-    primary: '#2e8b4a', primaryD: '#1f6e3a', teal: '#1aa46f', purple: '#9b7bff',
-    ink: '#20342a', mut: '#688275', faint: '#a4b8ac', line: '#e1efe7',
-    pos: '#15c486', posBg: '#e2faf0', neg: '#fb5e6d', negBg: '#ffe9ec',
-    card: 'rgba(255,255,255,.85)', cardSolid: '#ffffff', soft: '#eef6f1',
-    shadow: '0 10px 30px rgba(31,120,60,.15)',
-  };
-  // ── Type scale (ใช้ร่วมทุกแท็บ — ข้อความชนิดเดียวกันต้องขนาดเท่ากันทุกหน้า เพื่อความเป็นมืออาชีพตอนนำเสนอ) ──
-  //   pageTitle 22 · sectionTitle 15 · kpiHero 26 · kpiAct 22 · tab/btn 14
-  //   body/เซลล์ตาราง/แถวรายการ/ป้าย 13 · caption/สรุป/หัวคอลัมน์ 12 · micro/เชิงอรรถ/แท็ก 11
-  const ACT_COLOR = { op: '#2e8b4a', inv: '#e08a3c', fin: '#9b7bff', transfer: '#688275', other: '#688275' };
-  const ACT_TAGBG = { op: '#e4f2e9', inv: '#fff0e6', fin: '#efe8ff', transfer: '#eef2ef', other: '#eef2ef' };
-  const ACT_TAGFG = { op: '#21703a', inv: '#d98032', fin: '#7a5fd0', transfer: '#688275', other: '#688275' };
-
+  /* ═════════════════════════════════════════════════════════════════════
+   * ส่วนที่ 1 — ตัวอ่านไฟล์ของ BIO (ยกมาจากหน้าเดิมทั้งชุด ไม่แก้)
+   * ═════════════════════════════════════════════════════════════════════ */
   /* ---------- helpers ---------- */
   function cfpNum(v) {
     if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -116,42 +105,6 @@
   const CFP_ACT_NAME = { op: 'กิจกรรมดำเนินงาน', inv: 'กิจกรรมลงทุน', fin: 'กิจกรรมจัดหาเงิน', transfer: 'โอนระหว่างบัญชี', other: 'อื่นๆ' };
   const CFP_ACT_SHORT = { op: 'ดำเนินงาน', inv: 'ลงทุน', fin: 'จัดหาเงิน', transfer: 'โอน', other: 'อื่นๆ' };
 
-  function cfpShort(s) {
-    s = String(s || '').replace(/^เงินสดรับจากการขาย\s*-?\s*/, '').replace(/^เงินสดจ่ายเกี่ยวกับ\s*-?\s*/, '').replace(/^เงินสดรับ\s*-?\s*/, '').trim();
-    return s.length > 28 ? s.slice(0, 28) + '…' : s;
-  }
-  // วิเคราะห์ "จุดเฝ้าระวัง" รายกิจกรรม (sev: red ด่วน / amber เฝ้าระวัง / blue ข้อมูล / green ปกติ)
-  function cfpWatch(model, k) {
-    const a = model.acts[k]; if (!a) return [];
-    const cats = a.catList || [];
-    const out = cats.filter(c => c.net < 0), inn = cats.filter(c => c.net > 0);
-    const outTot = out.reduce((s, c) => s + Math.abs(c.net), 0), inTot = inn.reduce((s, c) => s + c.net, 0);
-    const F = [], order = { red: 0, amber: 1, blue: 2, green: 3 };
-    if (k === 'op') {
-      if (a.net < 0) F.push({ sev: 'red', t: 'กระแสเงินสดดำเนินงานติดลบ ' + cfpFmtM(a.net) + ' — รายจ่ายมากกว่ารายรับจากการดำเนินงาน' });
-      if (out.length) { const t = out[0], p = Math.round(Math.abs(t.net) / (outTot || 1) * 100); if (p >= 30) F.push({ sev: p >= 50 ? 'amber' : 'blue', t: 'รายจ่ายกระจุกที่ “' + cfpShort(t.name) + '” ' + p + '% (' + cfpFmtM(t.net) + ')' }); }
-      if (inn.length && inTot > 0) { const t = inn[0], p = Math.round(t.net / inTot * 100); if (p >= 70) F.push({ sev: 'amber', t: 'รายได้พึ่ง “' + cfpShort(t.name) + '” ' + p + '% ของรายรับดำเนินงาน — กระจุกตัวสูง' }); }
-    } else if (k === 'inv') {
-      if (a.net < 0) F.push({ sev: 'blue', t: 'ลงทุนซื้อสินทรัพย์สุทธิ ' + cfpFmtM(a.net) });
-      if (a.net > 0) F.push({ sev: 'amber', t: 'มีเงินสดจากการขาย/ลดสินทรัพย์ ' + cfpFmtM(a.net) });
-      if (out.length) { const t = out[0]; F.push({ sev: 'blue', t: 'ส่วนใหญ่คือ “' + cfpShort(t.name) + '” (' + cfpFmtM(t.net) + ')' }); }
-    } else if (k === 'fin') {
-      const interest = cats.filter(c => /ดอกเบี้ย/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
-      const loansIn = inn.filter(c => /กู้/.test(c.name)).reduce((s, c) => s + c.net, 0);
-      const director = cats.filter(c => /กรรมการ|ให้กู้ยืม/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
-      const repay = cats.filter(c => /ชำระคืน|คืนเงินกู้/.test(c.name)).reduce((s, c) => s + Math.abs(c.net), 0);
-      if (interest > 0) F.push({ sev: (model.payroll && interest >= 0.5 * model.payroll) ? 'red' : 'amber', t: 'ดอกเบี้ยจ่าย ' + cfpFmtM(interest) + (model.payroll ? (' ≈ ' + Math.round(interest / model.payroll * 100) + '% ของเงินเดือนทั้งบริษัท') : '') });
-      if (loansIn > 0 && model.acts.op.net < 0) F.push({ sev: 'red', t: 'พึ่งเงินกู้ประคองสภาพคล่อง — รับกู้ ' + cfpFmtM(loansIn) + ' ขณะดำเนินงานติดลบ' });
-      else if (loansIn > 0) F.push({ sev: 'blue', t: 'รับเงินกู้เข้า ' + cfpFmtM(loansIn) + ' หนุนสภาพคล่อง' });
-      if (director > 0) F.push({ sev: 'amber', t: 'เงินให้กรรมการกู้ยืม ' + cfpFmtM(director) });
-      if (repay > 0) F.push({ sev: 'blue', t: 'ชำระคืนเงินกู้ ' + cfpFmtM(repay) });
-    }
-    if (!F.length) F.push({ sev: 'green', t: 'ไม่พบจุดเฝ้าระวังเด่นชัด' });
-    F.sort((x, y) => order[x.sev] - order[y.sev]);
-    return F.slice(0, 5);
-  }
-  const CFP_SEV = { red: { c: '#c0392b', bg: '#fdecea' }, amber: { c: '#8a6400', bg: '#fff7e0' }, blue: { c: '#1f6fb8', bg: '#eaf2ff' }, green: { c: '#15875a', bg: '#e6f7ef' } };
-
   function cfpAccountLabel(raw) {
     const s = String(raw || '');
     const m = s.match(/([A-Za-z])\/A#\s*([A-Za-z]*)\s*([\d-]+)\s*(.*)/);
@@ -162,75 +115,6 @@
       return (bank || 'บัญชี') + (tail ? ' ···' + tail : '') + (name ? ' · ' + name : '');
     }
     return s.trim();
-  }
-  function cfpBankCode(acctLabel) { const m = String(acctLabel || '').match(/^([A-Za-z]{2,4})/); return m ? m[1].toUpperCase() : ''; }
-  const BANK_PILL = { BBL: { bg: '#e0f0ff', fg: '#1f6fb8' }, SCB: { bg: '#efe6ff', fg: '#6a3fc0' }, KBANK: { bg: '#e8f7e9', fg: '#2e7d32' }, KTB: { bg: '#e0f2ff', fg: '#1565c0' }, KKP: { bg: '#fbeee0', fg: '#b8730b' }, BAY: { bg: '#fff0e6', fg: '#d98032' } };
-
-  /* ---------- statement-line ↔ STM category matcher ---------- */
-  function cfpStripCat(s) {
-    return String(s || '')
-      .replace(/^เงินสดรับจากการขาย\s*-?\s*/, '').replace(/^เงินสดรับ\s*-?\s*/, '')
-      .replace(/^เงินสดจ่ายเกี่ยวกับ\s*-?\s*/, '').replace(/^รวม\s*/, '').replace(/^รายได้\s*/, '').replace(/^ค่า/, '')
-      .replace(/[^0-9A-Za-zก-๙]/g, '');
-  }
-  function cfpLatin(s) { return (String(s || '').match(/[A-Za-z]{3,}/g) || []).map(x => x.toLowerCase()); }
-  function cfpLCS(a, b) {
-    if (!a || !b) return 0;
-    const m = a.length, n = b.length; let best = 0, prev = new Array(n + 1).fill(0);
-    for (let i = 1; i <= m; i++) { const cur = new Array(n + 1).fill(0);
-      for (let j = 1; j <= n; j++) { if (a[i - 1] === b[j - 1]) { cur[j] = prev[j - 1] + 1; if (cur[j] > best) best = cur[j]; } } prev = cur; }
-    return best;
-  }
-  // ★ ชื่อตรงเป๊ะ (ยุบช่องว่างซ้ำ/NBSP · ละตินไม่สนตัวพิมพ์เล็กใหญ่) — ใช้ตัดสินก่อนตัวเทียบ "คล้ายกัน" เสมอ
-  function cfpSameCatName(a, b) {
-    const norm = x => String(x == null ? '' : x).replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
-    const na = norm(a); return !!na && na === norm(b);
-  }
-  function cfpStmtMatch(catName, leafLabel) {
-    const a = cfpStripCat(catName), b = cfpStripCat(leafLabel);
-    if (!a || !b) return false;
-    const mn = Math.min(a.length, b.length);
-    if (mn >= 5 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return true;
-    const la = cfpLatin(catName), lb = cfpLatin(leafLabel);
-    if (la.length && la.some(t => lb.indexOf(t) >= 0)) return true;
-    const lcs = cfpLCS(a, b);
-    if (lcs >= 8 && lcs >= 0.7 * mn) return true;
-    return false;
-  }
-  // หาหมวด (STM category objects) จากรายชื่อหมวด — ค้นทุกกิจกรรม (op/inv/fin)
-  function cfpCatsByNames(model, names) {
-    const res = []; if (!names || !names.length) return res;
-    ['op', 'inv', 'fin'].forEach(k => { const a = model.acts[k]; if (a) a.catList.forEach(c => { if (names.indexOf(c.name) >= 0) res.push(c); }); });
-    return res;
-  }
-  // ★ ชื่อหมวดเดียวกันอาจมีใน >1 กิจกรรม (net คนละค่า) — เวอร์ชันนี้ "ยึดกิจกรรมของบรรทัด" ก่อน, fallback กิจกรรมอื่น
-  function cfpCatsByNamesInAct(model, names, actKey) {
-    const res = []; if (!names || !names.length) return res;
-    const act = model.acts[actKey];
-    names.forEach(n => {
-      let c = null;
-      if (act) { for (let i = 0; i < act.catList.length; i++) { if (act.catList[i].name === n) { c = act.catList[i]; break; } } }
-      if (!c) c = cfpCatsByNames(model, [n])[0];
-      if (c) res.push(c);
-    });
-    return res;
-  }
-  // net ของหมวด "ในกิจกรรมที่ระบุ" (กันชื่อชนข้ามกิจกรรม)
-  function cfpCatNetInAct(model, name, actKey) { const c = cfpCatsByNamesInAct(model, [name], actKey)[0]; return c ? c.net : 0; }
-  // ยึด "หมวด" เป็นหลัก: fallback เดาด้วยชื่อหมวดเมื่อยังไม่ได้จับคู่เอง (manual map ดูใน openStmt)
-  function cfpFindStmtTxns(model, leafLabel, actKey, monthNum, dir, strict) {
-    const act = model.acts[actKey]; if (!act) return { txns: [], matched: false, cats: [] };
-    const sameDir = c => !dir || ((c.net >= 0 ? 1 : -1) === dir);
-    // ★ 1) ชื่อหมวดตรงเป๊ะกับชื่อบรรทัด = ตัวมันเอง ไม่ต้องเดา (ไม่กรองทิศทางเงิน — ชื่อตรงแล้วยอดจะบวกหรือลบก็คือหมวดนี้)
-    const exactCats = leafLabel ? act.catList.filter(c => cfpSameCatName(c.name, leafLabel)) : [];
-    const exact = exactCats.length > 0;
-    // 2) ไม่มีชื่อตรง → ค่อยเทียบแบบ "คล้ายกัน" (ไฟล์เก่าที่เขียนชื่อคนละสไตล์กับหน้างบ)
-    const cats = exact ? exactCats : (leafLabel ? act.catList.filter(c => cfpStmtMatch(c.name, leafLabel) && sameDir(c)) : []);
-    const matched = cats.length > 0;
-    const src = matched ? cats : (strict ? [] : act.catList.filter(sameDir));
-    let txns = []; src.forEach(c => { txns = txns.concat(c.txns); });
-    if (monthNum) txns = txns.filter(t => t.month === monthNum);
-    return { txns, matched, exact, cats: cats.map(c => c.name) };
   }
 
   /* ---------- parse STM ----------
@@ -363,127 +247,6 @@
     return out;
   }
 
-  // ป้ายงวด: ถ้ารายการ (STM) ครอบคลุมเดือน "มากกว่า" ที่งบสรุประบุ → ใช้ช่วงจากรายการจริง
-  //   (กันป้ายล้าสมัย เช่น งบสรุปมีถึง พ.ค. แต่ชีตรวมทุกบัญชีลากถึง มิ.ย. → ต้องขึ้น "ถึง มิถุนายน")
-  //   ปีใส่ดิบได้ (พ.ศ./ค.ศ.) เพราะผลลัพธ์ถูกครอบด้วย cfpCeText ที่แปลง พ.ศ.→ค.ศ. อีกชั้น
-  const CFP_MONTHS_FULL = { 1: 'มกราคม', 2: 'กุมภาพันธ์', 3: 'มีนาคม', 4: 'เมษายน', 5: 'พฤษภาคม', 6: 'มิถุนายน', 7: 'กรกฎาคม', 8: 'สิงหาคม', 9: 'กันยายน', 10: 'ตุลาคม', 11: 'พฤศจิกายน', 12: 'ธันวาคม' };
-  function cfpPeriodLabel(summary, months, txns) {
-    const sumN = (summary && summary.monthLabels) ? summary.monthLabels.length : 0;
-    const yr = (txns && txns.length) ? String(txns[0].iso).slice(0, 4) : String(new Date().getFullYear());
-    if (months.length && months.length > sumN) {
-      const a = CFP_MONTHS_FULL[months[0]] || months[0], b = CFP_MONTHS_FULL[months[months.length - 1]] || months[months.length - 1];
-      return 'สำหรับงวด ' + a + ' ถึง ' + b + ' ' + yr;
-    }
-    return (summary && summary.periodLabel) || (months.length ? (CFP_MONTHS[months[0]] + '–' + CFP_MONTHS[months[months.length - 1]] + ' ' + yr) : '');
-  }
-
-  /* ---------- กระทบยอด STM ↔ งบสรุป: หา "สาเหตุ" ของส่วนต่าง ----------
-   *  สาเหตุอันดับ 1 ที่เจอจริง = ไฟล์ 2 ฝั่งครอบเดือนไม่เท่ากัน — งบสรุปเพิ่มคอลัมน์
-   *  เดือนใหม่แล้ว แต่ชีตรายการยังไม่ได้ต่อรายการเดือนนั้น (หรือกลับกัน) → ส่วนต่าง
-   *  = ยอดสุทธิของเดือนที่ขาดพอดี (เคสจริง 17/08/2026: งบสรุปถึง ก.ค. · STM ถึง มิ.ย.
-   *  → ต่าง 1,147,149 = คอลัมน์ ก.ค. เป๊ะ ๆ). จึงหักเดือนที่ขาด/เกินออกก่อน แล้วที่เหลือ
-   *  (rest) ค่อยโทษการจัดกิจกรรม/หมวด → ป้ายเตือนจะบอกวิธีแก้ตรงจุด ไม่ใช่แค่ 2 ตัวเลข.
-   */
-  function cfpMonthNumOfLabel(lb) {
-    const s = String(lb || '');
-    for (let m = 1; m <= 12; m++) if (CFP_MONTHS_FULL[m] && s.indexOf(CFP_MONTHS_FULL[m]) >= 0) return m;
-    for (let m = 1; m <= 12; m++) if (CFP_MONTHS[m] && s.indexOf(CFP_MONTHS[m]) >= 0) return m;
-    return 0;
-  }
-  function cfpMonthRange(months) {
-    if (!months || !months.length) return '';
-    const a = CFP_MONTHS[months[0]] || months[0], b = CFP_MONTHS[months[months.length - 1]] || months[months.length - 1];
-    return months.length === 1 ? String(a) : (a + '–' + b);
-  }
-  // ช่วงจากป้ายเดือนของงบสรุป — ปีเหมือนกันทั้งคู่ → ตัดปีตัวหน้าออก ("ม.ค. 69–ก.ค. 69" → "ม.ค.–ก.ค. 69")
-  function cfpLabelRange(labels) {
-    if (!labels || !labels.length) return '';
-    if (labels.length === 1) return labels[0];
-    const a = labels[0], b = labels[labels.length - 1];
-    const ya = (a.match(/\d{2,4}\s*$/) || [''])[0].trim(), yb = (b.match(/\d{2,4}\s*$/) || [''])[0].trim();
-    return ((ya && ya === yb) ? a.replace(/\s*\d{2,4}\s*$/, '') : a) + '–' + b;
-  }
-  /* เทียบ "รายเดือน": STM (op+inv+fin ของเดือนนั้น) ↔ แถวสุทธิของงบสรุปคอลัมน์เดือนเดียวกัน
-   *  → ป้ายไม่ต้องเดาว่า "มาจากการจัดหมวด" อีก บอกได้ว่าต่างที่เดือนไหน เท่าไร (กดดูต่อได้)
-   */
-  function cfpGapByMonth(model, grand) {
-    const s = model.summary || {};
-    const sumByM = {};
-    (s.monthLabels || []).forEach((lb, i) => {
-      const m = cfpMonthNumOfLabel(lb); if (!m) return;
-      sumByM[m] = { col: i, label: cfpCeText(lb), val: (grand && grand.vals) ? (grand.vals[i] || 0) : 0 };
-    });
-    const stmByM = {}; (model.monthly || []).forEach(x => { stmByM[x.m] = x.net; });
-    const all = [...new Set(Object.keys(sumByM).map(Number).concat(Object.keys(stmByM).map(Number)))].sort((a, b) => a - b);
-    return all.map(m => {
-      const sv = sumByM[m] ? sumByM[m].val : null, tv = stmByM[m] != null ? stmByM[m] : null;
-      return {
-        m, label: (sumByM[m] && sumByM[m].label) || CFP_MONTHS[m] || String(m),
-        col: sumByM[m] ? sumByM[m].col : -1, sum: sv, stm: tv,
-        diff: (sv == null || tv == null) ? null : (sv - tv),
-      };
-    });
-  }
-  /* ต่างในเดือนนั้น "มาจากหมวดไหน" — ยอดรายหมวดจากรายการจริง ↔ บรรทัดในงบเดือนนั้น
-   *  ⚠️ บล็อกท้ายงบ "— รายการที่ไม่นับเป็นกิจกรรม —" (โอนระหว่างบัญชี · ยังไม่ลงหมวด ·
-   *     ⚠ หมวดที่ไม่มีในผัง · ผลต่างที่ยังกระทบยอดไม่ลงตัว) ถูกตัวอ่านติด actKey ของกิจกรรม
-   *     สุดท้ายไว้ (curAct ไม่ถูกรีเซ็ต) → ต้องตัดออกก่อนเทียบ ไม่งั้นนับซ้ำ; คืนแยกเป็น
-   *     `outside` ให้ดู เพราะ "หมวดที่ STM มีแต่งบไม่มีบรรทัด" จะไปโผล่ตรงนั้นพอดี
-   */
-  function cfpCatGapOfMonth(model, m, col) {
-    const stm = {};
-    (model.allTxns || []).forEach(t => {
-      if (t.month !== m || t.actKey === 'transfer' || t.actKey === 'other') return;
-      const k = t.category || '(ไม่ระบุหมวด)';
-      stm[k] = (stm[k] || 0) + (t.flow || 0);
-    });
-    const sum = {}, outside = []; let after = false;
-    ((model.summary && model.summary.rows) || []).forEach(r => {
-      if (/ไม่นับเป็นกิจกรรม/.test(r.label)) { after = true; return; }
-      const v = col >= 0 ? cfpNum((r.vals || [])[col]) : 0;
-      if (after) { if (v) outside.push({ name: r.label, val: v }); return; }
-      if (r.type !== 'leaf') return;
-      sum[r.label] = (sum[r.label] || 0) + v;
-    });
-    const key = n => String(n == null ? '' : n).replace(/\s+/g, ' ').trim().toLowerCase();  // \s ครอบ NBSP อยู่แล้ว
-    const sumKey = {}; Object.keys(sum).forEach(n => { const k = key(n); sumKey[k] = (sumKey[k] || 0) + sum[n]; });
-    const rows = [], seen = {};
-    Object.keys(stm).forEach(n => {
-      const k = key(n); seen[k] = 1;
-      const sv = sumKey[k] == null ? null : sumKey[k];
-      const diff = (sv || 0) - stm[n];
-      if (Math.abs(diff) > 1) rows.push({ name: n, stm: stm[n], sum: sv, diff });
-    });
-    Object.keys(sumKey).forEach(k => {
-      if (seen[k] || Math.abs(sumKey[k]) <= 1) return;
-      const name = Object.keys(sum).filter(n => key(n) === k)[0] || k;
-      rows.push({ name, stm: null, sum: sumKey[k], diff: sumKey[k] });
-    });
-    rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
-    return { rows, outside };
-  }
-  function cfpNetGap(model) {
-    const s = model.summary; if (!s || s.net == null) return null;
-    const gap = s.net - model.net;
-    if (Math.abs(gap) < 1) return { ok: true, gap: 0 };
-    // แถวสุทธิในงบ → vals รายเดือน (ใช้หายอดของเดือนที่ STM ยังไม่มี)
-    const grand = (s.rows || []).filter(r => /เพิ่มขึ้น.*ลดลง.*สุทธิ|สุทธิ.*เพิ่มขึ้น/.test(r.label))[0];
-    const stmHas = {}; (model.months || []).forEach(m => { stmHas[m] = true; });
-    const sumHas = {}; const miss = [];
-    (s.monthLabels || []).forEach((lb, i) => {
-      const m = cfpMonthNumOfLabel(lb); if (!m) return;
-      sumHas[m] = true;
-      if (!stmHas[m]) miss.push({ m, label: cfpCeText(lb) || CFP_MONTHS[m], val: (grand && grand.vals) ? (grand.vals[i] || 0) : 0 });
-    });
-    // เดือนที่มีในรายการแต่งบสรุปยังไม่มีคอลัมน์ (กรณีกลับกัน)
-    const extra = Object.keys(sumHas).length
-      ? (model.monthly || []).filter(x => !sumHas[x.m]).map(x => ({ m: x.m, label: CFP_MONTHS[x.m] || String(x.m), val: x.net }))
-      : [];
-    const missSum = miss.reduce((a, x) => a + x.val, 0), extraSum = extra.reduce((a, x) => a + x.val, 0);
-    const explained = missSum - extraSum;            // ส่วนต่างที่อธิบายได้ด้วยเดือนที่ไม่ตรงกัน
-    return { ok: false, gap, miss, extra, missSum, extraSum, explained, rest: gap - explained, byMonth: cfpGapByMonth(model, grand) };
-  }
-
   /* ⚠️ ข้อมูลเก่าที่อัปไว้ก่อนแก้บั๊ก BE serial มี `iso` เป็นปี พ.ศ. ("2569-05-05")
      ⇒ เดือนไม่ตรงกับข้อมูลใหม่ (2026-05), เรียงลำดับผิด, ป้ายเดือนเพี้ยน.
      ยุบเป็น ค.ศ. ทุกทางที่อ่านเข้ามา — ทั้งตอนสร้าง model และตอน merge ที่หน้า #cf_coding */
@@ -504,975 +267,2555 @@
     return out;
   }
 
-  /* ---------- build model ---------- */
-  function cfpBuildModel(stm, summary) {
-    const txns = cfpFixEraTxns(stm.txns);
-    const monthsSet = {};
-    txns.forEach(t => { if (t.month && t.actKey !== 'transfer' && t.actKey !== 'other') monthsSet[t.month] = true; });
-    const months = Object.keys(monthsSet).map(Number).sort((a, b) => a - b);
-    const mkAct = key => ({ key, name: CFP_ACT_NAME[key], net: 0, byMonth: {}, cats: {} });
-    const acts = { op: mkAct('op'), inv: mkAct('inv'), fin: mkAct('fin') };
-    months.forEach(m => { ['op', 'inv', 'fin'].forEach(k => { acts[k].byMonth[m] = 0; }); });
-    let transferNet = 0, otherNet = 0;
-    txns.forEach(t => {
-      if (t.actKey === 'transfer') { transferNet += t.flow; return; }
-      if (t.actKey === 'other') { otherNet += t.flow; return; }
-      const a = acts[t.actKey]; if (!a) return;
-      a.net += t.flow; a.byMonth[t.month] = (a.byMonth[t.month] || 0) + t.flow;
-      if (!a.cats[t.category]) a.cats[t.category] = { name: t.category, net: 0, count: 0, txns: [] };
-      const cat = a.cats[t.category]; cat.net += t.flow; cat.count++; cat.txns.push(t);
-    });
-    ['op', 'inv', 'fin'].forEach(k => {
-      acts[k].catList = Object.keys(acts[k].cats).map(n => acts[k].cats[n]).sort((x, y) => Math.abs(y.net) - Math.abs(x.net));
-      acts[k].catList.forEach(c => c.txns.sort((x, y) => Math.abs(y.flow) - Math.abs(x.flow)));
-    });
-    const opening = stm.opening || 0;
-    const net = acts.op.net + acts.inv.net + acts.fin.net;
-    const ending = opening + net;
-    let run = opening;
-    const monthly = months.map(m => {
-      const o = acts.op.byMonth[m] || 0, iv = acts.inv.byMonth[m] || 0, f = acts.fin.byMonth[m] || 0;
-      const mnet = o + iv + f; run += mnet;
-      return { m, label: CFP_MONTHS[m] || ('เดือน ' + m), op: o, inv: iv, fin: f, net: mnet, end: run };
-    });
-    let interest = 0, payroll = 0, inflowTotal = 0, outflowTotal = 0; const inflowByCat = {};
-    txns.forEach(t => {
-      if (t.actKey === 'transfer' || t.actKey === 'other') return;
-      if (/ดอกเบี้ย/.test(t.category)) interest += Math.abs(t.flow);
-      if (/เงินเดือน/.test(t.category)) payroll += Math.abs(t.flow);
-      if (t.flow > 0) { inflowTotal += t.flow; inflowByCat[t.category] = (inflowByCat[t.category] || 0) + t.flow; }
-      else outflowTotal += -t.flow;   // ★ inflowTotal - outflowTotal = net (ตัด transfer/other ออกชุดเดียวกัน)
-    });
-    let topInflow = { name: '', amt: 0 };
-    Object.keys(inflowByCat).forEach(n => { if (inflowByCat[n] > topInflow.amt) topInflow = { name: n, amt: inflowByCat[n] }; });
-    // ── ยอดรายบัญชี (per-account): ต้นงวด (stm.openingByAcct) + Δ รายเดือนจาก txns (รวมทุก actKey
-    //    incl. โอนระหว่างบัญชี/อื่นๆ เพราะกระทบยอดเงินในบัญชีจริง) = ปลายงวด รายบัญชี. ──
-    const monthsAllSet = {}; txns.forEach(t => { if (t.month) monthsAllSet[t.month] = true; });
-    const monthsAll = Object.keys(monthsAllSet).map(Number).sort((a, b) => a - b);
-    const openByName = (stm.openingByAcct && typeof stm.openingByAcct === 'object') ? stm.openingByAcct : {};
-    // last4 = เลขท้ายบัญชีในป้าย "BANK ···XXXX [· ชื่อ]" → จับกลุ่มเลขกลุ่มแรก (bank code เป็นตัวอักษร เลขกลุ่มแรก=tail)
-    //   ใช้ "เลขกลุ่มแรก" ไม่ใช่ "เลขท้ายสุด" เพราะป้ายอาจมี ' · ชื่อบัญชี' ต่อท้าย → tail ไม่ได้อยู่ท้ายสุด
-    const last4of = name => (String(name).match(/(\d{3,4})/) || [])[1] || '';
-    const acctMap = {};
-    const ensureAcct = name => { if (!acctMap[name]) acctMap[name] = { name, last4: last4of(name), opening: cfpNum(openByName[name]), byMonth: {}, flowTotal: 0 }; return acctMap[name]; };
-    Object.keys(openByName).forEach(n => ensureAcct(n));
-    txns.forEach(t => { const x = ensureAcct(t.account); x.byMonth[t.month] = (x.byMonth[t.month] || 0) + t.flow; x.flowTotal += t.flow; });
-    const accountInfo = Object.keys(acctMap).map(n => { const a = acctMap[n]; return { name: a.name, last4: a.last4, opening: a.opening, byMonth: a.byMonth, ending: a.opening + a.flowTotal }; }).sort((a, b) => b.ending - a.ending);
-    const hasAcctBalances = Object.keys(openByName).length > 0;   // STM = บัญชีเดินบัญชี → Σflow ต่อบัญชี = ยอดจริง (reconcile)
-    const accounts = {}; txns.forEach(t => { accounts[t.account] = true; });
-    return {
-      months, monthly, acts, opening, ending, net, transferNet, otherNet,
-      accountInfo, monthsAll, hasAcctBalances,
-      allTxns: txns, txnCount: txns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').length,
-      accounts: Object.keys(accounts), interest, payroll, inflowTotal, outflowTotal, topInflow,
-      summary: summary || null, stmt: (summary && summary.rows && summary.rows.length) ? summary.rows : null,
-      monthLabels: ((summary && summary.monthLabels) || []).map(cfpCeText),
-      periodLabel: cfpCeText(cfpPeriodLabel(summary, months, txns)),
-    };
-  }
-
-  /* ---------- shared bits ---------- */
-  function CfpTag({ k }) { return <span style={{ display: 'inline-block', padding: '2px 9px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: ACT_TAGBG[k] || C.soft, color: ACT_TAGFG[k] || C.mut, whiteSpace: 'nowrap' }}>{CFP_ACT_SHORT[k] || k}</span>; }
-  function CfpBankPill({ acct }) { const code = cfpBankCode(acct); const p = BANK_PILL[code] || { bg: C.soft, fg: C.primaryD }; return <span title={acct} style={{ fontWeight: 700, fontSize: 11, padding: '2px 8px', borderRadius: 6, background: p.bg, color: p.fg, whiteSpace: 'nowrap' }}>{code || 'บัญชี'}</span>; }
-  function cfpTxnRows(txns) {
-    return txns.map((t, i) => (
-      <tr key={i}>
-        <td style={{ padding: '6px 8px', color: C.mut, borderBottom: '1px solid ' + C.line, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
-        <td style={{ padding: '6px 8px', color: C.ink, borderBottom: '1px solid ' + C.line, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || t.category}</td>
-        <td style={{ padding: '6px 8px', borderBottom: '1px solid ' + C.line }}><CfpBankPill acct={t.account} /></td>
-        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: t.flow < 0 ? C.neg : C.pos, borderBottom: '1px solid ' + C.line, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{cfpFmtB(t.flow)}</td>
-      </tr>
-    ));
-  }
-  function CfpTxnTable({ txns }) {
-    const totIn = txns.filter(t => t.flow > 0).reduce((s, t) => s + t.flow, 0);
-    const totOut = txns.filter(t => t.flow < 0).reduce((s, t) => s + Math.abs(t.flow), 0);
-    return (
-      <div>
-        <div style={{ display: 'flex', gap: 16, fontSize: 12, color: C.mut, marginBottom: 6 }}>
-          <span>รับ <b style={{ color: C.pos }}>{cfpFmtB(totIn)}</b></span>
-          <span>จ่าย <b style={{ color: C.neg }}>{cfpFmtB(totOut)}</b></span>
-          <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
-        </div>
-        <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead><tr style={{ color: C.mut, textAlign: 'left', fontSize: 12 }}>
-              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fafdfb', width: 96 }}>วันที่</th>
-              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fafdfb' }}>รายการ</th>
-              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fafdfb', width: 70 }}>บัญชี</th>
-              <th style={{ padding: '7px 8px', fontWeight: 700, position: 'sticky', top: 0, background: '#fafdfb', width: 110, textAlign: 'right' }}>จำนวน</th>
-            </tr></thead>
-            <tbody>{cfpTxnRows(txns)}</tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  /* ---------- drill modal ---------- */
-  function CfpModal({ title, subtitle, txns, onClose }) {
-    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
-    return (
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
-        <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 900, width: '100%', maxHeight: '86vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
-          <div style={{ padding: '16px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-              {subtitle && <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>{subtitle}</div>}
-            </div>
-            <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
-          </div>
-          <div style={{ padding: '12px 22px 22px', overflow: 'auto' }}>
-            {txns.length ? <CfpTxnTable txns={txns} /> : <div style={{ fontSize: 13, color: C.faint, padding: '10px 0' }}>ไม่พบรายการ</div>}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* ---------- Category mapping editor (จับคู่ บรรทัดงบ ↔ หมวด STM) ---------- */
-  function CfpMapModal({ model, catMap, onClose, onSave }) {
-    const leaves = useMemo(() => (model.stmt || []).filter(r => r.type === 'leaf' && r.actKey), [model]);
-    // working copy: เริ่มจาก catMap; บรรทัดที่ยังไม่ตั้ง → เดาอัตโนมัติด้วยชื่อหมวด (ให้ผู้ใช้ปรับ/ยืนยัน)
-    const init = useMemo(() => {
-      const m = {}; const claimed = new Set(); // 1 หมวด = 1 บรรทัด (ต่อกิจกรรม): คีย์ "กิจกรรม|ชื่อ" กันชื่อชนข้ามกิจกรรม
-      const keyOf = (ak, n) => ak + '' + n;
-      // pass 1: การจับคู่ที่บันทึกไว้ (เจตนาผู้ใช้) จองหมวดก่อน — ตัดหมวดที่ซ้ำกับบรรทัดก่อนหน้าในกิจกรรมเดียวกัน
-      leaves.forEach(r => { if (Array.isArray(catMap[r.label]) && catMap[r.label].length) { const uniq = catMap[r.label].filter(n => !claimed.has(keyOf(r.actKey, n))); uniq.forEach(n => claimed.add(keyOf(r.actKey, n))); m[r.label] = uniq; } });
-      // pass 2: เดาอัตโนมัติให้บรรทัดที่เหลือ — เฉพาะหมวดที่ยังไม่ถูกจอง (ในกิจกรรมนั้น)
-      leaves.forEach(r => {
-        if (m[r.label]) return;
-        const act = model.acts[r.actKey];
-        const dir = r.total > 0 ? 1 : r.total < 0 ? -1 : 0;
-        const free = c => !claimed.has(keyOf(r.actKey, c.name));
-        const exact = act ? act.catList.filter(c => cfpSameCatName(c.name, r.label) && free(c)).map(c => c.name) : [];
-        const guess = exact.length ? exact
-          : (act ? act.catList.filter(c => cfpStmtMatch(c.name, r.label) && (!dir || ((c.net >= 0 ? 1 : -1) === dir)) && free(c)).map(c => c.name) : []);
-        guess.forEach(n => claimed.add(keyOf(r.actKey, n)));
-        m[r.label] = guess;
-      });
-      return m;
-    }, [model, catMap, leaves]);
-    const [m, setM] = useState(init);
-    const [q, setQ] = useState('');
-    const catNet = (name, actKey) => cfpCatNetInAct(model, name, actKey); // ยึดกิจกรรมของบรรทัด (กันชื่อชนข้ามกิจกรรม)
-    const tol = v => 1; // ✓ ต้องตรงเป๊ะ (เผื่อปัดเศษ ≤ 1 บาทเท่านั้น) — เดิม 1% หลวมเกินไป
-    const isOk = (label, sel) => { const r = leaves.find(x => x.label === label); if (!r) return false; const s = (sel || m[label] || []); return s.length > 0 && Math.abs(s.reduce((a, n) => a + catNet(n, r.actKey), 0) - r.total) <= tol(r.total); };
-    // ย่อ/กาง: เริ่มต้นย่อบรรทัดที่ "✓ ตรง" แล้ว เหลือกางเฉพาะที่ยังต้องจัด (ไม่ต้องเลื่อนหาไกล)
-    const [expanded, setExpanded] = useState(() => { const s = {}; leaves.forEach(r => { if (!isOk(r.label, init[r.label])) s[r.label] = true; }); return s; });
-    useEffect(() => { const h = e => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
-    const leafAct = {}; leaves.forEach(r => { leafAct[r.label] = r.actKey; });
-    // เลือกหมวด: ถ้าเปิด (ON) → ย้ายหมวดนั้นออกจากบรรทัด "กิจกรรมเดียวกัน" อื่น (1 หมวด = 1 บรรทัด ต่อกิจกรรม)
-    const toggle = (leaf, name) => setM(prev => {
-      const next = Object.assign({}, prev); const cur = (next[leaf] || []).slice(); const i = cur.indexOf(name); const a = leafAct[leaf];
-      if (i >= 0) { cur.splice(i, 1); next[leaf] = cur; }
-      else { Object.keys(next).forEach(l => { if (l !== leaf && leafAct[l] === a && next[l] && next[l].indexOf(name) >= 0) next[l] = next[l].filter(x => x !== name); }); cur.push(name); next[leaf] = cur; }
-      return next;
-    });
-    const toggleExp = label => setExpanded(prev => Object.assign({}, prev, { [label]: !prev[label] }));
-    const setAllExp = on => setExpanded(() => { const s = {}; if (on) leaves.forEach(r => { s[r.label] = true; }); return s; });
-    const shown = leaves.filter(r => !q || r.label.toLowerCase().indexOf(q.toLowerCase()) >= 0);
-    const okCount = leaves.filter(r => isOk(r.label)).length;
-    // หมวดที่ถูกเลือกแล้ว → ใช้กับบรรทัดอื่นไม่ได้ (1 หมวด = 1 บรรทัด) — คีย์ด้วย "กิจกรรม|ชื่อ" กันชื่อชนข้ามกิจกรรม
-    const ck = (actKey, name) => actKey + '' + name;
-    const selByCat = {}; leaves.forEach(r => (m[r.label] || []).forEach(n => { const k = ck(r.actKey, n); (selByCat[k] = selByCat[k] || []).push(r.label); }));
-    const ownerOf = (actKey, name, leaf) => (selByCat[ck(actKey, name)] || []).filter(l => l !== leaf)[0];
-    return (
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(31,58,95,.42)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1300, padding: 20 }}>
-        <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 20, maxWidth: 1000, width: '100%', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 30px 80px rgba(31,58,95,.35)' }}>
-          <div style={{ padding: '16px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>⚙ จัดหมวด — จับคู่บรรทัดงบ ↔ หมวด STM</div>
-              <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>เลือกหมวด STM ของแต่ละบรรทัด · ✓ = ยอดหมวดตรงกับยอดในงบ · ตั้งครั้งเดียว แชร์ทั้งทีม</div>
-            </div>
-            <button onClick={onClose} style={{ cursor: 'pointer', border: 0, background: C.soft, width: 34, height: 34, borderRadius: 10, fontSize: 18, color: C.mut, flexShrink: 0 }}>×</button>
-          </div>
-          <div style={{ padding: '10px 22px', borderBottom: '1px solid ' + C.line, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาบรรทัดงบ…" style={{ flex: '1 1 200px', boxSizing: 'border-box', padding: '8px 12px', border: '1px solid ' + C.line, borderRadius: 10, fontSize: 13, fontFamily: 'inherit', outline: 'none' }} />
-            <span style={{ fontSize: 12, fontWeight: 700, color: okCount === leaves.length ? C.pos : C.mut, whiteSpace: 'nowrap' }}>✓ {okCount}/{leaves.length} ตรง</span>
-            <button onClick={() => setAllExp(false)} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 11px', fontSize: 12, fontWeight: 600 }}>▸ ย่อทั้งหมด</button>
-            <button onClick={() => setAllExp(true)} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 11px', fontSize: 12, fontWeight: 600 }}>▾ กางทั้งหมด</button>
-          </div>
-          <div style={{ padding: '8px 22px 16px', overflow: 'auto' }}>
-            {shown.map((r, ri) => {
-              const sel = m[r.label] || [];
-              const selSum = sel.reduce((s, n) => s + catNet(n, r.actKey), 0);
-              const ok = Math.abs(selSum - r.total) <= tol(r.total);
-              const act = model.acts[r.actKey];
-              // ตัวเลือก = หมวดในกิจกรรมนี้ + หมวดที่เลือกไว้แต่อยู่กิจกรรมอื่น (จะได้เห็น/เอาออกได้ ไม่เป็นยอดผีที่ลบไม่ได้)
-              const actCats = act ? act.catList.slice() : [];
-              const actNames = {}; actCats.forEach(c => { actNames[c.name] = 1; });
-              const extraSel = sel.filter(n => !actNames[n]).map(n => cfpCatsByNames(model, [n])[0]).filter(Boolean);
-              const cats = actCats.concat(extraSel);
-              const isExp = !!expanded[r.label];
-              return (
-                <div key={ri} style={{ padding: '9px 0', borderBottom: '1px solid ' + C.line }}>
-                  <div onClick={() => toggleExp(r.label)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: isExp ? 7 : 0, cursor: 'pointer' }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.ink }}><span style={{ color: C.faint, fontWeight: 400, marginRight: 4 }}>{isExp ? '▾' : '▸'}</span>{r.label} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>· {CFP_ACT_NAME[r.actKey]}</span></div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: sel.length ? (ok ? C.pos : C.neg) : C.faint }}>
-                      {sel.length ? (ok ? '✓ ตรง ' : '⚠ ต่าง ') + cfpFmtPlain(selSum) + ' / งบ ' + cfpFmtPlain(r.total) : 'ยังไม่เลือก · งบ ' + cfpFmtPlain(r.total)}
-                    </div>
-                  </div>
-                  {isExp && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {cats.length ? cats.map((c, ci) => {
-                      const on = sel.indexOf(c.name) >= 0;
-                      const owner = on ? null : ownerOf(r.actKey, c.name, r.label);
-                      return (
-                        <button key={ci} onClick={() => toggle(r.label, c.name)} title={owner ? ('ใช้อยู่ที่ "' + owner + '" — กดเพื่อย้ายมาบรรทัดนี้') : ('ยอดหมวด ' + cfpFmtPlain(c.net))} style={{ cursor: 'pointer', fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px ' + (owner ? 'dashed ' : 'solid ') + (on ? C.primary : C.line), background: on ? C.primary : '#fff', color: on ? '#fff' : (owner ? C.faint : C.mut), fontWeight: on ? 700 : 500, opacity: owner ? 0.6 : 1 }}>
-                          {on ? '✓ ' : (owner ? '↩ ' : '')}{c.name} <span style={{ opacity: .7, fontSize: 11 }}>({cfpFmtPlain(c.net)})</span>{owner ? <span style={{ fontSize: 10, opacity: .8 }}> · ใช้ที่อื่น</span> : null}
-                        </button>
-                      );
-                    }) : <span style={{ fontSize: 12, color: C.faint }}>ไม่มีหมวดในกิจกรรมนี้</span>}
-                  </div>}
-                </div>
-              );
-            })}
-            {!shown.length && <div style={{ fontSize: 13, color: C.faint, padding: '14px 0' }}>ไม่พบบรรทัด</div>}
-          </div>
-          <div style={{ padding: '12px 22px', borderTop: '1px solid ' + C.line, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button onClick={onClose} style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 11, padding: '9px 16px', fontSize: 14 }}>ยกเลิก</button>
-            <button onClick={() => onSave(m)} style={{ cursor: 'pointer', border: 0, background: C.primary, color: '#fff', borderRadius: 11, padding: '9px 18px', fontSize: 14, fontWeight: 700, boxShadow: C.shadow }}>บันทึกการจับหมวด</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* ---------- KPI cards ---------- */
-  // ชื่อ/ไอคอน/คำอธิบายการ์ดกิจกรรม (ไทย + อังกฤษ) — สไลด์นำเสนออ่านได้ทั้งสองภาษา
-  const CFP_ACT_EN = { op: 'Operating', inv: 'Investing', fin: 'Financing' };
-  const CFP_ACT_ICON = { op: '⚙️', inv: '📊', fin: '🏛️' };
-  const CFP_ACT_DESC = { op: 'เงินสดจาก/ใช้ในการดำเนินงาน', inv: 'ซื้อ/ขายสินทรัพย์ · เงินลงทุน', fin: 'เงินกู้ / เพิ่มทุน / จ่ายคืน' };
-
-  /* ★ แถบสรุปผู้บริหาร — เลย์เอาต์ชุดเดียวกับ WTP เพื่อให้สไลด์นำเสนอสองบริษัทไปทางเดียวกัน:
-   *     ซ้าย = ภาพรวมรับ–จ่าย (เงินรับรวม / เงินจ่ายรวม / กระแสเงินสดสุทธิ)
-   *     ขวา  = เงินสดปลายงวด (ยอดชูโรง) + ต้นงวด → % เปลี่ยนแปลง
-   *   สีคงชุดแบรนด์ BIOAXEL: เขียว = การ์ดหลัก/เงินเข้า · แดง = เงินออก
-   *   ยอดในแถบนี้แสดง "บาทเต็ม ทศนิยม 2 ตำแหน่ง" (ไม่ใช่ M) — ผู้บริหารอ่านตัวเลขจริงบนสไลด์ */
-  function CfpHeroBoard({ model }) {
-    const inflow = model.inflowTotal || 0;
-    const outflow = model.outflowTotal || 0;
-    const mx = Math.max(inflow, outflow, 1);
-    const up = model.net >= 0;
-    const chg = model.opening ? (model.net / Math.abs(model.opening) * 100) : null;
-    const tile = grad => ({ background: grad, borderRadius: 16, padding: '13px 16px', color: '#fff', boxShadow: '0 8px 20px rgba(20,52,34,.13)' });
-    const flows = [
-      { lab: 'เงินรับรวม', val: inflow, tag: '▲ เข้า', grad: 'linear-gradient(140deg,#22c98d,#0f9c67)' },
-      { lab: 'เงินจ่ายรวม', val: outflow, tag: '▼ ออก', grad: 'linear-gradient(140deg,#fb6b78,#e0414f)' },
-    ];
-    return (
-      <div className="cfp-hero-grid">
-        {/* ซ้าย — เงินเข้า / เงินออก / สุทธิ */}
-        <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 13 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>ภาพรวมรับ–จ่าย <span style={{ fontSize: 12, fontWeight: 500, color: C.faint }}>Cash In–Out Overview</span></div>
-            <div style={{ fontSize: 12, color: C.mut }}>{model.months.length} เดือน · เงินหมุน {cfpFmtM(inflow + outflow)}</div>
-          </div>
-          <div className="cfp-hero-flows">
-            {flows.map(f => (
-              <div key={f.lab} style={tile(f.grad)}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>▪ {f.lab}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, background: 'rgba(255,255,255,.22)', borderRadius: 99, padding: '3px 10px', whiteSpace: 'nowrap' }}>{f.tag}</span>
-                </div>
-                <div style={{ fontSize: 'clamp(19px,2.1vw,27px)', fontWeight: 800, letterSpacing: '-.6px', marginTop: 9, fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(f.val)}</div>
-                <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,.3)', marginTop: 11, overflow: 'hidden' }}><div style={{ width: (f.val / mx * 100) + '%', height: '100%', background: 'rgba(255,255,255,.92)', borderRadius: 99 }} /></div>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: up ? C.posBg : C.negBg, border: '1px solid ' + (up ? '#c3f0de' : '#ffd3d9'), borderRadius: 16, padding: '12px 16px' }}>
-            <div style={{ width: 34, height: 34, borderRadius: 12, background: up ? C.pos : C.neg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 800, flex: '0 0 auto' }}>{up ? '↑' : '↓'}</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: up ? C.pos : C.neg }}>กระแสเงินสดสุทธิ</div>
-              <div style={{ fontSize: 12, color: C.mut }}>{up ? 'รับมากกว่าจ่าย — เงินสดเพิ่มขึ้นในงวดนี้' : 'จ่ายมากกว่ารับ — เงินสดลดลงในงวดนี้'}</div>
-            </div>
-            <div style={{ marginLeft: 'auto', fontSize: 'clamp(19px,2.3vw,28px)', fontWeight: 800, color: up ? C.pos : C.neg, letterSpacing: '-.6px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{cfpFmtAcct(model.net)}</div>
-          </div>
-        </div>
-
-        {/* ขวา — เงินสดปลายงวด (ยอดชูโรง) */}
-        <div className="cfp-card cfp-hero-end" style={{ position: 'relative', overflow: 'hidden', borderRadius: 18, padding: '18px 22px', color: '#fff', background: 'linear-gradient(140deg,#34a86e 0%,#1f7d46 52%,#134d2c 100%)', boxShadow: '0 14px 36px rgba(31,120,60,.32)' }}>
-          <div aria-hidden style={{ position: 'absolute', right: -62, top: -74, width: 210, height: 210, borderRadius: '50%', background: 'rgba(255,255,255,.09)' }} />
-          <div aria-hidden style={{ position: 'absolute', right: 34, bottom: -96, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,.07)' }} />
-          <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><span>🏦</span>เงินสดปลายงวด <span style={{ fontSize: 12, fontWeight: 500, opacity: .72 }}>Ending Cash</span></div>
-            <div style={{ fontSize: 'clamp(26px,3.2vw,42px)', fontWeight: 800, letterSpacing: '-1.4px', lineHeight: 1.06, margin: '10px 0 5px', fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(model.ending)}</div>
-            <div style={{ fontSize: 12, opacity: .78 }}>คงเหลือสุทธิ ณ สิ้นงวด · หน่วย บาท</div>
-            <div style={{ height: 1, background: 'rgba(255,255,255,.22)', marginTop: 'auto', marginBottom: 0, minHeight: 1, flex: '0 0 auto' }} />
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 12 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12, opacity: .75 }}>เงินสดต้นงวด</div>
-                <div style={{ fontSize: 'clamp(15px,1.6vw,20px)', fontWeight: 700, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{cfpFmtFull(model.opening)}</div>
-              </div>
-              <div style={{ flex: 1, textAlign: 'center', fontSize: 17, opacity: .55 }}>→</div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 12, opacity: .75 }}>เปลี่ยนแปลง</div>
-                <div style={{ fontSize: 'clamp(15px,1.6vw,20px)', fontWeight: 800, marginTop: 3, whiteSpace: 'nowrap' }}>{chg == null ? '–' : (up ? '▲ ' : '▼ ') + Math.abs(chg).toFixed(1) + '%'}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  /* ป้ายกระทบยอด STM ↔ งบสรุป (ใต้การ์ด KPI) — ตรง = บรรทัดเดียว, ต่าง = บอกสาเหตุ + วิธีแก้
-   *  บรรทัดแนะนำวิธีแก้เป็น no-print/no-present (ไม่รกตอนพรีเซนต์/ปรินต์ให้ผู้บริหาร) */
-  function CfpReconBadge({ model }) {
-    const [open, setOpen] = useState(false);
-    const [pick, setPick] = useState(null);
-    const g = cfpNetGap(model);
-    if (!g) return null;
-    const wrap = ok => ({ fontSize: 12, color: ok ? C.pos : '#b8860b', marginBottom: 16, padding: '9px 14px', background: ok ? C.posBg : '#fff7e6', borderRadius: 12, fontWeight: 600, display: 'inline-block', maxWidth: '100%', lineHeight: 1.55 });
-    if (g.ok) return <div style={wrap(true)}>✓ STM ตรงกับงบสรุป — สุทธิ {cfpFmtB(model.net)}</div>;
-    const missTxt = g.miss.map(x => x.label).join(', '), extraTxt = g.extra.map(x => x.label).join(', ');
-    const full = Math.abs(g.rest) < 1;                        // เดือนที่ไม่ตรงกันอธิบายส่วนต่างได้ทั้งก้อน
-    const stmRange = cfpMonthRange(model.months), sumRange = cfpLabelRange(model.monthLabels || []);
-    const offM = (g.byMonth || []).filter(x => x.diff == null || Math.abs(x.diff) > 1);
-    const worst = offM.filter(x => x.diff != null).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))[0];
-    let head, fix;
-    if (g.miss.length && full) {
-      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — งบสรุปมีเดือน ' + missTxt + ' แต่ชีตรายการ (STM) ยังไม่มี';
-      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' ในชีตรายการ (เช่น “รวมทุกบัญชี”) แล้วอัปโหลดไฟล์ใหม่ — หรือถ้าเดือนนั้นยังไม่ปิดงบ ให้ตัดคอลัมน์เดือนนั้นออกจากงบสรุป';
-    } else if (g.miss.length) {
-      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือน ' + missTxt + ' มีในงบสรุปแต่ยังไม่มีในรายการ (อธิบายได้ ' + cfpFmtB(g.explained) + ' · เหลือต่าง ' + cfpFmtB(g.rest) + ')';
-      fix = 'แก้: ต่อรายการเดือน ' + missTxt + ' แล้วอัปโหลดใหม่ · ส่วนที่เหลือ ' + cfpFmtB(g.rest) + ' ให้กดดูรายละเอียดด้านล่าง ว่าต่างที่เดือนไหน/หมวดไหน';
-    } else if (g.extra.length) {
-      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — ชีตรายการมีเดือน ' + extraTxt + ' แต่งบสรุปยังไม่มีคอลัมน์เดือนนั้น';
-      fix = 'แก้: อัปเดตชีตงบสรุปให้ครบถึงเดือน ' + extraTxt + ' แล้วอัปโหลดใหม่' + (full ? '' : ' · เหลือต่าง ' + cfpFmtB(g.rest) + ' ให้กดดูรายละเอียดด้านล่าง');
-    } else {
-      head = '⚠ ต่าง ' + cfpFmtB(g.gap) + ' — เดือนครอบเท่ากันทั้ง 2 ฝั่ง แต่ยอดสุทธิไม่ตรง'
-        + (worst ? ' · ต่างมากสุดเดือน ' + worst.label + ' (' + cfpFmtB(worst.diff) + ')' : '')
-        + (offM.length > 1 ? ' · ไม่ตรง ' + offM.length + ' เดือน' : '');
-      fix = 'กด “ดูว่าต่างที่เดือนไหน” ด้านล่าง → กดที่เดือนเพื่อดูรายหมวด. หมวดที่ STM มีแต่ “ไม่มีบรรทัดนี้ในงบ” = หมวดที่ไม่อยู่ในผังหมวด (ยอดตกไปอยู่บล็อกท้ายงบ ไม่เข้ากิจกรรม) — แก้หมวดที่หน้ากระทบยอดกระแสเงินสด แล้วดันเดือนนั้นขึ้นมาใหม่';
-    }
-    const det = pick != null ? cfpCatGapOfMonth(model, pick, ((g.byMonth || []).find(x => x.m === pick) || {}).col) : null;
-    const thR = { padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: C.mut, whiteSpace: 'nowrap' };
-    const tdR = { padding: '4px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
-    return (
-      <div style={wrap(false)}>
-        <div>{head}</div>
-        <div style={{ fontWeight: 500, opacity: .85, marginTop: 2 }}>STM {cfpFmtB(model.net)}{stmRange ? ' (' + stmRange + ')' : ''} · งบสรุป {cfpFmtB(model.summary.net)}{sumRange ? ' (' + sumRange + ')' : ''}</div>
-        {fix && <div className="no-print no-present" style={{ fontSize: 11, fontWeight: 500, color: '#a8620a', marginTop: 4 }}>{fix}</div>}
-        {(g.byMonth || []).length > 0 &&
-          <div className="no-print no-present" style={{ marginTop: 6 }}>
-            <button onClick={() => setOpen(!open)} style={{ fontSize: 11.5, fontWeight: 700, color: '#a8620a', background: '#fff', border: '1px solid #f0d6a8', borderRadius: 8, padding: '3px 10px', cursor: 'pointer' }}>
-              {open ? '▾ ซ่อนรายละเอียด' : '🔎 ดูว่าต่างที่เดือนไหน'}
-            </button>
-          </div>}
-        {open &&
-          <div className="no-print no-present" style={{ marginTop: 8, background: '#fff', border: '1px solid #f0d6a8', borderRadius: 10, padding: '4px 2px', maxWidth: 760, overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 600, color: C.mut }}>เดือน</th>
-                  <th style={thR}>STM (รายการจริง)</th><th style={thR}>งบสรุป</th><th style={thR}>ต่าง</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(g.byMonth || []).map(x => {
-                  const bad = x.diff == null || Math.abs(x.diff) > 1;
-                  const on = pick === x.m;
-                  const out = [
-                    <tr key={'m' + x.m} onClick={() => setPick(on ? null : x.m)} title="กดดูว่าหมวดไหนทำให้ต่าง"
-                      style={{ cursor: 'pointer', background: on ? '#fffaf0' : undefined, borderTop: '1px solid ' + C.line }}>
-                      <td style={{ padding: '4px 8px', fontWeight: 600, color: C.ink }}>{(on ? '▾ ' : '▸ ') + x.label}</td>
-                      <td style={tdR}>{x.stm == null ? '— ไม่มีรายการ' : cfpFmtB(x.stm)}</td>
-                      <td style={tdR}>{x.sum == null ? '— ไม่มีคอลัมน์' : cfpFmtB(x.sum)}</td>
-                      <td style={Object.assign({}, tdR, { fontWeight: 700, color: bad ? C.neg : C.pos })}>{x.diff == null ? '?' : (bad ? cfpFmtB(x.diff) : 'ตรง')}</td>
-                    </tr>,
-                  ];
-                  if (on && det) out.push(
-                    <tr key={'d' + x.m}>
-                      <td colSpan={4} style={{ padding: '2px 8px 10px', background: '#fffdf7' }}>
-                        {det.rows.length === 0
-                          ? <div style={{ fontSize: 11.5, color: C.mut }}>เดือนนี้ยอดรายหมวดตรงกันทุกหมวด (ส่วนต่างมาจากบรรทัดท้ายงบ)</div>
-                          : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-                            <thead><tr>
-                              <th style={{ padding: '3px 8px', textAlign: 'left', color: C.mut, fontWeight: 600 }}>หมวด</th>
-                              <th style={thR}>STM</th><th style={thR}>งบ</th><th style={thR}>ต่าง</th>
-                            </tr></thead>
-                            <tbody>
-                              {det.rows.slice(0, 12).map((r, i2) => (
-                                <tr key={i2} style={{ borderTop: '1px solid ' + C.line }}>
-                                  <td style={{ padding: '3px 8px', color: C.ink }}>
-                                    {r.name}
-                                    {r.sum == null && <span style={{ color: C.neg, fontWeight: 600 }}> · ไม่มีบรรทัดนี้ในงบ</span>}
-                                    {r.stm == null && <span style={{ color: '#a8620a', fontWeight: 600 }}> · ไม่มีรายการใน STM</span>}
-                                  </td>
-                                  <td style={tdR}>{r.stm == null ? '—' : cfpFmtB(r.stm)}</td>
-                                  <td style={tdR}>{r.sum == null ? '—' : cfpFmtB(r.sum)}</td>
-                                  <td style={Object.assign({}, tdR, { fontWeight: 700 })}>{cfpFmtB(r.diff)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>}
-                        {det.outside.length > 0 &&
-                          <div style={{ fontSize: 11, color: C.mut, marginTop: 5 }}>
-                            ท้ายงบ (ไม่นับเป็นกิจกรรม): {det.outside.map(o => o.name + ' ' + cfpFmtB(o.val)).join(' · ')}
-                          </div>}
-                      </td>
-                    </tr>);
-                  return out;
-                })}
-              </tbody>
-            </table>
-          </div>}
-      </div>
-    );
-  }
-  /* การ์ดกิจกรรม (ดำเนินงาน/ลงทุน/จัดหาเงิน) — ขอบซ้ายบอกทิศทางเงิน (เขียว=รับสุทธิ แดง=จ่ายสุทธิ),
-   * แถบ + "สัดส่วน %" = น้ำหนักกิจกรรมนั้นเทียบยอดสัมบูรณ์ทั้ง 3 กิจกรรม, 🚩 = จุดเฝ้าระวัง, กดการ์ด → รายการจริง */
-  function CfpKpiAct({ k, value, share, flags, onClick }) {
-    const up = value >= 0, col = up ? C.pos : C.neg, bg = up ? C.posBg : C.negBg;
-    const pct = Math.max(0, Math.min(100, Math.round((share || 0) * 100)));
-    return (
-      <div onClick={onClick} className="cfp-card" title={'กดดูรายการ' + CFP_ACT_NAME[k]} style={{ background: C.cardSolid, border: '1px solid ' + C.line, borderLeft: '5px solid ' + col, borderRadius: 18, padding: '14px 18px', boxShadow: C.shadow, cursor: 'pointer' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 11, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flex: '0 0 auto' }}>{CFP_ACT_ICON[k]}</div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, whiteSpace: 'nowrap' }}>{CFP_ACT_SHORT[k]}</div>
-            <div style={{ fontSize: 11, color: C.faint }}>{CFP_ACT_EN[k]}</div>
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            {flags > 0 && <span title={flags + ' จุดเฝ้าระวัง'} style={{ fontSize: 11, fontWeight: 700, color: '#a8620a', background: '#fff5e6', border: '1px solid #f0d6a8', borderRadius: 99, padding: '2px 8px', whiteSpace: 'nowrap' }}>🚩 {flags}</span>}
-            <span style={{ fontSize: 11, fontWeight: 700, color: col, background: bg, borderRadius: 99, padding: '3px 10px', whiteSpace: 'nowrap' }}>{up ? 'รับสุทธิ' : 'จ่ายสุทธิ'}</span>
-          </div>
-        </div>
-        <div style={{ fontSize: 'clamp(19px,2.1vw,27px)', fontWeight: 800, color: col, letterSpacing: '-.6px', margin: '12px 0 10px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfpFmtAcct(value)}</div>
-        <div style={{ height: 6, borderRadius: 99, background: C.soft, overflow: 'hidden' }}><div style={{ width: pct + '%', height: '100%', background: col, borderRadius: 99 }} /></div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8, fontSize: 11, color: C.mut }}>
-          <span>{CFP_ACT_DESC[k]}</span><span style={{ whiteSpace: 'nowrap' }}>สัดส่วน {pct}%</span>
-        </div>
-      </div>
-    );
-  }
-
-  /* ---------- Top 5 รับ – Top 5 จ่าย (แทนบล็อก Executive Insights เดิม) ----------
-   *  แบ่ง 2 ฝั่งในสไลด์เดียว: "เงินก้อนใหญ่เข้ามาจากไหน" กับ "ออกไปทางไหน"
-   *  ใช้ชุดรายการเดียวกับที่คิดกระแสเงินสดสุทธิ (ตัดโอนระหว่างบัญชี/อื่นๆ ออก)
-   *  → ตัวเลขจึงตรงกับการ์ดเงินรับรวม/เงินจ่ายรวมด้านบนเสมอ */
-  function CfpTopFlows({ model, onAll }) {
-    const base = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other');
-    const sides = [
-      { key: 'in', title: 'Top 5 รายการรับ', en: 'Top Cash In', icon: '📥', col: C.pos, bg: C.posBg, total: model.inflowTotal || 0, list: base.filter(t => t.flow > 0).sort((a, b) => b.flow - a.flow) },
-      { key: 'out', title: 'Top 5 รายการจ่าย', en: 'Top Cash Out', icon: '📤', col: C.neg, bg: C.negBg, total: model.outflowTotal || 0, list: base.filter(t => t.flow < 0).sort((a, b) => a.flow - b.flow) },
-    ];
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
-        {sides.map(s => {
-          const top = s.list.slice(0, 5);
-          const mx = Math.max.apply(null, top.map(t => Math.abs(t.flow)).concat([1]));
-          const topSum = top.reduce((a, t) => a + Math.abs(t.flow), 0);
-          return (
-            <div key={s.key} className="cfp-card" style={{ ...cfpCard, marginBottom: 0, borderTop: '4px solid ' + s.col }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 26, height: 26, borderRadius: 9, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>{s.icon}</span>
-                  {s.title} <span style={{ fontSize: 11, fontWeight: 500, color: C.faint }}>{s.en}</span>
-                </span>
-                <span onClick={() => onAll(s.key)} title={'ดูรายการ' + (s.key === 'in' ? 'รับ' : 'จ่าย') + 'ทั้งหมด'} style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: s.col, background: s.bg, borderRadius: 99, padding: '4px 11px', whiteSpace: 'nowrap' }}>รวม {cfpFmtM(s.total)} · ดูทั้งหมด ›</span>
-              </div>
-              {top.map((t, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: i ? '1px solid ' + C.line : 'none' }}>
-                  <span style={{ width: 21, height: 21, borderRadius: 7, background: s.bg, color: s.col, fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>{i + 1}</span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div title={t.note || t.category} style={{ fontSize: 13, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.note || t.category}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                      <span style={{ fontSize: 11, color: C.faint, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</span>
-                      <CfpBankPill acct={t.account} />
-                      <CfpTag k={t.actKey} />
-                      <span style={{ flex: 1, minWidth: 20, height: 4, borderRadius: 99, background: C.soft, overflow: 'hidden' }}><span style={{ display: 'block', width: (Math.abs(t.flow) / mx * 100) + '%', height: '100%', background: s.col, borderRadius: 99 }} /></span>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: s.col, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{cfpFmtB(t.flow)}</div>
-                </div>
-              ))}
-              {!top.length && <div style={{ fontSize: 12, color: C.faint, padding: '10px 0' }}>ไม่มีรายการ</div>}
-              {top.length > 0 && s.total > 0 && (
-                <div style={{ fontSize: 11, color: C.mut, borderTop: '1px solid ' + C.line, marginTop: 4, paddingTop: 8 }}>
-                  5 อันดับนี้ = <b style={{ color: s.col }}>{Math.round(topSum / s.total * 100)}%</b> ของยอด{s.key === 'in' ? 'รับ' : 'จ่าย'}ทั้งงวด · จากทั้งหมด {s.list.length} รายการ
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  /* ---------- "เงินสดนี้ใช้ได้จริงเท่าไร" — แยกตามบัญชี (5 ประเภท) + เพิ่ม-ลดรายเดือนรายบัญชี ----------
-   *  จัดประเภทแต่ละบัญชี (สามารถใช้ได้/ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD) → stored.acctTypes {accountName:typeKey}
-   *  (เก็บเฉพาะที่ต่างจาก default). "ใช้ได้จริง"=usable เท่านั้น. ยอดรายบัญชีจาก STM (Σflow ต่อบัญชี reconcile).
-   *  การ์ดย่อ → กดยอด/ชิปประเภท → modal ที่มา (รายบัญชี+รายเดือน). viewer อ่านอย่างเดียว.
-   *  ★ persist ไม่ merge ฟิลด์เก่าเอง → saveCatMap/onUpload ต้องส่ง acctTypes มาด้วยทุกครั้ง. */
-  const cfpCard = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
-  function cfpDeltaM(v) { if (!v) return '–'; return (v < 0 ? '-' : '+') + (Math.abs(v) / 1e6).toFixed(2) + 'M'; }   // ยอด Δ สั้นในตาราง
-  // 5 ประเภทบัญชี — "ใช้ได้จริง" = 'usable' เท่านั้น; ที่เหลือ = เงินที่ติดเงื่อนไข/ใช้ไม่ได้อิสระ
-  const CFP_ACCT_TYPES = [
-    { key: 'usable', label: 'สามารถใช้ได้', short: 'ใช้ได้', icon: '✅', color: C.pos },
-    { key: 'guarantee', label: 'วงเงินค้ำประกัน (ติดภาระ)', short: 'ค้ำประกัน', icon: '🔒', color: '#e08a3c' },
-    { key: 'investor', label: 'เงินนักลงทุน', short: 'นักลงทุน', icon: '💼', color: '#9b7bff' },
-    { key: 'joint', label: 'บัญชีร่วม', short: 'ร่วม', icon: '👥', color: '#1f6fb8' },
-    { key: 'od', label: 'OD (เบิกเกินบัญชี)', short: 'OD', icon: '➖', color: '#e5484d' },
+  /* ═════════════════════════════════════════════════════════════════════
+   * ส่วนที่ 2 — หน้าจอชุดเดียวกับหน้า "งบกระแสเงินสด" ของ Water POG (ต้นทาง = execdash ของเว็บ Benya)
+   * ─────────────────────────────────────────────────────────────────────
+   *  ผู้ใช้ขอ (2026-11-25) "ปรับแก้รูปแบบหน้างบกระแสเงินสดให้เหมือนของป๊อก ยกเว้นเรื่องสี ขอโทนสีเหมือนเดิม"
+   *  โค้ดวาดหน้า (ed*) ยกมาจากไฟล์ของ POG (สร้าง HTML เป็นข้อความ + onclick) — ★ POG = จุดที่ POG แก้จาก Benya,
+   *  ★ BIO = จุดที่ BIO ต่างจาก POG (สีเขียว BIO · ชื่อบริษัท · ข้อความอัปไฟล์ · ซ่อนคอลัมน์รหัส · cfpToEd)
+   *  ข้อมูลมาจากตัวอ่าน BIO (ส่วนที่ 1) → แปลงเป็นรูปข้อมูลของหน้าด้วย cfpToEd
+   *  ★ ปุ่ม/ลิงก์ในหน้าเรียกผ่าน window.CfpEd.<ชื่อฟังก์ชัน> (ชื่อเดียวที่ออกไป global)
+   *  ★ BIO: โทนสี = เขียว BIO ของหน้าเดิม (รับ #15c486 · จ่าย #fb5e6d · หลัก #2e8b4a · กิจกรรม เขียว/ส้ม/ม่วง)
+   * ═════════════════════════════════════════════════════════════════════ */
+  const CED_CHART_SRC = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js';
+  const CED_CHART_SRI = 'sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG';
+  const CED_UI_LS = 'bio-cfp-ed-ui';
+  // ค่าที่โค้ดวาดหน้าอ่าน (state.company / COMPANIES / TOOLS) — id 'mbark' เหลือไว้ให้โค้ดเดิมทำงานเหมือน POG (สีจริงกำหนดใน ED_COLORS/CSS)
+  const state = { company: 'mbark' };
+  const COMPANIES = [{ id: 'mbark', name: 'BIOAXEL', fullName: 'บริษัท ไบโอแอ็กซ์เซล จำกัด', brand: 'BIOAXEL Co., Ltd.',
+    logo: 'bioaxel_logo.png', logoIcon: 'bioaxel_logo.png', gradient: ['#1f7d46', '#34a86e'] }];
+  const TOOLS = [{ id: 'execdash', name: 'งบกระแสเงินสด' }];
+  // ★ BIO: โทนสีเดิมของหน้า BIO (ผู้ใช้ขอ 2026-11-25 "ยกเว้นเรื่องสี ขอโทนสีเหมือนเดิม") — รับ = เขียว · จ่าย = แดงชมพู · กิจกรรม เขียว/ส้ม/ม่วง
+  const ED_COLORS = { brand: '#2e8b4a', brand2: '#a3d4b3', bg: '#eef6f1', in: '#15c486', out: '#fb5e6d', neutral: '#94A3B8', op: '#2e8b4a', inv: '#e08a3c', fin: '#9b7bff' };
+  const ED_TABS = [
+    { id: 'summary', l: 'Executive Summary' },
+    { id: 'category', l: 'Category Analysis' },
+    { id: 'banks', l: 'Bank Accounts' },
+    { id: 'explorer', l: 'Transaction Explorer' },
+    { id: 'stmt', l: 'งบกระแสเงินสด' },
   ];
-  function cfpTypeMeta(k) { for (let i = 0; i < CFP_ACCT_TYPES.length; i++) if (CFP_ACCT_TYPES[i].key === k) return CFP_ACCT_TYPES[i]; return CFP_ACCT_TYPES[0]; }
-  // ค่าเริ่มต้น BIOAXEL (จับด้วยเลขท้ายบัญชี 4 หลัก) — แก้ทับได้ผ่าน ✏️ จัดประเภทบัญชี (sync ทั้งทีม)
-  const CFP_ACCT_TYPE_DEF = {
-    '7693': 'investor',   // SCB 433-107769-3 เงินนักลงทุน
-    '4839': 'usable',     // SCB 136-268483-9
-    '5981': 'usable',     // SCB 422-058598-1
-    '8406': 'guarantee',  // SCB 218-110840-6 วงเงินค้ำประกัน (ติดภาระ)
-    '7651': 'joint',      // SCB 433-107765-1 บัญชีร่วม
-    '1968': 'usable',     // KBANK 145-2-83196-8
-    '1272': 'usable',     // BBL 451-3-501272
+  const CED = { host: null, target: null, canEdit: false, canSync: false, uploading: false, shareBusy: false, era: 'auto', printAll: false, hooks: {}, ui: null };
+  CED.ui = (function () {
+    const u = { data: null, tab: 'summary', monthFilter: 'all', explorer: { q: '', acct: 'all', act: 'all', dir: 'all', sort: 'date', desc: true }, stmtAcct: 'all', stmtTall: false, pdfOrient: 'landscape' };
+    try {
+      const s = JSON.parse(localStorage.getItem(CED_UI_LS) || 'null');
+      if (s) {
+        ['tab', 'monthFilter', 'stmtAcct', 'pdfOrient'].forEach(k => { if (typeof s[k] === 'string') u[k] = s[k]; });
+        u.stmtTall = !!s.stmtTall;
+        if (s.explorer && typeof s.explorer === 'object') Object.assign(u.explorer, s.explorer);
+      }
+    } catch (e) { }
+    return u;
+  })();
+  function edState() { return CED.ui; }
+  function edSave() {
+    try { const u = CED.ui; localStorage.setItem(CED_UI_LS, JSON.stringify({ tab: u.tab, monthFilter: u.monthFilter, explorer: u.explorer, stmtAcct: u.stmtAcct, stmtTall: u.stmtTall, pdfOrient: u.pdfOrient })); } catch (e) { }
+  }
+  function edContentEl() { return CED.target || document.getElementById('edContent'); }
+  function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function stamp() { const d = new Date(), p = n => String(n).padStart(2, '0'); return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()); }
+  function download(content, filename, mime) {
+    const url = URL.createObjectURL(new Blob([content], { type: mime || 'application/octet-stream' }));
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+  // ไอคอนปุ่ม (Benya ใช้ lucide — POG ไม่มี lucide จึงฝังเส้น SVG ชุดเดียวกันเอง)
+  const ED_ICONS = {
+    monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+    printer: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/>',
+    'file-text': '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    'rotate-ccw': '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+    'refresh-cw': '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
   };
-  function CfpCashUsable({ model, acctTypes, canEdit, onSave }) {
-    const [editing, setEditing] = useState(false);
-    const [draft, setDraft] = useState(null);
-    const [drill, setDrill] = useState(null);   // null | 'all' | <typeKey> → เปิดโมดัล "ยอดนี้มาจากบัญชีไหน"
-    const accts = (model.accountInfo && model.accountInfo.length) ? model.accountInfo : [];
-    const typeMap = (acctTypes && typeof acctTypes === 'object') ? acctTypes : {};
-    const active = (editing && draft) ? draft : typeMap;
-    const defOf = a => CFP_ACCT_TYPE_DEF[a.last4] || 'usable';
-    const typeOf = a => (active[a.name] != null ? active[a.name] : defOf(a));
-    const modalOpen = editing || drill !== null;
-    useEffect(() => {
-      if (!modalOpen) return;
-      const h = e => { if (e.key === 'Escape') { setEditing(false); setDrill(null); } };
-      window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
-    }, [modalOpen]);
-
-    // ----- ยังไม่มียอดรายบัญชี -----
-    if (!model.hasAcctBalances || !accts.length) {
-      if (!canEdit) return null;
-      return (
-        <div className="cfp-card no-print no-present" style={{ ...cfpCard, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: 'linear-gradient(135deg,rgba(46,139,74,.07),rgba(31,110,58,.10))' }}>
-          <div style={{ fontSize: 13, color: C.ink, flex: 1 }}>💡 <b>แยกเงินตามประเภทบัญชี</b> — อัปโหลดไฟล์ STM <b>อีกครั้ง 1 รอบ</b> เพื่อดึงยอดรายบัญชี จากนั้นจะจัดประเภทแต่ละบัญชี (ใช้ได้/ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD) + เห็นเพิ่ม-ลดรายเดือนรายบัญชีได้</div>
-        </div>
-      );
-    }
-
-    const total = accts.reduce((s, a) => s + a.ending, 0);
-    const pct = v => total > 0 ? Math.round(v / total * 100) : 0;
-    const months = model.monthsAll || [];
-    const byType = CFP_ACCT_TYPES.map(t => {
-      const list = accts.filter(a => typeOf(a) === t.key);
-      return { ...t, amount: list.reduce((s, a) => s + a.ending, 0), count: list.length };
-    }).filter(t => t.count > 0);
-    const usableTotal = accts.filter(a => typeOf(a) === 'usable').reduce((s, a) => s + a.ending, 0);
-    const restrictedTotal = total - usableTotal;
-    const unclassified = byType.length <= 1 && byType[0] && byType[0].key === 'usable';
-
-    function openDrill(scope) { setEditing(false); setDraft(null); setDrill(scope); }
-    function startEdit() { const d = {}; accts.forEach(a => { d[a.name] = typeOf(a); }); setDraft(d); setDrill(null); setEditing(true); }
-    function setType(name, t) { setDraft(d => ({ ...d, [name]: t })); }
-    function commit() { const out = {}; accts.forEach(a => { const t = draft[a.name] || 'usable'; if (t !== defOf(a)) out[a.name] = t; }); onSave(out); setEditing(false); }
-    function closeModal() { setEditing(false); setDrill(null); }
-
-    const typeRank = {}; CFP_ACCT_TYPES.forEach((t, i) => { typeRank[t.key] = t.key === 'usable' ? 99 : i; });
-    const rankOf = a => { const r = typeRank[typeOf(a)]; return r != null ? r : 50; };
-    const ordered = accts.slice().sort((a, b) => { const ra = rankOf(a), rb = rankOf(b); return ra !== rb ? ra - rb : b.ending - a.ending; });
-    const cell = { padding: '6px 8px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
-    const th = { padding: '7px 8px', fontWeight: 700, fontSize: 11, color: C.mut, whiteSpace: 'nowrap', textAlign: 'right', position: 'sticky', top: 0, background: C.cardSolid, zIndex: 1 };
-    const TypeBadge = ({ k }) => { const m = cfpTypeMeta(k); return <span title={m.label} style={{ background: m.color + '1f', color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{m.icon} {m.short}</span>; };
-    const clk = { cursor: 'pointer', borderBottom: '1.5px dotted currentColor' };
-    const selSty = { border: '1px solid ' + C.line, borderRadius: 8, padding: '3px 6px', fontSize: 11, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' };
-
-    const shown = (editing || drill === 'all' || drill == null) ? ordered : ordered.filter(a => typeOf(a) === drill);
-    const shownTotal = shown.reduce((s, a) => s + a.ending, 0);
-    const dMeta = (drill && drill !== 'all') ? cfpTypeMeta(drill) : null;
-    const modalTitle = editing ? '🏷️ จัดประเภทบัญชี' : dMeta ? (dMeta.icon + ' ' + dMeta.label + ' — มาจากบัญชีไหนบ้าง') : '💰 ยอดเงินสด — ทุกบัญชี';
-
-    return (
-      <React.Fragment>
-        {/* การ์ดสรุป (ย่อ) — กดที่ยอด/ชิปประเภท เพื่อดูว่ามาจากบัญชีไหน */}
-        <div className="cfp-card" style={cfpCard}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-            <span style={{ fontSize: 15, fontWeight: 700 }}>💰 เงินสดนี้ “ใช้ได้จริง” เท่าไร — แยกตามบัญชี</span>
-            {canEdit && <button className="no-print no-present" onClick={startEdit} style={{ border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 9, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✏️ จัดประเภทบัญชี</button>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-            <span onClick={() => openDrill('all')} title="กดดูทุกบัญชี" style={{ fontSize: 28, fontWeight: 800, color: C.ink, letterSpacing: '-.5px', cursor: 'pointer' }}>{cfpFmtM(total)}</span>
-            <span style={{ fontSize: 13, color: C.mut }}>เงินสดรวมทุกบัญชี — <b onClick={() => openDrill('usable')} title="กดดูว่ามาจากบัญชีไหน" style={{ color: C.pos, ...clk }}>ใช้ได้จริง {cfpFmtM(usableTotal)} ({pct(usableTotal)}%)</b>{restrictedTotal > 0 ? <span> · ติดเงื่อนไข {cfpFmtM(restrictedTotal)} ({pct(restrictedTotal)}%)</span> : null}</span>
-          </div>
-          <div style={{ display: 'flex', height: 26, borderRadius: 8, overflow: 'hidden', background: C.soft, marginBottom: 10 }}>
-            {byType.map(t => <div key={t.key} onClick={() => openDrill(t.key)} title={t.icon + ' ' + t.label + ' · ' + cfpFmtB(t.amount) + ' (กดดูที่มา)'} style={{ width: (total > 0 ? t.amount / total * 100 : 0) + '%', background: t.color, minWidth: 2, cursor: 'pointer' }} />)}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {byType.map(t => (
-              <button key={t.key} onClick={() => openDrill(t.key)} title="กดดูว่ามาจากบัญชีไหน + เพิ่ม-ลดรายเดือน" style={{ display: 'flex', alignItems: 'center', gap: 7, border: '1px solid ' + C.line, background: '#fff', borderRadius: 20, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 3, background: t.color, flex: '0 0 auto' }} />
-                <b style={{ color: C.ink }}>{t.icon} {t.label}</b>
-                <span style={{ color: C.mut, fontVariantNumeric: 'tabular-nums' }}>{cfpFmtM(t.amount)} · {pct(t.amount)}% · {t.count} บัญชี</span>
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>กดที่ยอด หรือชิปประเภท เพื่อดูว่ามาจากบัญชีไหน + เพิ่ม-ลดรายเดือน · ทั้งหมด {accts.length} บัญชี</div>
-          {unclassified && canEdit && <div className="no-print no-present" style={{ fontSize: 12, color: '#a8620a', background: '#fff7e6', borderRadius: 9, padding: '7px 12px', marginTop: 8 }}>ยังไม่ได้จัดประเภทบัญชี — กด ✏️ จัดประเภทบัญชี เพื่อระบุ ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD (ตอนนี้นับเป็นใช้ได้ทั้งหมด)</div>}
-        </div>
-
-        {/* โมดัล: ที่มาของยอด (ราย​บัญชี + เพิ่ม-ลดรายเดือน) / โหมดจัดประเภท */}
-        {modalOpen && (
-          <div className="no-print no-present" onClick={closeModal} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,45,.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1300, overflowY: 'auto' }}>
-            <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,.3)', width: 'min(940px,100%)', padding: '18px 20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: C.ink }}>{modalTitle}</div>
-                  <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>{shown.length} บัญชี · รวม {cfpFmtM(shownTotal)}{(!editing && dMeta) ? ' (' + pct(shownTotal) + '% ของเงินสดทั้งหมด)' : ''}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {editing
-                    ? <React.Fragment>
-                        <button onClick={closeModal} style={{ border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, padding: '7px 14px', fontSize: 13, cursor: 'pointer' }}>ยกเลิก</button>
-                        <button onClick={commit} style={{ border: 0, background: C.primary, color: '#fff', borderRadius: 9, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>บันทึก</button>
-                      </React.Fragment>
-                    : <React.Fragment>
-                        {canEdit && <button onClick={startEdit} style={{ border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 9, padding: '7px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✏️ จัดประเภท</button>}
-                        <button onClick={closeModal} title="ปิด" style={{ border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 9, width: 32, height: 32, fontSize: 16, cursor: 'pointer' }}>✕</button>
-                      </React.Fragment>}
-                </div>
-              </div>
-              {editing && <div style={{ fontSize: 12, color: C.primaryD, background: C.soft, borderRadius: 9, padding: '7px 12px', marginBottom: 10 }}>เลือกประเภทของแต่ละบัญชีจากเมนู (สามารถใช้ได้ / ค้ำประกัน / นักลงทุน / บัญชีร่วม / OD) แล้วกดบันทึก</div>}
-
-              <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '64vh', border: '1px solid ' + C.line, borderRadius: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 540 + months.length * 80 }}>
-                  <thead><tr>
-                    <th style={{ ...th, textAlign: 'left' }}>บัญชี</th>
-                    <th style={{ ...th, textAlign: 'center' }}>ประเภท</th>
-                    <th style={th}>ต้นงวด</th>
-                    {months.map(m => <th key={m} style={th}>{CFP_MONTHS[m] || m}</th>)}
-                    <th style={{ ...th, color: C.primaryD }}>ปลายงวด</th>
-                  </tr></thead>
-                  <tbody>
-                    {shown.map(a => {
-                      const k = typeOf(a); const m = cfpTypeMeta(k);
-                      return (
-                        <tr key={a.name} style={{ borderTop: '1px solid ' + C.line, background: k === 'usable' ? 'transparent' : (m.color + '12') }}>
-                          <td style={{ ...cell, textAlign: 'left' }}><CfpBankPill acct={a.name} /> <span style={{ color: C.mut, fontSize: 11 }}>···{a.last4 || '—'}</span></td>
-                          <td style={{ ...cell, textAlign: 'center' }}>{editing
-                            ? <select value={k} onChange={e => setType(a.name, e.target.value)} style={selSty}>{CFP_ACCT_TYPES.map(t => <option key={t.key} value={t.key}>{t.icon + ' ' + t.label}</option>)}</select>
-                            : <TypeBadge k={k} />}</td>
-                          <td style={{ ...cell, textAlign: 'right', color: C.mut }}>{cfpFmtM(a.opening)}</td>
-                          {months.map(mn => { const v = a.byMonth[mn] || 0; return <td key={mn} style={{ ...cell, textAlign: 'right', color: v > 0 ? C.pos : (v < 0 ? C.neg : C.faint) }}>{cfpDeltaM(v)}</td>; })}
-                          <td style={{ ...cell, textAlign: 'right', fontWeight: 800, color: a.ending < 0 ? C.neg : C.ink }}>{cfpFmtM(a.ending)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot><tr style={{ borderTop: '2px solid ' + C.line, fontWeight: 800, background: C.soft }}>
-                    <td style={{ ...cell, textAlign: 'left', position: 'sticky', bottom: 0, background: C.soft }}>รวม</td>
-                    <td style={{ position: 'sticky', bottom: 0, background: C.soft }} />
-                    <td style={{ ...cell, textAlign: 'right', color: C.mut, position: 'sticky', bottom: 0, background: C.soft }}>{cfpFmtM(shown.reduce((s, a) => s + a.opening, 0))}</td>
-                    {months.map(m => { const v = shown.reduce((s, a) => s + (a.byMonth[m] || 0), 0); return <td key={m} style={{ ...cell, textAlign: 'right', color: v > 0 ? C.pos : (v < 0 ? C.neg : C.faint), position: 'sticky', bottom: 0, background: C.soft }}>{cfpDeltaM(v)}</td>; })}
-                    <td style={{ ...cell, textAlign: 'right', color: C.primaryD, position: 'sticky', bottom: 0, background: C.soft }}>{cfpFmtM(shownTotal)}</td>
-                  </tr></tfoot>
-                </table>
-              </div>
-              <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>ต้นงวด = ยอดยกมารายบัญชี · ตัวเลขรายเดือน = เพิ่ม/ลดสุทธิของบัญชีนั้นในเดือนนั้น (รวมเงินโอนระหว่างบัญชี) · ปลายงวด = ยอดคงเหลือล่าสุด</div>
-            </div>
-          </div>
-        )}
-      </React.Fragment>
-    );
-  }
-
-  /* ---------- SVG: waterfall ---------- */
-  function CfpWaterfall({ model, onPick }) {
-    const W = 720, H = 300, padX = 46, top = 30, baseY = 250;
-    const cols = [
-      { key: null, name: 'ต้นงวด', delta: model.opening, abs: true }, { key: 'op', name: 'ดำเนินงาน', delta: model.acts.op.net },
-      { key: 'inv', name: 'ลงทุน', delta: model.acts.inv.net }, { key: 'fin', name: 'จัดหาเงิน', delta: model.acts.fin.net },
-      { key: null, name: 'ปลายงวด', delta: model.ending, abs: true },
-    ];
-    const segs = [{ from: 0, to: model.opening }]; let cum = model.opening;
-    [model.acts.op.net, model.acts.inv.net, model.acts.fin.net].forEach(d => { const from = cum; cum += d; segs.push({ from, to: cum }); });
-    segs.push({ from: 0, to: model.ending });
-    const peak = Math.max(model.opening, model.ending, ...segs.map(s => Math.max(s.from, s.to))) * 1.1 || 1;
-    const y = v => baseY - (v / peak) * (baseY - top);
-    const slot = (W - padX * 2) / cols.length, bw = Math.min(74, slot * 0.5);
-    return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="waterfall กระแสเงินสด">
-        <line x1={padX - 8} y1={baseY} x2={W - padX + 8} y2={baseY} stroke={C.line} />
-        {cols.map((c, i) => {
-          const cx = padX + slot * i + slot / 2, s = segs[i];
-          const yTop = y(Math.max(s.from, s.to)), h = Math.max(2, y(Math.min(s.from, s.to)) - yTop);
-          const fill = c.abs ? C.primary : (c.delta >= 0 ? C.pos : C.neg), clickable = !!c.key;
-          return (
-            <g key={i} style={{ cursor: clickable ? 'pointer' : 'default' }} onClick={() => clickable && onPick && onPick(c.key)}>
-              {i > 0 && <line x1={padX + slot * (i - 1) + slot / 2 + bw / 2} y1={y(segs[i - 1].to)} x2={cx - bw / 2} y2={y(c.abs ? c.delta : s.from)} stroke={C.faint} strokeDasharray="3 3" />}
-              <rect x={cx - bw / 2} y={yTop} width={bw} height={h} rx="5" fill={fill} opacity={c.abs ? 0.92 : 0.96} />
-              <text x={cx} y={yTop - 7} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.abs ? C.primaryD : fill}>{c.abs ? cfpFmtM(c.delta) : cfpFmtSigned(c.delta)}</text>
-              <text x={cx} y={baseY + 18} textAnchor="middle" fontSize="12" fill={C.mut}>{c.name}</text>
-              {clickable && <text x={cx} y={baseY + 33} textAnchor="middle" fontSize="10" fill={C.faint}>กดดู ›</text>}
-            </g>
-          );
-        })}
-      </svg>
-    );
-  }
-
-  /* ---------- SVG: monthly grouped bars (up/down by activity) ---------- */
-    function CfpMonthly({ model, onPick }) {
-    const mo = model.monthly; if (!mo.length) return null;
-    const acts = ['op', 'inv', 'fin'];
-    // ★ แท่งกลุ่มตามกิจกรรม "ขึ้น/ลง" จากเส้นศูนย์ — บวกขึ้น (เข้ม) · ลบลง (จาง)
-    //   ค่ากำกับ: บวกบนหัวแท่ง · ลบใต้แท่ง. จัดกลุ่มรายเดือน (พื้นสลับเฉดแยกเดือน).
-    const W = 760, H = 320, padX = 20, padTop = 40, padBot = 56;
-    const plotH = H - padTop - padBot, baseY = H - padBot, zeroY = padTop + plotH / 2, half = plotH / 2 - 12;
-    const maxAbs = Math.max.apply(null, mo.map(d => Math.max(Math.abs(d.op), Math.abs(d.inv), Math.abs(d.fin))).concat([1]));
-    const slot = (W - padX * 2) / mo.length, cx = i => padX + slot * i + slot / 2;
-    const gb = Math.min(34, (slot * 0.66) / 3), gap = Math.min(9, gb * 0.3);
-    const groupW = gb * 3 + gap * 2;
-    const barH = v => Math.max(2, Math.abs(v) / maxAbs * half);
-    const lbl = v => (v >= 0 ? '+' : '-') + (Math.abs(v) / 1e6).toFixed(1) + 'M';
-    return (
-      <svg viewBox={'0 0 ' + W + ' ' + H} width="100%" style={{ display: 'block' }} role="img" aria-label="กระแสเงินสดรายเดือน แยกตามกิจกรรม (แท่งขึ้น/ลง)">
-        {mo.map((d, i) => {
-          const gx = cx(i) - groupW / 2;
-          return (
-            <g key={'g' + i} style={{ cursor: 'pointer' }} onClick={() => onPick && onPick(d.m)}>
-              <rect x={cx(i) - slot / 2 + 3} y={padTop - 8} width={slot - 6} height={plotH + 8} rx="9" fill={i % 2 ? 'rgba(46,139,74,0.045)' : 'transparent'} />
-              {acts.map((k, j) => {
-                const v = d[k] || 0; const h = barH(v); const bx = gx + j * (gb + gap); const neg = v < 0;
-                const by = neg ? zeroY : zeroY - h, ty = neg ? zeroY + h + 12 : zeroY - h - 5;
-                return (
-                  <g key={k}>
-                    <rect x={bx} y={by} width={gb} height={h} rx="3" fill={ACT_COLOR[k]} opacity={neg ? 0.55 : 0.95}><title>{CFP_ACT_SHORT[k] + ' ' + cfpFmtM(v)}</title></rect>
-                    <text x={bx + gb / 2} y={ty} textAnchor="middle" fontSize="10" fontWeight="700" fill={neg ? C.neg : ACT_COLOR[k]}>{lbl(v)}</text>
-                  </g>
-                );
-              })}
-              <text x={cx(i)} y={baseY + 22} textAnchor="middle" fontSize="12" fontWeight="800" fill={C.ink}>{d.label}</text>
-              <text x={cx(i)} y={baseY + 37} textAnchor="middle" fontSize="11" fontWeight="700" fill={d.net < 0 ? C.neg : C.pos}>สุทธิ {cfpFmtSigned(d.net)}</text>
-            </g>
-          );
-        })}
-        {/* เส้นศูนย์ (zero line) เต็มความกว้าง */}
-        <line x1={padX} y1={zeroY} x2={W - padX} y2={zeroY} stroke={C.faint} strokeWidth="1.2" />
-      </svg>
-    );
-  }
-
-  function CfpBar({ amt, max }) { const w = Math.max(2, Math.round(Math.abs(amt) / (max || 1) * 100)); return <span style={{ display: 'inline-block', height: 7, width: w + '%', background: amt < 0 ? C.neg : C.pos, borderRadius: 2, verticalAlign: 'middle' }} />; }
-
-  /* ---------- statement table ---------- */
-  function CfpStatementTable({ model, onPick }) {
-    const rows = model.stmt;
-    const [collapsed, setCollapsed] = useState({});   // { groupRowIndex: true } = ย่อกลุ่มนั้น
-    if (!rows || !rows.length) return <div style={{ fontSize: 13, color: C.faint, padding: '6px 0' }}>อัปโหลดไฟล์ “งบกระแสเงินสดรายเดือน” เพิ่ม เพื่อแสดงตารางงบ</div>;
-    const months = (model.monthLabels && model.monthLabels.length) ? model.monthLabels : model.months.map(m => CFP_MONTHS[m]);
-    const monthNumByIdx = i => model.months[i] || (i + 1);
-    const toggle = i => setCollapsed(c => Object.assign({}, c, { [i]: !c[i] }));
-    // หากลุ่มเจ้าของของแต่ละรายการย่อย (group ครอบ leaf จนเจอแถวที่ไม่ใช่ leaf) → ใช้ย่อ/ขยาย
-    let cur = -1; const ownerOf = rows.map((r, i) => { if (r.type === 'group') { cur = i; return -1; } if (r.type === 'leaf') return cur; cur = -1; return -1; });
-    const anyGroup = rows.some(r => r.type === 'group');
-    // ผลรวมของรายการย่อยในแต่ละกลุ่ม (order-based) → ใช้เดาฝั่งรับ/จ่ายของหัวกลุ่มที่ชื่อไม่มีคำว่า รับ/จ่าย
-    const grpSum = {}; { let g = -1; rows.forEach((r, i) => { if (r.type === 'group') { g = i; grpSum[i] = 0; } else if (r.type === 'leaf' && g >= 0) { grpSum[g] += (r.total || 0); } else if (r.type !== 'leaf') { g = -1; } }); }
-    // ฝั่ง รับ/จ่าย: ดูจากชื่อก่อน (รับ/จ่าย) ไม่งั้นใช้เครื่องหมายยอด (ลบ=จ่าย บวก=รับ) → แถบสีซ้าย เขียว=รับ แดง=จ่าย
-    const sideOf = (r, ri) => { const l = String(r.label || ''); if (/จ่าย/.test(l)) return 'out'; if (/รับ/.test(l)) return 'in'; let t = r.total; if (r.type === 'group') t = grpSum[ri]; return t < 0 ? 'out' : t > 0 ? 'in' : null; };
-    const acct = v => { if (!v) return <span style={{ color: C.faint }}>-</span>; const neg = v < 0; return <span style={{ color: neg ? C.neg : C.ink }}>{neg ? '(' + cfpFmtPlain(v) + ')' : cfpFmtPlain(v)}</span>; };
-    const th = { padding: '8px 8px', fontWeight: 700, color: C.mut, whiteSpace: 'nowrap', borderBottom: '2px solid ' + C.line, fontSize: 12, position: 'sticky', top: 0, background: '#f4faf6' };
-    return (
-      <div className="cfp-stmt" style={{ overflowX: 'auto', maxHeight: '76vh', overflowY: 'auto', borderRadius: 12, border: '1px solid ' + C.line }}>
-        {anyGroup && <div className="no-print" style={{ display: 'flex', gap: 8, padding: '7px 10px', borderBottom: '1px solid ' + C.line, background: '#f4faf6', position: 'sticky', top: 0, zIndex: 4 }}>
-          <button onClick={() => { const c = {}; rows.forEach((r, i) => { if (r.type === 'group') c[i] = true; }); setCollapsed(c); }} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 10px' }}>▸ ย่อทุกกลุ่ม</button>
-          <button onClick={() => setCollapsed({})} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, border: '1px solid ' + C.line, background: '#fff', color: C.mut, borderRadius: 8, padding: '3px 10px' }}>▾ กางทุกกลุ่ม</button>
-        </div>}
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
-          <thead><tr>
-            <th style={{ ...th, textAlign: 'left', left: 0, zIndex: 3 }}>รายการ</th>
-            {months.map((m, i) => <th key={i} style={{ ...th, textAlign: 'right' }}>{m}</th>)}
-            <th style={{ ...th, textAlign: 'right' }}>รวม</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r, ri) => {
-              const isLeaf = r.type === 'leaf', isSection = r.type === 'section', isNet = r.type === 'net', isGrand = r.type === 'grand', isSub = r.type === 'subtotal', isGroup = r.type === 'group';
-              if (isLeaf && ownerOf[ri] >= 0 && collapsed[ownerOf[ri]]) return null;   // ซ่อนรายการย่อยเมื่อกลุ่มถูกย่อ
-              const side = sideOf(r, ri);
-              const sideAcc = side === 'in' ? C.pos : side === 'out' ? C.neg : null;   // เขียว=รับ · แดง=จ่าย
-              const accent = sideAcc || C.primary;
-              // สีไล่ระดับชั้น (เขียวเข้ม→อ่อน) ให้แยกชั้นชัด: section เข้มสุด > สุทธิ/รวม > หัวรับ-จ่าย > รายการย่อย(ขาว)
-              const rowBg = isSection ? '#cfe7d6' : isGrand ? '#cde6d4' : isNet ? '#d8eede' : isGroup ? '#e3f2e8' : isSub ? '#e9f4ed' : 'transparent';
-              const fw = (isSection || isNet || isSub || isGrand) ? 800 : (isGroup ? 700 : 400);
-              const indent = isSection ? 0 : (isGroup ? 14 : (isSub || isNet || isGrand ? 14 : 26));
-              const clickable = isLeaf || isNet || isSub || isGrand; const emptyVals = isSection || isGroup;
-              const col = (isSection || isNet || isGrand) ? C.primaryD : ((isGroup || isSub) && sideAcc) ? (side === 'in' ? C.primaryD : C.neg) : C.ink;
-              const labelBg = rowBg === 'transparent' ? '#fff' : rowBg;
-              const leftBar = (isGroup || isSub) ? ('4px solid ' + accent) : (isLeaf && sideAcc) ? ('4px solid ' + (side === 'in' ? 'rgba(21,196,134,.22)' : 'rgba(251,94,109,.20)')) : '4px solid transparent';
-              const tdTop = isNet ? ('2px solid ' + C.primary) : (isSub && sideAcc) ? ('1.5px solid ' + accent) : '0';
-              return (
-                <tr key={ri} style={{ background: rowBg }}>
-                  <td onClick={() => { if (isGroup) toggle(ri); else if (clickable && onPick) onPick(r, null); }} style={{ padding: '6px 8px', paddingLeft: 8 + indent, fontWeight: fw, color: col, cursor: (isGroup || clickable) ? 'pointer' : 'default', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: labelBg, borderBottom: '1px solid ' + C.line, borderLeft: leftBar, borderTop: tdTop }}>
-                    {isGroup && <span style={{ color: accent, marginRight: 5, display: 'inline-block', width: 10 }}>{collapsed[ri] ? '▸' : '▾'}</span>}
-                    {r.label}{(clickable && !isGroup) && <span style={{ color: C.faint, fontWeight: 400 }}> ›</span>}
-                  </td>
-                  {months.map((m, ci) => (
-                    <td key={ci} onClick={() => clickable && !emptyVals && onPick && onPick(r, monthNumByIdx(ci))} style={{ padding: '6px 8px', textAlign: 'right', fontWeight: (isNet || isSub || isGrand) ? 800 : 400, cursor: (clickable && !emptyVals) ? 'pointer' : 'default', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid ' + C.line, borderTop: tdTop }}>{emptyVals ? '' : acct(r.vals[ci])}</td>
-                  ))}
-                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', background: '#e8f4ec', borderBottom: '1px solid ' + C.line, borderTop: tdTop }}>{emptyVals ? '' : acct(r.total)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  /* ---------- Transaction Explorer ---------- */
-  function CfpExplorer({ model, toast }) {
-    const [q, setQ] = useState('');
-    const [fAct, setFAct] = useState(''); const [fBank, setFBank] = useState(''); const [fMonth, setFMonth] = useState(''); const [fType, setFType] = useState('');
-    const [sortKey, setSortKey] = useState('iso'); const [sortDir, setSortDir] = useState(-1);
-    const banks = useMemo(() => Array.from(new Set(model.allTxns.map(t => t.account))).sort(), [model]);
-    const sel = { padding: '8px 11px', border: '1px solid ' + C.line, borderRadius: 11, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink };
-    const rows = useMemo(() => {
-      const ql = q.trim().toLowerCase();
-      let r = model.allTxns.filter(t => {
-        if (fAct && t.actKey !== fAct) return false;
-        if (fBank && t.account !== fBank) return false;
-        if (fMonth && String(t.month) !== fMonth) return false;
-        if (fType === 'in' && t.flow <= 0) return false;
-        if (fType === 'out' && t.flow >= 0) return false;
-        if (ql) { const s = (t.note + ' ' + t.category + ' ' + t.docNo + ' ' + t.account).toLowerCase(); if (s.indexOf(ql) < 0) return false; }
-        return true;
+  function edIco(n) { return '<svg class="ed-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ED_ICONS[n] || '') + '</svg>'; }
+  // ค่าใช้จ่ายพนักงาน (KPI) — ★ POG: "ค่าจ้างเหมา…" = ค่าผู้รับเหมาติดตั้ง ไม่ใช่เงินเดือน → ไม่นับ
+  function edIsPayrollCat(k) { return /เงินเดือน|ค่าจ้าง|พนักงาน|salary|wage/i.test(k) && !/จ้างเหมา/.test(k); }
+  // เลขบัญชีแบบสั้นในตาราง — ★ POG: "···1234" (Benya ตัดเหลือ 5 ตัวท้าย)
+  function edNoShort(no) { const dg = String(no || '').replace(/\D/g, ''); return dg ? '···' + dg.slice(-4) : String(no || ''); }
+  function edHook(name, v) { const h = CED.hooks && CED.hooks[name]; if (typeof h === 'function') h(v); }
+  /* ข้อมูล BIO (stm จากไฟล์ STM / ชีต "รวมทุกบัญชี" / หน้า #cf_coding) → รูปข้อมูลของหน้าแบบ POG (ed*)
+   *   transactions: { date, dateISO, month:'YYYY.MM', in, out, category, activityKey, isTransfer, accountKey, bank, accountNo, accountNick, ref, mne, note, balance }
+   *   accounts[k].months['YYYY.MM'] = { opening, closing } · months = [{ key, accounts:[{accountKey, opening, closing, computed}] }]
+   *   ★ BIO: ป้ายบัญชี "KBANK ···1234 · ชื่อบัญชี" (cfpAccountLabel) → bank / no (เลขเต็มจากทะเบียนบัญชีถ้ามี) / nick = ชื่อบัญชี
+   *   ★ BIO: ต้นงวดรายบัญชี = stm.openingByAcct (ยอดยกมา / ยอดคงเหลือแถวแรก − รายการแรก) แล้วเดินยอดทีละเดือนด้วย
+   *     รายการทุกชนิด (รวมโอนระหว่างบัญชี เพราะกระทบเงินในบัญชีจริง) = วิธีเดียวกับยอดรายบัญชีของหน้าเดิม
+   *     (cfpBuildModel.accountInfo) · ไฟล์ STM ไม่มีชีตยอดรายเดือนแบบ POG
+   *   ★ BIO: เดือน = ปี-เดือนจากวันที่จริงของรายการ (ข้อมูลข้ามปีได้) · ไม่มีรหัสค่าใช้จ่าย → hasMne=false (ซ่อนคอลัมน์ "รหัส") */
+  function cfpToEd(stm, fullNoByTail) {
+    const txns = cfpFixEraTxns(Array.isArray(stm && stm.txns) ? stm.txns : []);
+    const ACT = { op: 'operating', inv: 'investing', fin: 'financing' };
+    const ACT_TH = { op: 'กิจกรรมดำเนินงาน', inv: 'กิจกรรมลงทุน', fin: 'กิจกรรมจัดหาเงิน', transfer: 'โอนระหว่างบัญชี', other: 'อื่น ๆ' };
+    const mkOf = iso => /^\d{4}-\d{2}/.test(String(iso || '')) ? String(iso).slice(0, 4) + '.' + String(iso).slice(5, 7) : '';
+    const splitMemo = {};
+    const split = nm => {
+      if (splitMemo[nm]) return splitMemo[nm];
+      const s = String(nm || '');
+      const m = s.match(/^(.*?)\s*···\s*(\d+)\s*(?:·\s*(.*))?$/);
+      const out = m
+        ? { bank: (m[1] || '').trim() || 'บัญชี', no: (fullNoByTail && fullNoByTail[m[2]]) || ('···' + m[2]), nick: (m[3] || '').trim() }
+        : { bank: s || 'บัญชี', no: '', nick: '' };
+      return (splitMemo[nm] = out);
+    };
+    const openBy = (stm && stm.openingByAcct && typeof stm.openingByAcct === 'object') ? stm.openingByAcct : {};
+    const mset = {};
+    txns.forEach(t => { const k = mkOf(t.iso); if (k) mset[k] = true; });
+    const monthKeys = Object.keys(mset).sort();
+    const flowAM = {};   // บัญชี → เดือน → ยอดสุทธิทุกรายการ (รวมโอน)
+    txns.forEach(t => {
+      const mk = mkOf(t.iso); if (!mk) return;
+      const row = flowAM[t.account] || (flowAM[t.account] = {});
+      row[mk] = (row[mk] || 0) + (Number(t.flow) || 0);
+    });
+    const r2 = v => Math.round(v * 100) / 100;
+    const accounts = {};
+    const names = Object.keys(openBy).concat(Object.keys(flowAM).filter(k => !Object.prototype.hasOwnProperty.call(openBy, k)));
+    names.forEach(name => {
+      const sp = split(name);
+      const acc = { bank: sp.bank, no: sp.no, nick: sp.nick, months: {}, lastClose: 0 };
+      let started = Object.prototype.hasOwnProperty.call(openBy, name);
+      let run = cfpNum(openBy[name]);
+      monthKeys.forEach(mk => {
+        const fl = (flowAM[name] || {})[mk] || 0;
+        if (!started && !fl) return;   // บัญชีที่ยังไม่มีทั้งยอดยกมาและรายการ = ยังไม่เริ่ม
+        started = true;
+        const open = run, close = run + fl;
+        acc.months[mk] = { opening: r2(open), closing: r2(close), computed: r2(close) };
+        run = close;
       });
-      r = r.slice().sort((a, b) => { let x = a[sortKey], y = b[sortKey]; if (x < y) return -sortDir; if (x > y) return sortDir; return 0; });
-      return r;
-    }, [model, q, fAct, fBank, fMonth, fType, sortKey, sortDir]);
-    const totIn = rows.filter(t => t.flow > 0).reduce((s, t) => s + t.flow, 0);
-    const totOut = rows.filter(t => t.flow < 0).reduce((s, t) => s + Math.abs(t.flow), 0);
-    const shown = rows.slice(0, 500);
-    function sortBy(k) { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(k === 'iso' ? -1 : 1); } }
-    function arrow(k) { return sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''; }
-    function exportCSV() {
-      const head = ['วันที่', 'เลขที่', 'รายการ', 'บัญชี', 'หมวด', 'กิจกรรม', 'รับ', 'จ่าย', 'คงเหลือ'];
-      const lines = [head.join(',')].concat(rows.map(t => [cfpThaiDate(t.iso), t.docNo, '"' + (t.note || '').replace(/"/g, '""') + '"', '"' + t.account + '"', '"' + t.category + '"', CFP_ACT_SHORT[t.actKey] || '', t.flow > 0 ? Math.round(t.flow) : '', t.flow < 0 ? Math.round(-t.flow) : '', t.balance || ''].join(',')));
-      const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'transactions.csv'; a.click();
-      toast && toast('ดาวน์โหลด CSV · ' + rows.length + ' รายการ');
+      const ks = Object.keys(acc.months).sort();
+      if (!ks.length) return;
+      acc.lastClose = acc.months[ks[ks.length - 1]].closing;
+      accounts[name] = acc;
+    });
+    const run = {};
+    const order = txns.map((t, i) => ({ t, i })).sort((x, y) => (x.t.iso < y.t.iso ? -1 : x.t.iso > y.t.iso ? 1 : x.i - y.i));
+    const transactions = [];
+    order.forEach(({ t }) => {
+      const mk = mkOf(t.iso); if (!mk) return;
+      const k = t.account, sp = split(k), flow = Number(t.flow) || 0;
+      if (!(k in run)) run[k] = cfpNum(openBy[k]);
+      run[k] += flow;
+      transactions.push({
+        date: new Date(t.iso), dateISO: t.iso || '', month: mk,
+        in: flow > 0 ? flow : 0, out: flow < 0 ? -flow : 0,
+        category: t.category || '(ไม่ระบุหมวด)', activityKey: ACT[t.actKey] || 'other', activity: ACT_TH[t.actKey] || ACT_TH.other,
+        isTransfer: t.actKey === 'transfer',
+        accountKey: k, bank: sp.bank, accountNo: sp.no, accountNick: sp.nick,
+        ref: t.docNo || '', mne: '', code: '', note: t.note || '', payee: '', status: '',
+        balance: r2(run[k]),
+      });
+    });
+    const months = monthKeys.map(key => ({
+      key, accounts: Object.keys(accounts).filter(k => accounts[k].months[key]).map(k => Object.assign({ accountKey: k }, accounts[k].months[key])),
+    }));
+    return { company: 'BIOAXEL', transactions, accounts, months, hasMne: transactions.some(t => t.mne) };
+  }
+
+  /* โหลด Chart.js ตอนเปิดหน้านี้ครั้งแรก (หน้าอื่นไม่ต้องโหลด) — เวอร์ชันเดียวกับเว็บ Benya */
+  let _edChartP = null;
+  function edLoadChart() {
+    if (window.Chart) return Promise.resolve();
+    if (_edChartP) return _edChartP;
+    _edChartP = new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = CED_CHART_SRC; s.integrity = CED_CHART_SRI; s.crossOrigin = 'anonymous';
+      s.onload = () => res(); s.onerror = () => { _edChartP = null; rej(new Error('โหลด Chart.js ไม่สำเร็จ')); };
+      document.head.appendChild(s);
+    });
+    return _edChartP;
+  }
+
+  /* ปุ่ม "นำเสนอ" = เปิด/ปิดโหมดนำเสนอของแอป (ปุ่มบนแถบบน: เต็มจอ + ไฮไลต์ตามเมาส์ · Esc ออก) */
+  function edTogglePresent() {
+    const btn = document.querySelector('.present-toggle');
+    if (btn) { btn.click(); return; }
+    try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) { }
+  }
+  /* พิมพ์ PDF — ★ POG ใช้กล่องพิมพ์ของเบราว์เซอร์ (Benya ใช้ html2canvas + jsPDF) · งบกระแสเงินสด = แนวนอนเสมอ */
+  function edPrint(all) {
+    const d = edState();
+    const land = d.pdfOrient !== 'portrait' || (!all && d.tab === 'stmt');
+    let st = document.getElementById('ced-print-orient');
+    if (!st) { st = document.createElement('style'); st.id = 'ced-print-orient'; document.head.appendChild(st); }
+    st.textContent = '@media print{@page{size:A4 ' + (land ? 'landscape' : 'portrait') + ';margin:10mm;}}';
+    const prevTitle = document.title;
+    const tabName = all ? 'ทั้งรายงาน' : ((ED_TABS.find(t => t.id === d.tab) || {}).l || '');
+    try { document.title = 'BIOAXEL_CashFlow_' + edPeriodTag(edScopeMonthKeys(d.data, d.monthFilter)) + (tabName ? '_' + tabName : ''); } catch (e) { }
+    const done = () => {
+      window.removeEventListener('afterprint', done);
+      try { document.title = prevTitle; } catch (e) { }
+      if (CED.printAll) { CED.printAll = false; if (CED.host) edRenderDashboard(); }
+    };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => window.print(), all ? 1200 : 60);
+  }
+  function edExportFullPDF() { CED.printAll = true; edRenderDashboard(); edPrint(true); }
+  const ED_RENDER = {
+    summary: () => edRenderSummary(), category: () => edRenderCategory(), banks: () => edRenderBanks(),
+    explorer: () => edRenderExplorer(), stmt: () => edRenderStmt(),
+  };
+
+  /* ═══════════ โค้ดหน้า Benya (ยกมาจาก fin.benyamedical.com/index.html) ═══════════ */
+/* ── Benya index.html 2589–2601 ── */
+function edFmt(n){
+  if(n==null || isNaN(n)) return "—";
+  const v = Number(n);
+  const s = Math.abs(v).toLocaleString("th-TH",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return v < 0 ? "(" + s + ")" : s;
+}
+function edFmtCompact(n){
+  if(!n) return "0";
+  const v = Math.abs(n);
+  if(v >= 1e6) return (n/1e6).toFixed(2) + "M";
+  if(v >= 1e3) return (n/1e3).toFixed(1) + "K";
+  return n.toFixed(0);
+}
+/* ── Benya index.html 2647–2714 ── */
+function edActivityLabel(k){
+  return ({operating:"ดำเนินงาน",investing:"ลงทุน",financing:"จัดหาเงิน",other:"อื่น ๆ"})[k] || k;
+}
+/* ตรวจว่า transaction เป็น "เงินโอนระหว่างบัญชี" (โอนภายในบริษัทเอง — ไม่ใช่รับ/จ่ายจริง) */
+function edIsTransfer(t){
+  // ★ POG: ธง isTransfer มาจากตัวอ่านชีต DATA (cfpActKey → "transfer") — ไม่เดาจากชื่อหมวดแบบ Benya
+  return !!(t && t.isTransfer);
+}
+/* helper: รายการเดือน (key "YYYY.MM") ที่อยู่ใน scope ที่เลือก — เรียงจากน้อย→มาก
+   monthFilter: "all" (ทุกปี) | "year:2025" (ทั้งปี) | "q:2025:2" (ไตรมาส) | "2025.01" (เดือนเดียว) */
+function edScopeMonthKeys(data, monthFilter){
+  const keys = (data.months || []).map(m => m.key).sort();
+  if(!monthFilter || monthFilter === "all") return keys;
+  if(monthFilter.startsWith("year:")){
+    const y = monthFilter.slice(5);
+    return keys.filter(k => k.slice(0,4) === y);
+  }
+  if(monthFilter.startsWith("q:")){
+    const [,y,q] = monthFilter.split(":"); const qn = Number(q);
+    return keys.filter(k => k.slice(0,4) === y && Math.ceil(Number(k.slice(5,7))/3) === qn);
+  }
+  return keys.filter(k => k === monthFilter);
+}
+/* helper: ป้ายชื่อ scope ที่อ่านง่าย (ใช้ใน drill/หัวข้อ) */
+function edScopeLabel(monthFilter){
+  if(!monthFilter || monthFilter === "all") return "รวมทุกเดือน";
+  if(monthFilter.startsWith("year:")) return "ปี " + (Number(monthFilter.slice(5)) + 543);
+  if(monthFilter.startsWith("q:")){ const [,y,q] = monthFilter.split(":"); return "ไตรมาส " + q + "/" + (Number(y) + 543); }
+  return edThaiMonth(monthFilter);
+}
+/* helper: ยอดเปิดต้น/ปิดปลายของ scope (รองรับ all/ปี/เดือน) — ต่อบัญชี: เปิด=เดือนแรกที่มีใน scope, ปิด=เดือนสุดท้าย */
+function edOpenClose(data, monthFilter){
+  const scope = edScopeMonthKeys(data, monthFilter);
+  let opening = 0, closing = 0;
+  if(!scope.length) return { opening, closing };
+  for(const k in data.accounts){
+    const acc = data.accounts[k];
+    for(const mk of scope){ if(acc.months[mk]){ opening += acc.months[mk].opening || 0; break; } }
+    for(let i = scope.length - 1; i >= 0; i--){ const mk = scope[i]; if(acc.months[mk]){ closing += acc.months[mk].closing || 0; break; } }
+  }
+  return { opening, closing };
+}
+/* helper: ดึง txs ตาม scope (month/year + optional exclude transfers) */
+function edTxsInScope(data, monthFilter, excludeTransfers){
+  let txs = data.transactions;
+  if(monthFilter && monthFilter.startsWith("year:")){
+    const y = monthFilter.slice(5);
+    txs = txs.filter(t => String(t.month).slice(0,4) === y);
+  } else if(monthFilter && monthFilter.startsWith("q:")){
+    const [,y,q] = monthFilter.split(":"); const qn = Number(q);
+    txs = txs.filter(t => String(t.month).slice(0,4) === y && Math.ceil(Number(String(t.month).slice(5,7))/3) === qn);
+  } else if(monthFilter !== "all"){
+    txs = txs.filter(t => t.month === monthFilter);
+  }
+  if(excludeTransfers) txs = txs.filter(t => !edIsTransfer(t));
+  return txs;
+}
+
+/* ---------- Parser ---------- */
+/* ── Benya index.html 2959–3027 ── */
+/* ---------- Aggregations ---------- */
+function edAgg(data, monthFilter, excludeTransfers){
+  // monthFilter: "all" หรือ "2026.01" — excludeTransfers=true จะตัด "เงินโอนระหว่างบัญชี" ออก
+  const txs = edTxsInScope(data, monthFilter, !!excludeTransfers);
+
+  const totalIn  = txs.reduce((s,t)=>s+t.in, 0);
+  const totalOut = txs.reduce((s,t)=>s+t.out, 0);
+  const net = totalIn - totalOut;
+
+  // opening/closing for the period (รองรับ ทุกปี / ทั้งปี / เดือนเดียว)
+  const oc = edOpenClose(data, monthFilter);
+  let opening = oc.opening, closing = oc.closing;
+
+  // by activity
+  const byAct = { operating:{in:0,out:0}, investing:{in:0,out:0}, financing:{in:0,out:0}, other:{in:0,out:0} };
+  for(const t of txs){
+    byAct[t.activityKey].in  += t.in;
+    byAct[t.activityKey].out += t.out;
+  }
+
+  // by category
+  const byCat = {};
+  for(const t of txs){
+    const k = t.category;
+    if(!byCat[k]) byCat[k] = { in:0, out:0, count:0, net:0 };
+    byCat[k].in  += t.in;
+    byCat[k].out += t.out;
+    byCat[k].count++;
+    byCat[k].net = byCat[k].in - byCat[k].out;
+  }
+
+  // by bank account
+  const byAcct = {};
+  for(const t of txs){
+    const k = t.accountKey;
+    if(!byAcct[k]) byAcct[k] = { bank:t.bank, no:t.accountNo, nick:t.accountNick, in:0, out:0, count:0, net:0 };
+    byAcct[k].in  += t.in;
+    byAcct[k].out += t.out;
+    byAcct[k].count++;
+    byAcct[k].net = byAcct[k].in - byAcct[k].out;
+  }
+
+  // by month timeline
+  const byMonth = {};
+  for(const t of txs){
+    if(!byMonth[t.month]) byMonth[t.month] = { in:0, out:0, op:{in:0,out:0}, inv:{in:0,out:0}, fin:{in:0,out:0} };
+    byMonth[t.month].in += t.in;
+    byMonth[t.month].out += t.out;
+    const ak = t.activityKey==="other" ? "op" : ({operating:"op",investing:"inv",financing:"fin"})[t.activityKey];
+    if(byMonth[t.month][ak]){
+      byMonth[t.month][ak].in  += t.in;
+      byMonth[t.month][ak].out += t.out;
     }
-    const th = (label, k, align) => <th onClick={k ? () => sortBy(k) : undefined} style={{ padding: '8px 9px', fontWeight: 700, fontSize: 12, color: C.mut, cursor: k ? 'pointer' : 'default', whiteSpace: 'nowrap', textAlign: align || 'left', position: 'sticky', top: 0, background: '#fafdfb', userSelect: 'none' }}>{label}{k ? arrow(k) : ''}</th>;
-    return (
-      <div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา รายการ / หมวด / เลขที่…" style={{ ...sel, minWidth: 230, flex: '1 1 230px' }} />
-          <select value={fAct} onChange={e => setFAct(e.target.value)} style={sel}><option value="">ทุกกิจกรรม</option><option value="op">ดำเนินงาน</option><option value="inv">ลงทุน</option><option value="fin">จัดหาเงิน</option><option value="transfer">โอนระหว่างบัญชี</option></select>
-          <select value={fBank} onChange={e => setFBank(e.target.value)} style={sel}><option value="">ทุกบัญชี</option>{banks.map(b => <option key={b} value={b}>{b}</option>)}</select>
-          <select value={fMonth} onChange={e => setFMonth(e.target.value)} style={sel}><option value="">ทุกเดือน</option>{model.months.map(m => <option key={m} value={String(m)}>{CFP_MONTHS[m]}</option>)}</select>
-          <select value={fType} onChange={e => setFType(e.target.value)} style={sel}><option value="">รับ+จ่าย</option><option value="in">รับเข้า</option><option value="out">จ่ายออก</option></select>
-          <button onClick={exportCSV} style={{ ...sel, cursor: 'pointer', fontWeight: 600 }}>⬇ CSV</button>
-        </div>
-        <div style={{ display: 'flex', gap: 18, fontSize: 12, color: C.mut, marginBottom: 10 }}>
-          <span><b style={{ color: C.ink }}>{rows.length.toLocaleString('en-US')}</b> รายการ</span>
-          <span>รับ <b style={{ color: C.pos }}>{cfpFmtB(totIn)}</b></span>
-          <span>จ่าย <b style={{ color: C.neg }}>{cfpFmtB(totOut)}</b></span>
-          <span>สุทธิ <b style={{ color: (totIn - totOut) < 0 ? C.neg : C.pos }}>{cfpFmtB(totIn - totOut)}</b></span>
-        </div>
-        <div className="cfp-grid" style={{ overflowX: 'auto', maxHeight: '70vh', overflowY: 'auto', border: '1px solid ' + C.line, borderRadius: 12 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 820 }}>
-            <thead><tr>{th('วันที่', 'iso')}{th('เลขที่', 'docNo')}{th('รายการ', 'note')}{th('บัญชี', 'account')}{th('หมวด', 'category')}{th('กิจกรรม', 'actKey')}{th('รับ', 'flow', 'right')}{th('จ่าย', null, 'right')}{th('คงเหลือ', 'balance', 'right')}</tr></thead>
-            <tbody>
-              {shown.map((t, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid ' + C.line }}>
-                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
-                  <td style={{ padding: '6px 9px', color: C.mut, whiteSpace: 'nowrap', fontSize: 12 }}>{t.docNo}</td>
-                  <td style={{ padding: '6px 9px', color: C.ink, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || '-'}</td>
-                  <td style={{ padding: '6px 9px' }}><CfpBankPill acct={t.account} /></td>
-                  <td style={{ padding: '6px 9px', color: C.mut, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }} title={t.category}>{t.category}</td>
-                  <td style={{ padding: '6px 9px' }}><CfpTag k={t.actKey} /></td>
-                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.pos, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.flow > 0 ? cfpFmtPlain(t.flow) : ''}</td>
-                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.neg, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.flow < 0 ? cfpFmtPlain(t.flow) : ''}</td>
-                  <td style={{ padding: '6px 9px', textAlign: 'right', color: C.mut, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{t.balance ? cfpFmtPlain(t.balance) : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {rows.length > shown.length && <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>แสดง {shown.length} จาก {rows.length.toLocaleString('en-US')} รายการ — ใช้ตัวกรอง/ค้นหาเพื่อแคบลง</div>}
-      </div>
-    );
   }
 
-  /* ---------- activity detail (องค์ประกอบ + จุดเฝ้าระวัง รายกิจกรรม) ---------- */
-  function CfpActivityDetail({ model, k, onCat, onAll }) {
-    const [expanded, setExpanded] = useState(false);
-    const a = model.acts[k]; if (!a) return null;
-    const flags = cfpWatch(model, k);
-    const cats = a.catList || [];
-    const maxAbs = Math.max.apply(null, cats.map(c => Math.abs(c.net)).concat([1]));
-    const inTot = cats.filter(c => c.net > 0).reduce((s, c) => s + c.net, 0);
-    const outTot = cats.filter(c => c.net < 0).reduce((s, c) => s + Math.abs(c.net), 0);
-    const top = expanded ? cats : cats.slice(0, 7);
-    return (
-      <div className="cfp-card" style={{ background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, boxShadow: C.shadow, marginBottom: 16, overflow: 'hidden' }}>
-        <div style={{ height: 5, background: ACT_COLOR[k] }} />
-        <div style={{ padding: '16px 20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{CFP_ACT_NAME[k]}</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: a.net < 0 ? C.neg : C.pos }}>{cfpFmtM(a.net)}</div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14, fontSize: 12, flexWrap: 'wrap' }}>
-            <span style={{ background: C.posBg, color: C.pos, padding: '3px 10px', borderRadius: 20, fontWeight: 700 }}>รับ {cfpFmtM(inTot)}</span>
-            <span style={{ background: C.negBg, color: C.neg, padding: '3px 10px', borderRadius: 20, fontWeight: 700 }}>จ่าย {cfpFmtM(outTot)}</span>
-            <span style={{ background: C.soft, color: C.mut, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>{cats.length} หมวด</span>
-          </div>
-          <div className="cfp-act-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.25fr) minmax(0,1fr)', gap: 20 }}>
+  return { txs, totalIn, totalOut, net, opening, closing, byAct, byCat, byAcct, byMonth };
+}
+
+/* ---------- Chart helpers ---------- */
+const _edCharts = {};
+function edDestroyChart(id){
+  if(_edCharts[id]){ try{ _edCharts[id].destroy(); }catch(e){} delete _edCharts[id]; }
+}
+function edMakeChart(id, cfg){
+  edDestroyChart(id);
+  const el = document.getElementById(id);
+  if(!el || !window.Chart) return;
+  _edCharts[id] = new Chart(el.getContext("2d"), cfg);
+}
+/* ── Benya index.html 3051–3101 ── */
+/* plugin: % กลางชิ้นโดนัท */
+const edDonutPctPlugin = {
+  id:"edDonutPct",
+  afterDatasetsDraw(chart){
+    const ctx = chart.ctx;
+    const ds = chart.data.datasets[0]; if(!ds) return;
+    const meta = chart.getDatasetMeta(0);
+    const total = ds.data.reduce((s,v)=>s+(Number(v)||0),0);
+    if(!total) return;
+    const ca = chart.chartArea;
+    ctx.save();
+    ctx.font = "700 12px 'IBM Plex Sans','IBM Plex Sans Thai',sans-serif";   // ★ ฟอนต์เท่ากันทุกป้าย
+    ctx.textBaseline = "middle";
+    const small = [];   // ชิ้นเล็กใส่ในวงไม่ได้ → เก็บไว้ทำเส้นโยงออกข้างวง
+    meta.data.forEach((arc, i) => {
+      const pct = (Number(ds.data[i])||0)/total*100;
+      if(pct < 0.05) return;               // 0.0% จริงๆ ข้าม
+      const p = arc.getProps(['x','y','startAngle','endAngle','outerRadius','innerRadius'], true);
+      const mid = (p.startAngle + p.endAngle)/2;
+      if(pct >= 12){                        // ชิ้นใหญ่ → % กลางชิ้น (ขาว)
+        ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+        const r = (p.innerRadius + p.outerRadius)/2;
+        ctx.fillText(Math.round(pct)+"%", p.x + Math.cos(mid)*r, p.y + Math.sin(mid)*r);
+      } else {                              // ชิ้นเล็ก → เส้นโยงออกข้าง
+        small.push({ pct, mid, p, col:(Array.isArray(ds.backgroundColor)?ds.backgroundColor[i]:ds.backgroundColor)||"#64748b",
+          side: Math.cos(mid) >= 0 ? 1 : -1, ay: p.y + Math.sin(mid)*p.outerRadius });
+      }
+    });
+    // แยกซ้าย/ขวา · เรียงบน→ล่าง · กันป้ายซ้อน (≥15px) · clamp อยู่ในกรอบ (ไม่ชนขอบ)
+    [1,-1].forEach(side => {
+      const arr = small.filter(o=>o.side===side).sort((a,b)=>a.ay-b.ay);
+      let prevY = -Infinity; const gap = 15;
+      arr.forEach(o => {
+        let ly = o.ay;
+        if(ly < ca.top + 8) ly = ca.top + 8;
+        if(ly < prevY + gap) ly = prevY + gap;
+        if(ly > ca.bottom - 8) ly = ca.bottom - 8;
+        prevY = ly;
+        const ex = o.p.x + Math.cos(o.mid)*o.p.outerRadius;   // ขอบนอกชิ้น
+        const ey = o.p.y + Math.sin(o.mid)*o.p.outerRadius;
+        const kneeX = o.p.x + side*(o.p.outerRadius + 8);
+        const labelX = o.p.x + side*(o.p.outerRadius + 26);
+        ctx.strokeStyle = o.col; ctx.lineWidth = 1.1;
+        ctx.beginPath(); ctx.moveTo(ex,ey); ctx.lineTo(kneeX,ly); ctx.lineTo(labelX,ly); ctx.stroke();
+        ctx.fillStyle = o.col; ctx.textAlign = side>0 ? "left" : "right";
+        ctx.fillText((o.pct<1?o.pct.toFixed(1):Math.round(o.pct))+"%", labelX + side*3, ly);
+      });
+    });
+    ctx.restore();
+  }
+};
+/* ── Benya index.html 3431–3493 ── */
+function edSetTab(tab){ edState().tab = tab; edSave(); edRenderDashboard(); }
+function edSetMonth(m){ edState().monthFilter = m; edSave(); edRenderDashboard(); }
+
+/* ปุ่มเลือกช่วงเวลา — กดเลือกปี (หรือรวมทุกปี) แล้วกดเลือกไตรมาส (แทน dropdown เดิม) */
+function edPeriodPicker(data, mf){
+  const years = [...new Set((data.months||[]).map(m => m.key.slice(0,4)))].sort();
+  if(!years.length) return "";
+  const multi = years.length > 1;
+
+  // ปีที่กำลังโฟกัส
+  let actYear = null;
+  if(mf && mf.startsWith("year:")) actYear = mf.slice(5);
+  else if(mf && mf.startsWith("q:")) actYear = mf.split(":")[1];
+  else if(mf && /^\d{4}\./.test(mf)) actYear = mf.slice(0,4);
+  if(!multi) actYear = years[0];   // ปีเดียว → โฟกัสปีนั้นเสมอ (โชว์ไตรมาสได้เลย)
+
+  const btn = (active, val, label, sub) => `<button onclick="CfpEd.edSetMonth('${val}')" style="padding:6px 13px;border-radius:8px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;border:1px solid ${active?'var(--brand)':'#bfe6cb'};background:${active?'var(--brand)':'#fff'};color:${active?'#fff':'#0f172a'};transition:.12s;line-height:1.2;text-align:center">${label}${sub?`<span style="display:block;font-size:9.5px;font-weight:500;opacity:.82">${sub}</span>`:''}</button>`;
+
+  // แถวปี
+  let yearBtns = "";
+  if(multi){
+    yearBtns += btn(mf==='all', 'all', `รวม ${years.length} ปี`);
+    yearBtns += years.map(y => btn(actYear===y, 'year:'+y, 'ปี '+(Number(y)+543))).join("");
+  } else {
+    yearBtns += btn(mf==='all', 'all', 'ทั้งปี '+(Number(years[0])+543));
+  }
+
+  // ไตรมาส (chips เท่านั้น — label อยู่ใน section)
+  let qChips = "", qLabel = "";
+  if(actYear){
+    const moy = (data.months||[]).filter(m => m.key.slice(0,4)===actYear).map(m => Number(m.key.slice(5,7)));
+    const wholeVal = multi ? 'year:'+actYear : 'all';
+    const QS = [[1,'Q1','ม.ค.–มี.ค.'],[2,'Q2','เม.ย.–มิ.ย.'],[3,'Q3','ก.ค.–ก.ย.'],[4,'Q4','ต.ค.–ธ.ค.']];
+    const has = q => moy.some(m => Math.ceil(m/3)===q);
+    qLabel = `ไตรมาส · ปี ${Number(actYear)+543}`;
+    qChips = btn(mf===wholeVal, wholeVal, 'ทั้งปี') + QS.filter(q => has(q[0])).map(q => btn(mf==='q:'+actYear+':'+q[0], 'q:'+actYear+':'+q[0], q[1], q[2])).join("");
+  }
+
+  // เดือน (chips เท่านั้น) — เลือกเดือนเดียวได้ (mf = "YYYY.MM")
+  let mChips = "", mLabel = "";
+  if(actYear){
+    const TH_MON_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const mList = [...new Set((data.months||[]).filter(m => m.key.slice(0,4)===actYear).map(m => Number(m.key.slice(5,7))))].sort((a,b)=>a-b);
+    if(mList.length){
+      mLabel = `เดือน · ปี ${Number(actYear)+543}`;
+      mChips = mList.map(m => { const key = actYear+'.'+String(m).padStart(2,'0'); return btn(mf===key, key, TH_MON_SHORT[m-1]); }).join("");
+    }
+  }
+
+  // ★ การ์ดเดียว สะอาดตา — 3 ส่วนเรียงข้างกัน (ช่วงเวลา | ไตรมาส | เดือน) คั่นด้วยเส้น
+  const section = (label, chips) => `<div style="display:flex;flex-direction:column;gap:7px;min-width:0">
+    <span style="font-size:10.5px;color:var(--ink-3);font-weight:700;letter-spacing:.3px">${label}</span>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
+  </div>`;
+  const divider = `<div style="width:1px;align-self:stretch;background:var(--glass-border,#e1efe7);flex-shrink:0"></div>`;
+  const parts = [section('ช่วงเวลา', yearBtns)];
+  if(qChips) parts.push(divider, section(qLabel, qChips));
+  if(mChips) parts.push(divider, section(mLabel, mChips));
+
+  return `<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;background:#fff;border:1px solid var(--glass-border,#e1efe7);border-radius:12px;padding:12px 16px;box-shadow:0 1px 3px rgba(15,23,42,.05)">${parts.join("")}</div>`;
+}
+
+/* ===== โหมดนำเสนอ (present mode) — เต็มจอ + ไฮไลต์ตามเมาส์ ===== */
+/* ── Benya index.html 3625–3657 ── */
+/* ---------- Print / PDF helpers ---------- */
+const TH_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+const TH_MON_SHORT = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+function edThaiMonth(key){
+  // key = "2026.05" → "พฤษภาคม 2569"
+  const [y,m] = key.split(".").map(Number);
+  return TH_MONTHS[m-1] + " " + (y+543);
+}
+function edPeriodLabel(data, monthFilter){
+  if(!data || !data.months.length) return "—";
+  if(monthFilter && monthFilter.startsWith("year:")){
+    return "ข้อมูลปี " + (Number(monthFilter.slice(5)) + 543);
+  }
+  if(monthFilter && monthFilter.startsWith("q:")){
+    const [,y,q] = monthFilter.split(":"); return "ข้อมูลไตรมาส " + q + " ปี " + (Number(y) + 543);
+  }
+  if(monthFilter !== "all"){
+    return "ข้อมูลของเดือน " + edThaiMonth(monthFilter);
+  }
+  const first = data.months[0].key;
+  const last  = data.months[data.months.length-1].key;
+  if(first === last) return "ข้อมูลของเดือน " + edThaiMonth(first);
+  return "ข้อมูลของเดือน " + edThaiMonth(first).split(" ")[0] + "–" + edThaiMonth(last);
+}
+function edNowStr(){
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2,"0");
+  const mm = TH_MONTHS[d.getMonth()];
+  const yy = d.getFullYear() + 543;
+  const hh = String(d.getHours()).padStart(2,"0");
+  const mi = String(d.getMinutes()).padStart(2,"0");
+  return `${dd} ${mm} ${yy} เวลา ${hh}:${mi} น.`;
+}
+/* ── Benya index.html 4166–4853 ── */
+/* ---------- Render dashboard with 6 tabs ---------- */
+function edRenderDashboard(){
+  const t = TOOLS.find(x=>x.id==="execdash");
+  const co = COMPANIES.find(c=>c.id===state.company);
+  const d = edState();
+  const data = d.data;
+  const main = CED.host;   // ★ POG: วาดลงกล่องที่ React เตรียมไว้ (แทน #main ของ Benya)
+  if(!main) return;
+  const canEditExec = CED.canEdit;   // ★ POG: คนที่แก้ข้อมูลได้ (ผู้บริหาร/ผู้นำเสนอ = ดูอย่างเดียว ไม่เห็นปุ่มอัปโหลด/ล้าง)
+
+  // กัน scope ค้าง: ถ้าปี/เดือนที่เลือกไม่มีในข้อมูลแล้ว → กลับไป "ทุกปี"
+  if(d.monthFilter && d.monthFilter !== "all" && !edScopeMonthKeys(data, d.monthFilter).length){
+    d.monthFilter = "all";
+  }
+
+  // ทำลาย charts เก่าก่อน re-render
+  Object.keys(_edCharts).forEach(edDestroyChart);
+
+  const tabs = ED_TABS;
+
+  const curTab = CED.printAll ? { l:"รายงานงบกระแสเงินสด (ทุกหัวข้อ)" } : (tabs.find(x=>x.id===d.tab) || tabs[0]);
+
+  main.innerHTML = `
+    <div class="ed-page">
+      <div id="printHeader">
+        <div class="ph-row">
+          <div class="ph-co">
+            <img class="ph-logo" src="${esc(co.logoIcon||co.logo)}" onerror="this.style.display='none'">
             <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>องค์ประกอบหลัก (กดดูรายการ)</div>
-              <div style={expanded ? { maxHeight: 420, overflowY: 'auto', paddingRight: 4 } : null}>
-                {top.map((c, i) => (
-                  <div key={i} onClick={() => onCat(c)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.4fr) minmax(0,0.8fr) 92px', gap: 10, alignItems: 'center', padding: '6px 6px', borderBottom: '1px solid ' + C.line, cursor: 'pointer', borderRadius: 6 }}>
-                    <span style={{ fontSize: 13, color: C.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{c.name} <span style={{ color: C.faint }}>({c.count})</span></span>
-                    <span><CfpBar amt={c.net} max={maxAbs} /></span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: c.net < 0 ? C.neg : C.pos, textAlign: 'right', whiteSpace: 'nowrap' }}>{cfpFmtB(c.net)}</span>
-                  </div>
-                ))}
-              </div>
-              {cats.length > 7 && (
-                <div style={{ display: 'flex', gap: 16, marginTop: 9, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span onClick={() => setExpanded(e => !e)} style={{ fontSize: 12, color: C.primary, cursor: 'pointer', fontWeight: 700 }}>{expanded ? '▲ ย่อ' : '▼ ดูอีก ' + (cats.length - 7) + ' หมวด'}</span>
-                  <span onClick={onAll} style={{ fontSize: 12, color: C.mut, cursor: 'pointer' }}>ดูรายการทั้งหมด →</span>
-                </div>
-              )}
+              <div class="ph-co-name">${esc(co.fullName||co.name)}</div>
+              <div class="ph-co-sub">${esc(co.brand||'')}</div>
             </div>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, marginBottom: 8 }}>🚩 จุดเฝ้าระวัง</div>
-              {flags.map((f, i) => {
-                const s = CFP_SEV[f.sev] || CFP_SEV.blue;
-                return (
-                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 11px', borderRadius: 10, background: s.bg, marginBottom: 7 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.c, marginTop: 5, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: s.c, lineHeight: 1.45, fontWeight: 500 }}>{f.t}</span>
-                  </div>
-                );
-              })}
-            </div>
+          </div>
+          <div class="ph-meta">
+            <div class="ph-title">${esc(curTab.l)}</div>
+            <div class="ph-period">${esc(edPeriodLabel(data, d.monthFilter))}</div>
+            <div class="ph-ts">พิมพ์เมื่อ ${edNowStr()} · ${esc(cfpCurrentUser()||'')} · หน่วย: บาท</div>
           </div>
         </div>
       </div>
-    );
+
+      <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:14px">
+          <img src="${esc(co.logo)}" onerror="this.style.display='none'" style="width:40px;height:40px;object-fit:contain;border-radius:8px">
+          <div>
+            <h1>${t.name} <span class="badge">${esc(co.name)}</span></h1>
+            <div class="sub"><span style="color:var(--ink-3)">หน่วย: บาท</span></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="ed-hide-present" onchange="CfpEd.edState().pdfOrient=this.value;CfpEd.edSave()" title="แนวกระดาษตอนพิมพ์ PDF" style="padding:7px 10px;border:1px solid #bfe6cb;border-radius:8px;font-size:13px;background:#fff;font-family:inherit;color:#0f172a">
+            <option value="landscape" ${d.pdfOrient!=='portrait'?'selected':''}>📄 แนวนอน (หลายหน้า)</option>
+            <option value="portrait" ${d.pdfOrient==='portrait'?'selected':''}>📐 แนวตั้ง</option>
+          </select>
+          <button class="btn ghost btn sm ed-hide-present" onclick="CfpEd.edTogglePresent()" title="โหมดนำเสนอเต็มจอ + ไฮไลต์ตามเมาส์ (กด Esc เพื่อออก)">${edIco("monitor")}นำเสนอ</button>
+          <button class="btn ghost btn sm ed-hide-present" onclick="CfpEd.edPrint()" title="พิมพ์เฉพาะหัวข้อที่เปิดอยู่">${edIco("printer")}พิมพ์ PDF</button>
+          <button class="btn ghost btn sm ed-hide-present" onclick="CfpEd.edExportFullPDF()" title="รวมทั้ง 5 หัวข้อเป็น PDF ไฟล์เดียว">${edIco("file-text")}ทั้งรายงาน</button>
+          ${canEditExec ? `
+          ${CED.canSync ? `<button class="btn ghost btn sm ed-hide-present" onclick="CfpEd.edHook('refresh')" ${CED.shareBusy?'disabled':''} title="ดึงข้อมูลส่วนกลางล่าสุด (ที่คนอื่นอัปไว้)">${edIco("refresh-cw")}${CED.shareBusy?'กำลังโหลด…':'โหลดล่าสุด'}</button>` : ""}
+          <select class="ed-hide-present" onchange="CfpEd.edHook('era', this.value)" title="ปีในไฟล์ข้อมูล (พ.ศ./ค.ศ.)" style="padding:7px 10px;border:1px solid #bfe6cb;border-radius:8px;font-size:13px;background:#fff;font-family:inherit;color:#0f172a">
+            <option value="auto" ${CED.era==='auto'?'selected':''}>ปีในไฟล์: อัตโนมัติ</option>
+            <option value="be" ${CED.era==='be'?'selected':''}>ไฟล์เป็น พ.ศ.</option>
+            <option value="ce" ${CED.era==='ce'?'selected':''}>ไฟล์เป็น ค.ศ.</option>
+          </select>
+          <button class="btn ed-hide-present" onclick="CfpEd.edHook('upload')" ${CED.uploading?'disabled':''} style="background:linear-gradient(135deg,#10b981,#059669);border:none" title="อัปไฟล์ STM รายการเดินบัญชี (+ งบกระแสเงินสดสรุป) — เลือกได้หลายไฟล์ · แทนชุดเดิมทั้งหมด">${edIco("plus")}${CED.uploading?'กำลังอ่าน…':'อัปเดตไฟล์'}</button>
+          <button class="btn ghost btn sm ed-hide-present" onclick="CfpEd.edHook('clear')" title="ล้างข้อมูลทั้งหมดแล้วเริ่มอัปใหม่">${edIco("rotate-ccw")}ล้าง &amp; เริ่มใหม่</button>` : ""}
+        </div>
+      </div>
+      <!-- ★ ตัวเลือกช่วงเวลา = แถวของตัวเอง (กันดันปุ่มนำเสนอ/พิมพ์ เวลาแถวเดือนโผล่) -->
+      <div class="ed-period" style="margin:2px 0 14px">${edPeriodPicker(data, d.monthFilter)}</div>
+
+      <div class="ed-tabs">
+        ${tabs.map(tb => `<button class="${d.tab===tb.id?'active':''}" onclick="CfpEd.edSetTab('${tb.id}')">${tb.l}</button>`).join("")}
+      </div>
+
+      <div id="edContent"></div>
+    </div>
+  `;
+
+  if(d.tab!=="summary" && d.tab!=="category" && d.tab!=="banks" && d.tab!=="explorer" && d.tab!=="stmt") d.tab="summary";  // กันแท็บเก่า (activity) ค้าง
+  if(CED.printAll){
+    // ★ POG: "ทั้งรายงาน" = วาดครบ 5 หัวข้อต่อกัน (ขึ้นหน้าใหม่ทุกหัวข้อ) แล้วสั่งพิมพ์ (แทน html2canvas + jsPDF ของ Benya)
+    const box = document.getElementById("edContent");
+    box.innerHTML = tabs.map(tb => `<section class="ed-print-sec" data-tab="${tb.id}"><h2 class="ed-print-h">${esc(tb.l)}</h2><div class="ed-print-body"></div></section>`).join("");
+    tabs.forEach(tb => {
+      CED.target = box.querySelector(`[data-tab="${tb.id}"] .ed-print-body`);
+      try { ED_RENDER[tb.id](); } finally { CED.target = null; }
+    });
+  }
+  else if(d.tab==="summary")  edRenderSummary();
+  else if(d.tab==="category") edRenderCategory();
+  else if(d.tab==="banks")    edRenderBanks();
+  else if(d.tab==="explorer") edRenderExplorer();
+  else if(d.tab==="stmt")     edRenderStmt();
+
+  // ★ ตัวเลขเงินวิ่ง count-up ทุกแท็บ (ข้ามที่ tag data-anim ใน Summary + ข้ามตารางใหญ่)
+  if(!CED.printAll) edAnimMoney(edContentEl());
+  // ★ โน้ตผู้นำเสนอ (exec_notes.js · แบบ Benya exnMount) — โผล่เฉพาะบัญชีผู้นำเสนอ · บัญชีอื่นไม่มีอะไรเกิดขึ้น
+  if(!CED.printAll && typeof window.exnMount === "function"){
+    try{ window.exnMount({ root: main, mf: d.monthFilter, year: ((data.months && data.months[0] && data.months[0].key) || "").slice(0,4) }); }catch(e){ console.warn("[cfp] notes", e); }
+  }
+}
+
+/* ตัวเลขวิ่ง (count-up) — หา element ที่มี data-anim แล้ว animate จาก 0 → ค่าจริง */
+function edAnimNums(root){
+  root = root || document;
+  const els = [...root.querySelectorAll('[data-anim]')];
+  if(!els.length) return;
+  const fmtOne = (kind, v, to) => {
+    if(kind === 'pct') return (to<0?'▼ ':'▲ ') + Math.abs(v).toFixed(1) + '%';
+    return edFmt(v);   // money (มี () สำหรับติดลบอยู่แล้ว)
+  };
+  const dur = 650, start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const e = 1 - Math.pow(1 - t, 3);
+    for(const el of els){
+      const to = parseFloat(el.dataset.to) || 0;
+      el.textContent = fmtOne(el.dataset.anim, to * e, to);
+    }
+    if(t < 1) requestAnimationFrame(step);
+    else for(const el of els){ const to = parseFloat(el.dataset.to) || 0; el.textContent = fmtOne(el.dataset.anim, to, to); }
+  };
+  requestAnimationFrame(step);
+}
+
+/* auto count-up เลขเงินทุก cell ในหน้า (แท็บอื่นที่ไม่ได้ tag data-anim)
+   จับเฉพาะ pattern เงิน x,xxx.xx (ปี/วันที่/เลขบัญชี/จำนวนรายการ จะไม่โดน) + ข้ามตารางใหญ่กัน jank */
+function edAnimMoney(root){
+  root = root || document;
+  const MONEY = /^\(?-?\d{1,3}(,\d{3})*\.\d{2}\)?$/;
+  const items = [];
+  for(const el of root.querySelectorAll('td, span, div, b, strong')){
+    if(el.children.length) continue;            // leaf เท่านั้น
+    if(el.hasAttribute('data-anim')) continue;  // ข้ามที่ทำ count-up อยู่แล้ว
+    const t = el.textContent.trim();
+    if(!MONEY.test(t)) continue;
+    let s = t, neg = false;
+    if(s[0] === '('){ neg = true; s = s.slice(1, -1); }
+    if(s[0] === '-'){ neg = true; s = s.slice(1); }
+    const target = (neg?-1:1) * parseFloat(s.replace(/,/g, ''));
+    if(!isFinite(target)) continue;
+    items.push({ el, target });
+    if(items.length > 300) return;   // ตารางใหญ่เกิน (เช่น Transaction Explorer) → ไม่ animate
+  }
+  if(!items.length) return;
+  const dur = 600, start = performance.now();
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / dur);
+    const e = 1 - Math.pow(1 - p, 3);
+    for(const it of items) it.el.textContent = edFmt(it.target * e);
+    if(p < 1) requestAnimationFrame(step);
+    else for(const it of items) it.el.textContent = edFmt(it.target);
+  };
+  requestAnimationFrame(step);
+}
+
+/* ---------- Tab 1: Executive Summary ---------- */
+/* ป้ายช่วงข้อมูลบนหัวการ์ด "ภาพรวมรับ–จ่าย" — ตามช่วงที่เลือก (เดิมนับทุกเดือนในข้อมูล → เลือก ก.ย. ก็ขึ้น "22 เดือน")
+   เดือนเดียว = "ก.ย. 2569" · ไตรมาส/ปี/ทั้งหมด = ป้ายช่วง + จำนวนเดือนที่มีข้อมูลในช่วงนั้น */
+function edSummaryScopeText(data, monthFilter){
+  const mf = monthFilter || "all";
+  if(mf !== "all" && !mf.startsWith("year:") && !mf.startsWith("q:")) return edThaiMonthShort(mf);
+  return edScopeLabel(mf) + " · " + edScopeMonthKeys(data, mf).length + " เดือน";
+}
+function edRenderSummary(){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ ตัด "เงินโอนระหว่างบัญชี" ออก
+
+  // ===== Hero band (redesign) — ปรับสีตามธีมบริษัท + ติดลบ=แดง =====
+  const _co = COMPANIES.find(c=>c.id===state.company) || {gradient:["#1e3a8a","#3b82f6"]};
+  const inGrad  = "linear-gradient(140deg,#22c98d,#0f9c67)";   // ★ POG: สีเดิม
+  const outGrad = "linear-gradient(140deg,#fb6b78,#e0414f)";
+  const heroBg  = "linear-gradient(140deg,#34a86e 0%,#1f7d46 52%,#134d2c 100%)";   // ★ POG: การ์ดเงินสดปลายงวดแบบเดิม
+  const _mx = Math.max(A.totalIn, A.totalOut, 1);
+  const inW = Math.round(A.totalIn/_mx*100), outW = Math.round(A.totalOut/_mx*100);
+  const netNeg = A.net < 0;
+  const netAccent = netNeg ? "#fb5e6d" : "#15c486";
+  const netChipBg = netNeg ? "#ffe9ec" : "#e2faf0";
+  const netChipBd = netNeg ? "#ffd3d9" : "#bfe6cb";
+  const netDesc   = netNeg ? "จ่ายมากกว่ารับ — เงินสดลดลงในงวดนี้" : "รับมากกว่าจ่าย — เงินสดเพิ่มขึ้นในงวดนี้";
+  const chgPct = A.opening ? ((A.closing - A.opening)/Math.abs(A.opening)*100) : 0;
+  const chgNeg = chgPct < 0;
+  const acts = [
+    { key:"operating", th:"ดำเนินงาน", en:"Operating", net:A.byAct.operating.in-A.byAct.operating.out, desc:"เงินสดจาก/ใช้ในการดำเนินงาน",
+      icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="CLR" stroke-width="1.8"/><path d="M19.4 13a7.5 7.5 0 0 0 .1-2l1.7-1.3-1.8-3.1-2 .8a7.6 7.6 0 0 0-1.7-1l-.3-2.1H9.6l-.3 2.1c-.6.2-1.2.6-1.7 1l-2-.8L3.8 9.7 5.5 11a7.5 7.5 0 0 0 0 2l-1.7 1.3 1.8 3.1 2-.8c.5.4 1.1.8 1.7 1l.3 2.1h4.8l.3-2.1c.6-.2 1.2-.6 1.7-1l2 .8 1.8-3.1L19.4 13Z" stroke="CLR" stroke-width="1.4" stroke-linejoin="round"/></svg>` },
+    { key:"investing", th:"ลงทุน", en:"Investing", net:A.byAct.investing.in-A.byAct.investing.out, desc:"ซื้อ/ขายสินทรัพย์ · เงินลงทุน",
+      icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 20V9M10 20V5M16 20v-8M22 20V3" stroke="CLR" stroke-width="2" stroke-linecap="round"/></svg>` },
+    { key:"financing", th:"จัดหาเงิน", en:"Financing", net:A.byAct.financing.in-A.byAct.financing.out, desc:"เงินกู้ / เพิ่มทุน / จ่ายคืน",
+      icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 21h18M5 21V10M9 21V10M15 21V10M19 21V10M12 3 3.5 8h17L12 3Z" stroke="CLR" stroke-width="1.7" stroke-linejoin="round"/></svg>` }
+  ];
+  const actSumAbs = acts.reduce((s,a)=>s+Math.abs(a.net),0) || 1;
+  const actCard = a => {
+    const neg = a.net < 0;
+    const accent = neg ? "#fb5e6d" : "#15c486";
+    const softBg = neg ? "#ffe9ec" : "#e2faf0";
+    const barGrad = neg ? "linear-gradient(180deg,#fb6b78,#fb5e6d)" : "linear-gradient(180deg,#22c98d,#15c486)";
+    const prop = Math.round(Math.abs(a.net)/actSumAbs*100);
+    return `<div onclick="CfpEd.edDrillActivityIO('${a.key}',null)" style="background:#fff;border:1px solid #e1efe7;border-radius:18px;padding:20px 22px;box-shadow:0 8px 22px rgba(31,42,68,.05);position:relative;overflow:hidden;cursor:pointer;transition:.15s" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 12px 26px rgba(31,42,68,.1)'" onmouseout="this.style.transform='none';this.style.boxShadow='0 8px 22px rgba(31,42,68,.05)'">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:${accent}"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:11px">
+          <div style="width:42px;height:42px;border-radius:12px;background:${softBg};display:flex;align-items:center;justify-content:center">${a.icon.replace(/CLR/g,accent)}</div>
+          <div><div style="font-size:18px;font-weight:700;color:#1F2A44;white-space:nowrap">${a.th}</div><div style="font-size:13.5px;color:#9AA8BF">${a.en}</div></div>
+        </div>
+        <span style="background:${softBg};color:${accent};font-size:13px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap">${neg?"จ่ายสุทธิ":"รับสุทธิ"}</span>
+      </div>
+      <div data-anim="money" data-to="${a.net}" style="font-size:35px;font-weight:700;letter-spacing:-.6px;color:${accent};margin-top:14px">${edFmt(a.net)}</div>
+      <div style="margin-top:14px;height:11px;background:#eef6f1;border-radius:7px;box-shadow:inset 0 1px 2px rgba(31,42,68,.1);overflow:hidden">
+        <div class="ed-grow" style="position:relative;overflow:hidden;width:${prop}%;height:100%;border-radius:7px;background:${barGrad}"><div class="ed-shim"></div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:#9AA8BF"><span>${a.desc}</span><span>สัดส่วน ${prop}%</span></div>
+    </div>`;
+  };
+
+  edContentEl().innerHTML = `
+    <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:18px;margin-bottom:16px">
+      <!-- LEFT: ภาพรวมรับ–จ่าย + สุทธิ -->
+      <div data-exn="summary.overview" style="background:#fff;border:1px solid #e1efe7;border-radius:20px;padding:22px 24px;box-shadow:0 8px 24px rgba(31,42,68,.05);min-width:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div style="font-size:18px;font-weight:700;color:#3A4A66">ภาพรวมรับ–จ่าย <span style="font-weight:400;color:#9AA8BF;font-size:13px">Cash In–Out Overview</span></div>
+          <div style="font-size:13.5px;color:#9AA8BF">${edSummaryScopeText(d.data, d.monthFilter)} · เงินหมุน ${edFmtCompact(A.totalIn+A.totalOut)}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">
+          <div onclick="CfpEd.edDrillSummary('in')" style="cursor:pointer;position:relative;overflow:hidden;border-radius:14px;padding:16px 18px;background:${inGrad};box-shadow:0 8px 18px rgba(15,160,140,.22)">
+            <div style="position:absolute;right:-32px;top:-36px;width:128px;height:128px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.28),rgba(255,255,255,0) 70%);pointer-events:none"></div>
+            <div style="position:relative;display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:3px;background:#fff"></span><span style="font-size:15px;font-weight:500;color:rgba(255,255,255,.95);white-space:nowrap">เงินรับรวม</span><span style="margin-left:auto;background:rgba(255,255,255,.22);color:#fff;font-size:12.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap">▲ เข้า</span></div>
+            <div data-anim="money" data-to="${A.totalIn}" style="position:relative;font-size:34px;font-weight:700;color:#fff;margin-top:8px;letter-spacing:-.6px">${edFmt(A.totalIn)}</div>
+            <div style="position:relative;margin-top:12px;height:8px;background:rgba(255,255,255,.28);border-radius:5px;overflow:hidden"><div class="ed-grow" style="width:${inW}%;height:100%;background:rgba(255,255,255,.95);border-radius:5px"></div></div>
+          </div>
+          <div onclick="CfpEd.edDrillSummary('out')" style="cursor:pointer;position:relative;overflow:hidden;border-radius:14px;padding:16px 18px;background:${outGrad};box-shadow:0 8px 18px rgba(216,80,130,.2)">
+            <div style="position:absolute;right:-32px;top:-36px;width:128px;height:128px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.26),rgba(255,255,255,0) 70%);pointer-events:none"></div>
+            <div style="position:relative;display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:3px;background:#fff"></span><span style="font-size:15px;font-weight:500;color:rgba(255,255,255,.95);white-space:nowrap">เงินจ่ายรวม</span><span style="margin-left:auto;background:rgba(255,255,255,.22);color:#fff;font-size:12.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap">▼ ออก</span></div>
+            <div data-anim="money" data-to="${A.totalOut}" style="position:relative;font-size:34px;font-weight:700;color:#fff;margin-top:8px;letter-spacing:-.6px">${edFmt(A.totalOut)}</div>
+            <div style="position:relative;margin-top:12px;height:8px;background:rgba(255,255,255,.28);border-radius:5px;overflow:hidden"><div class="ed-grow" style="width:${outW}%;height:100%;background:rgba(255,255,255,.95);border-radius:5px"></div></div>
+          </div>
+        </div>
+        <div onclick="CfpEd.edDrillSummary('net')" style="cursor:pointer;margin-top:18px;display:flex;align-items:center;gap:16px;background:${netChipBg};border:1px solid ${netChipBd};border-radius:14px;padding:14px 18px">
+          <div style="width:40px;height:40px;border-radius:11px;background:${netAccent};display:flex;align-items:center;justify-content:center;flex:none">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 19l-6-6M12 19l6-6" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" transform="${netNeg?'':'rotate(180 12 12)'}"/></svg>
+          </div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:${netAccent};letter-spacing:.3px">กระแสเงินสดสุทธิ</div><div style="font-size:13.5px;color:#7C8597;margin-top:1px">${netDesc}</div></div>
+          <div data-anim="money" data-to="${A.net}" style="font-size:36px;font-weight:700;letter-spacing:-.6px;color:${netNeg?'#fb5e6d':netAccent}">${edFmt(A.net)}</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: เงินสดปลายงวด hero -->
+      <div data-exn="summary.ending" onclick="CfpEd.edDrillOpenClose('closing')" class="ed-glow" style="cursor:pointer;border-radius:20px;padding:24px 26px;color:#fff;position:relative;overflow:hidden;box-shadow:0 14px 36px rgba(31,120,60,.32);background:${heroBg};min-width:0">
+        <div class="ed-shine"></div>
+        <div style="position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.07)"></div>
+        <div style="position:absolute;right:30px;bottom:-60px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.05)"></div>
+        <div style="position:relative">
+          <div style="display:flex;align-items:center;gap:9px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 7h18v12H3z" stroke="rgba(255,255,255,.85)" stroke-width="1.8"/><path d="M3 10h18M16 14h2" stroke="rgba(255,255,255,.85)" stroke-width="1.8" stroke-linecap="round"/></svg><span style="font-size:19px;font-weight:700;color:rgba(255,255,255,.95)">เงินสดปลายงวด <span style="font-weight:400;color:rgba(255,255,255,.6);font-size:13px">Ending Cash</span></span></div>
+          <div data-anim="money" data-to="${A.closing}" style="font-size:56px;font-weight:700;letter-spacing:-1.5px;margin-top:12px;line-height:1">${edFmt(A.closing)}</div>
+          <div style="font-size:13.5px;color:rgba(255,255,255,.7);margin-top:7px">คงเหลือสุทธิ ณ สิ้นงวด · หน่วย บาท</div>
+          <div style="height:1px;background:rgba(255,255,255,.18);margin:18px 0 14px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div><div style="font-size:14px;color:rgba(255,255,255,.65)">เงินสดต้นงวด</div><div data-anim="money" data-to="${A.opening}" style="font-size:22px;font-weight:600;margin-top:3px">${edFmt(A.opening)}</div></div>
+            <svg width="28" height="22" viewBox="0 0 26 20" fill="none"><path d="M2 10h20M22 10l-6-5M22 10l-6 5" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div style="text-align:right"><div style="font-size:14px;color:rgba(255,255,255,.65)">เปลี่ยนแปลง</div><div data-anim="pct" data-to="${chgPct}" style="font-size:22px;font-weight:700;margin-top:3px;color:${chgNeg?'#ffd3d9':'#c3f0de'}">${chgNeg?'▼':'▲'} ${Math.abs(chgPct).toFixed(1)}%</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div data-exn="summary.acts" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:16px">
+      ${acts.map(actCard).join("")}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.05fr 1fr;gap:18px;margin-bottom:16px">
+      ${edCashWaterfall(A, acts)}
+      <div data-exn="summary.monthly" class="card" style="margin-bottom:0">
+        <h3 style="font-size:18px">📈 กระแสเงินสดรายเดือน <span style="font-weight:400;color:#94a3b8;font-size:13px">Monthly Cash Flow · แยกตามกิจกรรม</span></h3>
+        <div style="font-size:12px;color:#94a3b8;margin:-2px 0 8px">บนเส้นศูนย์ = รับสุทธิ · ใต้เส้นศูนย์ = จ่ายสุทธิ · กดแท่งดูรายการ</div>
+        <div style="position:relative;height:320px"><canvas id="edActMonthly"></canvas></div>
+      </div>
+    </div>
+
+    ${edRenderFinKpis(A, d.data, d.monthFilter)}
+  `;
+
+  edAnimNums(edContentEl());   // ★ ตัวเลขวิ่ง count-up
+
+  // เดือนใน scope (ใช้กับกราฟแยกกิจกรรม) · ถ้าเลือกปี → เฉพาะเดือนของปีนั้น
+  let months = edState().data.months.map(m=>m.key);
+  const _mf = edState().monthFilter;
+  if(_mf && _mf.startsWith("year:")){ const _y=_mf.slice(5); months = months.filter(k=>k.slice(0,4)===_y); }
+
+  // ── กระแสเงินสดรายเดือน แยกตามกิจกรรม (ย้ายมาจากแท็บ Activity เดิม) ──
+  const _actCol = { operating:ED_COLORS.op, investing:ED_COLORS.inv, financing:ED_COLORS.fin };   // ★ POG: สีกิจกรรมแบบเดิม (น้ำเงิน/ส้ม/ม่วง)
+  const _actSeries = [
+    { label:"ดำเนินงาน", aKey:"operating" },
+    { label:"ลงทุน",     aKey:"investing" },
+    { label:"จัดหาเงิน", aKey:"financing" },
+  ].map(s => ({
+    label:s.label, backgroundColor:_actCol[s.aKey], borderRadius:4,
+    data: months.map(m => edTxsInScope(edState().data, m, true).reduce((a,t)=> a + (t.activityKey===s.aKey ? (t.in - t.out) : 0), 0))
+  }));
+  const _actNet = months.map((m,i) => _actSeries.reduce((a,s)=>a+s.data[i], 0));
+  edMakeChart("edActMonthly", {
+    type:"bar",
+    data:{ labels:months, datasets:_actSeries },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{position:"bottom"}, tooltip:{ callbacks:{ label:c=>c.dataset.label+": "+edFmt(c.parsed.y) } } },
+      scales:{
+        y:{ ticks:{ callback:v=>edFmtCompact(v) } },
+        x:{ ticks:{ callback:(val,idx)=>{ const k=months[idx]; return [ (TH_MON_SHORT[Number(k.slice(5,7))-1]||k)+" "+String(Number(k.slice(0,4))+543).slice(2), "สุทธิ "+edFmtCompact(_actNet[idx]) ]; }, font:{size:12.5} } }
+      },
+      onClick:(e,els)=>{ if(els && els.length){ edSetMonth(months[els[0].index]); edSetTab("explorer"); } }
+    }
+  });
+}
+/* กราฟ Waterfall "เงินสดเดินทางอย่างไร" — ต้นงวด → ดำเนินงาน → ลงทุน → จัดหาเงิน → ปลายงวด
+   แท่งกิจกรรมลอย (บวก=เขียว/ลบ=แดง) · แท่งยอดรวมเต็ม (น้ำเงิน) · คลิกแท่งกิจกรรมดูรายการ */
+function edCashWaterfall(A, acts){
+  const opening = A.opening, closing = A.closing;
+  const op = acts[0].net, inv = acts[1].net, fin = acts[2].net;
+  let run = opening;
+  const steps = [{ label:"ต้นงวด", kind:"total", val:opening, bottom:Math.min(0,opening), top:Math.max(0,opening) }];
+  const flow = (label, key, delta) => { const b=Math.min(run,run+delta), t=Math.max(run,run+delta); steps.push({label,key,kind:"flow",delta,bottom:b,top:t}); run+=delta; };
+  flow("ดำเนินงาน","operating",op); flow("ลงทุน","investing",inv); flow("จัดหาเงิน","financing",fin);
+  steps.push({ label:"ปลายงวด", kind:"total", val:closing, bottom:Math.min(0,closing), top:Math.max(0,closing) });
+
+  const H = 230;
+  const hi = Math.max(...steps.map(s=>s.top), 0);
+  const lo = Math.min(...steps.map(s=>s.bottom), 0);
+  const span = (hi - lo) || 1;
+  const y = v => (v - lo) / span * H;                 // ค่า → พิกัดจากล่าง
+
+  const bars = steps.map(s => {
+    const barH = Math.max(3, y(s.top) - y(s.bottom));
+    const off  = y(s.bottom);
+    let grad, valColor, valTxt;
+    if(s.kind==="total"){
+      grad = "linear-gradient(180deg,#3fa864,#2e8b4a)"; valColor = "#1f6e3a";
+      valTxt = "฿" + edFmtCompact(s.val);
+    } else {
+      const pos = s.delta >= 0;
+      grad = pos ? "linear-gradient(180deg,#22c98d,#15c486)" : "linear-gradient(180deg,#fb6b78,#fb5e6d)";
+      valColor = pos ? "#15c486" : "#fb5e6d";
+      valTxt = (pos?"+":"−") + "฿" + edFmtCompact(Math.abs(s.delta));
+    }
+    const clickable = s.kind==="flow";
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center">
+      <div style="position:relative;width:100%;height:${H}px">
+        <div ${clickable?`onclick="CfpEd.edDrillActivity('${s.key}')"`:""} style="position:absolute;left:16%;right:16%;bottom:${off}px;height:${barH}px;background:${grad};border-radius:6px;${clickable?"cursor:pointer":""};box-shadow:0 4px 10px rgba(31,42,68,.12)" ${clickable?`onmouseover="this.style.filter='brightness(1.06)'" onmouseout="this.style.filter='none'"`:""}>
+          <span style="position:absolute;top:-22px;left:50%;transform:translateX(-50%);font-size:14px;font-weight:700;white-space:nowrap;color:${valColor}">${valTxt}</span>
+        </div>
+      </div>
+      <div style="margin-top:9px;font-size:13.5px;color:#64748b;font-weight:600;text-align:center">${s.label}${clickable?'<span style="display:block;font-size:11px;color:#a3b3bb;font-weight:500">กดดู ›</span>':''}</div>
+    </div>`;
+  }).join("");
+
+  return `<div data-exn="summary.acts" class="card" style="margin-bottom:0">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <h3 style="font-size:18px">💧 เงินสดเดินทางอย่างไร <span style="font-weight:400;color:#94a3b8;font-size:13px">Cash Flow Waterfall</span></h3>
+      <span style="font-size:11.5px;color:#94a3b8;white-space:nowrap;margin-top:5px">กดแท่งกิจกรรมเพื่อดูรายการ</span>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:8px;margin-top:28px;padding:0 4px">${bars}</div>
+  </div>`;
+}
+function edTopList(byCat, dir){
+  // หักลบรับ-จ่ายในหมวดเดียวกันก่อน (net) → หมวด net บวก = รายรับ · net ลบ = รายจ่าย
+  // กันยอดรับเล็กๆ ในหมวดจ่าย (เช่น refund) ไปโผล่ฝั่งรายรับ
+  const arr = Object.entries(byCat).map(([k,v])=>{
+    const net = (v.in||0) - (v.out||0);
+    return {k, net, v:Math.abs(net)};
+  }).filter(x => dir==="in" ? x.net > 0.005 : x.net < -0.005)
+    .sort((a,b)=>b.v-a.v).slice(0,10);
+  const total = arr.reduce((s,x)=>s+x.v,0);
+  const color = dir==="in" ? ED_COLORS.in : ED_COLORS.out;
+  const title = dir==="in" ? "หมวดรายรับ" : "หมวดรายจ่าย";
+  const titleEn = dir==="in" ? "Receipts" : "Payments";
+  const titleHtml = `<div style="font-weight:700;font-size:15px;color:${color};margin-bottom:9px">${title} <span style="font-weight:400;color:#94a3b8;font-size:12px">${titleEn}</span></div>`;
+  if(!arr.length) return `<div>${titleHtml}<div class="empty" style="padding:14px">ไม่มีข้อมูล</div></div>`;
+  return `<div>
+    ${titleHtml}
+    ${arr.map(x => {
+      const pct = total ? (x.v/total*100).toFixed(1) : 0;
+      return `<div style="margin-bottom:9px;cursor:pointer" onclick="CfpEd.edDrillCat(${JSON.stringify(x.k).replace(/"/g,'&quot;')},'${dir}')">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px;margin-bottom:3px"><span style="color:var(--ink-2)">${esc(x.k)}</span><span style="color:${color};font-weight:700;white-space:nowrap">${edFmt(x.v)}</span></div>
+        <div style="height:7px;background:#e2e8f0;border-radius:999px;overflow:hidden"><div style="height:100%;background:${color};width:${pct}%"></div></div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+/* ---------- KPI ทางการเงิน (Summary tab — ต่อจาก Top 5) ---------- */
+function edRenderFinKpis(A, data, monthFilter){
+  const months = data.months || [];
+  const nMonths = Math.max(1, edScopeMonthKeys(data, monthFilter).length);
+  const op = A.byAct.operating || { in:0, out:0 };
+  const opNet = op.in - op.out;
+
+  // หา cost ของหมวด เงินเดือน/ค่าจ้าง (regex บนชื่อหมวด) · ★ POG: ไม่มีการ์ดค่าโฆษณา (ผู้ใช้เลือกตัดออก 2026-11-25)
+  let empCost = 0;
+  for(const [k, v] of Object.entries(A.byCat || {})){
+    if(edIsPayrollCat(k)) empCost += v.out;
   }
 
-  /* ---------- main page ---------- */
-  function CashFlowPresentPage({ data, setData, toast }) {
+  // ratios
+  const cashMargin = A.totalIn > 0 ? (A.net / A.totalIn * 100) : null;
+  const opRatio    = op.in > 0 ? (opNet / op.in * 100) : null;
+  const burn       = A.totalOut / nMonths;
+  const avgIn      = A.totalIn / nMonths;
+  const opExRatio  = op.in > 0 ? (op.out / op.in * 100) : null;
+  const empRatio   = op.in > 0 ? (empCost / op.in * 100) : null;
+
+  // period label — แบบในภาพ "ตลอดปี 2568"
+  let periodLabel = "ตลอดทั้งช่วง";
+  if(monthFilter && monthFilter.startsWith("year:")){
+    periodLabel = "ตลอดปี " + (Number(monthFilter.slice(5)) + 543);
+  } else if(monthFilter !== "all"){
+    periodLabel = "เดือน " + monthFilter;
+  } else if(months.length){
+    const yrs = [...new Set(months.map(m => m.key.slice(0,4)))];
+    if(yrs.length === 1) periodLabel = "ตลอดปี " + (parseInt(yrs[0]) + 543);
+    else periodLabel = "ตลอด " + months.length + " เดือน · " + (parseInt(yrs[0])+543) + "–" + (parseInt(yrs[yrs.length-1])+543);
+  }
+
+  // helpers
+  const fmtPct = (v) => v == null ? "—" : (v >= 0 ? "" : "") + v.toFixed(1) + "%";
+  const fmtCompactM = (n) => {
+    const a = Math.abs(n);
+    if(a >= 1e6) return ((n/1e6).toFixed(2)) + " ล้าน";
+    if(a >= 1e3) return ((n/1e3).toFixed(1)) + " K";
+    return n.toFixed(0);
+  };
+  const goodColor = ED_COLORS.in;     // ★ POG: เขียว — ดี
+  const badColor  = "#fb5e6d";        // แดง — แย่/ติดลบ/จ่าย (ตรงกับ negative=red ทั้งระบบ)
+  const neuColor  = "#0f172a";
+
+  // benchmark eval: pass {value, good, ok, dir} dir='hi' = ยิ่งสูงยิ่งดี, 'lo' = ยิ่งต่ำยิ่งดี
+  const evalBench = (v, good, ok, dir) => {
+    if(v == null) return neuColor;
+    if(dir === "hi"){
+      if(v >= good) return goodColor;
+      if(v >= ok)   return "#f59e0b";
+      return badColor;
+    } else {
+      if(v <= ok)   return goodColor;
+      if(v <= good) return "#f59e0b";
+      return badColor;
+    }
+  };
+
+  // ป้ายชื่อ ไทย + อังกฤษ
+  const lbl = (th, en) => `${th} <span style="font-weight:400;color:#94a3b8;font-size:11.5px">${en}</span>`;
+
+  // single KPI card — คลิกได้ → drill modal
+  const card = (kpiKey, label, value, color, sub, bench, ref) => `
+    <div onclick="CfpEd.edDrillFinKpi('${kpiKey}')" style="background:rgba(255,255,255,.85);backdrop-filter:blur(6px);border:1px solid #bfe6cb;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:4px;cursor:pointer;transition:.15s" onmouseover="this.style.borderColor='${ED_COLORS.brand}';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,.06)'" onmouseout="this.style.borderColor='#bfe6cb';this.style.transform='none';this.style.boxShadow='none'">
+      <div style="font-size:13px;font-weight:700;color:#475569">${label}</div>
+      <div style="font-size:30px;font-weight:800;color:${color};letter-spacing:-.4px;margin-top:3px">${value}</div>
+      ${sub?`<div style="font-size:12.5px;color:#64748b">${sub}</div>`:""}
+      ${bench?`<div style="margin-top:7px;padding:5px 9px;background:rgba(99,102,241,.07);border:1px solid #e0e7ff;border-radius:6px;font-size:12px;color:#475569;align-self:flex-start;display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span>เกณฑ์มาตรฐาน: ${bench}</span>${ref?`<a href="${ref}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="เปิดหน้าอ้างอิงภาษาไทย (ตลาดหลักทรัพย์ฯ SET) ในแท็บใหม่" style="display:inline-flex;align-items:center;gap:4px;padding:4px 11px;background:#4f46e5;color:#fff;font-weight:700;font-size:11.5px;border-radius:999px;text-decoration:none;white-space:nowrap;cursor:pointer">↗ ดูที่มา</a>`:''}</div>`:""}
+    </div>`;
+
+  return `
+    <div class="card" data-exn="summary.kpi" style="margin-top:14px">
+      <h3 style="font-size:18px">📊 KPI ทางการเงิน <span style="font-weight:400;color:#94a3b8;font-size:13.5px">Financial KPIs</span></h3>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px">
+        ${card("totalIn",  lbl("รายรับรวม","Total Receipts"), fmtCompactM(A.totalIn), goodColor, periodLabel, "")}
+        ${card("totalOut", lbl("รายจ่ายรวม","Total Payments"), fmtCompactM(A.totalOut), badColor, periodLabel, "")}
+        ${card("net",      lbl("กระแสเงินสดสุทธิ","Net Cash Flow"), fmtCompactM(A.net), A.net>=0?goodColor:badColor, "รับ - จ่าย", "")}
+
+        ${card("cashMargin", lbl("อัตรากำไรเงินสด","Cash Margin"),
+          fmtPct(cashMargin),
+          evalBench(cashMargin, 10, 5, "hi"),
+          "Net / Total Income",
+          "ไม่ต่ำกว่า 5% (ดี) / ไม่ต่ำกว่า 10% (ยอดเยี่ยม)",
+          "https://www.setinvestnow.com/th/knowledge/article/169-the-usefulness-of-financial-ratio")}
+
+        ${card("opRatio", lbl("อัตราส่วนเงินสดดำเนินงาน","Operating Cash Flow Ratio"),
+          fmtPct(opRatio),
+          evalBench(opRatio, 100, 50, "hi"),
+          "Op Net / Op Income",
+          "ไม่ต่ำกว่า 50% (ดี) / ไม่ต่ำกว่า 100% (แข็งแกร่ง)",
+          "https://www.setinvestnow.com/th/knowledge/article/566-tsi-survival-business-scan-techniques")}
+
+        ${card("burn", lbl("อัตราใช้เงินสด/เดือน","Cash Burn Rate"),
+          fmtCompactM(burn) + "/เดือน",
+          burn <= avgIn ? goodColor : badColor,
+          "ค่าใช้จ่ายดำเนินงานเฉลี่ย",
+          "ควรต่ำกว่ายอดรายรับ/เดือน",
+          "https://www.setinvestnow.com/th/knowledge/article/281-cash-cycle-for-business-liquidity")}
+
+        ${card("opExRatio", lbl("ค่าใช้จ่ายต่อยอดขาย","Op Expense Ratio"),
+          fmtPct(opExRatio),
+          evalBench(opExRatio, 100, 80, "lo"),
+          "Op Expense / Op Income",
+          "ไม่เกิน 80%",
+          "https://www.setinvestnow.com/th/knowledge/article/169-the-usefulness-of-financial-ratio")}
+
+        ${card("empRatio", lbl("สัดส่วนค่าใช้จ่ายพนักงาน","Payroll Ratio"),
+          fmtPct(empRatio),
+          evalBench(empRatio, 50, 30, "lo"),
+          "เงินเดือน / รายรับดำเนินงาน",
+          "ไม่เกิน 30%")}
+      </div>
+      <div style="margin-top:13px;padding-top:11px;border-top:1px dashed #e2e8f0;font-size:11px;color:#94a3b8;line-height:1.65">
+        <b style="color:#64748b">ที่มาของเกณฑ์มาตรฐาน:</b> ค่าอ้างอิงเป็น “rule of thumb” ทั่วไปจากการวิเคราะห์อัตราส่วนทางการเงิน (financial ratio analysis) ซึ่งแตกต่างกันตามอุตสาหกรรม — ใช้เป็นแนวเทียบเบื้องต้น ไม่ใช่เกณฑ์ตายตัว:
+        <br>• <b>อัตรากำไรเงินสด / Net Margin</b> ≥ 5–10% — เกณฑ์อัตรากำไรสุทธิทั่วไป
+        &nbsp;•&nbsp; <b>Operating Cash Flow Ratio</b> ≥ 1.0 (100%) = กระแสเงินสดจากการดำเนินงานครอบคลุมภาระระยะสั้น
+        &nbsp;•&nbsp; <b>Cash Burn</b> ควรต่ำกว่ารายรับเฉลี่ยต่อเดือน
+        <br>• <b>Op Expense Ratio</b> ≤ 80% &nbsp;•&nbsp; <b>สัดส่วนค่าใช้จ่ายพนักงาน</b> ≤ 30% ของรายได้ <span style="color:#b0bcc9">(ตัวหลังเป็นแนวทางบริหารต้นทุน SME — ไม่มีมาตรฐานสากลตายตัว ปรับตามอุตสาหกรรม)</span>
+        <br><span style="color:#b0bcc9">แหล่งอ้างอิงภาษาไทย — ตลาดหลักทรัพย์ฯ (SET Investnow) · คลิก ↗ ที่การ์ดแต่ละใบ:
+          <a href="https://www.setinvestnow.com/th/knowledge/article/169-the-usefulness-of-financial-ratio" target="_blank" rel="noopener" style="color:#6366f1">อัตราส่วนทางการเงิน (กำไรสุทธิ)</a> ·
+          <a href="https://www.setinvestnow.com/th/knowledge/article/566-tsi-survival-business-scan-techniques" target="_blank" rel="noopener" style="color:#6366f1">ความสามารถชำระหนี้จากกระแสเงินสด</a> ·
+          <a href="https://www.setinvestnow.com/th/knowledge/article/281-cash-cycle-for-business-liquidity" target="_blank" rel="noopener" style="color:#6366f1">วงจรเงินสด / สภาพคล่อง</a>
+          · ปรับเกณฑ์ได้ตามนโยบายของบริษัท</span>
+      </div>
+    </div>`;
+}
+
+/* ---------- Drill: KPI ทางการเงิน — แสดงสูตร + ตัวตั้ง/ตัวหาร + รายการที่มา ---------- */
+function edDrillFinKpi(kpiKey){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers
+  const months = d.data.months || [];
+  const nMonths = Math.max(1, edScopeMonthKeys(d.data, d.monthFilter).length);
+  const op = A.byAct.operating || { in:0, out:0 };
+  const opNet = op.in - op.out;
+
+  // categorize emp
+  const empCats = [];
+  let empCost = 0;
+  for(const [k, v] of Object.entries(A.byCat || {})){
+    if(edIsPayrollCat(k)) { empCost += v.out; empCats.push({ k, v }); }
+  }
+  empCats.sort((a,b) => b.v.out - a.v.out);
+
+  // monthly breakdown (for burn rate) — ตาม scope ที่เลือก
+  const monthlyOut = edScopeMonthKeys(d.data, d.monthFilter).map(mk => ({
+    month: mk,
+    out: edTxsInScope(d.data, mk, true).reduce((s,t) => s + t.out, 0)  // ★ exclude transfers
+  }));
+
+  // 3 อันแรก = single value → route ไปที่ existing drill
+  if(kpiKey === "totalIn")  return edDrillSummary("in");
+  if(kpiKey === "totalOut") return edDrillSummary("out");
+  if(kpiKey === "net")      return edDrillSummary("net");
+
+  // SPECS ของ 6 ratio
+  const SPECS = {
+    cashMargin: {
+      title: "อัตรากำไรเงินสด · Cash Margin",
+      formula: "กระแสเงินสดสุทธิ ÷ รายรับรวม × 100",
+      numLabel: "ตัวตั้ง: กระแสเงินสดสุทธิ (Net)",
+      numValue: A.net,
+      denLabel: "ตัวหาร: รายรับรวม (Total Income)",
+      denValue: A.totalIn,
+      result: A.totalIn > 0 ? (A.net / A.totalIn * 100) : null,
+      bench: "≥5% (ดี) / ≥10% (ยอดเยี่ยม)",
+      desc: "ทุก 100 บาทของรายรับ เหลือเป็นเงินสดสุทธิกี่บาท — ยิ่งสูงยิ่งดี",
+      extra: ""
+    },
+    opRatio: {
+      title: "Operating Cash Flow Ratio · OCF",
+      formula: "(Op Income − Op Expense) ÷ Op Income × 100",
+      numLabel: "ตัวตั้ง: ดำเนินงานสุทธิ (Op Net)",
+      numValue: opNet,
+      denLabel: "ตัวหาร: รายรับดำเนินงาน (Op Income)",
+      denValue: op.in,
+      result: op.in > 0 ? (opNet / op.in * 100) : null,
+      bench: "≥50% (ดี) / ≥100% (แข็งแกร่ง)",
+      desc: "เฉพาะกิจกรรมดำเนินงาน (Operating) — ไม่รวม ลงทุน / จัดหาเงิน",
+      extra: `<div style="margin-top:8px;font-size:11.5px;color:#475569">รายละเอียด: Op Income ${edFmt(op.in)} − Op Expense ${edFmt(op.out)} = <b>${edFmt(opNet)}</b></div>`
+    },
+    burn: {
+      title: "Cash Burn Rate · อัตราเผาเงิน",
+      formula: "รายจ่ายรวม ÷ จำนวนเดือน",
+      numLabel: "ตัวตั้ง: รายจ่ายรวม (Total Expense)",
+      numValue: A.totalOut,
+      denLabel: "ตัวหาร: จำนวนเดือนในช่วง",
+      denValue: nMonths,
+      result: A.totalOut / nMonths,
+      bench: "ควรต่ำกว่ายอดรายรับ/เดือน (" + edFmt(A.totalIn / nMonths) + ")",
+      desc: "ค่าใช้จ่ายเฉลี่ยต่อเดือน — ใช้วัดว่าเงินสดจะอยู่ได้กี่เดือน",
+      isAvg: true,
+      extra: `<div style="margin-top:10px"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">รายจ่ายแยกตามเดือน:</div><table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="background:#f8fafc"><th style="text-align:left;padding:5px 8px;color:#475569;font-weight:600">เดือน</th><th style="text-align:right;padding:5px 8px;color:#475569;font-weight:600">รายจ่าย</th></tr></thead>
+        <tbody>${monthlyOut.map(m => `<tr><td style="padding:5px 8px;border-top:1px solid #e2e8f0">${esc(m.month)}</td><td style="padding:5px 8px;text-align:right;border-top:1px solid #e2e8f0;color:${ED_COLORS.out};font-weight:600">${edFmt(m.out)}</td></tr>`).join("")}
+        <tr style="background:#f1f5f9;font-weight:700"><td style="padding:6px 8px">รวม / เฉลี่ย</td><td style="padding:6px 8px;text-align:right">${edFmt(A.totalOut)} / <b>${edFmt(A.totalOut/nMonths)}</b></td></tr></tbody>
+      </table></div>`
+    },
+    opExRatio: {
+      title: "ค่าใช้จ่ายต่อยอดขาย · OpEx Ratio",
+      formula: "Op Expense ÷ Op Income × 100",
+      numLabel: "ตัวตั้ง: รายจ่ายดำเนินงาน (Op Expense)",
+      numValue: op.out,
+      denLabel: "ตัวหาร: รายรับดำเนินงาน (Op Income)",
+      denValue: op.in,
+      result: op.in > 0 ? (op.out / op.in * 100) : null,
+      bench: "≤80% (จัดการต้นทุนได้ดี)",
+      desc: "ทุก 100 บาทของรายรับ มีต้นทุนดำเนินงานกี่บาท — ยิ่งต่ำยิ่งดี",
+      extra: ""
+    },
+    empRatio: {
+      title: "สัดส่วนค่าใช้จ่ายพนักงาน · Staff Cost",
+      formula: "ค่าใช้จ่ายพนักงาน ÷ Op Income × 100",
+      numLabel: "ตัวตั้ง: ค่าใช้จ่ายพนักงาน (จากหมวด)",
+      numValue: empCost,
+      denLabel: "ตัวหาร: รายรับดำเนินงาน (Op Income)",
+      denValue: op.in,
+      result: op.in > 0 ? (empCost / op.in * 100) : null,
+      bench: "≤30%",
+      desc: "หมวดที่ชื่อมีคำว่า เงินเดือน / ค่าจ้าง / พนักงาน (ไม่นับค่าจ้างเหมา — เป็นค่าผู้รับเหมา ไม่ใช่พนักงาน)",
+      extra: empCats.length ? `<div style="margin-top:10px"><div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px">หมวดที่นับเป็น 'ค่าใช้จ่ายพนักงาน' (${empCats.length} หมวด):</div><table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="background:#f8fafc"><th style="text-align:left;padding:5px 8px;color:#475569;font-weight:600">หมวด</th><th style="text-align:right;padding:5px 8px;color:#475569;font-weight:600">จำนวน</th><th style="text-align:right;padding:5px 8px;color:#475569;font-weight:600">ยอดจ่าย</th></tr></thead>
+        <tbody>${empCats.map(c => `<tr style="cursor:pointer" onclick="CfpEd.edDrillCat(${JSON.stringify(c.k).replace(/"/g,'&quot;')},'out');event.stopPropagation()"><td style="padding:5px 8px;border-top:1px solid #e2e8f0">${esc(c.k)}</td><td style="padding:5px 8px;text-align:right;border-top:1px solid #e2e8f0;color:#64748b">${c.v.count}</td><td style="padding:5px 8px;text-align:right;border-top:1px solid #e2e8f0;color:${ED_COLORS.out};font-weight:600">${edFmt(c.v.out)}</td></tr>`).join("")}
+        <tr style="background:#f1f5f9;font-weight:700"><td style="padding:6px 8px" colspan="2">รวม</td><td style="padding:6px 8px;text-align:right">${edFmt(empCost)}</td></tr></tbody>
+      </table></div>` : '<div style="margin-top:10px;padding:12px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;text-align:center">ไม่พบหมวด \'เงินเดือน/ค่าจ้าง/พนักงาน\' ในช่วงนี้</div>'
+    },
+  };
+
+  const s = SPECS[kpiKey];
+  if(!s) return;
+
+  const fmtVal = (v, isAvg) => {
+    if(typeof v === "number" && !isAvg && Math.abs(v) >= 100) return edFmt(v);
+    if(typeof v === "number") return v.toLocaleString("th-TH",{maximumFractionDigits:2});
+    return v;
+  };
+  const passColor = s.result == null ? "#0f172a" : (s.result >= 0 ? ED_COLORS.in : ED_COLORS.out);
+
+  // Modal
+  const m = document.createElement("div");
+  m.id = "edDrillModal";
+  m.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:1100;display:flex;align-items:flex-start;justify-content:center;padding:30px 20px;overflow:auto";
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;max-width:720px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);margin:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #e2e8f0">
+        <div style="flex:1">
+          <div style="font-size:11px;font-weight:700;color:${ED_COLORS.brand};text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">KPI · ที่มาของตัวเลข</div>
+          <div style="font-size:17px;font-weight:800;color:#0f172a">${esc(s.title)}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:3px">${esc(s.desc)}</div>
+        </div>
+        <button onclick="document.getElementById('edDrillModal').remove()" style="background:transparent;border:1px solid #cbd5e1;border-radius:6px;padding:5px 10px;cursor:pointer;color:#475569;font-size:12px">✕ ปิด</button>
+      </div>
+
+      <!-- สูตร -->
+      <div style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+        <div style="font-size:10.5px;font-weight:700;color:#4338ca;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📐 สูตร</div>
+        <div style="font-size:14px;font-weight:600;color:#1e1b4b">${esc(s.formula)}</div>
+      </div>
+
+      <!-- ตัวเลข -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:10px;margin-bottom:14px">
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px">
+          <div style="font-size:10.5px;color:#64748b;font-weight:600">${esc(s.numLabel)}</div>
+          <div style="font-size:18px;font-weight:800;color:${s.numValue<0?ED_COLORS.out:'#0f172a'};margin-top:3px">${fmtVal(s.numValue)}</div>
+        </div>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px">
+          <div style="font-size:10.5px;color:#64748b;font-weight:600">${esc(s.denLabel)}</div>
+          <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:3px">${fmtVal(s.denValue)}</div>
+        </div>
+        <div style="background:${passColor};color:#fff;border-radius:10px;padding:12px">
+          <div style="font-size:10.5px;font-weight:700;opacity:.9">= ผลลัพธ์</div>
+          <div style="font-size:22px;font-weight:800;margin-top:3px;letter-spacing:-.3px">${s.result==null?"—":(s.isAvg?edFmt(s.result):s.result.toFixed(2)+"%")}</div>
+          <div style="font-size:10.5px;opacity:.85;margin-top:2px">เกณฑ์: ${esc(s.bench)}</div>
+        </div>
+      </div>
+
+      ${s.extra || ""}
+    </div>`;
+  document.body.appendChild(m);
+  m.onclick = e => { if(e.target === m) m.remove(); };
+}
+
+/* ── Benya index.html 4949–5200 ── */
+function edThaiMonthShort(key){
+  const [y,m] = String(key||"").split(".").map(Number);
+  if(!y || !m) return String(key||"");
+  return TH_MON_SHORT[m-1] + " " + (y+543);
+}
+/* รวมยอดต่อหมวดจากชุด txs ที่ให้มา (โครงเดียวกับ A.byCat) */
+function edCatOfTxs(txs){
+  const byCat = {};
+  for(const t of txs){
+    const k = t.category;
+    if(!byCat[k]) byCat[k] = { in:0, out:0, count:0, net:0 };
+    byCat[k].in  += t.in;
+    byCat[k].out += t.out;
+    byCat[k].count++;
+    byCat[k].net = byCat[k].in - byCat[k].out;
+  }
+  return byCat;
+}
+/* สีโปร่ง (hex → rgba) — ใช้ rgba แทน color-mix เพราะ html2canvas (พิมพ์ PDF) ไม่รองรับ color-mix */
+function edTint(c, a){
+  const m = String(c||"").trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if(!m) return `rgba(148,163,184,${a})`;
+  let h = m[1]; if(h.length===3) h = h.split("").map(x=>x+x).join("");
+  return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`;
+}
+/* สีเข้มขึ้น (hex → rgb คูณ f) — ใช้ไล่เฉดแถบหัวให้ตัวหนังสือขาวอ่านชัด ทั้งบนจอและใน PDF */
+function edDark(c, f){
+  const m = String(c||"").trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if(!m) return "#1e293b";
+  let h = m[1]; if(h.length===3) h = h.split("").map(x=>x+x).join("");
+  const v = [0,2,4].map(i=>Math.round(parseInt(h.slice(i,i+2),16)*f));
+  return `rgb(${v.join(",")})`;
+}
+/* ลิสต์ Top N ของหมวด — แถบยาวเทียบหมวดที่มากสุด · % = สัดส่วนของยอดรวมฝั่งนั้นในกิจกรรมนั้น */
+function edTopListAct(byCat, dir, actKey, limit){
+  limit = limit || 5;
+  const arr = Object.entries(byCat).map(([k,v])=>({ k, v: v[dir]||0 }))
+    .filter(x => x.v > 0.005).sort((a,b)=>b.v-a.v);
+  const total = arr.reduce((s,x)=>s+x.v, 0);
+  const color = dir==="in" ? ED_COLORS.in : ED_COLORS.out;
+  const head  = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px;color:var(--ink)">
+        <span style="width:9px;height:9px;border-radius:50%;background:${color};box-shadow:0 0 0 4px ${edTint(color,.18)}"></span>
+        Top 5 ${dir==="in"?"รายรับ":"รายจ่าย"}</span>
+      <span style="font-size:12.5px;color:var(--ink-3)">รวม <b style="font-size:15px;color:${color}">${edFmt(total)}</b></span>
+    </div>`;
+  const wrap = body => `<div style="background:${edTint(color,.06)};border:1px solid ${edTint(color,.22)};border-radius:14px;padding:14px 16px;min-width:0">${head}${body}</div>`;
+  if(!arr.length) return wrap(`<div style="padding:14px;text-align:center;font-size:12.5px;color:#94a3b8">ไม่มีรายการ</div>`);
+  const top = arr.slice(0, limit), rest = arr.slice(limit), max = top[0].v || 1;
+  return wrap(top.map((x,i)=>{
+    const pct = total ? x.v/total*100 : 0;
+    const first = i===0;
+    return `<div style="display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:11px;cursor:pointer" onclick="CfpEd.edDrillCatAct(${JSON.stringify(x.k).replace(/"/g,'&quot;')},'${dir}','${actKey}')" title="กดดูรายการ">
+      <span style="width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;${first?`background:${color};color:#fff`:`background:#fff;color:${color};border:1px solid ${edTint(color,.35)}`}">${i+1}</span>
+      <div style="min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:4px">
+          <span style="color:var(--ink);font-weight:${first?700:500};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.k)}">${esc(x.k)}</span>
+          <span style="white-space:nowrap;font-weight:800;color:${color}">${edFmt(x.v)} <span style="display:inline-block;min-width:34px;text-align:right;font-weight:600;font-size:11.5px;color:#64748b">${pct<1?pct.toFixed(1):pct.toFixed(0)}%</span></span>
+        </div>
+        <div style="height:9px;background:${edTint(color,.14)};border-radius:999px;overflow:hidden"><div style="height:100%;border-radius:999px;background:linear-gradient(90deg,${edTint(color,.6)},${color});width:${Math.max(2,x.v/max*100).toFixed(1)}%"></div></div>
+      </div>
+    </div>`;
+  }).join("") + (rest.length?`<div style="font-size:12px;color:#64748b;margin-top:4px;padding-top:8px;border-top:1px dashed ${edTint(color,.3)}">+ อีก ${rest.length} หมวด · ${edFmt(rest.reduce((s,x)=>s+x.v,0))}</div>`:""));
+}
+/* การ์ด "Top 5 แยกตามกิจกรรม" — อยู่บนสุดของแท็บ Category
+   · แถบหัวสีแบรนด์ สรุปรับ/จ่าย/สุทธิรวม + สัดส่วนตามกิจกรรม
+   · กิจกรรมที่มีรายการ = บล็อกเต็ม (Top 5 รับ | Top 5 จ่าย) · ไม่มีรายการ = ยุบเป็นแถบบรรทัดเดียว (ไม่กินที่)
+   ★ กิจกรรม "อื่น ๆ" โผล่เฉพาะเมื่อมียอดจริง */
+function edActBreakdownCard(A){
+  const acts = [
+    { k:"operating", th:"กิจกรรมดำเนินงาน", en:"Operating", ic:"⚙️", c:ED_COLORS.op  },
+    { k:"investing", th:"กิจกรรมลงทุน",     en:"Investing", ic:"🏗️", c:ED_COLORS.inv },
+    { k:"financing", th:"กิจกรรมจัดหาเงิน", en:"Financing", ic:"🏦", c:ED_COLORS.fin }
+  ];
+  const o = A.byAct.other || { in:0, out:0 };
+  if(o.in > 0.005 || o.out > 0.005) acts.push({ k:"other", th:"อื่น ๆ", en:"Other", ic:"▫️", c:"#94a3b8" });
+  acts.forEach(a=>{
+    a.txs = A.txs.filter(t => t.activityKey === a.k);
+    a.v   = A.byAct[a.k] || { in:0, out:0 };
+    a.net = a.v.in - a.v.out;
+  });
+  const tIn = acts.reduce((s,a)=>s+a.v.in, 0), tOut = acts.reduce((s,a)=>s+a.v.out, 0), tNet = tIn - tOut;
+  const brand = ED_COLORS.brand || ED_COLORS.in;
+  const netClr = n => n>=0 ? ED_COLORS.in : "#fb5e6d";
+  const shade = { operating:"#ffffff", investing:"rgba(255,255,255,.62)", financing:"rgba(255,255,255,.38)", other:"rgba(255,255,255,.25)" };
+
+  /* แถบสัดส่วนตามกิจกรรม */
+  const shareBar = (dir, total) => total > 0.005
+    ? `<div style="display:flex;height:8px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.2)">${acts.filter(a=>a.v[dir]>0.005).map(a=>
+        `<div title="${a.th} ${edFmt(a.v[dir])}" style="width:${(a.v[dir]/total*100).toFixed(2)}%;background:${shade[a.k]}"></div>`).join("")}</div>`
+    : `<div style="height:8px;border-radius:999px;background:rgba(255,255,255,.2)"></div>`;
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;opacity:.9;margin-top:10px">${acts.map(a=>
+      `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:${shade[a.k]};border:1px solid rgba(255,255,255,.5)"></span>${a.th}</span>`).join("")}</div>`;
+  const kpi = (lbl, val, bar, sub) => `<div style="background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:14px;padding:12px 16px;min-width:0">
+      <div style="font-size:12.5px;opacity:.9">${lbl}</div>
+      <div style="font-size:24px;font-weight:800;letter-spacing:-.3px;line-height:1.3;margin:2px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${val}</div>
+      ${bar||""}${sub?`<div style="font-size:11.5px;opacity:.88">${sub}</div>`:""}
+    </div>`;
+  const hero = `<div style="background:linear-gradient(135deg,${edDark(brand,.72)},${edDark(brand,.5)});color:#fff;border-radius:16px;padding:20px 22px;margin-bottom:16px;position:relative;overflow:hidden">
+      <div style="position:absolute;right:-50px;top:-70px;width:230px;height:230px;border-radius:50%;background:rgba(255,255,255,.08)"></div>
+      <div style="position:relative">
+        <div style="font-size:19px;font-weight:800">Top 5 รายรับ / รายจ่าย · แยกตามกิจกรรม</div>
+        <div style="font-size:12.5px;opacity:.88;margin:2px 0 14px">Top 5 by Activity · กดชื่อกิจกรรมหรือแถบหมวดเพื่อดูรายการ</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+          ${kpi("รับรวม", edFmt(tIn), shareBar("in", tIn))}
+          ${kpi("จ่ายรวม", edFmt(tOut), shareBar("out", tOut))}
+          ${kpi("สุทธิ", edFmt(tNet), "", `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;background:${tNet<0?"#fb5e6d":"#15c486"};color:#fff">${tNet<0?"⚠ จ่ายมากกว่ารับ":"✓ รับมากกว่าจ่าย"}</span>`)}
+        </div>
+        ${legend}
+      </div>
+    </div>`;
+
+  const pill = (lbl, val, c) => `<span style="display:inline-flex;align-items:baseline;gap:6px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12px;color:var(--ink-3);white-space:nowrap">${lbl} <b style="font-size:14px;color:${c}">${edFmt(val)}</b></span>`;
+  const full  = acts.filter(a => a.txs.length);
+  const empty = acts.filter(a => !a.txs.length);
+
+  const blocks = full.map(a=>{
+    const byCat = edCatOfTxs(a.txs);
+    return `<div style="border:1px solid ${edTint(a.c,.35)};border-radius:16px;padding:16px 18px;margin-bottom:14px;background:linear-gradient(180deg,${edTint(a.c,.08)},#fff 80px);box-shadow:0 2px 12px ${edTint(a.c,.1)}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;cursor:pointer" onclick="CfpEd.edDrillActivity('${a.k}')" title="กดดูรายการทั้งหมดของกิจกรรมนี้">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:21px;background:${edTint(a.c,.16)};border:1px solid ${edTint(a.c,.35)}">${a.ic}</span>
+          <div>
+            <div style="font-weight:800;font-size:16.5px;color:var(--ink)">${a.th}</div>
+            <div style="font-size:12px;color:#94a3b8">${a.en} · <b style="color:${a.c}">${a.txs.length.toLocaleString("th-TH")}</b> รายการ</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${pill("รับ", a.v.in, ED_COLORS.in)}${pill("จ่าย", a.v.out, ED_COLORS.out)}${pill("สุทธิ", a.net, netClr(a.net))}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">
+        ${edTopListAct(byCat,"in", a.k)}
+        ${edTopListAct(byCat,"out", a.k)}
+      </div>
+    </div>`;
+  }).join("");
+
+  const emptyRow = empty.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px">${empty.map(a=>
+      `<div style="flex:1 1 260px;display:flex;align-items:center;gap:10px;border:1px dashed ${edTint(a.c,.5)};border-radius:12px;padding:9px 14px;background:${edTint(a.c,.04)};font-size:13px">
+        <span style="font-size:17px">${a.ic}</span><b style="color:var(--ink)">${a.th}</b>
+        <span style="color:#94a3b8;font-size:12px">${a.en}</span>
+        <span style="margin-left:auto;font-size:12px;color:#94a3b8">ไม่มีรายการในช่วงนี้</span>
+      </div>`).join("")}</div>` : "";
+
+  return `<div class="card" style="padding:16px">
+    ${hero}
+    ${blocks || `<div class="empty" style="padding:24px">ไม่มีรายการในช่วงนี้</div>`}
+    ${emptyRow}
+  </div>`;
+}
+function edDrillCatAct(cat, dir, actKey){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);   // ★ exclude transfers
+  let txs = A.txs.filter(t => t.category===cat && t.activityKey===actKey);
+  if(dir==="in")  txs = txs.filter(t=>t.in>0);
+  if(dir==="out") txs = txs.filter(t=>t.out>0);
+  edShowDrillModal(edActivityLabel(actKey) + " · หมวด: " + cat, txs);
+}
+
+/* ★ ค่าใช้จ่ายที่สูงกว่าปกติ — เทียบ "เดือนล่าสุดใน scope" กับค่าเฉลี่ยเดือนก่อนหน้า (ไม่เกิน lookback เดือน)
+   · ค่าเฉลี่ยหารด้วยจำนวนเดือนทั้งหมด (เดือนที่ไม่มีรายการ = 0) → หมวดที่จ่ายไม่ทุกเดือนติดธง "จ่าย N/M เดือน"
+   · baseline ดึงจากทุกเดือนที่มีในข้อมูล (ไม่ผูก scope) — เลือกดูเดือนเดียวก็ยังเทียบย้อนหลังได้
+   · เกณฑ์: สูงกว่าค่าเฉลี่ย > 25% และส่วนต่าง ≥ max(500, 1% ของยอดจ่ายเดือนนั้น) กันรายการจิ๊บจ๊อยรก */
+function edAnomalyData(data, monthFilter, lookback){
+  lookback = lookback || 6;
+  const allKeys = (data.months||[]).map(m=>m.key).sort();
+  const scope   = edScopeMonthKeys(data, monthFilter);
+  if(!scope.length) return null;
+  const target = scope[scope.length-1];
+  const prior  = allKeys.filter(k => k < target).slice(-lookback);
+  if(!prior.length) return null;
+
+  const txs = (data.transactions||[]).filter(t => t.out > 0 && !edIsTransfer(t));
+  const outOf = (mk)=>{
+    const m = {};
+    for(const t of txs){ if(t.month === mk) m[t.category] = (m[t.category]||0) + t.out; }
+    return m;
+  };
+  const cur  = outOf(target);
+  const hist = prior.map(outOf);
+  const nB   = prior.length;
+  const sum  = (o)=>Object.keys(o).reduce((s,k)=>s+o[k], 0);
+  const curTotal     = sum(cur);
+  const baseAvgTotal = hist.reduce((s,h)=>s+sum(h), 0) / nB;
+
+  const floor = Math.max(500, curTotal * 0.01);
+  const rows = [];
+  for(const cat in cur){
+    const v    = cur[cat];
+    const seen = hist.filter(h => (h[cat]||0) > 0).length;
+    const avg  = hist.reduce((s,h)=>s+(h[cat]||0), 0) / nB;
+    const diff = v - avg;
+    if(diff < floor) continue;
+    if(avg > 0 && v/avg < 1.25) continue;
+    rows.push({ cat, cur:v, avg, diff, seen, months:nB,
+      pct: avg > 0 ? (v/avg - 1) * 100 : null,
+      kind: seen === 0 ? "new" : (seen < nB ? "irregular" : "up") });
+  }
+  rows.sort((a,b)=>b.diff-a.diff);
+  return { target, prior, rows, curTotal, baseAvgTotal, nB, floor };
+}
+function edAnomalyCard(data, monthFilter){
+  const titleHtml = `<h3 style="font-size:18px">⚠️ ค่าใช้จ่ายที่สูงกว่าปกติ <span style="font-weight:400;color:#94a3b8;font-size:13.5px">Unusual Spending · เทียบเดือนล่าสุดกับค่าเฉลี่ยย้อนหลัง</span></h3>`;
+  const R = edAnomalyData(data, monthFilter);
+  if(!R) return `<div class="card">${titleHtml}<div class="empty" style="padding:18px">ต้องมีข้อมูลอย่างน้อย 2 เดือนถึงจะเทียบได้</div></div>`;
+
+  const dTot = R.curTotal - R.baseAvgTotal;
+  const pTot = R.baseAvgTotal ? (dTot / R.baseAvgTotal * 100) : null;
+  const rangeLbl = R.nB === 1 ? edThaiMonthShort(R.prior[0])
+                              : edThaiMonthShort(R.prior[0]) + " – " + edThaiMonthShort(R.prior[R.nB-1]);
+  const summary = `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;font-size:13px;color:var(--ink-2)">
+      <span style="background:rgba(148,163,184,.14);padding:6px 12px;border-radius:999px">เดือนที่ตรวจ <b style="color:var(--ink)">${edThaiMonthShort(R.target)}</b></span>
+      <span>จ่ายรวม <b style="color:${ED_COLORS.out}">${edFmt(R.curTotal)}</b></span>
+      <span style="color:#cbd5e1">|</span>
+      <span>ค่าเฉลี่ย ${R.nB} เดือนก่อน (${rangeLbl}) <b>${edFmt(R.baseAvgTotal)}</b></span>
+      <span style="font-weight:700;color:${dTot>=0?"#fb5e6d":ED_COLORS.in}">${dTot>=0?"▲ สูงกว่า":"▼ ต่ำกว่า"} ${edFmt(Math.abs(dTot))}${pTot!==null?` (${dTot>=0?"+":""}${pTot.toFixed(0)}%)`:""}</span>
+    </div>`;
+  const note = `<div style="font-size:11.5px;color:#94a3b8;margin-top:10px;line-height:1.7">
+      เกณฑ์: สูงกว่าค่าเฉลี่ยเกิน 25% <b>และ</b> ส่วนต่างตั้งแต่ ${edFmt(R.floor)} ขึ้นไป · ค่าเฉลี่ยหารด้วย ${R.nB} เดือน (เดือนที่ไม่มีรายการนับเป็น 0) · ไม่รวมเงินโอนระหว่างบัญชี
+    </div>`;
+
+  if(!R.rows.length) return `<div class="card">${titleHtml}${summary}
+    <div style="padding:14px;border-radius:10px;background:rgba(22,163,74,.08);color:#15803d;font-size:13.5px;font-weight:600">✓ ไม่พบหมวดค่าใช้จ่ายที่สูงผิดปกติในเดือนนี้</div>${note}</div>`;
+
+  const CAP = 8;
+  const show = R.rows.slice(0, CAP), rest = R.rows.slice(CAP);
+  const badge = (r)=>{
+    if(r.kind === "new")       return `<span style="background:rgba(220,38,38,.12);color:#b91c1c;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap">รายการใหม่ · ไม่มีใน ${r.months} เดือนก่อน</span>`;
+    if(r.kind === "irregular") return `<span style="background:rgba(217,119,6,.14);color:#b45309;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap">จ่าย ${r.seen}/${r.months} เดือน · +${r.pct.toFixed(0)}%</span>`;
+    return `<span style="background:rgba(220,38,38,.10);color:#fb5e6d;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap">+${r.pct.toFixed(0)}% จากค่าเฉลี่ย</span>`;
+  };
+  return `<div class="card">${titleHtml}${summary}
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>หมวดค่าใช้จ่าย</th><th style="text-align:right">${edThaiMonthShort(R.target)}</th><th style="text-align:right">เฉลี่ย ${R.nB} เดือนก่อน</th><th style="text-align:right">ส่วนต่าง</th><th>สาเหตุ</th></tr></thead>
+      <tbody>${show.map((r,i)=>`<tr style="cursor:pointer" onclick="CfpEd.edDrillCatMonth(${JSON.stringify(r.cat).replace(/"/g,'&quot;')},${JSON.stringify(R.target).replace(/"/g,'&quot;')})">
+        <td>${i+1}</td>
+        <td>${esc(r.cat)}</td>
+        <td style="text-align:right;font-weight:700;color:${ED_COLORS.out}">${edFmt(r.cur)}</td>
+        <td style="text-align:right;color:var(--ink-3)">${r.avg>0?edFmt(r.avg):"—"}</td>
+        <td style="text-align:right;font-weight:800;color:#fb5e6d">+${edFmt(r.diff)}</td>
+        <td>${badge(r)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    ${rest.length?`<div style="font-size:12px;color:#94a3b8;margin-top:8px">+ อีก ${rest.length} หมวดที่เข้าเกณฑ์ รวม ${edFmt(rest.reduce((s,x)=>s+x.diff,0))}</div>`:""}
+    ${note}
+  </div>`;
+}
+function edDrillCatMonth(cat, monthKey){
+  const d = edState();
+  const txs = (d.data.transactions||[]).filter(t => t.category===cat && t.month===monthKey && t.out>0 && !edIsTransfer(t));
+  edShowDrillModal("หมวด: " + cat + " · " + edThaiMonth(monthKey), txs);
+}
+
+/* ── Benya index.html 5201–5708 ── */
+function edRenderCategory(){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers
+  const cats = Object.entries(A.byCat).map(([k,v])=>({ k, ...v, abs:Math.abs(v.net) })).sort((a,b)=>b.abs-a.abs);
+
+  // Top 5 รับ / จ่าย (+ รวมที่เหลือเป็น "อื่นๆ") สำหรับโดนัทชาร์ต
+  const buildTop = (dir) => {
+    const arr = Object.entries(A.byCat).map(([k,v])=>({k, v:v[dir]})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+    const top = arr.slice(0,5);
+    const restArr = arr.slice(5);
+    const rest = restArr.reduce((s,x)=>s+x.v,0);
+    const labels = top.map(x=>x.k.length>34?x.k.slice(0,32)+"…":x.k);
+    const data   = top.map(x=>x.v);
+    const keys   = top.map(x=>x.k);
+    if(rest>0){ labels.push(`อื่นๆ (${restArr.length} หมวด)`); data.push(rest); keys.push(null); }
+    return { labels, data, keys, total: arr.reduce((s,x)=>s+x.v,0) };
+  };
+  const inT = buildTop("in"), outT = buildTop("out");
+
+  edContentEl().innerHTML = `
+    <div data-exn="category.top">${edActBreakdownCard(A)}</div>
+    <div data-exn="category.top" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      <div class="card" style="margin-bottom:0">
+        <h3 style="font-size:18px">🟢 Top 5 รายรับ <span style="font-weight:400;color:#94a3b8;font-size:13.5px">Top 5 Receipts</span></h3>
+        ${inT.data.length?`<div style="position:relative;height:330px"><canvas id="edPieIn"></canvas></div>`:`<div class="empty" style="padding:30px">ไม่มีรายรับ</div>`}
+      </div>
+      <div class="card" style="margin-bottom:0">
+        <h3 style="font-size:18px">🔴 Top 5 รายจ่าย <span style="font-weight:400;color:#94a3b8;font-size:13.5px">Top 5 Payments</span></h3>
+        ${outT.data.length?`<div style="position:relative;height:330px"><canvas id="edPieOut"></canvas></div>`:`<div class="empty" style="padding:30px">ไม่มีรายจ่าย</div>`}
+      </div>
+    </div>
+    <div data-exn="category.anomaly">${edAnomalyCard(d.data, d.monthFilter)}</div>
+    <div class="card">
+      <h3 style="font-size:18px">Top 10 หมวด รายรับ / รายจ่าย <span style="font-weight:400;color:#94a3b8;font-size:13.5px">Top 10 Categories · หักลบรับ-จ่ายในหมวดเดียวกันแล้ว</span></h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+        ${edTopList(A.byCat,"in")}
+        ${edTopList(A.byCat,"out")}
+      </div>
+    </div>
+    <div class="card">
+      <h3>ตารางจัดอันดับ</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>หมวด</th><th style="text-align:right">รายการ</th><th style="text-align:right;color:var(--ok)">รับ</th><th style="text-align:right;color:var(--bad)">จ่าย</th><th style="text-align:right">สุทธิ</th></tr></thead>
+        <tbody>${cats.map((c,i)=>`<tr style="cursor:pointer" onclick="CfpEd.edDrillCat(${JSON.stringify(c.k).replace(/"/g,'&quot;')},'all')">
+          <td>${i+1}</td><td>${esc(c.k)}</td>
+          <td style="text-align:right">${c.count}</td>
+          <td style="text-align:right;color:var(--ok)">${c.in>0?edFmt(c.in):"—"}</td>
+          <td style="text-align:right;color:var(--bad)">${c.out>0?edFmt(c.out):"—"}</td>
+          <td style="text-align:right;font-weight:700;color:${c.net>=0?ED_COLORS.in:"#fb5e6d"}">${edFmt(c.net)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+  `;
+
+  const inPalette  = ["#15c486","#3fd39d","#8fe3c2","#2e8b4a","#6fb886","#9AA8BF"];   // ★ POG: เขียว/น้ำเงิน = รับ
+  const outPalette = ["#fb5e6d","#fb6b78","#e08a3c","#f0b070","#9b7bff","#9AA8BF"];   // ★ POG: แดง/ส้ม/ม่วง = จ่าย
+  const mkPie = (id, T, palette, dir) => {
+    if(!T.data.length) return;
+    edMakeChart(id, {
+      type:"doughnut",
+      data:{ labels:T.labels, datasets:[{ data:T.data, backgroundColor:T.labels.map((_,i)=>palette[i%palette.length]), borderColor:"#fff", borderWidth:2, hoverOffset:6 }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:"55%",
+        layout:{ padding:{ top:16, right:38, bottom:6, left:38 } },   // เผื่อที่ป้าย % + เส้นโยงข้างวง
+        plugins:{
+          legend:{ position:"bottom", labels:{ font:{size:11.5}, boxWidth:12, padding:9,
+            generateLabels:(c)=>{ const dd=c.data, dset=dd.datasets[0], tot=dset.data.reduce((s,v)=>s+(Number(v)||0),0)||1;
+              return dd.labels.map((lab,i)=>{ const v=Number(dset.data[i])||0, pc=v/tot*100, bg=Array.isArray(dset.backgroundColor)?dset.backgroundColor[i]:dset.backgroundColor;
+                return { text: lab+"  "+(pc<1?pc.toFixed(1):pc.toFixed(0))+"%", fillStyle:bg, strokeStyle:bg, lineWidth:0, index:i }; }); }
+          } },
+          tooltip:{ callbacks:{ label:c=>{ const pct=T.total?(c.parsed/T.total*100).toFixed(1):0; return " "+c.label+": "+edFmt(c.parsed)+" ("+pct+"%)"; } } }
+        },
+        onClick:(e,els)=>{ if(els&&els.length){ const k=T.keys[els[0].index]; if(k) edDrillCat(k, dir); } }
+      },
+      plugins:[edDonutPctPlugin]
+    });
+  };
+  mkPie("edPieIn", inT, inPalette, "in");
+  mkPie("edPieOut", outT, outPalette, "out");
+}
+
+/* ---------- Tab 4: Banks ---------- */
+function edRenderBanks(){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter);
+  const acctEntries = Object.entries(A.byAcct).sort((a,b)=>b[1].in - a[1].in);
+  const hasNick = acctEntries.some(([k,v]) => v.nick);   // ★ POG
+
+  edContentEl().innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <div class="card" style="margin-bottom:0">
+        <h3>สัดส่วนเงินสด (ปลายงวด) ตามบัญชี</h3>
+        <div style="position:relative;height:300px"><canvas id="edAcctDonut"></canvas></div>
+      </div>
+      <div class="card" style="margin-bottom:0">
+        <h3>เปรียบเทียบ รับ vs จ่าย ต่อบัญชี</h3>
+        <div style="position:relative;height:300px"><canvas id="edAcctBars"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>สรุปยอดต่อบัญชี (${acctEntries.length} บัญชี)</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ธนาคาร</th><th>เลขบัญชี</th>${hasNick?"<th>ชื่อบัญชี</th>":""}<th style="text-align:right">รายการ</th><th style="text-align:right;color:var(--ok)">รับ</th><th style="text-align:right;color:var(--bad)">จ่าย</th><th style="text-align:right">สุทธิ</th><th style="text-align:right">ยอดล่าสุด</th></tr></thead>
+        <tbody>${acctEntries.map(([k,v])=>{
+          const last = d.data.accounts[k] ? d.data.accounts[k].lastClose : null;
+          return `<tr style="cursor:pointer" onclick="CfpEd.edDrillAcct(${JSON.stringify(k).replace(/"/g,'&quot;')})">
+            <td><b>${esc(v.bank)}</b></td><td><code>${esc(v.no)}</code></td>${hasNick?`<td style="font-size:12px;color:var(--ink-3)">${esc(v.nick||"")}</td>`:""}
+            <td style="text-align:right">${v.count}</td>
+            <td style="text-align:right;color:var(--ok)">${edFmt(v.in)}</td>
+            <td style="text-align:right;color:var(--bad)">${edFmt(v.out)}</td>
+            <td style="text-align:right;font-weight:700;color:${v.net>=0?ED_COLORS.in:"#fb5e6d"}">${edFmt(v.net)}</td>
+            <td style="text-align:right;font-weight:700">${edFmt(last)}</td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table></div>
+    </div>
+  `;
+
+  const palette = ["#2e8b4a","#a3d4b3","#15c486","#e08a3c","#9b7bff","#fb5e6d","#0ea5e9","#84cc16"];
+  edMakeChart("edAcctDonut", {
+    type:"doughnut",
+    data:{
+      labels: acctEntries.map(([k,v])=>v.bank+" "+v.no),
+      datasets:[{
+        data: acctEntries.map(([k,v])=> Math.max(0, d.data.accounts[k] ? d.data.accounts[k].lastClose : 0)),
+        backgroundColor: acctEntries.map((_,i)=>palette[i%palette.length])
+      }]
+    },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:"bottom", labels:{ font:{ size:11 } } }, tooltip:{ callbacks:{ label:c=>c.label+": "+edFmt(c.parsed) } } } }
+  });
+  edMakeChart("edAcctBars", {
+    type:"bar",
+    data:{
+      labels: acctEntries.map(([k,v])=>v.bank+" "+edNoShort(v.no)),
+      datasets:[
+        { label:"รับ",  data: acctEntries.map(([k,v])=>v.in),  backgroundColor: ED_COLORS.in, borderRadius:6 },
+        { label:"จ่าย", data: acctEntries.map(([k,v])=>v.out), backgroundColor: ED_COLORS.out, borderRadius:6 }
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, indexAxis:"y",
+      scales:{ x:{ ticks:{ callback:v=>edFmtCompact(v) } } },
+      plugins:{ legend:{position:"bottom"}, tooltip:{ callbacks:{ label:c=>c.dataset.label+": "+edFmt(c.parsed.x) } } }
+    }
+  });
+}
+
+/* ---------- Tab 5: Transaction Explorer ---------- */
+// explorer state now in edState()
+/* เพดานแถวที่ render ในตาราง (Export ได้ทั้งหมดเสมอ) — 2,000 แถวยัง render ไหวสบาย */
+const ED_EXP_CAP = 2000;
+function edExpSet(k,v){ edState().explorer[k]=v; edRenderExplorer(); }
+function edExpSort(c){ const e=edState().explorer; if(e.sort===c) e.desc=!e.desc; else { e.sort=c; e.desc=true; } edRenderExplorer(); }
+
+/* ตัวกรองของ Transaction Explorer — ใช้ร่วมกันทั้งตารางบนจอและปุ่ม Export (สิ่งที่เห็น = สิ่งที่ส่งออก) */
+function edExplorerFilter(d){
+  const A = edAgg(d.data, d.monthFilter);
+  const e = d.explorer;
+
+  let txs = A.txs.slice();
+  if(e.q){
+    const q = e.q.toLowerCase();
+    txs = txs.filter(t => (t.note||"").toLowerCase().includes(q) || (t.ref||"").toLowerCase().includes(q) || (t.category||"").toLowerCase().includes(q));
+  }
+  if(e.acct!=="all") txs = txs.filter(t=>t.accountKey===e.acct);
+  if(e.act!=="all")  txs = txs.filter(t=>t.activityKey===e.act);
+  if(e.dir==="in")   txs = txs.filter(t=>t.in>0);
+  if(e.dir==="out")  txs = txs.filter(t=>t.out>0);
+  return txs;
+}
+function edRenderExplorer(){
+  const d = edState();
+  const e = d.explorer;
+
+  let txs = edExplorerFilter(d);   // ★ ตัวกรองชุดเดียวกับปุ่ม Export
+
+  txs.sort((a,b)=>{
+    let av=a[e.sort], bv=b[e.sort];
+    if(e.sort==="date"){ av=a.date.getTime(); bv=b.date.getTime(); }
+    if(av < bv) return e.desc?1:-1;
+    if(av > bv) return e.desc?-1:1;
+    return 0;
+  });
+
+  const acctOpts = Object.entries(d.data.accounts).map(([k,v])=>`<option value="${esc(k)}" ${e.acct===k?'selected':''}>${esc(v.bank)} ${esc(v.no)}</option>`).join("");
+  const sortIcon = c => e.sort===c ? (e.desc?" ↓":" ↑") : "";
+
+  edContentEl().innerHTML = `
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" placeholder="ค้นหา หมายเหตุ / เลขที่ / หมวด" value="${esc(e.q)}" oninput="CfpEd.edExpSet('q',this.value)"
+          style="flex:1;min-width:200px;padding:7px 11px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+        <select onchange="CfpEd.edExpSet('acct',this.value)" style="padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px"><option value="all">ทุกบัญชี</option>${acctOpts}</select>
+        <select onchange="CfpEd.edExpSet('act',this.value)" style="padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+          <option value="all" ${e.act==="all"?"selected":""}>ทุกกิจกรรม</option>
+          <option value="operating" ${e.act==="operating"?"selected":""}>ดำเนินงาน</option>
+          <option value="investing" ${e.act==="investing"?"selected":""}>ลงทุน</option>
+          <option value="financing" ${e.act==="financing"?"selected":""}>จัดหาเงิน</option>
+          <option value="other" ${e.act==="other"?"selected":""}>อื่น ๆ</option>
+        </select>
+        <select onchange="CfpEd.edExpSet('dir',this.value)" style="padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+          <option value="all" ${e.dir==="all"?"selected":""}>รับ + จ่าย</option>
+          <option value="in"  ${e.dir==="in"?"selected":""}>รับเท่านั้น</option>
+          <option value="out" ${e.dir==="out"?"selected":""}>จ่ายเท่านั้น</option>
+        </select>
+        ${edTallBtn(d)}
+        <button class="btn ghost btn sm" onclick="CfpEd.edExportTxs('xlsx')">Export Excel</button>
+        <button class="btn ghost btn sm" onclick="CfpEd.edExportTxs('csv')">Export CSV</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">${txs.length.toLocaleString()} รายการ · รับรวม <span style="color:var(--ok);font-weight:700">${edFmt(txs.reduce((s,t)=>s+t.in,0))}</span> · จ่ายรวม <span style="color:var(--bad);font-weight:700">${edFmt(txs.reduce((s,t)=>s+t.out,0))}</span></div>
+      <div class="table-wrap" style="${edTallStyle(d)}"><table>
+        <thead><tr>
+          <th onclick="CfpEd.edExpSort('date')" style="cursor:pointer">วันที่${sortIcon("date")}</th>
+          ${d.data.hasMne===false?"":"<th>รหัส</th>"}<th>เลขที่</th>
+          <th onclick="CfpEd.edExpSort('bank')" style="cursor:pointer">บัญชี${sortIcon("bank")}</th>
+          <th>หมวด</th>
+          <th onclick="CfpEd.edExpSort('in')" style="text-align:right;cursor:pointer;color:var(--ok)">รับ${sortIcon("in")}</th>
+          <th onclick="CfpEd.edExpSort('out')" style="text-align:right;cursor:pointer;color:var(--bad)">จ่าย${sortIcon("out")}</th>
+          <th style="text-align:right">คงเหลือ</th>
+          <th>หมายเหตุ</th>
+        </tr></thead>
+        <tbody>${txs.slice(0,ED_EXP_CAP).map(t=>`<tr>
+          <td>${t.dateISO}</td>
+          ${d.data.hasMne===false?"":`<td style="font-size:11px">${esc(t.mne)}</td>`}
+          <td><code style="font-size:11px">${esc(t.ref)}</code></td>
+          <td style="font-size:12px"><b>${esc(t.bank)}</b> ${esc(edNoShort(t.accountNo))}</td>
+          <td style="font-size:12px">${esc(t.category)}</td>
+          <td style="text-align:right;color:var(--ok)">${t.in>0?edFmt(t.in):"—"}</td>
+          <td style="text-align:right;color:var(--bad)">${t.out>0?edFmt(t.out):"—"}</td>
+          <td style="text-align:right;font-size:12px;color:var(--ink-3)">${edFmt(t.balance)}</td>
+          <td style="font-size:12px;color:var(--ink-2);max-width:300px;white-space:normal">${esc(t.note)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+      ${txs.length>ED_EXP_CAP?`<div style="font-size:12px;color:var(--ink-3);margin-top:8px">แสดง ${ED_EXP_CAP.toLocaleString()} แถวแรก จาก ${txs.length.toLocaleString()} — Export เพื่อดูทั้งหมด</div>`:""}
+    </div>
+  `;
+}
+/* ===================== ส่งออก Excel แบบจัดรูปแบบ (Executive Dashboard) =====================
+   ใช้ xlsx-js-style (โหลดเป็น XLSX อยู่แล้ว) — เขียนสี/กรอบ/ฟอนต์/รูปแบบตัวเลข/ผสานเซลล์/ตัวกรอง/ลิงก์ชีตได้
+   ★ ไลบรารีไม่เขียน "ตรึงแนว" (freeze panes) ให้ — edXlsSave แทรก <pane> ในไฟล์เองด้วย JSZip */
+/* ชื่อบริษัทในชื่อไฟล์: mbark → Mbark · benya → Benya */
+function edCoTag(){
+  return "BIOAXEL";   // ★ BIO: ชื่อบริษัทในชื่อไฟล์
+}
+/* ช่วงข้อมูลในชื่อไฟล์ จาก month key "YYYY.MM": เดือนเดียว 01.2026 · ปีเดียวกัน 01-03.2026 · ข้ามปี 12.2025-02.2026 */
+function edPeriodTag(monthKeys){
+  const ks = Array.from(new Set((monthKeys || []).filter(Boolean).map(String))).sort();
+  if(!ks.length) return stamp();
+  const [y1, m1] = ks[0].split("."), [y2, m2] = ks[ks.length-1].split(".");
+  if(ks.length === 1) return `${m1}.${y1}`;
+  if(y1 === y2) return `${m1}-${m2}.${y1}`;
+  return `${m1}.${y1}-${m2}.${y2}`;
+}
+/* ป้ายบัญชี: ในชื่อไฟล์ = SCB4889 · ในหัวรายงาน = SCB 136-2-684889 (4889) */
+function edAcctTag(acc){
+  const digits = String((acc && acc.no) || "").replace(/\D/g, "");
+  return String((acc && acc.bank) || "").replace(/[^A-Za-z0-9]/g, "") + digits.slice(-4);
+}
+function edAcctLabel(acc){
+  if(!acc) return "";
+  return `${acc.bank || ""} ${acc.no || ""}`.trim() + (acc.nick ? ` (${acc.nick})` : "");
+}
+/* "2026-01-05" → "5 มกราคม 2569" */
+function edThaiDateLong(iso){
+  const [y, m, d] = String(iso || "").slice(0,10).split("-").map(Number);
+  if(!y || !m || !d) return String(iso || "");
+  return `${d} ${TH_MONTHS[m-1]} ${y + 543}`;
+}
+function edXlsNow(){
+  const n = new Date(), p = v => String(v).padStart(2, "0");
+  return `${p(n.getDate())}/${p(n.getMonth()+1)}/${n.getFullYear()+543} ${p(n.getHours())}:${p(n.getMinutes())} น.`;
+}
+/* ISO → เลขวันที่ของ Excel (คิดแบบ UTC กันวันเพี้ยนจาก timezone ไทย) */
+function edXlsSerial(iso){
+  const [y, m, d] = String(iso || "").slice(0,10).split("-").map(Number);
+  if(!y || !m || !d) return null;
+  return (Date.UTC(y, m-1, d) - Date.UTC(1899, 11, 30)) / 86400000;
+}
+/* ชื่อชีต: ห้ามอักขระ [ ] : * ? / และ backslash · ยาวไม่เกิน 31 · ห้ามซ้ำ */
+function edXlsSheetName(name, used){
+  const BAD = "[]:*?/" + String.fromCharCode(92);
+  const clean = Array.from(String(name || "Sheet")).map(ch => BAD.includes(ch) ? " " : ch).join("").replace(/\s+/g, " ").trim();
+  const base = clean.slice(0, 31) || "Sheet";
+  let n = base, i = 2;
+  while(used.has(n)){ const suf = ` (${i++})`; n = base.slice(0, 31 - suf.length) + suf; }
+  used.add(n);
+  return n;
+}
+/* ชุดสไตล์ — สีหลักตามบริษัท (co.gradient[0]) · ฟอนต์เดียวกับใบกระทบยอดขาย */
+function edXlsKit(){
+  const co = COMPANIES.find(c => c.id === state.company) || {};
+  const hex = v => String(v || "").replace("#", "").toUpperCase();
+  const brand = hex((co.gradient && co.gradient[0]) || "#0d9488");
+  const FONT = "IBM Plex Sans Thai";
+  const line = { style:"thin", color:{ rgb:"CBD5E1" } };
+  const border = { top:line, bottom:line, left:line, right:line };
+  const fill = rgb => rgb ? { patternType:"solid", fgColor:{ rgb:hex(rgb) } } : undefined;
+  const font = (o = {}) => ({ name:FONT, sz:o.sz || 10.5, bold:!!o.bold, color:{ rgb:hex(o.color || "1E293B") } });
+  const align = (h, o = {}) => { const a = { horizontal:h, vertical:"center" }; if(o.wrap) a.wrapText = true; if(o.indent) a.indent = o.indent; return a; };
+  const NUM = '#,##0.00;[Red](#,##0.00);"-"';   // ติดลบ = วงเล็บสีแดง · ศูนย์ = "-"
+  return {
+    co, brand, NUM,
+    title:    v => ({ v, t:"s", s:{ font:font({ sz:15, bold:true, color:"FFFFFF" }), fill:fill(brand), alignment:align("left") } }),
+    subtitle: v => ({ v, t:"s", s:{ font:font({ sz:12, bold:true, color:brand }), alignment:align("left") } }),
+    meta:     v => ({ v, t:"s", s:{ font:font({ sz:10, color:"475569" }), alignment:align("left") } }),
+    head: (v, o = {}) => ({ v, t:"s", s:{ font:font({ bold:true, color:o.color || "FFFFFF" }), fill:fill(o.bg || brand), border, alignment:align(o.h || "center", { wrap:true }) } }),
+    txt:  (v, o = {}) => ({ v:v == null ? "" : String(v), t:"s", s:{ font:font({ bold:o.bold, color:o.color }), fill:fill(o.bg), border, alignment:align(o.h || "left", o) } }),
+    num:  (v, o = {}) => {
+      const c = { v:Math.round((Number(v) || 0) * 100) / 100, t:"n", z:o.fmt || NUM,
+        s:{ numFmt:o.fmt || NUM, font:font({ bold:o.bold, color:o.color }), fill:fill(o.bg), border, alignment:align("right") } };
+      if(o.f) c.f = o.f;
+      return c;
+    },
+    int:  (v, o = {}) => ({ v:Number(v) || 0, t:"n", z:"#,##0", s:{ numFmt:"#,##0", font:font({ bold:o.bold }), fill:fill(o.bg), border, alignment:align("center") } }),
+    date: (iso, o = {}) => {
+      const n = edXlsSerial(iso);
+      if(n == null) return { v:String(iso || ""), t:"s", s:{ font:font(), fill:fill(o.bg), border, alignment:align("center") } };
+      return { v:n, t:"n", z:"dd/mm/yyyy", s:{ numFmt:"dd/mm/yyyy", font:font(), fill:fill(o.bg), border, alignment:align("center") } };
+    },
+    link: (v, sheet, o = {}) => ({ v, t:"s", l:{ Target:`#'${String(sheet).replace(/'/g, "''")}'!A1`, Tooltip:"ไปที่ชีต " + sheet },
+      s:{ font:{ name:FONT, sz:10.5, underline:true, color:{ rgb:"2563EB" } }, fill:fill(o.bg), border, alignment:align("left") } }),
+  };
+}
+/* สร้างชีตจากตาราง cell spec ({v,t,s,z,f,l} หรือ null)
+   opts: cols (ความกว้าง wch ต่อคอลัมน์) · merges · rows ({แถว: ความสูง pt}) · autofilter ("A6:K40") */
+function edXlsBuild(cells, opts = {}){
+  const ws = {};
+  let maxC = 0;
+  cells.forEach((row, r) => (row || []).forEach((c, ci) => {
+    if(!c) return;
+    const cell = { v:c.v, t:c.t || "s" };
+    if(c.s) cell.s = c.s;
+    if(c.z) cell.z = c.z;
+    if(c.f) cell.f = c.f;
+    if(c.l) cell.l = c.l;
+    ws[XLSX.utils.encode_cell({ r, c:ci })] = cell;
+    if(ci > maxC) maxC = ci;
+  }));
+  ws["!ref"] = XLSX.utils.encode_range({ s:{ r:0, c:0 }, e:{ r:Math.max(0, cells.length - 1), c:maxC } });
+  if(opts.cols) ws["!cols"] = opts.cols.map(w => ({ wch:w }));
+  if(opts.merges && opts.merges.length) ws["!merges"] = opts.merges;
+  if(opts.rows){ const arr = []; for(const k in opts.rows) arr[Number(k)] = { hpt:opts.rows[k] }; ws["!rows"] = arr; }
+  if(opts.autofilter) ws["!autofilter"] = { ref:opts.autofilter };
+  return ws;
+}
+/* บันทึกไฟล์ + ตรึงแนว — freeze: { ชื่อชีต: { row: แถวบนที่ตรึง, col: คอลัมน์ซ้ายที่ตรึง } }
+   ขั้นตรึงแนวพังตรงไหน = บันทึกแบบไม่ตรึงแทน (ข้อมูล/รูปแบบยังครบ) */
+async function edXlsSave(wb, filename, freeze){
+  // ★ POG: ไม่มี JSZip → แก้ไฟล์ในซิปด้วย XLSX.CFB (มากับ xlsx-js-style) แบบเดียวกับ Fleet Card
+  try{
+    const CFB = XLSX.CFB;
+    if(!freeze || !CFB || !CFB.utils || !CFB.utils.cfb_add) throw new Error("no-freeze");
+    const cfb = CFB.read(XLSX.write(wb, { type:"base64", bookType:"xlsx" }), { type:"base64" });
+    for(let i = 0; i < wb.SheetNames.length; i++){
+      const fz = freeze[wb.SheetNames[i]];
+      if(!fz || (!fz.row && !fz.col)) continue;
+      const path = "/xl/worksheets/sheet" + (i+1) + ".xml";
+      const ent = CFB.find(cfb, path);
+      if(!ent) continue;
+      const xml = new TextDecoder("utf-8").decode(new Uint8Array(ent.content));
+      const ref = XLSX.utils.encode_cell({ r:fz.row || 0, c:fz.col || 0 });
+      const pane = fz.row && fz.col ? "bottomRight" : (fz.row ? "bottomLeft" : "topRight");
+      const paneXml = `<pane${fz.col ? ` xSplit="${fz.col}"` : ""}${fz.row ? ` ySplit="${fz.row}"` : ""} topLeftCell="${ref}" activePane="${pane}" state="frozen"/><selection pane="${pane}" activeCell="${ref}" sqref="${ref}"/>`;
+      CFB.utils.cfb_add(cfb, path, new TextEncoder().encode(xml.replace(/<sheetView([^>]*?)\/>/, `<sheetView$1>${paneXml}</sheetView>`)));
+    }
+    const bin = atob(CFB.write(cfb, { fileType:"zip", type:"base64", compression:true }));
+    const bytes = new Uint8Array(bin.length);
+    for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const el = document.createElement("a");
+    el.href = URL.createObjectURL(blob); el.download = filename; document.body.appendChild(el); el.click(); el.remove();
+    setTimeout(() => URL.revokeObjectURL(el.href), 1500);
+  }catch(e){
+    XLSX.writeFile(wb, filename);
+  }
+}
+
+/* ส่งออกรายการ — ตามตัวกรองที่เห็นบนจอ (ช่วงเวลา/ค้นหา/บัญชี/กิจกรรม/รับ-จ่าย)
+   Excel: หลายบัญชี = ชีต "สรุป" + ชีตแยกต่อบัญชี · บัญชีเดียว = ชีตเดียว · มีหัวรายงาน/หัวตาราง/กรอบ/สี/ยอดรวม
+   CSV: ตารางเดียวทุกบัญชี (เอาไปทำ pivot ต่อ)
+   ชื่อไฟล์ = บริษัท_Transaction_ช่วงข้อมูลจริง เช่น Mbark_Transaction_01.2026 */
+function edExportTxs(fmt){
+  const d = edState();
+  const e = d.explorer;
+  const txs = edExplorerFilter(d).sort((a,b) => (a.dateISO < b.dateISO ? -1 : a.dateISO > b.dateISO ? 1 : 0));   // sort เสถียร → ในวันเดียวกันคงลำดับเดิมของไฟล์ธนาคาร
+  if(!txs.length){ alert("ไม่มีรายการให้ส่งออกตามตัวกรองที่เลือก"); return; }
+  const accs = d.data.accounts || {};
+  const single = e.acct && e.acct !== "all" ? accs[e.acct] : null;
+  const base = `${edCoTag()}_Transaction${single ? "_" + edAcctTag(single) : ""}_${edPeriodTag(txs.map(t => t.month))}`;
+
+  if(fmt === "csv"){
+    const rows = [["วันที่","รหัส","เลขที่","ธนาคาร","เลขบัญชี","ชื่อบัญชี","หมวด","กิจกรรม","รับ","จ่าย","คงเหลือ","สถานะ","หมายเหตุ"]];
+    for(const t of txs) rows.push([t.dateISO, t.mne, t.ref, t.bank, t.accountNo, t.accountNick, t.category, t.activity, t.in, t.out, t.balance, t.status, t.note]);
+    if(d.data.hasMne===false) rows.forEach(r => r.splice(1, 1));   // ★ BIO: ไม่มีรหัส
+    download("\uFEFF" + XLSX.utils.sheet_to_csv(XLSX.utils.aoa_to_sheet(rows)), base + ".csv", "text/csv;charset=utf-8");
+    return;
+  }
+
+  const K = edXlsKit();
+  const coName = K.co.fullName || K.co.name || d.data.company || "";
+  const filt = [];
+  if(e.q) filt.push(`ค้นหา “${e.q}”`);
+  if(e.act !== "all") filt.push(ED_STMT_ACT_SHORT[e.act] || e.act);
+  if(e.dir === "in")  filt.push("รับเท่านั้น");
+  if(e.dir === "out") filt.push("จ่ายเท่านั้น");
+  const filtTxt = filt.length ? filt.join(" · ") : "ไม่มี (ทุกรายการ)";
+  const scopeTxt = edScopeLabel(d.monthFilter);
+  const range = list => `${edThaiDateLong(list[0].dateISO)} – ${edThaiDateLong(list[list.length-1].dateISO)}`;
+  const TOT = "E2E8F0", ZEBRA = "F8FAFC", GREEN = "15803D", RED = "B91C1C";
+
+  // จัดกลุ่มตามบัญชี — ลำดับชีตตามทะเบียนบัญชี
+  const byAcct = new Map();
+  for(const t of txs){ if(!byAcct.has(t.accountKey)) byAcct.set(t.accountKey, []); byAcct.get(t.accountKey).push(t); }
+  const order = Object.keys(accs).filter(k => byAcct.has(k)).concat([...byAcct.keys()].filter(k => !(k in accs)));
+  const acctOf = k => accs[k] || { bank:byAcct.get(k)[0].bank, no:byAcct.get(k)[0].accountNo, nick:byAcct.get(k)[0].accountNick };
+  const multi = order.length > 1;
+  const used = new Set(multi ? ["สรุป"] : []);
+  const sheetOf = {};
+  for(const k of order){ const a = acctOf(k); sheetOf[k] = edXlsSheetName(`${a.bank || ""} ${a.no || ""}`, used); }
+  const wb = XLSX.utils.book_new();
+  const freeze = {};
+  const titleMerges = lastCol => [0,1,2,3].map(r => ({ s:{ r, c:0 }, e:{ r, c:lastCol } }));
+
+  // ===== ชีตสรุป (เฉพาะเมื่อมีหลายบัญชี) =====
+  if(multi){
+    const H = ["ลำดับ","ธนาคาร","เลขที่บัญชี","ชื่อบัญชี","ช่วงข้อมูล","จำนวนรายการ","รับ","จ่าย","สุทธิ (รับ − จ่าย)","ดูรายการ"];
+    const cells = [
+      [K.title(coName)],
+      [K.subtitle("สรุปรายการเดินบัญชีธนาคาร (Transaction Summary)")],
+      [K.meta(`ช่วงข้อมูล: ${range(txs)} · ขอบเขตที่เลือก: ${scopeTxt} · หน่วย: บาท`)],
+      [K.meta(`ตัวกรอง: ${filtTxt} · ส่งออกเมื่อ ${edXlsNow()}`)],
+      [],
+      H.map(h => K.head(h)),
+    ];
+    const r0 = cells.length;                       // แถวหัวตาราง (เลขแถว Excel) = r0 · ข้อมูลเริ่ม r0+1
+    order.forEach((k, i) => {
+      const list = byAcct.get(k), a = acctOf(k), bg = i % 2 ? ZEBRA : null, R = r0 + i + 1;
+      const tin = list.reduce((s,t) => s + t.in, 0), tout = list.reduce((s,t) => s + t.out, 0);
+      cells.push([
+        K.int(i + 1, { bg }), K.txt(a.bank, { bg, h:"center", bold:true }), K.txt(a.no, { bg, h:"center" }), K.txt(a.nick || "", { bg }),
+        K.txt(range(list), { bg }), K.int(list.length, { bg }),
+        K.num(tin, { bg, color:GREEN }), K.num(tout, { bg, color:RED }), K.num(tin - tout, { bg, bold:true, f:`G${R}-H${R}` }),
+        K.link(sheetOf[k], sheetOf[k], { bg }),
+      ]);
+    });
+    const first = r0 + 1, last = r0 + order.length;
+    const allIn = txs.reduce((s,t) => s + t.in, 0), allOut = txs.reduce((s,t) => s + t.out, 0);
+    cells.push([
+      K.txt("รวมทุกบัญชี", { bold:true, bg:TOT, h:"center" }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }),
+      Object.assign(K.int(txs.length, { bold:true, bg:TOT }), { f:`SUM(F${first}:F${last})` }),
+      K.num(allIn, { bold:true, bg:TOT, color:GREEN, f:`SUM(G${first}:G${last})` }),
+      K.num(allOut, { bold:true, bg:TOT, color:RED, f:`SUM(H${first}:H${last})` }),
+      K.num(allIn - allOut, { bold:true, bg:TOT, f:`SUM(I${first}:I${last})` }),
+      K.txt("", { bg:TOT }),
+    ]);
+    const lastCol = H.length - 1;
+    XLSX.utils.book_append_sheet(wb, edXlsBuild(cells, {
+      cols:[7, 9, 18, 14, 36, 12, 16, 16, 18, 22],
+      merges:titleMerges(lastCol).concat([{ s:{ r:cells.length-1, c:0 }, e:{ r:cells.length-1, c:4 } }]),
+      rows:{ 0:30, 5:24 },
+      autofilter:`A${r0}:${XLSX.utils.encode_col(lastCol)}${last}`,
+    }), "สรุป");
+    freeze["สรุป"] = { row:r0 };
+  }
+
+  // ===== ชีตต่อบัญชี =====
+  const H = ["ลำดับ","วันที่","รหัส","เลขที่","หมวด","กิจกรรม","รับ","จ่าย","คงเหลือ","สถานะ","หมายเหตุ"];
+  for(const k of order){
+    const list = byAcct.get(k), a = acctOf(k), name = sheetOf[k];
+    const cells = [
+      [K.title(coName)],
+      [K.subtitle(`รายการเดินบัญชี (Transaction) · ${edAcctLabel(a)}`)],
+      [K.meta(`ช่วงข้อมูล: ${range(list)} · ${list.length.toLocaleString()} รายการ · หน่วย: บาท`)],
+      [K.meta(`ตัวกรอง: ${filtTxt} · ขอบเขตที่เลือก: ${scopeTxt} · ส่งออกเมื่อ ${edXlsNow()}`)],
+      [],
+      H.map(h => K.head(h)),
+    ];
+    const r0 = cells.length;
+    list.forEach((t, i) => {
+      const bg = i % 2 ? ZEBRA : null;
+      cells.push([
+        K.int(i + 1, { bg }), K.date(t.dateISO, { bg }), K.txt(t.mne, { bg, h:"center" }), K.txt(t.ref, { bg }),
+        K.txt(t.category, { bg, wrap:true }), K.txt(t.activity, { bg }),
+        K.num(t.in, { bg, color:GREEN }), K.num(t.out, { bg, color:RED }), K.num(t.balance, { bg }),
+        K.txt(t.status, { bg, h:"center" }), K.txt(t.note, { bg, wrap:true }),
+      ]);
+    });
+    const first = r0 + 1, last = r0 + list.length;
+    const tin = list.reduce((s,t) => s + t.in, 0), tout = list.reduce((s,t) => s + t.out, 0);
+    // คงเหลือปลายงวด = ยอดคงเหลือของรายการสุดท้าย — โชว์เฉพาะตอนไม่ได้กรอง (กรองแล้วยอดนี้ไม่ใช่ยอดปลายงวดจริง)
+    const closeCell = filt.length ? K.txt("", { bg:TOT }) : K.num(list[list.length-1].balance, { bold:true, bg:TOT });
+    cells.push([
+      K.txt("รวม", { bold:true, bg:TOT, h:"center" }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }), K.txt("", { bg:TOT }),
+      K.txt(`${list.length.toLocaleString()} รายการ`, { bold:true, bg:TOT, h:"right" }),
+      K.num(tin, { bold:true, bg:TOT, color:GREEN, f:`SUM(G${first}:G${last})` }),
+      K.num(tout, { bold:true, bg:TOT, color:RED, f:`SUM(H${first}:H${last})` }),
+      closeCell,
+      K.txt("", { bg:TOT }),
+      K.txt(filt.length ? "" : "คงเหลือ = ยอดคงเหลือหลังรายการสุดท้ายของช่วง", { bg:TOT, color:"64748B" }),
+    ]);
+    const lastCol = H.length - 1;
+    XLSX.utils.book_append_sheet(wb, edXlsBuild(cells, {
+      cols:[7, 12, 8, 17, 40, 18, 15, 15, 17, 11, 50],
+      merges:titleMerges(lastCol).concat([{ s:{ r:cells.length-1, c:0 }, e:{ r:cells.length-1, c:4 } }]),
+      rows:{ 0:30, 5:24 },
+      autofilter:`A${r0}:${XLSX.utils.encode_col(lastCol)}${last}`,
+    }), name);
+    freeze[name] = { row:r0 };
+  }
+  edXlsSave(wb, base + ".xlsx", freeze);
+}
+
+/* ---------- Tab 6: Statement (งบกระแสเงินสด) ---------- */
+// stmtAcct state now in edState()
+/* ── Benya index.html 5709–6174 ── */
+function edStmtAcct(v){ edState().stmtAcct = v; edRenderStmt(); }
+/* ขยาย/ย่อ ความสูงตาราง (ใช้ร่วมกันทั้งแท็บงบกระแสเงินสดและ Transaction Explorer)
+   ค่าปกติอิงความสูงจอ — จอใหญ่ได้พื้นที่มากขึ้นเอง */
+function edToggleStmtTall(){
+  const d=edState(); d.stmtTall=!d.stmtTall;
+  if(d.tab==="explorer") edRenderExplorer(); else edRenderStmt();
+}
+function edTallBtn(d){
+  return `<button class="btn ghost btn sm" onclick="CfpEd.edToggleStmtTall()" title="ขยายตารางให้เต็มความสูงจอ / ย่อกลับ">${d.stmtTall?"↕ ย่อตาราง":"↕ ขยายตาราง"}</button>`;
+}
+function edTallStyle(d){ return `max-height:${d.stmtTall?"calc(100vh - 130px)":"calc(100vh - 300px)"};min-height:380px`; }
+
+/* MBark vs Benya — palette สำหรับงบกระแสเงินสด */
+function edStmtPalette(){
+  // ★ POG: โทนสีงบเดิมของหน้า POG — หัวกิจกรรม/สุทธิ = น้ำเงิน · เงินสดรับ = เขียว · เงินสดจ่าย = แดง
+  return {
+    actBg:"#cde6d4", actText:"#1f6e3a",
+    inBg:"#e2faf0",  inText:"#15875a",  inSubBg:"#f1fcf7", inTotalBg:"#c3f0de", inRowTotalBg:"#eef6f1",
+    outBg:"#ffe9ec", outText:"#c0392b", outSubBg:"#fff5f6", outTotalBg:"#ffd3d9", outRowTotalBg:"#eef6f1",
+    netBg:"#d8eede", netTotalBg:"#b3dcc0", netAccent:"#1f6e3a",
+    openBg:"#f4faf6", openTotalBg:"#e8f4ec", openCloseBg:"#cfe7d6",
+    netPosText:"#15875a", netNegText:"#c0392b"
+  };
+}
+
+/* ★ โมเดลตัวเลขงบกระแสเงินสด — ใช้ร่วมกันทั้งหน้าจอ (edRenderStmt) และไฟล์ Excel (edExportStmtXlsx)
+   ห้ามคัดลอกสูตรไปไว้อีกที่ ไม่งั้นวันหนึ่งตัวเลขในไฟล์กับบนจอจะไม่ตรงกัน
+   filterAcct: "all" = รวมทุกบัญชี · accountKey = เฉพาะบัญชีนั้น */
+const ED_STMT_ACT_LABEL = { operating:"กระแสเงินสดจากกิจกรรมดำเนินงาน", investing:"กระแสเงินสดจากกิจกรรมลงทุน", financing:"กระแสเงินสดจากกิจกรรมจัดหาเงิน", other:"อื่น ๆ" };
+const ED_STMT_ACT_SHORT = { operating:"กิจกรรมดำเนินงาน", investing:"กิจกรรมลงทุน", financing:"กิจกรรมจัดหาเงิน", other:"อื่น ๆ" };
+function edStmtModel(data, monthFilter, filterAcct){
+  const months = edScopeMonthKeys(data, monthFilter);
+  const acct = filterAcct || "all";
+  const cats = {};   // catKey → { in:[m], out:[m] }
+  for(const t of data.transactions){
+    if(acct!=="all" && t.accountKey!==acct) continue;
+    if(edIsTransfer(t)) continue;  // ★ ตัด "เงินโอนระหว่างบัญชี" ออก (ทำให้ยอดรับ/จ่ายเกินจริง)
+    const k = t.category + "|" + t.activityKey;
+    if(!cats[k]) cats[k] = { cat:t.category, act:t.activityKey, code:t.code || "", in:Array(months.length).fill(0), out:Array(months.length).fill(0) };
+    if(t.code && (!cats[k].code || t.code < cats[k].code)) cats[k].code = t.code;
+    const mi = months.indexOf(t.month);
+    if(mi>=0){ cats[k].in[mi] += t.in; cats[k].out[mi] += t.out; }
+  }
+  const groups = { operating:[], investing:[], financing:[], other:[] };
+  for(const k in cats) groups[cats[k].act].push(cats[k]);
+  // ยอดต้นงวด/ปลายงวดของเดือน = ผลรวมบัญชีในเดือนนั้น (เฉพาะบัญชีที่เลือก)
+  const monthSum = (m, pick) => {
+    const mObj = data.months.find(x=>x.key===m);
+    if(!mObj) return 0;
+    let s = 0;
+    for(const a of mObj.accounts){ if(acct==="all" || a.accountKey===acct) s += pick(a); }
+    return s;
+  };
+  const openings = months.map(m => monthSum(m, a => a.opening));
+  const closings = months.map(m => monthSum(m, a => (a.closing || a.computed)));
+  const sumArr  = a => a.reduce((s,v)=>s+v,0);
+  const catNet  = c => c.in.map((v,i)=> v - c.out[i]);          // ★ net รับ-จ่าย ต่อเดือน (หัก refund กลบกันในหมวด)
+  const nonZero = arr => arr.some(v => Math.abs(v) > 0.005);
+  // ★ จัดประเภทหมวด → 'in'/'out' ตาม "ชื่อหมวด" (กันหมวดรายจ่ายที่มี refund บวก ไปโผล่ฝั่งรายรับ) · ชื่อไม่ชัด → ดู net รวม
+  const stmtSide = c => {
+    const dg = String(c.code || "").replace(/\D/g, "")[0];   // ★ POG: เลขหน้ารหัส 1/3/5 = รับ · 2/4/6 = จ่าย
+    if(dg && dg !== "0") return "135".indexOf(dg) >= 0 ? "in" : "out";
+    const n = c.cat || "";
+    if(/^\s*(รายรับ|รายได้|เงินสดรับ|เงินรับ)/.test(n)) return "in";
+    if(/^\s*(รายจ่าย|ค่าใช้จ่าย|เงินสดจ่าย|เงินจ่าย)/.test(n)) return "out";
+    return sumArr(catNet(c)) >= 0 ? "in" : "out";
+  };
+  const toRows = (list, sub) => list.map(c => { const net = catNet(c); net.forEach((v,i) => sub[i] += v); return { cat:c.cat, net, total:sumArr(net) }; });
+  const sections = [];
+  for(const act of ["operating","investing","financing","other"]){
+    if(!groups[act].length) continue;
+    const inCats = groups[act].filter(c => stmtSide(c)==="in" && nonZero(catNet(c)))
+      .sort((a,b) => sumArr(catNet(b)) - sumArr(catNet(a)));
+    const outCats = groups[act].filter(c => stmtSide(c)==="out" && nonZero(catNet(c)))
+      .sort((a,b) => sumArr(catNet(a)) - sumArr(catNet(b)));   // ติดลบมากสุดก่อน
+    const inSub = Array(months.length).fill(0), outSub = Array(months.length).fill(0);
+    const inRows = toRows(inCats, inSub), outRows = toRows(outCats, outSub);
+    const netByMonth = inSub.map((v,i) => v + outSub[i]);
+    sections.push({ act, inRows, inSub, outRows, outSub, netByMonth, netTotal:sumArr(netByMonth) });
+  }
+  const netChange = months.map((m,i)=> closings[i]-openings[i]);
+  return { months, openings, closings, sections, netChange, totalNet:netChange.reduce((s,v)=>s+v,0) };
+}
+
+function edRenderStmt(){
+  const d = edState();
+  // โชว์คอลัมน์ตาม scope ที่เลือก (ทุกปี=ทุกเดือน · เลือกปี=เฉพาะปีนั้น · เลือกเดือน=เดือนเดียว)
+  const M = edStmtModel(d.data, d.monthFilter, d.stmtAcct);  // ★ ตัวเลขชุดเดียวกับไฟล์ Excel (edExportStmtXlsx)
+  const months = M.months, openings = M.openings, closings = M.closings;
+  const filterAcct = d.stmtAcct;
+  const C = edStmtPalette();  // ★ สีตามบริษัท
+
+  const acctOpts = Object.entries(d.data.accounts).map(([k,v])=>`<option value="${esc(k)}" ${filterAcct===k?'selected':''}>${esc(v.bank)} ${esc(v.no)}</option>`).join("");
+
+  let html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px" data-pdf-hide="1">
+        <h3 style="margin:0">งบกระแสเงินสด — รายเดือน <span style="font-size:11px;font-weight:500;color:var(--ink-3)">· คลิกชื่อหมวด = คลี่รายการ · คลิกตัวเลข = ดูป๊อปอัพ</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${edTallBtn(d)}
+          <button class="btn ghost btn sm" onclick="CfpEd.edExportStmtXlsx()" title="ส่งออกงบกระแสเงินสดเป็น Excel ตามช่วงเวลาและบัญชีที่เลือก">Export Excel</button>
+          <select onchange="CfpEd.edStmtAcct(this.value)" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+            <option value="all" ${filterAcct==="all"?"selected":""}>รวมทุกบัญชี</option>${acctOpts}
+          </select>
+        </div>
+      </div>
+      <div data-pdf-only="1" style="display:none;margin-bottom:10px">
+        <h3 style="margin:0;color:${C.actText}">งบกระแสเงินสด — รายเดือน${filterAcct!=="all"?` · ${esc((d.data.accounts[filterAcct]&&d.data.accounts[filterAcct].bank)||'')} ${esc((d.data.accounts[filterAcct]&&d.data.accounts[filterAcct].no)||'')}`:" · รวมทุกบัญชี"}</h3>
+      </div>
+      <div class="table-wrap" style="${edTallStyle(d)}"><table>
+        <thead><tr><th>หมวด</th>${months.map(m=>`<th style="text-align:right">${esc(m)}</th>`).join("")}<th style="text-align:right;background:${C.openTotalBg}">รวม</th></tr></thead>
+        <tbody>
+          <tr style="background:${C.openBg};font-weight:700;cursor:pointer" title="คลิกดูยอดเปิดต้นงวดต่อบัญชี" onclick="CfpEd.edDrillOpenClose('opening')"><td>เงินสดต้นงวด</td>
+            ${openings.map((v,i)=>`<td style="text-align:right" onclick="event.stopPropagation();CfpEd.edDrillOpenCloseMonth('opening','${months[i]}')">${edFmt(v)}</td>`).join("")}
+            <td style="text-align:right;background:${C.openTotalBg}">${edFmt(openings[0])}</td></tr>
+  `;
+  const actLabels = ED_STMT_ACT_LABEL, actShort = ED_STMT_ACT_SHORT;
+  const sumArr = a => a.reduce((s,v)=>s+v,0);
+  const ncols = months.length + 2;
+  // helper: build clickable cell with onclick filter
+  const dq = s => JSON.stringify(s == null ? null : s).replace(/"/g,'&quot;');
+
+  const STMT_RED = "#fb5e6d";                                   // ★ สีแดงสำหรับยอดติดลบ
+  const stmtClr = v => (Number(v) < -0.005 ? STMT_RED : ED_COLORS.in);  // ★ ติดลบ=แดง · ไม่ติดลบ=สี in (ฟ้าพาสเทล/teal)
+
+  for(const S of M.sections){
+    const act = S.act;
+    // หัวกิจกรรม
+    html += `<tr style="background:${C.actBg}"><td colspan="${ncols}" style="font-weight:800;color:${C.actText};padding:9px 12px;font-size:13.5px">${actLabels[act]}</td></tr>`;
+
+    // ==== เงินสดรับ (หมวดประเภทรับ — แสดง net รับ-จ่าย) ====
+    const inSub = S.inSub;
+    if(S.inRows.length){
+      html += `<tr style="background:${C.inBg}"><td colspan="${ncols}" style="font-weight:700;color:${C.inText};padding:6px 12px;font-size:12.5px">เงินสดรับจาก${actShort[act]}</td></tr>`;
+      for(const c of S.inRows){
+        const net = c.net;
+        const total = c.total;
+        html += `<tr><td class="stmt-cat" style="padding-left:16px;color:#0f172a;cursor:pointer" onclick="CfpEd.edStmtToggle(this,${dq(c.cat)},'${act}',null)" title="คลิกเพื่อคลี่รายการ"><span class="stmt-caret" style="display:inline-block;width:12px;color:var(--ink-3);font-size:10px">▶</span> ${esc(c.cat)}</td>` +
+          net.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(${dq(c.cat)},'${act}','${months[i]}',null)" style="text-align:right;cursor:pointer;color:${Math.abs(v)>0.005?stmtClr(v):"var(--ink-3)"}" title="คลิกดูรายการ">${Math.abs(v)>0.005?edFmt(v):"—"}</td>`).join("") +
+          `<td onclick="CfpEd.edDrillStmt(${dq(c.cat)},'${act}','all',null)" style="text-align:right;background:${C.inRowTotalBg};font-weight:700;cursor:pointer;color:${stmtClr(total)}" title="คลิกดูรายการรวมทั้งปี">${edFmt(total)}</td></tr>`;
+      }
+      html += `<tr style="background:${C.inSubBg};font-weight:700"><td style="padding-left:18px;color:${C.inText}">รวมเงินสดรับ</td>` +
+        inSub.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(null,'${act}','${months[i]}','in')" style="text-align:right;cursor:pointer;color:${stmtClr(v)}" title="คลิกดูที่มา">${edFmt(v)}</td>`).join("") +
+        `<td onclick="CfpEd.edDrillStmt(null,'${act}','all','in')" style="text-align:right;background:${C.inTotalBg};cursor:pointer;color:${stmtClr(sumArr(inSub))}" title="คลิกดูที่มา">${edFmt(sumArr(inSub))}</td></tr>`;
+    }
+
+    // ==== เงินสดจ่าย (หมวดประเภทจ่าย — net รับ-จ่าย, ปกติติดลบ; refund หักกลบในฝั่งนี้ ไม่ขึ้นรายรับ) ====
+    const outSub = S.outSub;
+    if(S.outRows.length){
+      html += `<tr style="background:${C.outBg}"><td colspan="${ncols}" style="font-weight:700;color:${C.outText};padding:6px 12px;font-size:12.5px">เงินสดจ่ายจาก${actShort[act]}</td></tr>`;
+      for(const c of S.outRows){
+        const net = c.net;
+        const total = c.total;
+        html += `<tr><td class="stmt-cat" style="padding-left:16px;color:#0f172a;cursor:pointer" onclick="CfpEd.edStmtToggle(this,${dq(c.cat)},'${act}',null)" title="คลิกเพื่อคลี่รายการ"><span class="stmt-caret" style="display:inline-block;width:12px;color:var(--ink-3);font-size:10px">▶</span> ${esc(c.cat)}</td>` +
+          net.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(${dq(c.cat)},'${act}','${months[i]}',null)" style="text-align:right;cursor:pointer;color:${Math.abs(v)>0.005?stmtClr(v):"var(--ink-3)"}" title="คลิกดูรายการ">${Math.abs(v)>0.005?edFmt(v):"—"}</td>`).join("") +
+          `<td onclick="CfpEd.edDrillStmt(${dq(c.cat)},'${act}','all',null)" style="text-align:right;background:${C.outRowTotalBg};font-weight:700;cursor:pointer;color:${stmtClr(total)}" title="คลิกดูรายการรวมทั้งปี">${edFmt(total)}</td></tr>`;
+      }
+      html += `<tr style="background:${C.outSubBg};font-weight:700"><td style="padding-left:18px;color:${C.outText}">รวมเงินสดจ่าย</td>` +
+        outSub.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(null,'${act}','${months[i]}','out')" style="text-align:right;cursor:pointer;color:${stmtClr(v)}" title="คลิกดูที่มา">${edFmt(v)}</td>`).join("") +
+        `<td onclick="CfpEd.edDrillStmt(null,'${act}','all','out')" style="text-align:right;background:${C.outTotalBg};cursor:pointer;color:${stmtClr(sumArr(outSub))}" title="คลิกดูที่มา">${edFmt(sumArr(outSub))}</td></tr>`;
+    }
+
+    // ==== สุทธิของกิจกรรม ====
+    const netByMonth = S.netByMonth;
+    const netTotal = S.netTotal;
+    html += `<tr style="background:${C.netBg};font-weight:800;border-top:2px solid ${C.netTotalBg}"><td style="color:${C.netAccent}">กระแสเงินสดสุทธิจาก${actShort[act]}</td>` +
+      netByMonth.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(null,'${act}','${months[i]}',null)" style="text-align:right;cursor:pointer;color:${stmtClr(v)}" title="คลิกดูที่มา">${edFmt(v)}</td>`).join("") +
+      `<td onclick="CfpEd.edDrillStmt(null,'${act}','all',null)" style="text-align:right;background:${C.netTotalBg};cursor:pointer;color:${stmtClr(netTotal)}" title="คลิกดูที่มา">${edFmt(netTotal)}</td></tr>`;
+  }
+  // net change row
+  const netChange = M.netChange;
+  const totalNet = M.totalNet;
+  html += `
+    <tr style="background:${C.netBg};font-weight:800;border-top:2px solid ${C.netTotalBg}"><td style="color:${C.netAccent}">เปลี่ยนแปลงเงินสดสุทธิ</td>` +
+      netChange.map((v,i)=>`<td onclick="CfpEd.edDrillStmt(null,null,'${months[i]}',null)" style="text-align:right;cursor:pointer;color:${stmtClr(v)}" title="คลิกดูที่มา">${edFmt(v)}</td>`).join("") +
+      `<td onclick="CfpEd.edDrillStmt(null,null,'all',null)" style="text-align:right;background:${C.netTotalBg};cursor:pointer;color:${stmtClr(totalNet)}" title="คลิกดูที่มา">${edFmt(totalNet)}</td></tr>
+    <tr style="background:${C.openBg};font-weight:700;cursor:pointer" title="คลิกดูยอดปิดงวดต่อบัญชี" onclick="CfpEd.edDrillOpenClose('closing')"><td>เงินสดปลายงวด</td>` +
+      closings.map((v,i)=>`<td style="text-align:right" onclick="event.stopPropagation();CfpEd.edDrillOpenCloseMonth('closing','${months[i]}')">${edFmt(v)}</td>`).join("") +
+      `<td style="text-align:right;background:${C.openCloseBg}">${edFmt(closings[closings.length-1])}</td></tr>
+  </tbody></table></div>
+  </div>`;
+
+  edContentEl().innerHTML = html;
+}
+
+/* ส่งออกงบกระแสเงินสดเป็น Excel — ตัวเลขจาก edStmtModel ชุดเดียวกับหน้าจอ (ห้ามคำนวณแยก)
+   "รวมทุกบัญชี" + ในช่วงมีหลายบัญชี = ชีตรวม + ชีตแยกต่อบัญชี · เลือกบัญชีเดียว = ชีตเดียว
+   สีแถวตามหน้าจอ (edStmtPalette) · ชื่อไฟล์ = บริษัท_CashFlowStatement_ช่วงข้อมูล เช่น Mbark_CashFlowStatement_01.2026 */
+function edExportStmtXlsx(){
+  const d = edState();
+  const months = d.data && d.data.months ? edScopeMonthKeys(d.data, d.monthFilter) : [];
+  if(!months.length){ alert("ไม่มีข้อมูลงบกระแสเงินสดในช่วงเวลาที่เลือก"); return; }
+  const K = edXlsKit(), C = edStmtPalette();
+  const accs = d.data.accounts || {};
+  const sel = d.stmtAcct && d.stmtAcct !== "all" && accs[d.stmtAcct] ? d.stmtAcct : "all";
+  const coName = K.co.fullName || K.co.name || d.data.company || "";
+  const periodTxt = months.length === 1 ? edThaiMonth(months[0]) : `${edThaiMonth(months[0])} – ${edThaiMonth(months[months.length-1])}`;
+  const inScope = Object.keys(accs).filter(k => months.some(m => accs[k].months && accs[k].months[m]));
+  const targets = sel !== "all" ? [sel] : (inScope.length > 1 ? ["all"].concat(inScope) : ["all"]);
+  const hex = v => String(v || "").replace("#", "").toUpperCase();
+  const sum = a => a.reduce((s,v) => s + v, 0);
+  const lastCol = months.length + 1;
+  const wb = XLSX.utils.book_new(), used = new Set(), freeze = {};
+  for(const acct of targets){
+    const M = edStmtModel(d.data, d.monthFilter, acct);
+    const a = accs[acct] || {};
+    const acctTxt = acct === "all" ? (inScope.length > 1 ? `รวมทุกบัญชี (${inScope.length} บัญชี)` : "รวมทุกบัญชี") : edAcctLabel(a);
+    const cells = [
+      [K.title(coName)],
+      [K.subtitle(`งบกระแสเงินสด — รายเดือน · ${acctTxt}`)],
+      [K.meta(`ช่วงข้อมูล: ${periodTxt} · หน่วย: บาท`)],
+      [K.meta(`ไม่รวมเงินโอนระหว่างบัญชี · ตัวเลขติดลบแสดงในวงเล็บ · ส่งออกเมื่อ ${edXlsNow()}`)],
+      [],
+      [K.head("หมวด", { h:"left" })].concat(M.months.map(m => K.head(edThaiMonthShort(m)))).concat([K.head("รวม")]),
+    ];
+    const r0 = cells.length;
+    const merges = [0,1,2,3].map(r => ({ s:{ r, c:0 }, e:{ r, c:lastCol } }));
+    // แถวหัวข้อ — ระบายสีทั้งแถวแล้วผสานเซลล์
+    const bandRow = (label, o) => {
+      const row = [K.txt(label, { bold:true, bg:o.bg, color:o.color, indent:o.indent })];
+      for(let i = 1; i <= lastCol; i++) row.push(K.txt("", { bg:o.bg }));
+      merges.push({ s:{ r:cells.length, c:0 }, e:{ r:cells.length, c:lastCol } });
+      cells.push(row);
+    };
+    // แถวตัวเลข — คอลัมน์ "รวม" ใช้สีเข้มขึ้นเหมือนบนจอ · topLine = เส้นคั่นหนาด้านบน (แถวสุทธิ)
+    const numRow = (label, vals, total, o) => {
+      const row = [K.txt(label, { bold:o.bold, bg:o.bg, color:o.color, indent:o.indent })]
+        .concat(vals.map(v => K.num(v, { bold:o.bold, bg:o.bg })))
+        .concat([K.num(total, { bold:true, bg:o.totalBg || o.bg })]);
+      if(o.topLine) row.forEach(c => { c.s.border = Object.assign({}, c.s.border, { top:{ style:"medium", color:{ rgb:hex(o.topLine) } } }); });
+      cells.push(row);
+    };
+    numRow("เงินสดต้นงวด", M.openings, M.openings[0], { bold:true, bg:C.openBg, totalBg:C.openTotalBg });
+    for(const S of M.sections){
+      bandRow(ED_STMT_ACT_LABEL[S.act], { bg:C.actBg, color:C.actText });
+      if(S.inRows.length){
+        bandRow("เงินสดรับจาก" + ED_STMT_ACT_SHORT[S.act], { bg:C.inBg, color:C.inText, indent:1 });
+        for(const r of S.inRows) numRow(r.cat, r.net, r.total, { totalBg:C.inRowTotalBg, indent:2 });
+        numRow("รวมเงินสดรับ", S.inSub, sum(S.inSub), { bold:true, bg:C.inSubBg, color:C.inText, totalBg:C.inTotalBg, indent:1 });
+      }
+      if(S.outRows.length){
+        bandRow("เงินสดจ่ายจาก" + ED_STMT_ACT_SHORT[S.act], { bg:C.outBg, color:C.outText, indent:1 });
+        for(const r of S.outRows) numRow(r.cat, r.net, r.total, { totalBg:C.outRowTotalBg, indent:2 });
+        numRow("รวมเงินสดจ่าย", S.outSub, sum(S.outSub), { bold:true, bg:C.outSubBg, color:C.outText, totalBg:C.outTotalBg, indent:1 });
+      }
+      numRow("กระแสเงินสดสุทธิจาก" + ED_STMT_ACT_SHORT[S.act], S.netByMonth, S.netTotal, { bold:true, bg:C.netBg, color:C.netAccent, totalBg:C.netTotalBg, topLine:C.netTotalBg });
+    }
+    numRow("เปลี่ยนแปลงเงินสดสุทธิ", M.netChange, M.totalNet, { bold:true, bg:C.netBg, color:C.netAccent, totalBg:C.netTotalBg, topLine:C.netTotalBg });
+    numRow("เงินสดปลายงวด", M.closings, M.closings[M.closings.length-1], { bold:true, bg:C.openBg, totalBg:C.openCloseBg });
+    const name = edXlsSheetName(acct === "all" ? "รวมทุกบัญชี" : `${a.bank || ""} ${a.no || ""}`, used);
+    XLSX.utils.book_append_sheet(wb, edXlsBuild(cells, {
+      cols:[52].concat(M.months.map(() => 16)).concat([18]),
+      merges, rows:{ 0:30, [r0 - 1]:24 },
+    }), name);
+    freeze[name] = { row:r0, col:1 };
+  }
+  const tag = sel !== "all" ? "_" + edAcctTag(accs[sel]) : "";
+  edXlsSave(wb, `${edCoTag()}_CashFlowStatement${tag}_${edPeriodTag(months)}.xlsx`, freeze);
+}
+
+/* คลี่/พับรายการของหมวด inline (แบบ Excel) — เรียกจากการคลิก "ชื่อหมวด" ในงบกระแสเงินสด
+   (คลิกที่ตัวเลขเดือนยังเปิด popup เหมือนเดิมผ่าน edDrillStmt) */
+function edStmtToggle(tdEl, catName, actKey, dir){
+  const tr = tdEl.closest("tr");
+  const caret = tdEl.querySelector(".stmt-caret");
+  const next = tr.nextElementSibling;
+  if(next && next.classList.contains("stmt-detail")){   // เปิดอยู่ → พับ
+    next.remove();
+    if(caret) caret.textContent = "▶";
+    return;
+  }
+  const d = edState();
+  let txs = d.data.transactions.filter(t => !edIsTransfer(t));   // ★ ตัดโอนระหว่างบัญชี
+  if(catName) txs = txs.filter(t => t.category === catName);
+  if(actKey)  txs = txs.filter(t => t.activityKey === actKey);
+  if(d.stmtAcct && d.stmtAcct !== "all") txs = txs.filter(t => t.accountKey === d.stmtAcct);
+  if(dir === "in")  txs = txs.filter(t => t.in  > 0);
+  if(dir === "out") txs = txs.filter(t => t.out > 0);
+  txs.sort((a,b) => a.date - b.date);
+
+  const colspan = tr.children.length;
+  const head = dir === "in" ? ED_COLORS.in : ED_COLORS.out;
+  const body = txs.length ? txs.map(t=>`<tr style="border-top:1px solid #eef6f1">
+      <td style="padding:5px 10px;white-space:nowrap">${t.dateISO}</td>
+      <td style="padding:5px 10px"><code style="font-size:11px">${esc(t.ref)}</code></td>
+      <td style="padding:5px 10px"><b>${esc(t.bank)}</b> ${esc(edNoShort(t.accountNo))}</td>
+      <td style="padding:5px 10px;text-align:right;color:${ED_COLORS.in}">${t.in>0?edFmt(t.in):"—"}</td>
+      <td style="padding:5px 10px;text-align:right;color:${ED_COLORS.out}">${t.out>0?edFmt(t.out):"—"}</td>
+      <td style="padding:5px 10px;color:var(--ink-2);white-space:normal">${esc(t.note)}</td>
+    </tr>`).join("") : `<tr><td colspan="6" style="padding:10px;color:var(--ink-3)">ไม่มีรายการ</td></tr>`;
+
+  const detail = document.createElement("tr");
+  detail.className = "stmt-detail";
+  detail.innerHTML = `<td colspan="${colspan}" style="padding:0;background:#fbfefc;border-left:3px solid ${head}">
+    <div style="padding:4px 10px 10px 30px;overflow:auto">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="color:var(--ink-3)">
+          <th style="padding:4px 10px;font-weight:600;text-align:left">วันที่</th>
+          <th style="padding:4px 10px;font-weight:600;text-align:left">เลขที่</th>
+          <th style="padding:4px 10px;font-weight:600;text-align:left">บัญชี</th>
+          <th style="padding:4px 10px;font-weight:600;text-align:right">รับ</th>
+          <th style="padding:4px 10px;font-weight:600;text-align:right">จ่าย</th>
+          <th style="padding:4px 10px;font-weight:600;text-align:left">หมายเหตุ</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div></td>`;
+  tr.after(detail);
+  if(caret) caret.textContent = "▼";
+}
+
+/* ---------- Drill modals ---------- */
+/* generic drill: filter ตาม cat/act/month/dir แล้วแสดง modal รายการต้นทาง */
+function edDrillStmt(catName, actKey, monthKey, dir){
+  const d = edState();
+  let txs = d.data.transactions.filter(t => !edIsTransfer(t));  // ★ exclude transfers (drill จาก Statement)
+  if(catName) txs = txs.filter(t => t.category === catName);
+  if(actKey)  txs = txs.filter(t => t.activityKey === actKey);
+  if(monthKey && monthKey !== "all") txs = txs.filter(t => t.month === monthKey);
+  if(d.stmtAcct && d.stmtAcct !== "all") txs = txs.filter(t => t.accountKey === d.stmtAcct);
+  if(dir === "in")  txs = txs.filter(t => t.in > 0);
+  if(dir === "out") txs = txs.filter(t => t.out > 0);
+  const parts = [];
+  if(catName) parts.push(catName);
+  else if(actKey) parts.push(edActivityLabel(actKey));
+  if(dir === "in")  parts.push("เงินสดรับ");
+  else if(dir === "out") parts.push("เงินสดจ่าย");
+  else if(actKey || catName) parts.push("สุทธิ");
+  parts.push(monthKey && monthKey !== "all" ? edThaiMonth(monthKey) : "รวมทุกเดือน");
+  edShowDrillModal(parts.join(" · "), txs);
+}
+
+/* Summary KPI drill — รับรวม / จ่ายรวม / สุทธิ */
+function edDrillSummary(kind){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers (drill จาก Summary)
+  let txs = A.txs;
+  let title = "รายการทั้งหมด";
+  if(kind === "in"){  txs = txs.filter(t => t.in  > 0); title = "เงินสดรับรวม"; }
+  if(kind === "out"){ txs = txs.filter(t => t.out > 0); title = "เงินสดจ่ายรวม"; }
+  if(kind === "net") title = "กระแสเงินสดสุทธิ";
+  const period = edScopeLabel(d.monthFilter);
+  edShowDrillModal(title + " · " + period, txs);
+}
+
+/* Activity sub-KPI drill — รับ/จ่ายของกิจกรรมหนึ่งๆ */
+function edDrillActivityIO(actKey, dir){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers
+  let txs = A.txs.filter(t => t.activityKey === actKey);
+  if(dir === "in")  txs = txs.filter(t => t.in  > 0);
+  if(dir === "out") txs = txs.filter(t => t.out > 0);
+  const label = edActivityLabel(actKey);
+  const dirL  = dir === "in" ? "รับ" : dir === "out" ? "จ่าย" : "สุทธิ";
+  const period = edScopeLabel(d.monthFilter);
+  edShowDrillModal(`${label} · ${dirL} · ${period}`, txs);
+}
+
+/* drill ยอดเปิด/ปิด ของเดือนเฉพาะ (เรียกจาก Statement cell) */
+function edDrillOpenCloseMonth(kind, monthKey){
+  const d = edState();
+  const saved = d.monthFilter;
+  d.monthFilter = monthKey;
+  edDrillOpenClose(kind);
+  d.monthFilter = saved;
+}
+
+/* opening/closing breakdown by account */
+function edDrillOpenClose(kind){
+  const d = edState();
+  const data = d.data;
+  const filterAcct = d.stmtAcct || "all";
+  const monthFilter = d.monthFilter;
+  const rows = [];
+  let total = 0;
+
+  // เปิด = เดือนแรกที่บัญชีปรากฏใน scope · ปิด = เดือนสุดท้าย (รองรับ ทุกปี/ทั้งปี/เดือนเดียว)
+  const scope = edScopeMonthKeys(data, monthFilter);
+  for(const k in data.accounts){
+    if(filterAcct !== "all" && k !== filterAcct) continue;
+    const a = data.accounts[k];
+    let v = null;
+    if(kind === "opening"){
+      for(const mk of scope){ if(a.months[mk]){ v = a.months[mk].opening; break; } }
+    } else {
+      for(let i = scope.length - 1; i >= 0; i--){ const mk = scope[i]; if(a.months[mk]){ v = a.months[mk].closing; break; } }
+    }
+    if(v == null) continue;
+    rows.push({ bank:a.bank, no:a.no, nick:a.nick, value:v });
+    total += v;
+  }
+
+  const title = (kind === "opening" ? "เงินสดต้นงวด" : "เงินสดปลายงวด")
+    + " · " + edScopeLabel(monthFilter);
+
+  const wrap = document.createElement("div");
+  wrap.id = "edDrillModal";
+  wrap.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px";
+  wrap.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:24px;max-width:700px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0;font-size:16px">${esc(title)} <span style="color:var(--ink-3);font-size:13px;font-weight:500">— ${rows.length} บัญชี · รวม ${edFmt(total)}</span></h3>
+        <button onclick="document.getElementById('edDrillModal').remove()" style="padding:6px 12px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:13px;cursor:pointer">ปิด</button>
+      </div>
+      <table style="font-size:13px;width:100%">
+        <thead><tr><th style="text-align:left;padding:8px 12px;background:#f8fafc;border-bottom:1px solid var(--line)">ธนาคาร</th><th style="text-align:left;padding:8px 12px;background:#f8fafc;border-bottom:1px solid var(--line)">เลขบัญชี</th><th style="text-align:left;padding:8px 12px;background:#f8fafc;border-bottom:1px solid var(--line)">ชื่อบัญชี</th><th style="text-align:right;padding:8px 12px;background:#f8fafc;border-bottom:1px solid var(--line)">ยอด</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9"><b>${esc(r.bank)}</b></td><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9"><code style="font-size:12px">${esc(r.no)}</code></td><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;color:var(--ink-3);font-size:12px">${esc(r.nick||"—")}</td><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700">${edFmt(r.value)}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.onclick = (e) => { if(e.target === wrap) wrap.remove(); };
+}
+
+function edDrillCat(cat, dir){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers
+  let txs = A.txs.filter(t=>t.category===cat);
+  if(dir==="in")  txs = txs.filter(t=>t.in>0);
+  if(dir==="out") txs = txs.filter(t=>t.out>0);
+  edShowDrillModal("หมวด: "+cat, txs);
+}
+function edDrillActivity(actKey){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter, true);  // ★ exclude transfers
+  const txs = A.txs.filter(t=>t.activityKey===actKey);
+  edShowDrillModal("กิจกรรม: "+edActivityLabel(actKey), txs);
+}
+function edDrillAcct(key){
+  const d = edState();
+  const A = edAgg(d.data, d.monthFilter);
+  const txs = A.txs.filter(t=>t.accountKey===key);
+  edShowDrillModal("บัญชี: "+key, txs);
+}
+function edShowDrillModal(title, txs){
+  const wrap = document.createElement("div");
+  wrap.id = "edDrillModal";
+  wrap.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px";
+  const totalIn = txs.reduce((s,t)=>s+t.in,0);
+  const totalOut = txs.reduce((s,t)=>s+t.out,0);
+  wrap.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:24px;max-width:1000px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="margin:0;font-size:16px">${esc(title)} <span style="color:var(--ink-3);font-size:13px;font-weight:500">— ${txs.length} รายการ · รับ ${edFmt(totalIn)} · จ่าย ${edFmt(totalOut)}</span></h3>
+        <button onclick="document.getElementById('edDrillModal').remove()" style="padding:6px 12px;border:1px solid var(--line);background:#fff;border-radius:7px;font-size:13px;cursor:pointer">ปิด</button>
+      </div>
+      <div style="overflow:auto;flex:1"><table style="font-size:12px;width:100%">
+        <thead><tr><th>วันที่</th><th>เลขที่</th><th>บัญชี</th><th style="text-align:right">รับ</th><th style="text-align:right">จ่าย</th><th>หมายเหตุ</th></tr></thead>
+        <tbody>${txs.map(t=>`<tr>
+          <td>${t.dateISO}</td><td><code style="font-size:11px">${esc(t.ref)}</code></td>
+          <td><b>${esc(t.bank)}</b> ${esc(edNoShort(t.accountNo))}</td>
+          <td style="text-align:right;color:var(--ok)">${t.in>0?edFmt(t.in):"—"}</td>
+          <td style="text-align:right;color:var(--bad)">${t.out>0?edFmt(t.out):"—"}</td>
+          <td style="color:var(--ink-2)">${esc(t.note)}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.onclick = (e)=>{ if(e.target===wrap) wrap.remove(); };
+}
+
+  /* ── สไตล์ของหน้า Benya (ยกจาก <style> ของ fin.benyamedical.com) — ครอบด้วย .ced ไม่ให้ชนสไตล์ทั้งแอป
+   *    (POG มี .card/.btn/.badge/.page-head ของตัวเอง) · ป๊อปอัพรายการ (#edDrillModal) ต่อท้าย <body> จึงครอบแยก */
+  const CED_CSS = `
+.ced, #edDrillModal{
+  --brand:#2e8b4a; --brand-dark:#1f6e3a; --brand-soft:#e3f2e8; --brand-rgb:46,139,74;
+  --in:#15c486; --in-soft:#e2faf0; --in-ink:#15875a; --out:#fb5e6d; --out-soft:#ffe9ec; --out-ink:#c0392b;
+  --warn:#f59e0b; --warn-soft:#fef3c7; --warn-ink:#92400e; --ok:#15c486; --bad:#fb5e6d;
+  --ink:#20342a; --ink-2:#688275; --ink-3:#a4b8ac; --line:#e1efe7; --card:#ffffff;
+  --glass:rgba(255,255,255,.85); --glass-strong:rgba(255,255,255,.92); --glass-border:rgba(46,139,74,.14);
+  --radius:14px; --shadow:0 10px 30px rgba(31,120,60,.12); --shadow-md:0 14px 36px rgba(31,120,60,.18);
+  color:var(--ink); font-size:14.5px; line-height:1.6;
+}
+.ced .ed-page{background:transparent;min-height:calc(100vh - 54px);padding:24px 28px}
+@media (max-width:760px){ .ced .ed-page{padding:16px 14px} }
+body.present-mode .ced .ed-page{padding:26px 40px}
+@keyframes edGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes edShimmer{0%{transform:translateX(-130%)}55%{transform:translateX(230%)}100%{transform:translateX(230%)}}
+@keyframes edShine{0%{transform:translateX(-130%) skewX(-16deg)}60%{transform:translateX(330%) skewX(-16deg)}100%{transform:translateX(330%) skewX(-16deg)}}
+@keyframes edGlow{0%,100%{box-shadow:0 14px 36px rgba(31,120,60,.32)}50%{box-shadow:0 16px 44px rgba(31,120,60,.52)}}
+.ced .ed-grow{transform-origin:left;animation:edGrow .85s cubic-bezier(.22,1,.36,1)}
+.ced .ed-shim{position:absolute;inset:0;background:linear-gradient(110deg,transparent 25%,rgba(255,255,255,.55) 50%,transparent 75%);animation:edShimmer 2.8s ease-in-out infinite}
+.ced .ed-shine{position:absolute;top:0;left:0;width:38%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.22),transparent);animation:edShine 3.4s ease-in-out infinite;pointer-events:none}
+.ced .ed-glow{animation:edGlow 2.6s ease-in-out infinite}
+.ced .ed-tabs{display:flex;gap:4px;background:rgba(46,139,74,.08);padding:4px;border-radius:11px;margin-bottom:16px;flex-wrap:wrap}
+.ced .ed-tabs button{flex:1;min-width:120px;border:none;background:transparent;padding:9px 14px;font-size:12.5px;font-weight:600;color:#688275;border-radius:8px;cursor:pointer;transition:.15s;font-family:inherit}
+.ced .ed-tabs button:hover{background:rgba(255,255,255,.5)}
+.ced .ed-tabs button.active{background:linear-gradient(135deg,#2e8b4a,#1f6e3a);color:#fff;box-shadow:0 6px 16px rgba(31,120,60,.3);font-weight:700}
+.ced .page-head{display:block;margin-bottom:22px}
+.ced .page-head h1{margin:0 0 5px;font-size:25px;font-weight:800;letter-spacing:-.6px;color:var(--ink);font-family:"IBM Plex Sans","IBM Plex Sans Thai",ui-sans-serif,sans-serif}
+.ced .page-head .sub{color:var(--ink-2);font-size:13.5px}
+.ced .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--brand-soft);color:var(--brand-dark);vertical-align:middle;margin-left:8px;line-height:1.6;gap:0}
+.ced .card{background:var(--glass);backdrop-filter:blur(10px);border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:16px;transition:transform .18s ease,box-shadow .18s ease;position:static}
+.ced .card:hover{box-shadow:var(--shadow-md)}
+.ced .card h3{margin:0 0 4px;font-size:14.5px;font-weight:700;color:var(--ink);font-family:"IBM Plex Sans","IBM Plex Sans Thai",ui-sans-serif,sans-serif;letter-spacing:-.3px}
+.ced .card .note{color:var(--ink-3);font-size:12.5px;margin-bottom:14px}
+.ced .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:linear-gradient(135deg,var(--brand),var(--brand-dark));color:#fff;padding:9px 17px;border-radius:9px;font-weight:600;font-size:13px;line-height:1.3;transition:transform .14s ease,box-shadow .14s ease,filter .14s;box-shadow:0 3px 10px rgba(var(--brand-rgb),.22);cursor:pointer;font-family:inherit}
+.ced .btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(var(--brand-rgb),.30)}
+.ced .btn.ghost{background:rgba(255,255,255,.7);color:var(--brand);border-color:var(--brand);box-shadow:none}
+.ced .btn.ghost:hover{background:var(--brand-soft)}
+.ced .btn.sm{padding:6px 13px;font-size:12px;border-radius:8px}
+.ced .btn[disabled]{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.ced .ed-ico{width:15px;height:15px;flex:none}
+.ced .table-wrap{overflow:auto;border:1px solid var(--glass-border);border-radius:12px;margin-top:12px;max-height:440px;background:rgba(255,255,255,.5)}
+.ced table, #edDrillModal table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+.ced th, .ced td, #edDrillModal th, #edDrillModal td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left}
+.ced th, #edDrillModal th{background:rgba(var(--brand-rgb),.07);position:sticky;top:0;font-weight:700;color:var(--brand-dark);font-size:11px;letter-spacing:.4px;text-transform:uppercase}
+.ced tbody tr, #edDrillModal tbody tr{transition:background .12s}
+.ced tbody tr:hover, #edDrillModal tbody tr:hover{background:rgba(var(--brand-rgb),.05)}
+.ced code, #edDrillModal code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.ced .empty{padding:40px;text-align:center;color:var(--ink-3);font-size:13px}
+.ced .drop{border:1.5px dashed var(--glass-border);border-radius:12px;padding:28px;text-align:center;color:var(--ink-3);transition:.18s;background:rgba(255,255,255,.45);cursor:pointer}
+.ced .drop:hover{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-dark)}
+.ced .drop .big{font-size:28px;margin-bottom:6px;opacity:.6}
+.ced .drop b{color:var(--brand)}
+.ced .drop .sm{font-size:11.5px;margin-top:6px}
+.ced select{font-family:inherit}
+.ced .ed-print-h{font-size:18px;font-weight:800;color:#1f6e3a;margin:22px 0 12px;font-family:"IBM Plex Sans","IBM Plex Sans Thai",ui-sans-serif,sans-serif}
+.ced .ed-print-sec:first-child .ed-print-h{margin-top:0}
+.ced #printHeader{display:none}
+body.present-mode .ced .ed-hide-present{display:none!important}
+@media print{
+  .ced, .ced *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .ced .page-head, .ced .ed-period, .ced .ed-tabs, .ced .ed-hide-present, .ced .btn, .ced button, .ced select, .ced input{display:none!important}
+  .ced .ed-page{background:#fff!important;margin:0!important;padding:0!important;min-height:auto!important}
+  .ced .card{box-shadow:none!important;border:1px solid #cbd5e1!important;backdrop-filter:none!important;background:#fff!important;break-inside:avoid;page-break-inside:avoid;margin-bottom:10px!important;padding:14px!important}
+  .ced .card:has(table){break-inside:auto!important;page-break-inside:auto!important}
+  .ced #printHeader{display:block;border-bottom:3px solid #2e8b4a;padding:0 0 14px;margin-bottom:18px}
+  .ced #printHeader .ph-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .ced #printHeader .ph-co{display:flex;align-items:center;gap:14px}
+  .ced #printHeader .ph-logo{width:62px;height:62px;object-fit:contain}
+  .ced #printHeader .ph-co-name{font-size:18px;font-weight:800;color:#0f172a;letter-spacing:-.4px}
+  .ced #printHeader .ph-co-sub{font-size:11px;color:#64748b;margin-top:2px;text-transform:uppercase;letter-spacing:.7px;font-weight:600}
+  .ced #printHeader .ph-meta{text-align:right;font-size:11.5px;color:#475569;line-height:1.7}
+  .ced #printHeader .ph-title{font-size:13px;font-weight:700;color:#1f6e3a;letter-spacing:.3px;text-transform:uppercase}
+  .ced #printHeader .ph-period{font-size:14.5px;font-weight:700;color:#0f172a;margin-top:1px}
+  .ced #printHeader .ph-ts{color:#94a3b8;font-size:10.5px;margin-top:2px;font-style:italic}
+  .ced .table-wrap{max-height:none!important;overflow:visible!important;border:none!important}
+  .ced table{font-size:10px!important}
+  .ced th, .ced td{padding:5px 7px!important}
+  .ced th{background:#eef6f1!important;color:#1f6e3a!important;border-bottom:1.5px solid #2e8b4a!important;position:static!important}
+  .ced thead{display:table-header-group}
+  .ced tr{break-inside:avoid;page-break-inside:avoid}
+  .ced canvas{max-width:100%!important}
+  .ced .ed-print-sec{break-before:page;page-break-before:always}
+  .ced .ed-print-sec:first-child{break-before:auto;page-break-before:auto}
+  #edDrillModal{display:none!important}
+}`;
+  function edInjectCSS() {
+    if (document.getElementById('ced-css')) return;
+    const st = document.createElement('style'); st.id = 'ced-css'; st.textContent = CED_CSS; document.head.appendChild(st);
+  }
+  /* ยังไม่มีข้อมูล — หน้าอัปโหลด (★ BIO: อ่านไฟล์ STM รายการเดินบัญชี + งบสรุป ด้วยตัวอ่านเดิมของ BIO) */
+  function edRenderEmpty() {
+    const t = TOOLS[0], co = COMPANIES[0];
+    Object.keys(_edCharts).forEach(edDestroyChart);
+    CED.host.innerHTML = `
+    <div class="ed-page">
+      <div class="page-head">
+        <h1>${t.name} <span class="badge">${esc(co.name)}</span></h1>
+        <div class="sub">อัปไฟล์ STM รายการเดินบัญชี → 5 แดชบอร์ด: Executive Summary · Category Analysis · Bank Accounts · Transaction Explorer · งบกระแสเงินสด</div>
+      </div>
+      <div class="card">
+        <h3>อัปโหลดไฟล์</h3>
+        <div class="note">ไฟล์ Excel STM รายการเดินบัญชี (รายบัญชี หรือชีต "รวมทุกบัญชี" ที่มีคอลัมน์ วันที่ / ยอดถอน / ยอดฝาก / หมวด / ประเภทกิจกรรม) · เลือกพร้อมไฟล์งบกระแสเงินสดสรุปได้ (เลือกหลายไฟล์ได้) · หรือกด "ส่งขึ้นหน้า Cash Flow" ที่หน้างบกระทบยอดกระแสเงินสด</div>
+        ${CED.canEdit
+          ? `<div class="drop" onclick="CfpEd.edHook('upload')"><div class="big">↑</div><div>${CED.uploading ? 'กำลังอ่านไฟล์…' : '<b>คลิกเพื่อเลือกไฟล์</b>'}</div><div class="sm">อัปแล้วทุกคนที่เปิดหน้านี้เห็นชุดเดียวกัน</div></div>`
+          : `<div class="empty">ยังไม่มีข้อมูล — ให้ผู้ดูแลอัปโหลดไฟล์</div>`}
+      </div>
+    </div>`;
+  }
+  function edMount(data) {
+    edInjectCSS();
+    CED.ui.data = data;
+    if (!CED.host) return;
+    if (!data || !data.transactions || !data.transactions.length) { if (window.exnUnmount) window.exnUnmount(CED.host); edRenderEmpty(); return; }
+    edRenderDashboard();
+  }
+  function edUnmount() {
+    if (window.exnUnmount) window.exnUnmount(CED.host);
+    Object.keys(_edCharts).forEach(edDestroyChart);
+    document.querySelectorAll('#edDrillModal').forEach(m => m.remove());
+    CED.host = null; CED.target = null; CED.printAll = false;
+  }
+
+  /* ══════════ หน้า (React) — ถือข้อมูล/อัปโหลด/แชร์ส่วนกลาง แล้วให้ส่วนที่ 2 วาดหน้าจอ ══════════
+   *  การอ่านไฟล์ = ของ BIO เดิมทุกอย่าง: เลือกไฟล์ได้หลายไฟล์ · ทุกชีตในทุกไฟล์ → ชีต STM ที่มีรายการมากสุด
+   *  (ชีต "รวมทุกบัญชี" ชนะชีตรายบัญชีเก่า) + งบสรุปชีตแรกที่เจอ */
+  function CashFlowPresentPage({ data, toast }) {
     const [stored, setStored] = useState(() => { try { return JSON.parse(localStorage.getItem(CFP_LS) || 'null'); } catch (e) { return null; } });
     const [uploading, setUploading] = useState(false);
-    const [tab, setTab] = useState('overview');
-    const [topN, setTopN] = useState(10); const [era, setEra] = useState(() => { try { return localStorage.getItem('bio-cfp-era') || 'auto'; } catch (e) { return 'auto'; } });
-    const [modal, setModal] = useState(null);
-    const [synced, setSynced] = useState(false);      // โหลด/แชร์ผ่านส่วนกลาง (Supabase) สำเร็จล่าสุด
+    const [era, setEra] = useState(() => { try { return localStorage.getItem('bio-cfp-era') || 'auto'; } catch (e) { return 'auto'; } });
+    const [synced, setSynced] = useState(false);      // โหลด/แชร์ผ่านส่วนกลางสำเร็จล่าสุด
     const [shareBusy, setShareBusy] = useState(false);
-    const [orient, setOrient] = useState(() => { try { return localStorage.getItem('bio-cfp-print-orient') || 'portrait'; } catch (e) { return 'portrait'; } });
-    const [mapOpen, setMapOpen] = useState(false);
+    const [chartReady, setChartReady] = useState(() => !!window.Chart);
     const fileRef = useRef(null);
     const fetchedRef = useRef(false);
+    const hostRef = useRef(null);
     const canEdit = !(window._wtpRoleIsReadOnly && window._wtpRoleIsReadOnly());
+    useEffect(() => { try { localStorage.setItem('bio-cfp-era', era); } catch (e) { } }, [era]);
 
-    const model = useMemo(() => { if (!stored || !stored.stm) return null; try { return cfpBuildModel(stored.stm, stored.summary); } catch (e) { console.error('[cfp] build', e); return null; } }, [stored]); useEffect(() => { try { localStorage.setItem('bio-cfp-era', era); } catch (e) {} }, [era]);
+    // เลขบัญชีเต็มจากทะเบียนบัญชีธนาคาร (เลขท้าย 4 ตัว → เลขเต็ม) ให้ตารางโชว์ "KBANK 123-4-56789-0" แบบ POG
+    const bankRows = data && data.bankAccounts;
+    const fullNoByTail = useMemo(() => {
+      const out = {}, dup = {};
+      (Array.isArray(bankRows) ? bankRows : []).forEach(b => {
+        const raw = String((b && b.Bank_AC) || '').trim(), dg = raw.replace(/\D/g, '');
+        if (dg.length < 6) return;
+        const t4 = dg.slice(-4);
+        if (out[t4] && out[t4] !== raw) dup[t4] = true; else out[t4] = raw;
+      });
+      Object.keys(dup).forEach(k => { delete out[k]; });
+      return out;
+    }, [bankRows]);
+    const edData = useMemo(() => {
+      if (!stored || !stored.stm) return null;
+      try { return cfpToEd(stored.stm, fullNoByTail); } catch (e) { console.error('[cfp] แปลงข้อมูลไม่สำเร็จ', e); return null; }
+    }, [stored, fullNoByTail]);
+    useEffect(() => {
+      if (window.Chart) return;
+      let alive = true;
+      edLoadChart().then(() => { if (alive) setChartReady(true); }).catch(e => console.warn('[cfp]', e && e.message));
+      return () => { alive = false; };
+    }, []);
 
-    // โหลดข้อมูล "ส่วนกลาง" จาก Supabase ตอนเข้าหน้า → ทุกคน/ผู้บริหารเห็นชุดเดียวกัน
-    //   server = แหล่งจริง (ทับ local cache); ถ้า server ว่าง/ตารางยังไม่สร้าง → คง local เดิม
+    // โหลดข้อมูล "ส่วนกลาง" จาก Supabase ตอนเข้าหน้า → server = แหล่งจริง (ทับ local cache); ว่าง → คง local เดิม
     useEffect(() => {
       if (fetchedRef.current || !cfpCanSync()) return;
       fetchedRef.current = true; let alive = true;
@@ -1494,55 +2837,6 @@
       }).catch(e => { setShareBusy(false); toast && toast('โหลดไม่สำเร็จ: ' + (e && e.message || ''), 'error'); });
     }
 
-    function openAct(k) { const a = model.acts[k]; if (!a) return; let txns = []; a.catList.forEach(c => { txns = txns.concat(c.txns); }); txns.sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: CFP_ACT_NAME[k], subtitle: 'รวม ' + model.periodLabel + ' · ' + txns.length + ' รายการ', txns }); }
-    function openFlowSide(side) {
-      const txns = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other' && (side === 'in' ? t.flow > 0 : t.flow < 0)).sort((x, y) => Math.abs(y.flow) - Math.abs(x.flow));
-      const sum = txns.reduce((s, t) => s + t.flow, 0);
-      setModal({ title: side === 'in' ? 'รายการเงินสดรับทั้งหมด' : 'รายการเงินสดจ่ายทั้งหมด', subtitle: txns.length + ' รายการ · รวม ' + cfpFmtB(sum) + ' · ' + model.periodLabel, txns });
-    }
-    function openMonth(m) { const txns = model.allTxns.filter(t => t.month === m && t.actKey !== 'transfer' && t.actKey !== 'other').sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: 'เดือน ' + (CFP_MONTHS[m] || m), subtitle: txns.length + ' รายการ', txns }); }
-    function openCat(c) { const txns = (c.txns || []).slice().sort((x, y) => x.iso < y.iso ? 1 : -1); setModal({ title: c.name, subtitle: c.count + ' รายการ · สุทธิ ' + cfpFmtB(c.net), txns }); }
-    function watchN(k) { return cfpWatch(model, k).filter(f => f.sev === 'red' || f.sev === 'amber').length; }
-        function openStmt(row, monthNum) {
-      const mlab = monthNum ? ' · เดือน ' + (CFP_MONTHS[monthNum] || monthNum) : '';
-      if (row.type === 'grand') {
-        const txns = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other' && (!monthNum || t.month === monthNum)).slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
-        setModal({ title: row.label, subtitle: txns.length + ' รายการ' + mlab, txns }); return;
-      }
-      if (!row.actKey) return;
-      const isActNet = row.type === 'net';
-      // ★ 1) ยึด "การจับคู่หมวด" ที่ผู้ใช้ตั้งไว้ (catMap) ก่อนเสมอ — แม่นสุด ยอดตรงตามหมวดจริง
-      const map = (stored && stored.catMap) || {};
-      const mapped = !isActNet && Array.isArray(map[row.label]) && map[row.label].length ? map[row.label] : null;
-      if (mapped) {
-        const cats = cfpCatsByNamesInAct(model, mapped, row.actKey);
-        let txns = []; cats.forEach(c => { txns = txns.concat(c.txns); });
-        if (monthNum) txns = txns.filter(t => t.month === monthNum);
-        txns = txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
-        setModal({ title: row.label, subtitle: 'หมวดที่จับคู่: ' + mapped.join(', ') + ' · ' + txns.length + ' รายการ' + mlab, txns }); return;
-      }
-      // 2) ยังไม่ได้จับคู่ → เดาด้วยชื่อหมวด (fallback)
-      const dir = isActNet ? 0 : (row.total > 0 ? 1 : row.total < 0 ? -1 : 0);
-      const res = cfpFindStmtTxns(model, isActNet ? '' : row.label, row.actKey, monthNum, dir, row.type === 'leaf');
-      const txns = res.txns.slice().sort((x, y) => x.iso < y.iso ? 1 : -1);
-      let sub;
-      if (isActNet) sub = 'ทั้ง' + (CFP_ACT_NAME[row.actKey] || 'กิจกรรม');
-      else if (res.exact) sub = 'หมวด: ' + res.cats.join(', ');
-      else if (res.matched) sub = '⚙ เดาหมวดอัตโนมัติ (ยังไม่ได้ตั้ง — กด "จัดหมวด" เพื่อยืนยัน): ' + res.cats.join(', ');
-      else sub = 'ยังไม่ได้จับคู่หมวด — กดปุ่ม "⚙ จัดหมวด" เพื่อเลือกหมวด STM ของบรรทัดนี้';
-      setModal({ title: row.label, subtitle: sub + ' · ' + txns.length + ' รายการ' + mlab, txns });
-    }
-    function saveCatMap(newMap) {
-      persist({ stm: stored.stm, summary: stored.summary || null, catMap: newMap, acctTypes: (stored && stored.acctTypes) || null }).then(r => {
-        toast && toast('บันทึกการจับหมวดแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
-      });
-      setMapOpen(false);
-    }
-    // บันทึกการจัดประเภทบัญชี (ใช้ได้/ผูกพัน) → เก็บใน acctTypes + push ส่วนกลาง
-    function saveAcctTypes(at) {
-      persist({ stm: stored.stm, summary: (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: at }).then(r => { toast && toast('บันทึกการจัดประเภทบัญชีแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); });
-    }
-
     // อ่าน "ทุกชีต" ในไฟล์ (ไม่ใช่แค่ชีตแรก) — คืน [{name, aoa}] เพื่อให้ไฟล์เดียวที่มี
     //   ทั้งชีตงบสรุป + ชีต "รวมทุกบัญชี" (รายการดีเทล) ใช้จบในไฟล์เดียวได้.
     async function readSheets(file) {
@@ -1557,6 +2851,8 @@
       });
     }
     function detectKind(aoa) { const flat = aoa.slice(0, 12).map(r => (r || []).join(' ')).join(' '); if (/ประเภทกิจกรรมทางการเงิน|ยอดถอน|ยอดฝาก/.test(flat)) return 'stm'; if (/งบกระแสเงินสด|กระแสเงินสดจากกิจกรรม/.test(flat)) return 'summary'; return 'unknown'; }
+    // เก็บของเดิมที่หน้าเก่าเคยใช้ (งบสรุป / จับคู่หมวด / ประเภทบัญชี) ไว้ในแถวข้อมูลทุกครั้งที่บันทึก
+    const keepOld = (over) => Object.assign({ summary: (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null }, over);
     async function onUpload(files) { cfpEraHint = era;
       setUploading(true);
       try {
@@ -1575,11 +2871,11 @@
           if (!stm) sheets.forEach(sh => takeStm(cfpParseStm(sh.aoa)));
         }
         if (!stm || !stm.txns.length) {
-          if (summary && stored && stored.stm) { const r = await persist({ stm: stored.stm, summary, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null }); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
+          if (summary && stored && stored.stm) { const r = await persist(keepOld({ stm: stored.stm, summary })); toast && toast('อัปเดตตารางงบสรุปแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); }
           else { toast && toast('ต้องมีไฟล์ STM (รายการเดินบัญชี)', 'error'); }
           setUploading(false); return;
         }
-        const r = await persist({ stm, summary: summary || (stored && stored.summary) || null, catMap: (stored && stored.catMap) || null, acctTypes: (stored && stored.acctTypes) || null });
+        const r = await persist(keepOld({ stm, summary: summary || (stored && stored.summary) || null }));
         toast && toast('อ่านข้อมูลสำเร็จ · ' + stm.txns.length + ' รายการ' + (summary ? ' + งบสรุป' : '') + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined);
       } catch (e) { console.error(e); toast && toast('อ่านไฟล์ไม่สำเร็จ: ' + (e.message || e), 'error'); }
       setUploading(false);
@@ -1600,154 +2896,27 @@
       localStorage.removeItem(CFP_LS); setStored(null); setSynced(false);
       if (cfpCanSync()) { setShareBusy(true); window.WTPData.writeTable(CFP_TABLE, [], r => r.id).then(() => { setShareBusy(false); toast && toast('ล้างข้อมูลส่วนกลางแล้ว'); }).catch(e => { setShareBusy(false); toast && toast('ล้างในเครื่องแล้ว แต่ส่วนกลางไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }); }
     }
-    // ปรินต์/บันทึก PDF ของแท็บที่กำลังเปิดอยู่ (ใช้ window.print เหมือนหน้า Investor; print CSS ใน styles.css
-    //   ซ่อน sidebar/topbar/ปุ่ม/แท็บ + พิมพ์สีตรง). ตั้ง document.title ชั่วคราว → ใช้เป็นชื่อไฟล์ PDF.
-    //   แนวกระดาษ (แนวตั้ง/แนวนอน): inject <style> @page size ชั่วคราว (override @page ใน styles.css).
-    function printPdf(o) {
-      var dir = o || orient;
-      var prev = document.title, tabName = (tabs.filter(function (t) { return t[0] === tab; })[0] || ['', ''])[1].replace(/^[^ ]+ /, '');
-      try { document.title = 'BIOAXEL-CashFlow' + (model ? '-' + model.periodLabel : '') + (tabName ? '-' + tabName : ''); } catch (e) { }
-      var st = document.getElementById('cfp-print-orient');
-      if (!st) { st = document.createElement('style'); st.id = 'cfp-print-orient'; document.head.appendChild(st); }
-      st.textContent = '@media print{@page{size:A4 ' + (dir === 'landscape' ? 'landscape' : 'portrait') + ';margin:10mm;}}';
-      window.print();
-      setTimeout(function () { try { document.title = prev; } catch (e) { } }, 1000);
-    }
-    function setOrientPersist(v) { setOrient(v); try { localStorage.setItem('bio-cfp-print-orient', v); } catch (e) { } }
 
-    const pageWrap = { background: 'transparent', borderRadius: 20, padding: '20px 22px 30px', minHeight: 400, color: C.ink };
-    const card = { background: C.card, backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,.6)', borderRadius: 18, padding: '16px 20px', boxShadow: C.shadow, marginBottom: 16 };
-    const secTitle = { fontSize: 15, fontWeight: 700, margin: '0 0 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' };
-    const tabs = [['overview', '📊 ภาพรวม'], ['activity', '🔬 สรุปกิจกรรม'], ['statement', '📑 งบกระแสเงินสด'], ['explorer', '🔎 รายการ (Transaction Explorer)']];
+    // ส่วนที่ 2 (โค้ดวาดหน้า) เรียกกลับมาที่นี่ผ่าน CfpEd.edHook(...)
+    useEffect(() => { CED.hooks = { upload: () => { if (fileRef.current) fileRef.current.click(); }, refresh: refreshShared, clear: clearData, era: v => setEra(v) }; });
+    useEffect(() => {
+      Object.assign(CED, { host: hostRef.current, canEdit, canSync: cfpCanSync(), uploading, shareBusy, era, synced, stored });
+      edMount(edData);
+    }, [edData, canEdit, uploading, shareBusy, era, chartReady, synced]);
+    useEffect(() => () => edUnmount(), []);
 
     return (
-      <div className="cfp-page present-page" style={pageWrap}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-.4px' }}>Executive Cash Flow Dashboard</div>
-            <div style={{ fontSize: 13, color: C.mut, marginTop: 3 }}>BIOAXEL{model ? ' · งวด ' + model.periodLabel + ' · ' + model.txnCount + ' รายการ · ' + model.accounts.length + ' บัญชี' : ' · อัปโหลดไฟล์เพื่อเริ่ม'}</div>
-            {model && (
-              <div style={{ fontSize: 12, marginTop: 6, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                {synced
-                  ? <span style={{ background: '#e6f5ea', color: C.primaryD, border: '1px solid #bfe6cb', borderRadius: 99, padding: '2px 10px', fontWeight: 700 }}>🌐 ข้อมูลส่วนกลาง · ทุกคนเห็นชุดนี้</span>
-                  : <span style={{ background: '#fff5e6', color: '#a8620a', border: '1px solid #f0d6a8', borderRadius: 99, padding: '2px 10px', fontWeight: 700 }} title="ข้อมูลนี้ยังอยู่แค่ในเครื่องนี้ — อัปโหลด (หรือกดโหลดล่าสุด) เพื่อแชร์/ดึงชุดส่วนกลาง">📌 ข้อมูลในเครื่อง (ยังไม่แชร์)</span>}
-                {stored && stored.uploadedBy && <span style={{ color: C.faint }}>อัปโดย {stored.uploadedBy}{stored.uploadedAt ? ' · ' + cfpWhen(stored.uploadedAt) : ''}</span>}
-                {shareBusy && <span style={{ color: C.faint }}>⏳ กำลัง sync…</span>}
-              </div>
-            )}
-          </div>
-          <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {cfpCanSync() && <button onClick={refreshShared} disabled={shareBusy} className="no-present" title="ดึงข้อมูลส่วนกลางล่าสุด (ที่คนอื่นอัปไว้)" style={{ background: '#fff', color: C.primaryD, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>{shareBusy ? '⏳' : '↻'} โหลดล่าสุด</button>}
-            {model && (<span style={{ display: 'inline-flex', alignItems: 'stretch', border: '1px solid ' + C.line, borderRadius: 11, overflow: 'hidden', background: '#fff' }}>
-              <select value={orient} onChange={e => setOrientPersist(e.target.value)} title="แนวกระดาษเมื่อปรินต์" style={{ border: 0, borderRight: '1px solid ' + C.line, padding: '0 8px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' }}><option value="portrait">แนวตั้ง</option><option value="landscape">แนวนอน</option></select>
-              <button onClick={() => printPdf()} title="ปรินต์ / บันทึกเป็น PDF (แท็บที่เปิดอยู่)" style={{ background: '#fff', color: C.primaryD, border: 0, padding: '9px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>🖨️ ปรินต์ PDF</button>
-            </span>)}
-            {canEdit && (<React.Fragment>
-              <select value={era} onChange={e => setEra(e.target.value)} className="no-present" title="ปีในไฟล์ข้อมูล (พ.ศ./ค.ศ.)" style={{ border: '1px solid ' + C.line, borderRadius: 11, padding: '0 10px', fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink, cursor: 'pointer' }}><option value="auto">ปี: อัตโนมัติ</option><option value="be">ไฟล์เป็น พ.ศ.</option><option value="ce">ไฟล์เป็น ค.ศ.</option></select><button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} className="no-present" style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '9px 16px', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: C.shadow }}>{uploading ? '⏳ กำลังอ่าน…' : (model ? '⬆️ อัปเดตไฟล์' : '⬆️ อัปโหลด STM + งบสรุป')}</button>
-              {model && <button onClick={clearData} className="no-present" style={{ background: '#fff', color: C.mut, border: '1px solid ' + C.line, borderRadius: 11, padding: '9px 12px', fontSize: 14, cursor: 'pointer' }}>ล้าง</button>}
-              <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={e => { if (e.target.files.length) onUpload(Array.from(e.target.files)); e.target.value = ''; }} />
-            </React.Fragment>)}
-          </div>
-        </div>
-
-        {!model && (
-          <div style={{ ...card, textAlign: 'center', padding: '48px 20px' }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
-            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>ยังไม่มีข้อมูล</div>
-            <div style={{ fontSize: 14, color: C.mut, maxWidth: 480, margin: '0 auto 18px', lineHeight: 1.6 }}>อัปโหลด <b>2 ไฟล์</b>: <b>STM</b> (รายการเดินบัญชี) + <b>งบกระแสเงินสดรายเดือน</b> (สรุป). เลือกพร้อมกันได้</div>
-            {canEdit ? <button onClick={() => fileRef.current && fileRef.current.click()} style={{ background: C.primary, color: '#fff', border: 0, borderRadius: 11, padding: '11px 22px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>เลือกไฟล์…</button> : <div style={{ fontSize: 13, color: C.faint }}>บัญชีนี้ดูได้อย่างเดียว — ให้ผู้ดูแลอัปโหลดไฟล์</div>}
-          </div>
-        )}
-
-        {model && <React.Fragment>
-          {/* tab nav */}
-          <div className="no-print" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-            {tabs.map(([k, label]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ border: '1px solid ' + (tab === k ? 'transparent' : C.line), background: tab === k ? 'linear-gradient(135deg,#2e8b4a,#1f6e3a)' : '#fff', color: tab === k ? '#fff' : C.mut, fontWeight: 700, fontSize: 14, padding: '9px 16px', borderRadius: 12, cursor: 'pointer', boxShadow: tab === k ? '0 6px 16px rgba(46,139,74,.3)' : 'none' }}>{label}</button>
-            ))}
-          </div>
-
-          {tab === 'overview' && <React.Fragment>
-            <CfpHeroBoard model={model} />
-            {(function () {
-              const tot = Math.abs(model.acts.op.net) + Math.abs(model.acts.inv.net) + Math.abs(model.acts.fin.net) || 1;
-              return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(255px,1fr))', gap: 14, marginBottom: 16 }}>
-                  {['op', 'inv', 'fin'].map(k => <CfpKpiAct key={k} k={k} value={model.acts[k].net} share={Math.abs(model.acts[k].net) / tot} flags={watchN(k)} onClick={() => openAct(k)} />)}
-                </div>
-              );
-            })()}
-            <CfpReconBadge model={model} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(370px,1fr))', gap: 14, marginBottom: 16, alignItems: 'start' }}>
-              <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>💧 เงินสดเดินทางอย่างไร</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแท่งกิจกรรมเพื่อดูรายการ</span></div><CfpWaterfall model={model} onPick={openAct} /></div>
-              <div className="cfp-card" style={{ ...card, marginBottom: 0 }}><div style={secTitle}><span>📈 กระแสเงินสดรายเดือน (แยกตามกิจกรรม)</span><span style={{ display: 'flex', gap: 12, fontSize: 11, color: C.mut }}><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.op, marginRight: 4, verticalAlign: 'middle' }} />ดำเนินงาน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.inv, marginRight: 4, verticalAlign: 'middle' }} />ลงทุน</span><span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: ACT_COLOR.fin, marginRight: 4, verticalAlign: 'middle' }} />จัดหาเงิน</span></span></div><CfpMonthly model={model} onPick={openMonth} /></div>
-            </div>
-            <CfpCashUsable model={model} acctTypes={stored && stored.acctTypes} canEdit={canEdit} onSave={saveAcctTypes} />
-            <div style={secTitle}><span>🏅 Top 5 รับ–จ่าย</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>เงินก้อนใหญ่เข้ามาจากไหน · ออกไปทางไหน · กด "ดูทั้งหมด" → รายการจริง</span></div>
-            <CfpTopFlows model={model} onAll={openFlowSide} />
-            {(function () {
-              const ranked = model.allTxns.filter(t => t.actKey !== 'transfer' && t.actKey !== 'other').slice().sort((a, b) => Math.abs(b.flow) - Math.abs(a.flow)).slice(0, topN);
-              return (
-                <div className="cfp-card" style={{ ...card, marginTop: 16 }}>
-                  <div style={secTitle}><span>🏆 รายการเงินสดสูงสุด (Top {topN})</span>
-                    <select value={topN} onChange={e => setTopN(+e.target.value)} style={{ padding: '7px 11px', border: '1px solid ' + C.line, borderRadius: 11, fontSize: 13, fontFamily: 'inherit', background: '#fff', color: C.ink }}>
-                      <option value={10}>10 อันดับ</option><option value={20}>20 อันดับ</option><option value={50}>50 อันดับ</option>
-                    </select>
-                  </div>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-                      <thead><tr style={{ color: C.mut, textAlign: 'left', fontSize: 12 }}>
-                        <th style={{ padding: '7px 8px', fontWeight: 700, width: 34 }}>#</th>
-                        <th style={{ padding: '7px 8px', fontWeight: 700, width: 92 }}>วันที่</th>
-                        <th style={{ padding: '7px 8px', fontWeight: 700 }}>รายการ</th>
-                        <th style={{ padding: '7px 8px', fontWeight: 700, width: 64 }}>บัญชี</th>
-                        <th style={{ padding: '7px 8px', fontWeight: 700, width: 78 }}>กิจกรรม</th>
-                        <th style={{ padding: '7px 8px', fontWeight: 700, width: 120, textAlign: 'right' }}>จำนวน</th>
-                      </tr></thead>
-                      <tbody>
-                        {ranked.map((t, i) => (
-                          <tr key={i} style={{ borderTop: '1px solid ' + C.line }}>
-                            <td style={{ padding: '6px 8px', color: C.faint, fontWeight: 700 }}>{i + 1}</td>
-                            <td style={{ padding: '6px 8px', color: C.mut, whiteSpace: 'nowrap' }}>{cfpThaiDate(t.iso)}</td>
-                            <td style={{ padding: '6px 8px', color: C.ink, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.note}>{t.note || t.category}</td>
-                            <td style={{ padding: '6px 8px' }}><CfpBankPill acct={t.account} /></td>
-                            <td style={{ padding: '6px 8px' }}><CfpTag k={t.actKey} /></td>
-                            <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: t.flow < 0 ? C.neg : C.pos, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{cfpFmtB(t.flow)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })()}
-          </React.Fragment>}
-
-          {tab === 'activity' && <React.Fragment>
-            <div style={{ ...secTitle, margin: '0 2px 12px' }}><span>🔬 สรุปกิจกรรม</span><span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>แต่ละกิจกรรมมีอะไร + จุดเฝ้าระวัง · กดหมวด → รายการจริง</span></div>
-            <CfpActivityDetail model={model} k="op" onCat={openCat} onAll={() => openAct('op')} />
-            <CfpActivityDetail model={model} k="inv" onCat={openCat} onAll={() => openAct('inv')} />
-            <CfpActivityDetail model={model} k="fin" onCat={openCat} onAll={() => openAct('fin')} />
-          </React.Fragment>}
-
-          {tab === 'statement' && (
-            <div className="cfp-card" style={card}><div style={secTitle}><span>📑 งบกระแสเงินสด (รายเดือน)</span><span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{canEdit && <button onClick={() => setMapOpen(true)} className="no-print" style={{ cursor: 'pointer', border: '1px solid ' + C.line, background: '#fff', color: C.primaryD, borderRadius: 10, padding: '6px 12px', fontSize: 13, fontWeight: 600 }}>⚙ จัดหมวด</button>}<span style={{ fontSize: 11, fontWeight: 500, color: C.mut, background: C.soft, padding: '3px 10px', borderRadius: 20 }}>กดแถว/ช่อง → รายการจริงจาก STM</span></span></div><CfpStatementTable model={model} onPick={openStmt} /></div>
-          )}
-
-          {tab === 'explorer' && (
-            <div className="cfp-card" style={card}><div style={secTitle}><span>🔎 Transaction Explorer — รายการเดินบัญชีจาก STM</span></div><CfpExplorer model={model} toast={toast} /></div>
-          )}
-
-          <div style={{ fontSize: 11, color: C.faint, margin: '6px 2px 4px' }}>ตารางงบ = ไฟล์งบกระแสเงินสดรายเดือน · รายการ = ไฟล์ STM · {synced ? 'ข้อมูลส่วนกลาง (ทุกคนเห็น)' : 'ข้อมูลในเครื่อง'} · วันที่แสดงเป็น ค.ศ. · อัปเดต {stored && stored.uploadedAt ? new Date(stored.uploadedAt).toLocaleString('th-TH-u-ca-gregory') : '-'}</div>
-        </React.Fragment>}
-
-        {modal && <CfpModal title={modal.title} subtitle={modal.subtitle} txns={modal.txns} onClose={() => setModal(null)} />}
-        {mapOpen && model && <CfpMapModal model={model} catMap={(stored && stored.catMap) || {}} onClose={() => setMapOpen(false)} onSave={saveCatMap} />}
+      <div className="cfp-page present-page ced">
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={e => { if (e.target.files.length) onUpload(Array.from(e.target.files)); e.target.value = ''; }} />
+        <div ref={hostRef} />
       </div>
     );
   }
 
   window.CashFlowPresentPage = CashFlowPresentPage;
+  window.CfpEd = { edDrillAcct, edDrillActivity, edDrillActivityIO, edDrillCat, edDrillCatAct, edDrillCatMonth, edDrillFinKpi, edDrillOpenClose, edDrillOpenCloseMonth, edDrillStmt, edDrillSummary, edExpSet, edExpSort, edExportFullPDF, edExportStmtXlsx, edExportTxs, edHook, edPrint, edSave, edSetMonth, edSetTab, edState, edStmtAcct, edStmtToggle, edTogglePresent, edToggleStmtTall,
+    // ↓ ให้ exec_notes.js (โน้ตผู้นำเสนอ) คำนวณจากข้อมูลชุดเดียวกับหน้าจอ
+    edAgg, edScopeMonthKeys, edAnomalyData, edScopeLabel };
   /* ★ เปิดตัวอ่าน + ค่าคงที่ให้หน้า #cf_coding เรียกข้ามไฟล์ได้ — หน้านั้นสร้าง AOA
      รูปเดียวกับไฟล์ที่คนอัปมือ แล้วส่งผ่านตัวอ่านชุดนี้ ⇒ ข้อมูลที่ลงเอยเหมือนกัน
      เป๊ะกับการ "ส่งออกแล้วอัปกลับ" โดยไม่ต้องเขียนตัวแปลงซ้ำ (กันสูตรสองชุดเพี้ยนกัน) */

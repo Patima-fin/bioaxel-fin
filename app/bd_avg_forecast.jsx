@@ -1500,7 +1500,7 @@ function BDCashPlanPanel({ accounts, arList, forecasts, overrides, today, canEdi
           {noCf ? (
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-900)' }}>
               {cfState === 'loading' ? 'กำลังโหลดข้อมูลจ่ายจริงจาก Cash Flow…' : 'ยังสรุปไม่ได้ — ยังไม่มีข้อมูลจ่ายจริงจาก Cash Flow (เงินออกเป็น 0 ทั้งหมด)'}
-              {cfState !== 'loading' && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-600)', marginTop: 4 }}>อัปโหลดไฟล์ Cash Flow ที่หน้า "พรีเซนต์ Cash Flow" หรือดันจากหน้างบกระทบยอดกระแสเงินสด แล้วกด ↻ โหลดใหม่</div>}
+              {cfState !== 'loading' && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-600)', marginTop: 4 }}>อัปโหลดไฟล์ Cash Flow ที่หน้า "งบกระแสเงินสด" หรือดันจากหน้างบกระทบยอดกระแสเงินสด แล้วกด ↻ โหลดใหม่</div>}
             </div>
           ) : needTotal > 0.5 ? (<>
             <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-900)' }}>
@@ -1600,7 +1600,7 @@ function BDCashPlanPanel({ accounts, arList, forecasts, overrides, today, canEdi
               )}
               {exp.out && noCf && (
                 <tr className="bdaf-det"><td colSpan={nCols} style={{ padding: '14px 40px', color: 'var(--ink-500)' }}>
-                  {cfState === 'loading' ? 'กำลังโหลดข้อมูล Cash Flow…' : 'ยังไม่มีข้อมูลจ่ายจริงจาก Cash Flow — อัปโหลดไฟล์ Cash Flow ที่หน้า "พรีเซนต์ Cash Flow" หรือดันจากหน้างบกระทบยอดกระแสเงินสดก่อน'}
+                  {cfState === 'loading' ? 'กำลังโหลดข้อมูล Cash Flow…' : 'ยังไม่มีข้อมูลจ่ายจริงจาก Cash Flow — อัปโหลดไฟล์ Cash Flow ที่หน้า "งบกระแสเงินสด" หรือดันจากหน้างบกระทบยอดกระแสเงินสดก่อน'}
                 </td></tr>
               )}
               {exp.out && view.cats.map(c => {

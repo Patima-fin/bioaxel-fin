@@ -13,7 +13,7 @@
 // XLSX (SheetJS), html2canvas.  ทุก identifier prefix `BS`/`bs` กันชน global scope.
 // เพิ่มไฟล์นี้ → ต้องเพิ่ม <script type="text/babel"> ใน index.html + route ใน app.jsx.
 
-const { useState: bsState, useMemo: bsMemo, useRef: bsRef } = React;
+const { useState: bsState, useMemo: bsMemo, useRef: bsRef, useEffect: bsEffect } = React;
 
 // ── number helpers (parentheses for negatives — ตรงกับหน้า P&L) ──
 function BS_fmt(v, opt) {
@@ -275,6 +275,18 @@ function BSGauge({ score }) {
   );
 }
 
+// ข้อเสนอแนะของกล่องวิเคราะห์ — ใช้ร่วมกับบทวิเคราะห์ผู้นำเสนอ (exec_notes.js · bal.insight) ให้เป็นชุดเดียวกับบนจอเสมอ
+//   (2026-11-25 · แยกออกมาจาก BSInsight แบบเดียวกับ Water POG)
+function BS_recs(m) {
+  const ta = m.totalAssets.cur, tl = m.totalLiab.cur, eq = m.equity.cur, ca = m.curAssets.cur, cl = m.curLiab.cur;
+  const Rc = [];
+  if (eq != null && eq < 0) Rc.push('เพิ่มทุน / แปลงเงินกู้กรรมการเป็นทุน (debt-to-equity) เพื่อแก้ส่วนของผู้ถือหุ้นติดลบ');
+  if (ca != null && cl && ca / cl < 1.2) Rc.push('ดูแลสภาพคล่อง — เร่งเก็บลูกหนี้ / ลดสินค้าคงคลัง ให้สินทรัพย์หมุนเวียนคุ้มหนี้ระยะสั้น');
+  if (tl != null && ta && tl / ta > 0.7) Rc.push('ลดภาระหนี้ — สัดส่วนหนี้ต่อสินทรัพย์สูง ควรทยอยชำระ / รีไฟแนนซ์ดอกเบี้ยต่ำ');
+  if (!Rc.length) Rc.push('รักษาโครงสร้างทุนให้แข็งแรงต่อเนื่อง');
+  return Rc;
+}
+
 // ── กล่องวิเคราะห์ฐานะการเงิน (Auto Generated) — พอร์ตจาก finBalInsight (finance-tools) ──
 function BSInsight({ m, bs }) {
   const ta = m.totalAssets.cur, tl = m.totalLiab.cur, eq = m.equity.cur, ca = m.curAssets.cur, cl = m.curLiab.cur;
@@ -288,11 +300,7 @@ function BSInsight({ m, bs }) {
   if (tl != null && ta) { const dr = tl / ta; B.push({ t: dr < 1 ? 'warn' : 'bad', x: 'หนี้สินคิดเป็น ' + (dr * 100).toFixed(0) + '% ของสินทรัพย์' + (dr > 1 ? ' (หนี้มากกว่าสินทรัพย์)' : '') }); }
   if (eqNeg) B.push({ t: 'bad', x: 'ส่วนของผู้ถือหุ้นติดลบ ' + f(eq) + ' บาท — ต้องเพิ่มทุนหรือแปลงหนี้เป็นทุน' });
   // ข้อเสนอแนะ (recs)
-  const Rc = [];
-  if (eqNeg) Rc.push('เพิ่มทุน / แปลงเงินกู้กรรมการเป็นทุน (debt-to-equity) เพื่อแก้ส่วนของผู้ถือหุ้นติดลบ');
-  if (ca != null && cl && ca / cl < 1.2) Rc.push('ดูแลสภาพคล่อง — เร่งเก็บลูกหนี้ / ลดสินค้าคงคลัง ให้สินทรัพย์หมุนเวียนคุ้มหนี้ระยะสั้น');
-  if (tl != null && ta && tl / ta > 0.7) Rc.push('ลดภาระหนี้ — สัดส่วนหนี้ต่อสินทรัพย์สูง ควรทยอยชำระ / รีไฟแนนซ์ดอกเบี้ยต่ำ');
-  if (!Rc.length) Rc.push('รักษาโครงสร้างทุนให้แข็งแรงต่อเนื่อง');
+  const Rc = BS_recs(m);
   const bico = (t) => {
     const c = t === 'good' ? '#059669' : (t === 'bad' ? '#dc2626' : '#d97706');
     const common = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: c, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { flexShrink: 0, marginTop: 2 } };
@@ -301,7 +309,7 @@ function BSInsight({ m, bs }) {
     return <svg {...common}><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>;
   };
   return (
-    <div style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18, marginTop: 14 }}>
+    <div data-exn="bal.insight" style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <span style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>✨</span>
         <div style={{ minWidth: 0 }}>
@@ -539,6 +547,21 @@ function BalanceSheetPage({ data, setData, toast }) {
     return wsum ? Math.round(acc / wsum) : null;
   }, [ratios]);
 
+  // ★ โน้ตผู้นำเสนอ (exec_notes.js · 2026-11-25 · แบบ Water POG) — ส่งค่าที่หน้าคิดแล้วให้ร่างคำพูด · โผล่เฉพาะบัญชีผู้นำเสนอ
+  //   กรอบ = data-exn บน hero / KPI / ตารางงบ / โครงสร้าง / อัตราส่วน / กล่องวิเคราะห์ (ชื่อ key ห้ามเปลี่ยน)
+  bsEffect(() => {
+    if (typeof window.exnMountFin !== 'function' || !pageRef.current) return;
+    try {
+      window.exnMountFin('balance', {
+        root: pageRef.current,
+        period: bs ? (bs.asOf || bs.curLabel || 'none') : 'none',
+        label: 'งบแสดงฐานะการเงิน' + (bs ? ' · ' + (bs.curLabel || bs.asOf || '') : ''),
+        data: bs ? { bs, rows, m, ratios, overallScore, charts: bsCharts, eqWord: 'ส่วนของผู้ถือหุ้น', recs: BS_recs(m) } : {},
+      });
+    } catch (e) { console.warn('[BS] notes', e); }
+  }, [bs, m, ratios, overallScore, bsCharts]);
+  bsEffect(() => () => { if (window.exnUnmount) window.exnUnmount(); }, []);
+
   const heroBtn = { background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.25)',
     borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 };
 
@@ -560,7 +583,7 @@ function BalanceSheetPage({ data, setData, toast }) {
       <style>{BS_CSS}</style>
 
       {/* HERO */}
-      <div className="anim-in bs-hero" style={{ background: 'linear-gradient(135deg, #2e8b4a 0%, #154524 100%)',
+      <div className="anim-in bs-hero" data-exn="bal.brief" style={{ background: 'linear-gradient(135deg, #2e8b4a 0%, #154524 100%)',
         borderRadius: 16, padding: '22px 28px', color: 'white', marginBottom: 18, boxShadow: '0 10px 28px rgba(30,58,138,0.18)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
@@ -589,7 +612,7 @@ function BalanceSheetPage({ data, setData, toast }) {
       </div>
 
       {/* KPI TILES — สินทรัพย์ (ซ้าย) + การ์ดใหญ่ "แหล่งเงินทุน" ครอบ หนี้สิน+ทุน (ขวา) */}
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16, alignItems: 'stretch' }}>
+      <div data-exn="bal.hero" style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16, alignItems: 'stretch' }}>
         <div style={{ flex: '1 1 240px', display: 'flex' }}>{bsKpiTile(kpiTiles[0])}</div>
         <div style={{ flex: '2 1 400px', background: 'linear-gradient(180deg,#f8fafc,#fff)', borderRadius: 14, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 14, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -615,7 +638,7 @@ function BalanceSheetPage({ data, setData, toast }) {
 
       {/* STATEMENT TABLE */}
       <div className="bs-section-head"><h2>งบแสดงฐานะการเงิน</h2><span className="bs-tag">หน่วย: บาท · {bs.curLabel}</span></div>
-      <div className="card bs-report-card" ref={reportRef}>
+      <div className="card bs-report-card" ref={reportRef} data-exn="bal.table">
         <div className="bs-report-wrap">
           <table className="bs-report">
             <thead><tr>
@@ -634,11 +657,11 @@ function BalanceSheetPage({ data, setData, toast }) {
         <span className="bs-tag">{bs.curLabel}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
-        <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
+        <div data-exn="bal.assets" style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>โครงสร้างสินทรัพย์</div>
           <Donut size={170} thickness={22} data={bsCharts.assetComp} animate={false} />
         </div>
-        <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
+        <div data-exn="bal.funding" style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 2 }}>แหล่งเงินทุน (หนี้สิน &amp; ส่วนของผู้ถือหุ้น)</div>
           <div style={{ fontSize: 11.5, color: '#94a3b8', marginBottom: 12 }}>สัดส่วนต่อสินทรัพย์รวม {BS_fmt(m.totalAssets.cur)} บาท</div>
           {bsCharts.funding.map((x, i) => (
@@ -657,10 +680,14 @@ function BalanceSheetPage({ data, setData, toast }) {
 
       {/* PARETO — โครงสร้างสินทรัพย์ + โครงสร้างหนี้สิน (เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 14, marginTop: 14 }}>
-        <ParetoBreakdown title="โครงสร้างสินทรัพย์" titleEn="Asset Breakdown" sub="สัดส่วนต่อสินทรัพย์รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
-          items={bsCharts.assetLines} palette={['#3b82f6', '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#14b8a6']} />
-        <ParetoBreakdown title="โครงสร้างหนี้สิน" titleEn="Liabilities Breakdown" sub="สัดส่วนต่อหนี้สินรวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
-          items={bsCharts.liabLines} palette={['#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#3b82f6', '#14b8a6']} />
+        <div data-exn="bal.assets" style={{ minWidth: 0 }}>
+          <ParetoBreakdown title="โครงสร้างสินทรัพย์" titleEn="Asset Breakdown" sub="สัดส่วนต่อสินทรัพย์รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
+            items={bsCharts.assetLines} palette={['#3b82f6', '#06b6d4', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#14b8a6']} />
+        </div>
+        <div data-exn="bal.funding" style={{ minWidth: 0 }}>
+          <ParetoBreakdown title="โครงสร้างหนี้สิน" titleEn="Liabilities Breakdown" sub="สัดส่วนต่อหนี้สินรวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
+            items={bsCharts.liabLines} palette={['#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#3b82f6', '#14b8a6']} />
+        </div>
       </div>
 
       {/* RATIOS — เลย์เอาต์รายการแบบ finance-tools (คลิกกางดูสูตร + ที่มา) */}
@@ -668,7 +695,7 @@ function BalanceSheetPage({ data, setData, toast }) {
         <h2>📊 อัตราส่วนทางการเงิน</h2>
         <span className="bs-tag">🖱️ คลิกดูสูตร + เกณฑ์คะแนน · {bs.curLabel}</span>
       </div>
-      <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16, display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' }}>
+      <div data-exn="bal.ratios bal.health" style={{ background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16, display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' }}>
         {overallScore != null && <div style={{ flex: '0 0 auto', width: 196 }}><BSGauge score={overallScore} /></div>}
         <div style={{ flex: '1 1 440px', minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>อัตราส่วนรายตัว <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>🖱️ คลิกดูสูตร + เกณฑ์คะแนน</span></div>

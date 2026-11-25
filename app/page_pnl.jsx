@@ -494,7 +494,20 @@ function PLHealthCard({ overall, subs, gcol, gstat }) {
   );
 }
 
+// ข้อเสนอแนะเชิงบริหารของกล่อง CFO Insight — ใช้ร่วมกับบทวิเคราะห์ผู้นำเสนอ (exec_notes.js · pnl.insight)
+//   ให้เป็นชุดเดียวกับบนจอเสมอ (2026-11-25 · แยกออกมาจาก PLAnalytics)
+function PL_cfoRecs({ opexRatio, net, eqNeg, curRatio }) {
+  const Rc = [];
+  if (opexRatio > 0.5) Rc.push('คุมค่าใช้จ่ายขายและบริหาร — ปัจจุบัน ' + (opexRatio * 100).toFixed(0) + '% ของรายได้ · ตั้งเพดานค่าโฆษณาไม่เกิน ~25% ของยอดขาย');
+  if (net < 0) Rc.push('เร่งหาจุดคุ้มทุน — เพิ่มรายได้หรือลดค่าใช้จ่ายให้กำไรก่อนต้นทุนการเงินเป็นบวก');
+  if (eqNeg) Rc.push('ปรับโครงสร้างทุน — พิจารณาแปลงเงินกู้กรรมการ/ในเครือเป็นทุน (debt-to-equity) เพื่อแก้ส่วนผู้ถือหุ้นติดลบ');
+  if (curRatio != null && curRatio < 1.2) Rc.push('ดูแลสภาพคล่อง — สินทรัพย์หมุนเวียนต่อหนี้สินหมุนเวียน ' + curRatio.toFixed(2) + ' เท่า · เร่งเก็บลูกหนี้');
+  if (!Rc.length) Rc.push('รักษาโมเมนตัม — คุมต้นทุนและขยายรายได้ต่อเนื่อง');
+  return Rc;
+}
+
 // กล่องวิเคราะห์ P&L ทั้งหมด: 4 ชาร์ต + คะแนนสุขภาพ + CFO Insight
+//   data-exn = กรอบของบทวิเคราะห์ผู้นำเสนอ (exec_notes.js) — ชื่อ key ห้ามเปลี่ยน (เป็นกุญแจของโน้ตที่บันทึก)
 function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   const cardBox = { background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 };
   const cardH = { fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 };
@@ -544,12 +557,7 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   B.push({ t: net < 0 ? 'bad' : 'good', x: (net < 0 ? 'ขาดทุน' : 'กำไร') + 'สุทธิ ' + f(net) + ' บาท อัตรา ' + pc(netMargin) });
   if (eqNeg) B.push({ t: 'bad', x: 'ส่วนของผู้ถือหุ้นติดลบ ' + f(eq) + ' บาท' + (debtRatio ? ' · Debt Ratio ' + debtRatio.toFixed(2) + ' เท่า' : '') });
   if (fin > 0.01) B.push({ t: 'warn', x: 'ต้นทุนทางการเงิน (ดอกเบี้ยจ่าย) ' + f(fin) + ' บาท กดดันกระแสเงินสด' });
-  const Rc = [];
-  if (opexRatio > 0.5) Rc.push('คุมค่าใช้จ่ายขายและบริหาร — ปัจจุบัน ' + (opexRatio * 100).toFixed(0) + '% ของรายได้ · ตั้งเพดานค่าโฆษณาไม่เกิน ~25% ของยอดขาย');
-  if (net < 0) Rc.push('เร่งหาจุดคุ้มทุน — เพิ่มรายได้หรือลดค่าใช้จ่ายให้กำไรก่อนต้นทุนการเงินเป็นบวก');
-  if (eqNeg) Rc.push('ปรับโครงสร้างทุน — พิจารณาแปลงเงินกู้กรรมการ/ในเครือเป็นทุน (debt-to-equity) เพื่อแก้ส่วนผู้ถือหุ้นติดลบ');
-  if (curRatio != null && curRatio < 1.2) Rc.push('ดูแลสภาพคล่อง — สินทรัพย์หมุนเวียนต่อหนี้สินหมุนเวียน ' + curRatio.toFixed(2) + ' เท่า · เร่งเก็บลูกหนี้');
-  if (!Rc.length) Rc.push('รักษาโมเมนตัม — คุมต้นทุนและขยายรายได้ต่อเนื่อง');
+  const Rc = PL_cfoRecs({ opexRatio, net, eqNeg, curRatio });
   let summary = 'บริษัทมีรายได้รวม ' + f(rev) + ' บาท '
     + (growth > 0.05 ? 'เติบโต ' + (growth * 100).toFixed(0) + '% จากต้นงวด ' : growth < -0.05 ? 'ลดลง ' + (Math.abs(growth) * 100).toFixed(0) + '% จากต้นงวด ' : '')
     + 'และกำไรขั้นต้นที่ ' + (grossMargin * 100).toFixed(0) + '% ';
@@ -568,13 +576,17 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
         <span className="pnl-tag">รายเดือน · โครงสร้างค่าใช้จ่าย · สุขภาพการเงิน · สรุปผู้บริหาร</span>
       </div>
       <div style={gridStyle}>
-        <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
-          items={revItems} palette={['#10b981', '#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6']} />
-        <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="รายบัญชี · ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
-          items={expItems} palette={['#ef4444', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#14b8a6']} />
+        <div data-exn="pnl.revenue" style={{ minWidth: 0 }}>
+          <ParetoBreakdown title="แหล่งรายได้" titleEn="Revenue Sources" sub="สัดส่วนต่อรายได้รวม · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
+            items={revItems} palette={['#10b981', '#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#14b8a6']} />
+        </div>
+        <div data-exn="pnl.expense" style={{ minWidth: 0 }}>
+          <ParetoBreakdown title="สัดส่วนค่าใช้จ่าย" titleEn="Expense Breakdown" sub="รายบัญชี · ต่อค่าใช้จ่ายทั้งหมด · เรียงมาก→น้อย · แสดง 3 อันดับแรก · กดดูที่เหลือ"
+            items={expItems} palette={['#ef4444', '#8b5cf6', '#3b82f6', '#06b6d4', '#f59e0b', '#14b8a6']} />
+        </div>
       </div>
       <div style={gridStyle}>
-        <div style={cardBox}>
+        <div style={cardBox} data-exn="pnl.trend">
           <div style={cardH}>รายได้ · ค่าใช้จ่าย · กำไรสุทธิ รายเดือน</div>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 6, fontSize: 11, color: '#64748b' }}>
             <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 5 }} />รายได้</span>
@@ -583,15 +595,15 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
           </div>
           <PLComboChart months={months} rev={revA} exp={expA} net={netA} />
         </div>
-        <div style={cardBox}>
+        <div style={cardBox} data-exn="pnl.expense">
           <div style={cardH}>โครงสร้างค่าใช้จ่ายทั้งหมด</div>
           {donutData.length ? <Donut size={170} thickness={22} data={donutData} animate={false} /> : <div style={{ color: '#94a3b8', fontSize: 12 }}>ไม่มีข้อมูลค่าใช้จ่าย</div>}
         </div>
       </div>
       {/* คะแนนสุขภาพการเงิน */}
-      <PLHealthCard overall={H.overall} subs={H.subs} gcol={H.gcol} gstat={H.gstat} />
+      <div data-exn="pnl.health"><PLHealthCard overall={H.overall} subs={H.subs} gcol={H.gcol} gstat={H.gstat} /></div>
       {/* CFO Insight */}
-      <div style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
+      <div data-exn="pnl.insight" style={{ background: 'linear-gradient(180deg,#f8fafc,#fff)', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <span style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>✨</span>
           <div style={{ minWidth: 0 }}>
@@ -1010,6 +1022,28 @@ function PnLPage({ data, setData, toast }) {
     return { rows, count: rows.length, price, cost, machine: sum('machine'), overhead: sum('overhead'), labor: sum('labor'), profit, margin: price ? profit / price * 100 : NaN };
   }, [costBA]);
 
+  // ★ โน้ตผู้นำเสนอ (exec_notes.js · 2026-11-25 · แบบ Water POG) — ส่งค่าที่หน้าคิดแล้วให้ร่างคำพูด · โผล่เฉพาะบัญชีผู้นำเสนอ
+  //   กรอบ = data-exn บน hero / KPI / ตาราง / Pareto / กราฟ / โดนัท / คะแนนสุขภาพ / CFO Insight
+  //   (ชื่อ key ห้ามเปลี่ยน — เป็นกุญแจของโน้ตที่บันทึก) · health/recs คิดด้วยสูตรเดียวกับ PLAnalytics
+  plEffect(() => {
+    if (loading || !comp || !groups || typeof window.exnMountFin !== 'function' || !pageRef.current) return;
+    try {
+      const nMon = lastMonth || 1;
+      const rev = PL_sum(comp.totalRevenue, nMon), net = PL_sum(comp.netProfit, nMon), gross = PL_sum(comp.grossProfit, nMon);
+      const opex = PL_sum(groups.selling, nMon) + PL_sum(groups.admin, nMon);
+      const health = PL_buildHealth({ rev, net, gross, opex, revA: comp.totalRevenue.slice(0, nMon), bal });
+      const recs = PL_cfoRecs({ opexRatio: opex / (rev || 1), net, eqNeg: bal.eq != null && bal.eq < 0,
+        curRatio: (bal.ca != null && bal.cl) ? bal.ca / bal.cl : null });
+      window.exnMountFin('pnl', {
+        root: pageRef.current,
+        period: plYear + '-' + String(nMon).padStart(2, '0'),
+        label: 'งบกำไรขาดทุน · ถึง' + (PL_MONTHS_TH_FULL[Math.max(0, nMon - 1)] || '') + ' ' + plYear,
+        data: { isSample, year: plYear, lastMonth: nMon, groups, accounts: model && model.accounts, comp, k, bal, health, recs, monthsFull: PL_MONTHS_TH_FULL },
+      });
+    } catch (e) { console.warn('[P&L] notes', e); }
+  }, [loading, model, comp, k, bal, isSample, lastMonth, plYear]);
+  plEffect(() => () => { if (window.exnUnmount) window.exnUnmount(); }, []);
+
   const saveImage = () => {
     if (!window.html2canvas) { toast('ระบบบันทึกรูปยังไม่พร้อม — โหลด html2canvas ไม่สำเร็จ'); return; }
     const target = pageRef.current || reportRef.current;
@@ -1108,7 +1142,7 @@ function PnLPage({ data, setData, toast }) {
   return (
     <div className="page pnl-page present-page" ref={pageRef}>
       {/* ── HERO BANNER ────────────────────────────────────────────────── */}
-      <div className="anim-in pnl-hero" style={{
+      <div className="anim-in pnl-hero" data-exn="pnl.brief" style={{
         background: 'linear-gradient(135deg, #2e8b4a 0%, #154524 100%)',
         borderRadius: 16, padding: '22px 28px', color: 'white',
         marginBottom: 18, boxShadow: '0 10px 28px rgba(30, 58, 138, 0.18)',
@@ -1177,7 +1211,7 @@ function PnLPage({ data, setData, toast }) {
       </div>
 
       {/* KPI — 4 horizontal cards (clean style ตาม mockup) */}
-      <div style={{
+      <div data-exn="pnl.kpi pnl.breakeven" style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: 14, marginBottom: 18,
@@ -1310,7 +1344,7 @@ function PnLPage({ data, setData, toast }) {
           </div>
         </div>
       </div>
-      <div className="card pnl-report-card" ref={reportRef}>
+      <div className="card pnl-report-card" ref={reportRef} data-exn="pnl.table">
         <div className="pnl-report-wrap">
           <table className="pnl-report">
             <thead>

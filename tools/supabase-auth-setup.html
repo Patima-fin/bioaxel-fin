@@ -83,7 +83,8 @@
   var URL_ = cfg.SUPABASE_URL || '';
   var DOMAIN = cfg.AUTH_EMAIL_DOMAIN || 'waterpog.app';
   var USERS = (cfg.USERS || []).slice();
-  var ROLES = ['viewer','staff','manager','owner'];
+  // presenter = บัญชีผู้นำเสนอ (2026-11-25) — ชื่อผู้ใช้ต้องตรง config.PRESENTER_USERNAME ('presenter') · รหัสของบัญชีนี้ = รหัสพิเศษ
+  var ROLES = ['viewer','staff','manager','owner','presenter'];
   document.getElementById('dom').textContent = '@' + DOMAIN;
 
   var logEl = document.getElementById('log');

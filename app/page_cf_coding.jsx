@@ -2665,13 +2665,13 @@
       return { months, monLabel, stmAoa, sumAoa, uncodedTot, cell, acctSeen };
     }
 
-    /* ส่งขึ้นหน้า "พรีเซนต์ Cash Flow" ตรง ๆ — ไม่ต้องดาวน์โหลดแล้วอัปกลับ
+    /* ส่งขึ้นหน้า "งบกระแสเงินสด" ตรง ๆ — ไม่ต้องดาวน์โหลดแล้วอัปกลับ
        ★ ส่ง AOA ผ่านตัวอ่านของหน้านั้นเอง (cfpParseStm / cfpParseSummary) ⇒ ผลลัพธ์
          เหมือนกับอัปไฟล์มือเป๊ะ ไม่ต้องมีตัวแปลงชุดที่สอง */
     async function sendToCashflow() {
       if (!rows.length) { toast && toast('ยังไม่มีรายการให้ส่ง'); return; }
       if (typeof cfpParseStm !== 'function' || typeof cfpParseSummary !== 'function' || typeof cfpAccountLabel !== 'function') {
-        toast && toast('เปิดหน้า "พรีเซนต์ Cash Flow" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
+        toast && toast('เปิดหน้า "งบกระแสเงินสด" สักครั้งก่อน แล้วลองใหม่', 'error'); return;
       }
       setPushAsk(false);
       setBusy('กำลังส่งขึ้นหน้า Cash Flow…');
@@ -2942,7 +2942,7 @@
               {canEdit && <button style={btn()} onClick={() => fileCf.current && fileCf.current.click()}>📚 สอนระบบจากไฟล์ CASH FLOW</button>}
               {canEdit && <button style={btn()} onClick={() => fileBank.current && fileBank.current.click()}>📥 นำเข้าไฟล์ EXPRESS</button>}
               {canEdit && <button style={btn()} title="เพิ่ม / แก้ชื่อ / ลบ หมวดในผังงบกระแสเงินสด" onClick={() => setAddCat(true)}>🗂 จัดการหมวด</button>}
-              {canEdit && <button style={btn(true)} title="ส่งขึ้นหน้าพรีเซนต์ Cash Flow ทันที ไม่ต้องดาวน์โหลดแล้วอัปกลับ"
+              {canEdit && <button style={btn(true)} title="ส่งขึ้นหน้างบกระแสเงินสดทันที ไม่ต้องดาวน์โหลดแล้วอัปกลับ"
                 onClick={() => setPushAsk(true)}>📤 ส่งขึ้นหน้า Cash Flow</button>}
               <button style={btn()} onClick={exportSheet}>⬇️ ส่งออกไฟล์ Excel</button>
             </div>

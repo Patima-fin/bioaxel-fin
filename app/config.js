@@ -31,6 +31,13 @@ window.WTP_CONFIG = {
   //   ★ ค่านี้ต้องตรงกันระหว่าง tools/supabase-auth-setup.html กับ login
   AUTH_EMAIL_DOMAIN: 'bioaxel.app',
 
+  // บัญชีผู้นำเสนอ (role 'presenter' · 2026-11-25 · แบบเดียวกับ Water POG) — ชื่อผู้ใช้ของบัญชีกลาง
+  //   ที่สร้างใน tools/supabase-auth-setup.html (role = presenter · รหัสผ่านของบัญชีนี้ = "รหัสพิเศษ")
+  //   คนที่ติ๊ก "🎤 เข้าบัญชีผู้นำเสนอได้" ในหน้าจัดการผู้ใช้ พิมพ์ชื่อผู้ใช้ของตัวเอง + รหัสพิเศษ
+  //   → หน้า login ลองเข้าบัญชีนี้ให้ (WTPData.authSignInPresenterAlias ใน data_supabase.js)
+  //   ★ ต้องรู้ชื่อนี้ก่อน login เพราะตาราง users อ่านได้หลังล็อกอินแล้วเท่านั้น (RLS)
+  PRESENTER_USERNAME: 'presenter',
+
   // ── รหัสแบรนด์ (ใช้เป็น prefix ชื่อไฟล์ตอนเซฟ PDF ฯลฯ) ────────────────
   //   BIOAXEL = 'BIO'  ·  Water POG = 'WTP'  (ฝั่ง POG ต้องตั้งเป็น 'WTP')
   BRAND_CODE: 'BIO',
