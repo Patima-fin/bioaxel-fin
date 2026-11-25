@@ -28,6 +28,13 @@
   function edState() { return CE().edState ? CE().edState() : {}; }
   function edSetTab(t) { if (CE().edSetTab) CE().edSetTab(t); }
   function edScopeLabel(mf) { return CE().edScopeLabel ? CE().edScopeLabel(mf) : String(mf || ''); }
+  // ยอดเงินที่ใช้ได้จริง (การ์ด "เงินสดนี้ใช้ได้จริงเท่าไร") — null = ไม่มียอดรายบัญชี → ใช้เงินสดปลายงวดทั้งก้อนแทน
+  function edUsableSummary(data, mf) { try { return CE().edUsableSummary ? CE().edUsableSummary(data, mf) : null; } catch (e) { return null; } }
+  // เงินที่ใช้คิด "พอจ่ายได้กี่เดือน" = เงินที่ใช้ได้จริง (ถ้าแยกประเภทบัญชีไว้และมีเงินติดเงื่อนไข) ไม่งั้นเงินสดปลายงวดทั้งก้อน
+  function exnUsableCash(data, mf, closing) {
+    const U = edUsableSummary(data, mf), part = !!(U && U.classified && U.restricted > 0.5);
+    return { U, part, cash: part ? Math.max(0, U.usable) : closing };
+  }
   function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   /* ★ BIO: บัญชีผู้นำเสนอ = role 'presenter' ของ session ปัจจุบัน (bio-session · role มาจาก JWT) */
@@ -293,18 +300,28 @@
       F["summary.overview"] = { say: s };
     }
 
-    /* 3) เงินสดปลายงวด */
+    /* 3) เงินสดปลายงวด — ★ (2026-11-25 ผู้ใช้ขอ) คิดจาก "เงินที่ใช้ได้จริง" บอกว่าใช้ได้กี่บาท · ไม่เกิน 3 ข้อ
+       (เงินค้ำประกัน/นักลงทุน/บัญชีร่วม หยิบมาจ่ายไม่ได้ → "พอจ่ายได้กี่เดือน" ต้องคิดจากยอดที่ใช้ได้เท่านั้น) */
     {
       const d = A.closing - A.opening, pct = A.opening > 0 ? d / A.opening * 100 : null;
-      const avgOut = A.totalOut / n, cover = avgOut > 0 ? A.closing / avgOut : null;
+      const UC = exnUsableCash(data, mf, A.closing), U = UC.U, cashUse = UC.cash;
+      const avgOut = A.totalOut / n, cover = avgOut > 0 ? cashUse / avgOut : null;
       const s = [];
       if(pct != null && Math.abs(pct) < 1000) s.push(`เมื่อเทียบกับต้นงวด เงินสดปลายงวด${d >= 0 ? "เพิ่มขึ้น" : "ลดลง"} **${exnP(pct)}**`);
+      if(UC.part){
+        const rs = U.types.filter(t => t.key !== "usable" && t.amount > 0).sort((a,b) => b.amount - a.amount).map(t => t.label.replace(/\s*\(.*\)$/, ""));
+        s.push(`แต่ในเงินสด ${exnAmt(U.total)} นี้ **ใช้ได้จริงราว ${exnAmt(U.usable)}** หรือ ${exnP(U.total > 0 ? U.usable / U.total * 100 : 0)}` +
+          (rs.length ? ` ที่เหลือเป็น${exnAnd(rs.slice(0, 2))} ซึ่งหยิบมาจ่ายไม่ได้` : ""));
+      }
       if(cover != null){
-        const t = cover < 1 ? `${Math.max(1, Math.round(cover * 30))} วัน` : `${cover.toFixed(1)} เดือน`;
-        s.push(`ถ้าใช้เงินในอัตราเฉลี่ยเท่าที่ผ่านมา เงินสดที่มีอยู่` + (cover < 1 ? `!!พอจ่ายได้ราว ${t}!! จึงควรติดตามเงินสดเป็นรายสัปดาห์` : cover < 3 ? `พอจ่ายได้ราว ${t} ซึ่ง!!ถือว่าค่อนข้างตึงตัว!!` : `**พอจ่ายได้ราว ${t}** ถือว่ายังรองรับได้`));
+        if(cashUse <= 0) s.push("!!เงินที่ใช้ได้จริงไม่เหลือแล้ว!! รายจ่ายถัดไปต้องรอเงินเข้าใหม่ หรือโอนจากบัญชีอื่น");
+        else {
+          const t = cover < 1 ? `${Math.max(1, Math.round(cover * 30))} วัน` : `${cover.toFixed(1)} เดือน`;
+          s.push(`ถ้าใช้เงินในอัตราเฉลี่ยเท่าที่ผ่านมา ${UC.part ? "เงินที่ใช้ได้จริง" : "เงินสดที่มีอยู่"}` + (cover < 1 ? `!!พอจ่ายได้ราว ${t}!! จึงควรติดตามเงินสดเป็นรายสัปดาห์` : cover < 3 ? `พอจ่ายได้ราว ${t} ซึ่ง!!ถือว่าค่อนข้างตึงตัว!!` : `**พอจ่ายได้ราว ${t}** ถือว่ายังรองรับได้`));
+        }
       }
       if(P && S.kind === "year" && P.closing != null){ const dd = A.closing - P.closing; s.push(`และเมื่อเทียบกับสิ้น${exnMonFull(S.prev[S.prev.length-1])}ปีก่อน เงินสดตอนนี้${dd >= 0 ? "**สูงกว่า**" : "!!ต่ำกว่า!!"}ราว ${exnAmt(dd)}`); }
-      F["summary.ending"] = { say: s };
+      F["summary.ending"] = { say: s.slice(0, 3) };
     }
 
     /* 4) กระแสเงินสดแยกตามกิจกรรม (+ waterfall) */
@@ -477,7 +494,7 @@
     {
       const l6 = S.all.filter(k => k <= S.last).slice(-6);
       const burn = -l6.reduce((t,k) => t + net(MA[k].byAct.operating) + net(MA[k].byAct.investing), 0) / Math.max(1, l6.length);
-      const cash = A.closing;
+      const UC = exnUsableCash(data, mf, A.closing), cash = UC.cash;   // ★ เงินที่ใช้ได้จริง (ผู้ใช้ขอ 2026-11-25)
       const runway = burn > 0 ? cash / burn : null;
       const runTxt = runway == null ? "" : (runway < 1 ? `${Math.max(1, Math.round(runway*4.3))} สัปดาห์` : `${runway.toFixed(1)} เดือน`);
       const runOut = (() => { if(runway == null) return ""; const [y,m] = S.last.split(".").map(Number); const d = new Date(y, m, 0); d.setDate(d.getDate() + Math.round(runway*30.4)); return exnMonYrFull(d.getFullYear() + "." + String(d.getMonth()+1).padStart(2,"0")); })();
@@ -485,7 +502,8 @@
       const s = [];
       if(burn > 0){
         s.push(`สุดท้ายเรื่องความเพียงพอของเงินสด ช่วง 6 เดือนล่าสุด การดำเนินงานรวมการลงทุนใช้เงินเฉลี่ยราว ${exnAmt(burn)}ต่อเดือน`);
-        s.push(`ด้วยเงินสดที่มีอยู่ ${runway < 3 ? `!!จะใช้ได้ราว ${runTxt}!!` : `**จะใช้ได้ราว ${runTxt}**`} หรือถึงประมาณ${runOut} ถ้าไม่มีเงินกู้เข้ามาเพิ่ม`);
+        if(cash <= 0) s.push("!!เงินที่ใช้ได้จริงไม่เหลือแล้ว!! รายจ่ายช่วงถัดไปต้องพึ่งเงินเข้าใหม่หรือเงินกู้ทั้งหมด");
+        else s.push(`ด้วย${UC.part ? `เงินที่ใช้ได้จริงราว ${exnAmt(cash)}` : "เงินสดที่มีอยู่"} ${runway < 3 ? `!!จะใช้ได้ราว ${runTxt}!!` : `**จะใช้ได้ราว ${runTxt}**`} หรือถึงประมาณ${runOut} ถ้าไม่มีเงินกู้เข้ามาเพิ่ม`);
         if(need > 0) s.push(`ถ้าต้องการสำรองเงินไว้ ${EXN_BUFFER_MONTHS} เดือน บริษัท!!ต้องหาเงินเพิ่มอีกราว ${exnAmt(need)}!!`);
         s.push(`จึงขอให้ผู้บริหารพิจารณา **แหล่งเงินสำหรับช่วงถัดไป**` + (up[0] ? ` และ**แนวทางควบคุม${sh(up[0].k)}** ซึ่งเป็นรายการที่เพิ่มขึ้นมากที่สุด` : ""));
       } else s.push(`สุดท้ายเรื่องความเพียงพอของเงินสด **การดำเนินงานรวมการลงทุนสร้างเงินสดได้เองราว ${exnAmt(-burn)}ต่อเดือน** จึงไม่ต้องพึ่งเงินกู้`);

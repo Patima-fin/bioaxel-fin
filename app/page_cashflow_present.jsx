@@ -2700,6 +2700,24 @@ function edShowDrillModal(title, txs){
     });
     return { accts, months };
   }
+  // ประเภทของบัญชี = ที่ตั้งไว้ (acctTypes) > ค่าเริ่มต้นตามเลขท้าย 4 ตัว > ใช้ได้
+  function edUsableTypeOf(a, typeMap) { const m = typeMap || {}; return m[a.name] != null ? m[a.name] : (CFP_ACCT_TYPE_DEF[a.last4] || 'usable'); }
+  // สรุปยอด "ใช้ได้จริง" ของช่วงที่เลือก — บทวิเคราะห์ผู้นำเสนอ (exec_notes.js) ใช้ตัวเลขชุดเดียวกับการ์ด
+  //   null = ยังไม่มียอดรายบัญชีจากไฟล์ · classified=false = ยังไม่ได้แยกประเภท (ทุกบัญชีนับเป็นใช้ได้)
+  function edUsableSummary(data, mf) {
+    if (!data || data.hasBalances === false) return null;
+    const { accts } = edUsableAccounts(data, mf);
+    if (!accts.length) return null;
+    const tm = (CED.acctTypes && typeof CED.acctTypes === 'object') ? CED.acctTypes : {};
+    const types = CFP_ACCT_TYPES.map(t => {
+      const list = accts.filter(a => edUsableTypeOf(a, tm) === t.key);
+      return { key: t.key, label: t.label, short: t.short, amount: list.reduce((x, a) => x + a.ending, 0), count: list.length };
+    }).filter(t => t.count > 0);
+    const u = types.find(t => t.key === 'usable');
+    const total = accts.reduce((x, a) => x + a.ending, 0), usable = u ? u.amount : 0;
+    return { total, usable, usableCount: u ? u.count : 0, restricted: total - usable, types, nAcct: accts.length,
+      classified: !(types.length === 1 && types[0].key === 'usable') };
+  }
   function CfpCashUsable({ data, mf, acctTypes, canEdit, onSave }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(null);
@@ -2708,7 +2726,7 @@ function edShowDrillModal(title, txs){
     const typeMap = (acctTypes && typeof acctTypes === 'object') ? acctTypes : {};
     const active = (editing && draft) ? draft : typeMap;
     const defOf = a => CFP_ACCT_TYPE_DEF[a.last4] || 'usable';
-    const typeOf = a => (active[a.name] != null ? active[a.name] : defOf(a));
+    const typeOf = a => edUsableTypeOf(a, active);
     const modalOpen = editing || drill !== null;
     useEffect(() => {
       if (!modalOpen) return;
@@ -3139,7 +3157,7 @@ body.present-mode .ced .ed-hide-present{display:none!important}
   window.CashFlowPresentPage = CashFlowPresentPage;
   window.CfpEd = { edDrillAcct, edDrillActivity, edDrillActivityIO, edDrillCat, edDrillCatAct, edDrillCatMonth, edDrillFinKpi, edDrillOpenClose, edDrillOpenCloseMonth, edDrillStmt, edDrillSummary, edExpSet, edExpSort, edExportFullPDF, edExportStmtXlsx, edExportTxs, edHook, edPrint, edSave, edSetMonth, edSetTab, edState, edStmtAcct, edStmtToggle, edTogglePresent, edToggleStmtTall,
     // ↓ ให้ exec_notes.js (โน้ตผู้นำเสนอ) คำนวณจากข้อมูลชุดเดียวกับหน้าจอ
-    edAgg, edScopeMonthKeys, edAnomalyData, edScopeLabel };
+    edAgg, edScopeMonthKeys, edAnomalyData, edScopeLabel, edUsableSummary };
   /* ★ เปิดตัวอ่าน + ค่าคงที่ให้หน้า #cf_coding เรียกข้ามไฟล์ได้ — หน้านั้นสร้าง AOA
      รูปเดียวกับไฟล์ที่คนอัปมือ แล้วส่งผ่านตัวอ่านชุดนี้ ⇒ ข้อมูลที่ลงเอยเหมือนกัน
      เป๊ะกับการ "ส่งออกแล้วอัปกลับ" โดยไม่ต้องเขียนตัวแปลงซ้ำ (กันสูตรสองชุดเพี้ยนกัน) */
