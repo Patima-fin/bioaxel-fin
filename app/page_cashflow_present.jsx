@@ -409,7 +409,8 @@
     const months = monthKeys.map(key => ({
       key, accounts: Object.keys(accounts).filter(k => accounts[k].months[key]).map(k => Object.assign({ accountKey: k }, accounts[k].months[key])),
     }));
-    return { company: 'BIOAXEL', transactions, accounts, months, hasMne: transactions.some(t => t.mne) };
+    // hasBalances = มียอดต้นงวดรายบัญชีจากไฟล์ (การ์ดเงินสดใช้ได้จริง — ไม่มี = ยอดบัญชีเป็นแค่ผลรวมรายการ ไม่ใช่ยอดจริง)
+    return { company: 'BIOAXEL', transactions, accounts, months, hasMne: transactions.some(t => t.mne), hasBalances: Object.keys(openBy).length > 0 };
   }
 
   /* โหลด Chart.js ตอนเปิดหน้านี้ครั้งแรก (หน้าอื่นไม่ต้องโหลด) — เวอร์ชันเดียวกับเว็บ Benya */
@@ -769,6 +770,7 @@ function edRenderDashboard(){
 
   // ทำลาย charts เก่าก่อน re-render
   Object.keys(_edCharts).forEach(edDestroyChart);
+  edUnmountUsable();   // ★ POG: ถอดการ์ดเงินสดใช้ได้จริง (React) ก่อนแทนที่ HTML
 
   const tabs = ED_TABS;
 
@@ -1030,8 +1032,11 @@ function edRenderSummary(){
       </div>
     </div>
 
+    <div data-ed-usable></div>   <!-- ★ การ์ด "เงินสดนี้ใช้ได้จริงเท่าไร" (React · edMountUsable) ก่อน KPI — ผู้ใช้ขอคืน 2026-11-25 -->
+
     ${edRenderFinKpis(A, d.data, d.monthFilter)}
   `;
+  edMountUsable(edContentEl());
 
   edAnimNums(edContentEl());   // ★ ตัวเลขวิ่ง count-up
 
@@ -2651,6 +2656,217 @@ function edShowDrillModal(title, txs){
   wrap.onclick = (e)=>{ if(e.target===wrap) wrap.remove(); };
 }
 
+  /* ══════════ "💰 เงินสดนี้ใช้ได้จริงเท่าไร — แยกตามบัญชี" (การ์ดของหน้าเดิม · ผู้ใช้ขอคืน 2026-11-25) ══════════
+   *  ผู้ใช้: "มีหลายบัญชี และแต่ละบัญชีเงินที่ใช้ได้จริงมีแค่ไม่กี่บัญชี อยากได้ข้อมูลเดิมส่วนนี้กลับมา … อยู่ก่อนตาราง KPI"
+   *  → แท็บ Executive Summary ก่อนการ์ด "📊 KPI ทางการเงิน" · ตามช่วงเวลาที่เลือกบนหน้า (ต้นงวด = เดือนแรกของช่วง ·
+   *    ปลายงวด = เดือนสุดท้าย · ตัวเลขรายเดือน = เพิ่ม/ลดสุทธิของบัญชีในเดือนนั้น รวมเงินโอน) — ยอดรวมเท่ากับการ์ดเงินสดปลายงวด
+   *  ประเภทบัญชี 5 แบบ (ใช้ได้/ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD) เก็บ stored.acctTypes {accountKey: typeKey} เฉพาะที่ต่างจาก
+   *  ค่าเริ่มต้น CFP_ACCT_TYPE_DEF (เลขท้าย 4 ตัว) — ชุดเดียวกับที่ตั้งไว้ในหน้าเดิม ไม่ต้องตั้งใหม่ · "ใช้ได้จริง" = usable เท่านั้น
+   *  เป็น React วางลงช่อง [data-ed-usable] หลังหน้า (HTML ของ ed*) วาดเสร็จ · ถอด (edUnmountUsable) ทุกครั้งก่อนวาดหน้าใหม่
+   *  บันทึกการจัดประเภท → CED.hooks.acctTypes (หน้า React เขียนส่วนกลาง) · ผู้บริหาร/ผู้นำเสนอดูอย่างเดียว */
+  const CU = { primary: '#2e8b4a', primaryD: '#1f6e3a', ink: '#20342a', mut: '#688275', faint: '#a4b8ac', line: '#e1efe7', pos: '#15c486', neg: '#fb5e6d', soft: '#eef6f1' };
+  const CFP_ACCT_TYPES = [
+    { key: 'usable', label: 'สามารถใช้ได้', short: 'ใช้ได้', icon: '✅', color: CU.pos },
+    { key: 'guarantee', label: 'วงเงินค้ำประกัน (ติดภาระ)', short: 'ค้ำประกัน', icon: '🔒', color: '#e08a3c' },
+    { key: 'investor', label: 'เงินนักลงทุน', short: 'นักลงทุน', icon: '💼', color: '#9b7bff' },
+    { key: 'joint', label: 'บัญชีร่วม', short: 'ร่วม', icon: '👥', color: '#1f6fb8' },
+    { key: 'od', label: 'OD (เบิกเกินบัญชี)', short: 'OD', icon: '➖', color: CU.neg },
+  ];
+  function cfpTypeMeta(k) { for (let i = 0; i < CFP_ACCT_TYPES.length; i++) if (CFP_ACCT_TYPES[i].key === k) return CFP_ACCT_TYPES[i]; return CFP_ACCT_TYPES[0]; }
+  // ค่าเริ่มต้น BIOAXEL (จับด้วยเลขท้ายบัญชี 4 หลัก · ชุดเดิมจากหน้าเดิม) — แก้ทับได้ผ่าน ✏️ จัดประเภทบัญชี (sync ทั้งทีม)
+  const CFP_ACCT_TYPE_DEF = {
+    '7693': 'investor',   // SCB 433-107769-3 เงินนักลงทุน
+    '4839': 'usable',     // SCB 136-268483-9
+    '5981': 'usable',     // SCB 422-058598-1
+    '8406': 'guarantee',  // SCB 218-110840-6 วงเงินค้ำประกัน (ติดภาระ)
+    '7651': 'joint',      // SCB 433-107765-1 บัญชีร่วม
+    '1968': 'usable',     // KBANK 145-2-83196-8
+    '1272': 'usable',     // BBL 451-3-501272
+  };
+  function cfpDeltaM(v) { if (!v) return '–'; return (v < 0 ? '-' : '+') + (Math.abs(v) / 1e6).toFixed(2) + 'M'; }   // ยอด Δ สั้นในตาราง
+  function cfpUsableM(v) { return (v < 0 ? '-' : '') + (Math.abs(v || 0) / 1e6).toFixed(2) + 'M'; }
+  // บัญชีในช่วงที่เลือก: ต้นงวด/ปลายงวด/Δ รายเดือน จากยอดรายบัญชีของหน้า (data.accounts — ชุดเดียวกับ edOpenClose)
+  function edUsableAccounts(data, mf) {
+    const months = edScopeMonthKeys(data, mf);
+    const accts = [];
+    Object.keys((data && data.accounts) || {}).forEach(k => {
+      const a = data.accounts[k], ms = months.filter(m => a.months[m]);
+      if (!ms.length) return;
+      const byMonth = {};
+      ms.forEach(m => { const x = a.months[m]; byMonth[m] = (Number(x.closing) || 0) - (Number(x.opening) || 0); });
+      const dg = String(a.no || '').replace(/\D/g, '') || String(k).replace(/\D/g, '');
+      accts.push({ name: k, bank: a.bank || '', no: a.no || '', nick: a.nick || '', last4: dg.slice(-4),
+        opening: Number(a.months[ms[0]].opening) || 0, ending: Number(a.months[ms[ms.length - 1]].closing) || 0, byMonth });
+    });
+    return { accts, months };
+  }
+  function CfpCashUsable({ data, mf, acctTypes, canEdit, onSave }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState(null);
+    const [drill, setDrill] = useState(null);   // null | 'all' | <typeKey> → เปิดโมดัล "ยอดนี้มาจากบัญชีไหน"
+    const { accts, months } = edUsableAccounts(data, mf);
+    const typeMap = (acctTypes && typeof acctTypes === 'object') ? acctTypes : {};
+    const active = (editing && draft) ? draft : typeMap;
+    const defOf = a => CFP_ACCT_TYPE_DEF[a.last4] || 'usable';
+    const typeOf = a => (active[a.name] != null ? active[a.name] : defOf(a));
+    const modalOpen = editing || drill !== null;
+    useEffect(() => {
+      if (!modalOpen) return;
+      const h = e => { if (e.key === 'Escape') { setEditing(false); setDrill(null); } };
+      window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+    }, [modalOpen]);
+
+    // ยังไม่มียอดรายบัญชีจากไฟล์ (ข้อมูลเก่า) → บอกให้อัปใหม่ (เห็นเฉพาะคนที่อัปได้)
+    if (!data || data.hasBalances === false || !accts.length) {
+      if (!canEdit) return null;
+      return (
+        <div className="card no-print no-present" style={{ fontSize: 13, color: CU.ink }}>
+          💡 <b>แยกเงินตามประเภทบัญชี</b> — อัปโหลดไฟล์ STM <b>อีกครั้ง 1 รอบ</b> เพื่อดึงยอดรายบัญชี จากนั้นจะเห็นว่าเงินสดก้อนนี้ใช้ได้จริงเท่าไร (ใช้ได้/ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD)
+        </div>
+      );
+    }
+
+    const total = accts.reduce((s, a) => s + a.ending, 0);
+    const pct = v => total > 0 ? Math.round(v / total * 100) : 0;
+    const byType = CFP_ACCT_TYPES.map(t => {
+      const list = accts.filter(a => typeOf(a) === t.key);
+      return { ...t, amount: list.reduce((s, a) => s + a.ending, 0), count: list.length };
+    }).filter(t => t.count > 0);
+    const usableTotal = accts.filter(a => typeOf(a) === 'usable').reduce((s, a) => s + a.ending, 0);
+    const restrictedTotal = total - usableTotal;
+    const unclassified = byType.length <= 1 && byType[0] && byType[0].key === 'usable';
+
+    function openDrill(scope) { setEditing(false); setDraft(null); setDrill(scope); }
+    function startEdit() { const d = {}; accts.forEach(a => { d[a.name] = typeOf(a); }); setDraft(d); setDrill(null); setEditing(true); }
+    function setType(name, t) { setDraft(d => ({ ...d, [name]: t })); }
+    // เก็บเฉพาะบัญชีที่ต่างจากค่าเริ่มต้น · บัญชีที่ไม่อยู่ในช่วงที่เลือกคงค่าที่ตั้งไว้เดิม
+    function commit() { const out = Object.assign({}, typeMap); accts.forEach(a => { const t = draft[a.name] || 'usable'; if (t !== defOf(a)) out[a.name] = t; else delete out[a.name]; }); onSave(out); setEditing(false); }
+    function closeModal() { setEditing(false); setDrill(null); }
+
+    // เรียง: usable ท้ายสุด · ที่เหลือ (ติดเงื่อนไข) ขึ้นก่อนตามลำดับประเภท แล้วยอดมากก่อน
+    const typeRank = {}; CFP_ACCT_TYPES.forEach((t, i) => { typeRank[t.key] = t.key === 'usable' ? 99 : i; });
+    const rankOf = a => { const r = typeRank[typeOf(a)]; return r != null ? r : 50; };
+    const ordered = accts.slice().sort((a, b) => { const ra = rankOf(a), rb = rankOf(b); return ra !== rb ? ra - rb : b.ending - a.ending; });
+    const cell = { padding: '6px 8px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', textTransform: 'none', letterSpacing: 0 };
+    const th = { padding: '7px 8px', fontWeight: 700, fontSize: 11, color: CU.mut, whiteSpace: 'nowrap', textAlign: 'right', position: 'sticky', top: 0, background: '#fff', zIndex: 1, textTransform: 'none', letterSpacing: 0 };
+    const TypeBadge = ({ k }) => { const m = cfpTypeMeta(k); return <span title={m.label} style={{ background: m.color + '1f', color: m.color, borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{m.icon} {m.short}</span>; };
+    const clk = { cursor: 'pointer', borderBottom: '1.5px dotted currentColor' };   // ยอดที่กดดูที่มาได้
+    const selSty = { border: '1px solid ' + CU.line, borderRadius: 8, padding: '3px 6px', fontSize: 11, fontFamily: 'inherit', background: '#fff', color: CU.ink, cursor: 'pointer' };
+    const multiYear = months.length && months[0].slice(0, 4) !== months[months.length - 1].slice(0, 4);
+    const monLbl = m => (TH_MON_SHORT[Number(m.slice(5, 7)) - 1] || m) + (multiYear ? ' ' + String(Number(m.slice(0, 4)) + 543).slice(2) : '');
+
+    const shown = (editing || drill === 'all' || drill == null) ? ordered : ordered.filter(a => typeOf(a) === drill);
+    const shownTotal = shown.reduce((s, a) => s + a.ending, 0);
+    const dMeta = (drill && drill !== 'all') ? cfpTypeMeta(drill) : null;
+    const modalTitle = editing ? '🏷️ จัดประเภทบัญชี' : dMeta ? (dMeta.icon + ' ' + dMeta.label + ' — มาจากบัญชีไหนบ้าง') : '💰 ยอดเงินสด — ทุกบัญชี';
+    const btn = { border: '1px solid ' + CU.line, background: '#fff', color: CU.primaryD, borderRadius: 9, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' };
+
+    return (
+      <React.Fragment>
+        {/* การ์ดสรุป (ย่อ) — กดที่ยอด/ชิปประเภท เพื่อดูว่ามาจากบัญชีไหน */}
+        <div className="card" style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+            <h3 style={{ fontSize: 18, margin: 0 }}>💰 เงินสดนี้ “ใช้ได้จริง” เท่าไร <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: 13 }}>แยกตามบัญชี · ณ ปลายงวดที่เลือก</span></h3>
+            {canEdit && <button className="no-print no-present ed-hide-present" onClick={startEdit} style={btn}>✏️ จัดประเภทบัญชี</button>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', margin: '6px 0 10px' }}>
+            <span onClick={() => openDrill('all')} title="กดดูทุกบัญชี" style={{ fontSize: 28, fontWeight: 800, color: CU.ink, letterSpacing: '-.5px', cursor: 'pointer' }}>{cfpUsableM(total)}</span>
+            <span style={{ fontSize: 13, color: CU.mut }}>เงินสดรวมทุกบัญชี — <b onClick={() => openDrill('usable')} title="กดดูว่ามาจากบัญชีไหน" style={{ color: CU.pos, ...clk }}>ใช้ได้จริง {cfpUsableM(usableTotal)} ({pct(usableTotal)}%)</b>{restrictedTotal > 0 ? <span> · ติดเงื่อนไข {cfpUsableM(restrictedTotal)} ({pct(restrictedTotal)}%)</span> : null}</span>
+          </div>
+          {/* แถบ 100% แยกตามประเภท */}
+          <div style={{ display: 'flex', height: 26, borderRadius: 8, overflow: 'hidden', background: CU.soft, marginBottom: 10 }}>
+            {byType.map(t => <div key={t.key} onClick={() => openDrill(t.key)} title={t.icon + ' ' + t.label + ' · ' + edFmt(t.amount) + ' (กดดูที่มา)'} style={{ width: (total > 0 ? Math.max(0, t.amount) / total * 100 : 0) + '%', background: t.color, minWidth: 2, cursor: 'pointer' }} />)}
+          </div>
+          {/* ชิปประเภท (กดดูบัญชีในแต่ละประเภท) = "เงินก้อนนี้เป็นเงินอะไรบ้าง" */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {byType.map(t => (
+              <button key={t.key} onClick={() => openDrill(t.key)} title="กดดูว่ามาจากบัญชีไหน + เพิ่ม-ลดรายเดือน" style={{ display: 'flex', alignItems: 'center', gap: 7, border: '1px solid ' + CU.line, background: '#fff', borderRadius: 20, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>
+                <span style={{ width: 9, height: 9, borderRadius: 3, background: t.color, flex: '0 0 auto' }} />
+                <b style={{ color: CU.ink }}>{t.icon} {t.label}</b>
+                <span style={{ color: CU.mut, fontVariantNumeric: 'tabular-nums' }}>{cfpUsableM(t.amount)} · {pct(t.amount)}% · {t.count} บัญชี</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: CU.faint, marginTop: 8 }}>กดที่ยอด หรือชิปประเภท เพื่อดูว่ามาจากบัญชีไหน + เพิ่ม-ลดรายเดือน · ทั้งหมด {accts.length} บัญชี</div>
+          {unclassified && canEdit && <div className="no-print no-present" style={{ fontSize: 12, color: '#a8620a', background: '#fff7e6', borderRadius: 9, padding: '7px 12px', marginTop: 8 }}>ยังไม่ได้จัดประเภทบัญชี — กด ✏️ จัดประเภทบัญชี เพื่อระบุ ค้ำประกัน/นักลงทุน/บัญชีร่วม/OD (ตอนนี้นับเป็นใช้ได้ทั้งหมด)</div>}
+        </div>
+
+        {/* โมดัล: ที่มาของยอด (รายบัญชี + เพิ่ม-ลดรายเดือน) / โหมดจัดประเภท */}
+        {modalOpen && (
+          <div className="no-print no-present" onClick={closeModal} style={{ position: 'fixed', inset: 0, background: 'rgba(15,25,45,.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', zIndex: 1300, overflowY: 'auto' }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,.3)', width: 'min(980px,100%)', padding: '18px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: CU.ink }}>{modalTitle}</div>
+                  <div style={{ fontSize: 12, color: CU.mut, marginTop: 2 }}>{shown.length} บัญชี · รวม {cfpUsableM(shownTotal)}{(!editing && dMeta) ? ' (' + pct(shownTotal) + '% ของเงินสดทั้งหมด)' : ''}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {editing
+                    ? <React.Fragment>
+                        <button onClick={closeModal} style={{ ...btn, color: CU.mut, padding: '7px 14px', fontSize: 13, fontWeight: 400 }}>ยกเลิก</button>
+                        <button onClick={commit} style={{ border: 0, background: CU.primary, color: '#fff', borderRadius: 9, padding: '7px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>บันทึก</button>
+                      </React.Fragment>
+                    : <React.Fragment>
+                        {canEdit && <button onClick={startEdit} style={btn}>✏️ จัดประเภท</button>}
+                        <button onClick={closeModal} title="ปิด" style={{ ...btn, color: CU.mut, width: 32, height: 32, padding: 0, fontSize: 16, fontWeight: 400 }}>✕</button>
+                      </React.Fragment>}
+                </div>
+              </div>
+              {editing && <div style={{ fontSize: 12, color: CU.primaryD, background: CU.soft, borderRadius: 9, padding: '7px 12px', marginBottom: 10 }}>เลือกประเภทของแต่ละบัญชีจากเมนู (สามารถใช้ได้ / ค้ำประกัน / นักลงทุน / บัญชีร่วม / OD) แล้วกดบันทึก</div>}
+              <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '64vh', border: '1px solid ' + CU.line, borderRadius: 12 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 540 + months.length * 80 }}>
+                  <thead><tr>
+                    <th style={{ ...th, textAlign: 'left' }}>บัญชี</th>
+                    <th style={{ ...th, textAlign: 'center' }}>ประเภท</th>
+                    <th style={th}>ต้นงวด</th>
+                    {months.map(m => <th key={m} style={th}>{monLbl(m)}</th>)}
+                    <th style={{ ...th, color: CU.primaryD }}>ปลายงวด</th>
+                  </tr></thead>
+                  <tbody>
+                    {shown.map(a => {
+                      const k = typeOf(a); const m = cfpTypeMeta(k);
+                      return (
+                        <tr key={a.name} style={{ borderTop: '1px solid ' + CU.line, background: k === 'usable' ? 'transparent' : (m.color + '12') }}>
+                          <td style={{ ...cell, textAlign: 'left' }}><b>{a.bank}</b> <span style={{ color: CU.mut, fontSize: 11 }}>{edNoShort(a.no) || ('···' + (a.last4 || '—'))}</span>{a.nick ? <span style={{ color: CU.faint, fontSize: 11 }}> · {a.nick}</span> : null}</td>
+                          <td style={{ ...cell, textAlign: 'center' }}>{editing
+                            ? <select value={k} onChange={e => setType(a.name, e.target.value)} style={selSty}>{CFP_ACCT_TYPES.map(t => <option key={t.key} value={t.key}>{t.icon + ' ' + t.label}</option>)}</select>
+                            : <TypeBadge k={k} />}</td>
+                          <td style={{ ...cell, textAlign: 'right', color: CU.mut }}>{cfpUsableM(a.opening)}</td>
+                          {months.map(mn => { const v = a.byMonth[mn] || 0; return <td key={mn} style={{ ...cell, textAlign: 'right', color: v > 0 ? CU.pos : (v < 0 ? CU.neg : CU.faint) }}>{cfpDeltaM(v)}</td>; })}
+                          <td style={{ ...cell, textAlign: 'right', fontWeight: 800, color: a.ending < 0 ? CU.neg : CU.ink }}>{cfpUsableM(a.ending)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot><tr style={{ borderTop: '2px solid ' + CU.line, fontWeight: 800, background: CU.soft }}>
+                    <td style={{ ...cell, textAlign: 'left', position: 'sticky', bottom: 0, background: CU.soft }}>รวม</td>
+                    <td style={{ position: 'sticky', bottom: 0, background: CU.soft }} />
+                    <td style={{ ...cell, textAlign: 'right', color: CU.mut, position: 'sticky', bottom: 0, background: CU.soft }}>{cfpUsableM(shown.reduce((s, a) => s + a.opening, 0))}</td>
+                    {months.map(m => { const v = shown.reduce((s, a) => s + (a.byMonth[m] || 0), 0); return <td key={m} style={{ ...cell, textAlign: 'right', color: v > 0 ? CU.pos : (v < 0 ? CU.neg : CU.faint), position: 'sticky', bottom: 0, background: CU.soft }}>{cfpDeltaM(v)}</td>; })}
+                    <td style={{ ...cell, textAlign: 'right', color: CU.primaryD, position: 'sticky', bottom: 0, background: CU.soft }}>{cfpUsableM(shownTotal)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+              <div style={{ fontSize: 11, color: CU.faint, marginTop: 8 }}>ต้นงวด = ยอดต้นเดือนแรกของช่วงที่เลือก · ตัวเลขรายเดือน = เพิ่ม/ลดสุทธิของบัญชีนั้นในเดือนนั้น (รวมเงินโอนระหว่างบัญชี) · ปลายงวด = ยอดสิ้นเดือนสุดท้ายของช่วง</div>
+            </div>
+          </div>
+        )}
+      </React.Fragment>
+    );
+  }
+  let _edUsableRoot = null;
+  // ถอดแบบเลื่อนไปรอบถัดไป — หน้าวาดใหม่จาก useEffect ของหน้า React ระหว่างที่ React ยังทำงานอยู่ (ถอดทันที = React เตือน race)
+  //   กล่องเดิมถูก innerHTML แทนที่ไปแล้ว ถอดทีหลังได้ปลอดภัย
+  function edUnmountUsable() { if (_edUsableRoot) { const r = _edUsableRoot; _edUsableRoot = null; setTimeout(() => { try { r.unmount(); } catch (e) { } }, 0); } }
+  function edMountUsable(box) {
+    edUnmountUsable();
+    const el = box && box.querySelector('[data-ed-usable]');
+    if (!el || !window.ReactDOM || !ReactDOM.createRoot) return;
+    const d = edState();
+    _edUsableRoot = ReactDOM.createRoot(el);
+    _edUsableRoot.render(React.createElement(CfpCashUsable, { data: d.data, mf: d.monthFilter, acctTypes: CED.acctTypes, canEdit: CED.canEdit, onSave: at => edHook('acctTypes', at) }));
+  }
+
   /* ── สไตล์ของหน้า Benya (ยกจาก <style> ของ fin.benyamedical.com) — ครอบด้วย .ced ไม่ให้ชนสไตล์ทั้งแอป
    *    (POG มี .card/.btn/.badge/.page-head ของตัวเอง) · ป๊อปอัพรายการ (#edDrillModal) ต่อท้าย <body> จึงครอบแยก */
   const CED_CSS = `
@@ -2744,6 +2960,7 @@ body.present-mode .ced .ed-hide-present{display:none!important}
   }
   /* ยังไม่มีข้อมูล — หน้าอัปโหลด (★ BIO: อ่านไฟล์ STM รายการเดินบัญชี + งบสรุป ด้วยตัวอ่านเดิมของ BIO) */
   function edRenderEmpty() {
+    edUnmountUsable();
     const t = TOOLS[0], co = COMPANIES[0];
     Object.keys(_edCharts).forEach(edDestroyChart);
     CED.host.innerHTML = `
@@ -2769,6 +2986,7 @@ body.present-mode .ced .ed-hide-present{display:none!important}
     edRenderDashboard();
   }
   function edUnmount() {
+    edUnmountUsable();
     if (window.exnUnmount) window.exnUnmount(CED.host);
     Object.keys(_edCharts).forEach(edDestroyChart);
     document.querySelectorAll('#edDrillModal').forEach(m => m.remove());
@@ -2897,10 +3115,15 @@ body.present-mode .ced .ed-hide-present{display:none!important}
       if (cfpCanSync()) { setShareBusy(true); window.WTPData.writeTable(CFP_TABLE, [], r => r.id).then(() => { setShareBusy(false); toast && toast('ล้างข้อมูลส่วนกลางแล้ว'); }).catch(e => { setShareBusy(false); toast && toast('ล้างในเครื่องแล้ว แต่ส่วนกลางไม่สำเร็จ: ' + (e && e.message || ''), 'error'); }); }
     }
 
+    // บันทึกการจัดประเภทบัญชี (การ์ดเงินสดใช้ได้จริง) → stored.acctTypes + แชร์ส่วนกลาง (ชุดเดียวกับที่ตั้งไว้ในหน้าเดิม)
+    function saveAcctTypes(at) {
+      if (!stored || !stored.stm) return;
+      persist(keepOld({ stm: stored.stm, acctTypes: at })).then(r => { toast && toast('บันทึกการจัดประเภทบัญชีแล้ว' + cfpShareSuffix(r), r.reason === 'error' ? 'error' : undefined); });
+    }
     // ส่วนที่ 2 (โค้ดวาดหน้า) เรียกกลับมาที่นี่ผ่าน CfpEd.edHook(...)
-    useEffect(() => { CED.hooks = { upload: () => { if (fileRef.current) fileRef.current.click(); }, refresh: refreshShared, clear: clearData, era: v => setEra(v) }; });
+    useEffect(() => { CED.hooks = { upload: () => { if (fileRef.current) fileRef.current.click(); }, refresh: refreshShared, clear: clearData, era: v => setEra(v), acctTypes: saveAcctTypes }; });
     useEffect(() => {
-      Object.assign(CED, { host: hostRef.current, canEdit, canSync: cfpCanSync(), uploading, shareBusy, era, synced, stored });
+      Object.assign(CED, { host: hostRef.current, canEdit, canSync: cfpCanSync(), uploading, shareBusy, era, synced, stored, acctTypes: (stored && stored.acctTypes) || null });
       edMount(edData);
     }, [edData, canEdit, uploading, shareBusy, era, chartReady, synced]);
     useEffect(() => () => edUnmount(), []);
