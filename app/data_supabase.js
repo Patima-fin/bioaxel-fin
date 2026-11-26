@@ -622,6 +622,35 @@
     return sb.from('presence').upsert({ id: String(row.id), data: row }).then(function () {}, function () {});
   };
 
+  /* ── โหมดแคสหน้าจอ (app/present_sync.js · แบบเว็บ Benya present_sync / Water POG /api/present-sync) ──
+   *   กระดานกลางแถวเดียว presentSync id='main' · ไอแพดผู้นำเสนอเขียน ~5 ครั้ง/วิ ระหว่างเลื่อน → ไม่ลง audit_log
+   *   RLS (supabase/present-sync.sql): อ่าน = ทุกคนที่ล็อกอิน · เขียน = presenter เท่านั้น
+   *   seq = updated_at (เวลาของ server ที่ trigger ตั้ง — เปลี่ยนทุกครั้งที่เขียน) · ageMs = อายุของสถานะ */
+  function _psyErr(e) {
+    var code = e && e.code, msg = String((e && e.message) || e || '');
+    if (code === '42501' || /row-level security/i.test(msg)) return new Error('ไม่มีสิทธิ์ส่ง (ต้องเป็นบัญชีผู้นำเสนอ)');
+    if (code === 'PGRST205' || code === '42P01' || /presentSync/.test(msg)) return new Error('ยังไม่มีตาราง presentSync — รัน supabase/present-sync.sql');
+    return e instanceof Error ? e : new Error(msg);
+  }
+  WTPData.presentSyncPut = function (state) {
+    if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
+    return sb.from('presentSync').upsert({ id: 'main', data: state }).select('id').then(function (r) {
+      if (r && r.error) throw _psyErr(r.error);
+      if (!r || !r.data || !r.data.length) throw new Error('ไม่มีสิทธิ์ส่ง (ต้องเป็นบัญชีผู้นำเสนอ)');
+      return { ok: true };
+    });
+  };
+  WTPData.presentSyncGet = function () {
+    if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
+    return sb.from('presentSync').select('data,updated_at').eq('id', 'main').limit(1).then(function (r) {
+      if (r && r.error) throw _psyErr(r.error);
+      var row = r && r.data && r.data[0];
+      if (!row || !row.data) return { state: null, seq: 0 };
+      var at = Date.parse(row.updated_at) || 0;
+      return { state: row.data, seq: row.updated_at || 0, ageMs: at ? Date.now() - at : Infinity };
+    });
+  };
+
   /* ── subscribe (React) ─────────────────────────────────────────────── */
   WTPData.subscribe = function (cb) {
     subscribers.push(cb);

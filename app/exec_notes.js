@@ -844,8 +844,13 @@
     el.setAttribute("data-exn", cur.join(" "));
   }
   function exnBindTargets() {
-    const S = exnState(), ctx = S.ctx, main = S.scope;
-    if (!ctx || !main || ctx.kind !== "exec") return;
+    const S = exnState(), ctx = S.ctx;
+    // ★ จอทีวี (โหมดแคสหน้าจอ · present_sync.js) ไม่ใช่บัญชีผู้นำเสนอ = ไม่มี ctx แต่ต้องติดป้ายกรอบเหมือนกัน
+    //   (ใช้หากรอบที่ไอแพดเลื่อนถึง) — แบบ Benya exnBindTargets ที่ดูจากหน้าที่เปิดอยู่เมื่อไม่มี ctx
+    const exec = ctx ? ctx.kind === "exec" : String(window.location.hash || "").replace(/^#/, "").split("?")[0] === "cashflow_present";
+    const host = document.getElementById("edContent");
+    const main = ctx ? S.scope : (host && host.closest(".ed-page"));
+    if (!exec || !main) return;
     const tab = edState().tab || "summary";
     exnTag(main.querySelector(".page-head"), ["summary.brief"]);
     const c = main.querySelector("#edContent");
@@ -871,23 +876,27 @@
     document.body.appendChild(root);
     return root;
   }
+  /* โหมดแคสหน้าจอ (present_sync.js) — หน้าวาดเสร็จ: ทีวีได้ปุ่ม "📡 โหมดแคสหน้าจอ" · ไอแพดส่งตำแหน่งให้จอใหญ่ */
+  function exnPsyMounted() { try { if (window.Psy && window.Psy.onMount) window.Psy.onMount(); } catch (e) { } }
+  function exnPsyToggle() { if (window.Psy && window.Psy.remoteToggle) window.Psy.remoteToggle(); exnCloseMenu(); exnToggleMenu(); }
   /* หน้างบกระแสเงินสด — เรียกท้าย edRenderDashboard() · mf = ช่วงที่เลือก · year = ปีของข้อมูล (แยกโน้ต "ทั้งหมด" ต่อปี) */
   function exnMount(o) {
     o = o || {};
-    if (!exnEnsureRoot(o.root)) return;
+    if (!exnEnsureRoot(o.root)) { exnPsyMounted(); return; }
     const S = exnState(), mf = o.mf || "all";
     S.ctx = { kind: "exec", mf, period: "cf:" + (mf === "all" ? "all:" + (o.year || "") : mf) };
     exnClosePop(); exnCloseMenu();
     exnBindTargets();
     exnLoad();
     exnRenderFab();
+    exnPsyMounted();   // เปลี่ยนแท็บ/ช่วงเวลา = หน้าวาดใหม่ → บอกจอใหญ่
   }
   /* หน้างบกำไรขาดทุน / งบแสดงฐานะการเงิน — เรียกจาก useEffect ของหน้า (ทุกครั้งที่ข้อมูลเปลี่ยน)
      o = { root, period, label, data:{...ค่าที่หน้าคิดแล้ว} } */
   function exnMountFin(which, o) {
     o = o || {};
     const w = which === "pnl" ? "pnl" : "balance";
-    if (!exnEnsureRoot(o.root)) return;
+    if (!exnEnsureRoot(o.root)) { exnPsyMounted(); return; }
     const S = exnState();
     S.fin[w] = o.data || {};
     const period = (w === "pnl" ? "pnl:" : "bal:") + (o.period || "none");
@@ -897,8 +906,10 @@
     else exnRefreshPop();
     exnLoad();
     exnRenderFab();
+    exnPsyMounted();
   }
   function exnUnmount(scope) {
+    try { if (window.Psy && window.Psy.onUnmount) window.Psy.onUnmount(); } catch (e) { }   // ปุ่มทีวีหายเมื่อออกจาก 3 หน้างบ
     if (scope && EXN.scope && EXN.scope !== scope) return;   // หน้าอื่นเพิ่งติดตั้งทับไปแล้ว
     exnClosePop(); exnCloseMenu();
     const r = document.getElementById("exnRoot"); if (r) r.remove();
@@ -970,8 +981,11 @@
     const notes = ctx ? (S.notes[ctx.period] || {}) : {};
     const n = Object.values(notes).filter(x => x.note && x.note.trim()).length;
     fab.className = on ? "" : "off";
-    fab.title = "บทวิเคราะห์ผู้นำเสนอ (เห็นเฉพาะบัญชีนี้)";
-    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้กรอบเพื่อดูบทวิเคราะห์" : "แตะกรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "");
+    // แคสหน้าจอ (present_sync.js): ป้ายสถานะท้ายปุ่ม — แบบ Benya "📡 กำลังแคส" / "📡 แคสไม่สำเร็จ" (Benya วางในแผงบทพูด)
+    const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
+    const castBad = !!(cs && cs.ok === false);
+    fab.title = "บทวิเคราะห์ผู้นำเสนอ (เห็นเฉพาะบัญชีนี้)" + (cast ? (castBad ? "\nแคสหน้าจอไม่สำเร็จ: " + (cs.msg || "") : "\nกำลังแคสหน้าจอ — จอที่เปิด \"โหมดแคสหน้าจอ\" แสดงตามหน้าจอนี้") : "");
+    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้กรอบเพื่อดูบทวิเคราะห์" : "แตะกรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "") + (cast ? (castBad ? " · 📡 แคสไม่สำเร็จ" : " · 📡 แคสอยู่") : "");
   }
   function exnCloseMenu(){ const m = document.getElementById("exnMenu"); if(m) m.remove(); }
   function exnToggleMenu(){
@@ -983,7 +997,10 @@
     const esc2 = s => (typeof esc === "function" ? esc(s) : String(s));
     const defs = C.tab ? C.defs.filter(f => f.tab === C.tab).concat(C.defs.filter(f => f.tab !== C.tab)) : C.defs;
     const m = document.createElement("div"); m.id = "exnMenu";
+    const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
     m.innerHTML = `<div class="exn-mt">${esc2(C.scopeLbl)} · เห็นเฉพาะบัญชีนี้</div>
+      ${P ? `<div class="exn-sw ${cast ? "on" : ""}" onclick="Exn.exnPsyToggle()"><span>📡 แคสหน้าจอไปจอใหญ่ (จอที่เปิด "โหมดแคสหน้าจอ" แสดงตาม)</span><i></i></div>` : ""}
+      ${cs && cs.ok === false ? `<div class="exn-err">แคสหน้าจอไม่สำเร็จ: ${esc2(cs.msg || "")}</div>` : ""}
       <div class="exn-sw ${on ? "on" : ""}" onclick="Exn.exnSetTap(${on ? "false" : "true"})"><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบเพื่อดูบทวิเคราะห์</span><i></i></div>
       ${S.err ? `<div class="exn-err">${esc2(S.err)}</div>` : ""}
       ${defs.map(f => `<button type="button" class="exn-it ${notes[f.key] && notes[f.key].note && notes[f.key].note.trim() ? "has" : ""}" onclick="Exn.exnOpenFromMenu('${f.key}')"><b>${esc2(f.title)}</b><small>${esc2(f.group || "")}</small></button>`).join("")}`;
@@ -1113,6 +1130,7 @@
     if(frameEl) frameEl.classList.add("exn-hl");
     window._exnPopKeys = { keys, x, y, el: frameEl, top: frameEl ? frameEl.getBoundingClientRect().top : 0 };
     window._exnPin = !!(opt && opt.pin);
+    if (window.Psy && window.Psy.push) window.Psy.push();   // แคสหน้าจอ: ส่งตำแหน่งปัจจุบัน (กรอบที่เปิดกล่องได้ก่อน)
     window._exnHoverEl = (opt && opt.hover) ? frameEl : null;
     return true;
   }
@@ -1186,6 +1204,7 @@
   }
 
   /* ปุ่ม/ช่องในกล่องเรียกผ่าน window.Exn.<ชื่อ> · หน้าเรียก window.exnMount / exnMountFin / exnUnmount */
-  window.Exn = { exnClosePop, exnEditNote, exnInput, exnOpenFromMenu, exnSave, exnSetTap };
+  window.Exn = { exnClosePop, exnEditNote, exnInput, exnOpenFromMenu, exnSave, exnSetTap, exnPsyToggle,
+    exnBindTargets, exnRenderFab };   // ↑ 2 ตัวท้ายให้ present_sync.js (ติดป้ายกรอบบนจอทีวี · ป้ายสถานะแคสบนปุ่ม ✦)
   window.exnMount = exnMount; window.exnMountFin = exnMountFin; window.exnUnmount = exnUnmount;
 })();

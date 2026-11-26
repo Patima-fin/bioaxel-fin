@@ -1043,6 +1043,13 @@ function PnLPage({ data, setData, toast }) {
     } catch (e) { console.warn('[P&L] notes', e); }
   }, [loading, model, comp, k, bal, isSample, lastMonth, plYear]);
   plEffect(() => () => { if (window.exnUnmount) window.exnUnmount(); }, []);
+  // ★ โหมดแคสหน้าจอ (present_sync.js · แบบเว็บ Benya / Water POG) — จอทีวีสลับตารางรายเดือน/รายไตรมาสตามไอแพด
+  plEffect(() => {
+    if (!window.Psy) return;
+    window.Psy.view('pnl', () => ({ viewMode }), v => { if (v && (v.viewMode === 'month' || v.viewMode === 'quarter')) setViewMode(v.viewMode); });
+    window.Psy.push();
+    return () => { if (window.Psy) window.Psy.view('pnl', null); };
+  }, [viewMode]);
 
   const saveImage = () => {
     if (!window.html2canvas) { toast('ระบบบันทึกรูปยังไม่พร้อม — โหลด html2canvas ไม่สำเร็จ'); return; }
