@@ -1189,6 +1189,8 @@
     if (EXN.scope) EXN.scope.classList.remove("exn-scope");
     EXN.scope = null; EXN.ctx = null;
     document.body.classList.remove("exn-tap", "exn-sc-open");   // แผงบทพูดหายไปกับ #exnRoot → คืนเมนูซ้ายของแอป
+    // หน้าต่างลอยเปิดอยู่: ไปหน้าที่ไม่มีบทพูด → บอกในหน้าต่าง (รอสักครู่ — สลับไปอีกหน้างบ หน้าใหม่ติดตั้งทับเอง ไม่กะพริบ)
+    if (exnPipWin()) setTimeout(() => { if (exnPipWin() && !document.getElementById("exnRoot") && !window._exnPipEmpty) exnRenderScript(); }, 400);
   }
 
   /* ═════ หน้าจอ (ยกจาก Benya exec-notes.js บรรทัด 815–1130 · แก้ ★ POG) ═════ */
@@ -1294,7 +1296,15 @@
     #exnScript .exn-nav .nx{flex:1;min-width:0;background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;box-shadow:0 8px 18px rgba(79,70,229,.28)}
     #exnScript .exn-nav .nx b{display:block;font-size:16px}#exnScript .exn-nav .nx small{display:block;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     #exnScript .exn-nav button:disabled{opacity:.35;cursor:default}
-    @media print{#exnFab,#exnMenu,#exnPop,#exnScript{display:none!important} body.exn-sc-open .main{padding-left:0}}`;
+    #exnScript .exn-pipb{flex:none;border:1px solid rgba(124,58,237,.3);background:#fff;color:#5b21b6;border-radius:999px;padding:4px 10px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+    #exnScript .exn-pipb:hover{background:#f5f3ff}
+    #exnScript .exn-shd .exn-pipb{margin-left:auto} #exnScript .exn-pipb + .exn-x{margin-left:0}
+    body.exn-pip #exnFab,body.exn-pip #exnMenu,body.exn-pip #exnPop,body.exn-pip #psyMe,body.exn-pip #psyMeMenu,body.exn-pip #psyPill{display:none!important}
+    #exnLaser{position:fixed;left:0;top:0;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:rgba(239,68,68,.92);box-shadow:0 0 0 4px rgba(239,68,68,.25),0 0 14px rgba(239,68,68,.6);pointer-events:none;z-index:2147483000;opacity:0;transition:opacity .25s}
+    #exnLaser.on{opacity:1}
+    .exn-ripple{position:fixed;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;border:3px solid rgba(239,68,68,.85);pointer-events:none;z-index:2147483000;animation:exnRip .9s ease-out forwards}
+    @keyframes exnRip{from{transform:scale(.3);opacity:1}to{transform:scale(1.6);opacity:0}}
+    @media print{#exnFab,#exnMenu,#exnPop,#exnScript,#exnLaser,.exn-ripple{display:none!important} body.exn-sc-open .main{padding-left:0}}`;
     document.head.appendChild(s);
   }
   function exnHoverDev(){ try{ return window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches; }catch(e){ return false; } }
@@ -1328,7 +1338,8 @@
     const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
     m.innerHTML = `<div class="exn-mt">${esc2(C.scopeLbl)} · เห็นเฉพาะบัญชีนี้</div>
       <div class="exn-sw ${exnScGet() ? "on" : ""}" onclick="Exn.exnScriptToggle()"><span>บทพูดทั้งหน้า (แผงด้านซ้าย)</span><i></i></div>
-      ${P ? `<div class="exn-sw ${cast ? "on" : ""}" onclick="Exn.exnPsyToggle()"><span>📡 แคสหน้าจอไปจอใหญ่ (จอที่เปิด "โหมดแคสหน้าจอ" แสดงตาม)</span><i></i></div>` : ""}
+      ${exnPipOk() ? `<button type="button" class="exn-it" onclick="Exn.exnPipOpen()"><b>⧉ แยกบทพูดเป็นหน้าต่างลอย</b><small>สำหรับแชร์แท็บใน Google Meet · ผู้ฟังไม่เห็นบทพูด</small></button>` : ""}
+      ${P ?`<div class="exn-sw ${cast ? "on" : ""}" onclick="Exn.exnPsyToggle()"><span>📡 แคสหน้าจอไปจอใหญ่ (จอที่เปิด "โหมดแคสหน้าจอ" แสดงตาม)</span><i></i></div>` : ""}
       ${cs && cs.ok === false ? `<div class="exn-err">แคสหน้าจอไม่สำเร็จ: ${esc2(cs.msg || "")}</div>` : ""}
       <div class="exn-sw ${on ? "on" : ""}" onclick="Exn.exnSetTap(${on ? "false" : "true"})"><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบเพื่อดูบทวิเคราะห์</span><i></i></div>
       ${S.err ? `<div class="exn-err">${esc2(S.err)}</div>` : ""}
@@ -1501,7 +1512,56 @@
   function exnScSet(v){ try{ localStorage.setItem("bio-exn-script", v ? "1" : "0"); }catch(e){} }
   function exnOneGet(){ try{ return localStorage.getItem("bio-exn-one") === "1"; }catch(e){ return false; } }
   function exnOneSet(v){ try{ localStorage.setItem("bio-exn-one", v ? "1" : "0"); }catch(e){} }
-  function exnScOpen(){ return !!document.getElementById("exnScript"); }
+  /* ★ แยกบทพูดเป็นหน้าต่างลอย (ยก Benya 2026-11-26 · ผู้ใช้: "ข้อมูลนำเสนอเป็นเหมือนแท็บแยกออกมาแทน ทำให้ทั้ง 3 บ.")
+       นำเสนอผ่าน Google Meet จากโน้ตบุ๊คเครื่องเดียว: Document Picture-in-Picture (Chrome/Edge บนคอม 116+) = หน้าต่างเล็กลอยบนสุด อยู่นอกแท็บ
+       → แชร์ "แท็บ" ใน Meet แล้วผู้ฟัง (ใน Meet + ทีวีที่เข้าห้อง Meet) ไม่เห็นบทพูด · บัญชีผู้นำเสนอบัญชีเดียว ไม่ต้องใช้โหมดแคส (โหมดแคสยังอยู่ เหมือน Benya)
+       · แผงวาดลง pip.document แทน (exnScDoc) · onclick ในหน้าต่างลอยรันใน window ของมันเอง → exnPipBind ส่ง window.Exn / window.Psy ไปให้
+       · หน้าเว็บที่แชร์ (body.exn-pip): ซ่อนปุ่ม ✦ / กล่องบทวิเคราะห์ / ปุ่มแคส · กรอบไฮไลต์ยังโชว์ (ให้ผู้ฟังเห็นว่ากำลังพูดกรอบไหน)
+         + จุดแดงตามเมาส์ + วงกระเพื่อมตอนคลิก (แชร์แบบแท็บไม่ติดเมาส์)
+       · ปิดหน้าต่างลอย (× ของหน้าต่าง / "⤺ กลับเข้าหน้าเว็บ") = แผงกลับเข้าหน้าเว็บ
+       · ไปหน้าที่ไม่มีบทพูด = หน้าต่างลอยยังเปิดอยู่ บอกว่าหน้านี้ไม่มีบทพูด แล้วขึ้นบทพูดเองเมื่อกลับมา 3 หน้างบ */
+  function exnPipOk(){ return "documentPictureInPicture" in window; }
+  function exnPipWin(){ const w = window._exnPip; return w && !w.closed ? w : null; }
+  function exnScDoc(){ const w = exnPipWin(); return w ? w.document : document; }
+  function exnScOpen(){ return !!exnScDoc().getElementById("exnScript"); }
+  function exnPipBind(w){ try{ w.Exn = window.Exn; if(window.Psy) w.Psy = window.Psy; }catch(e){} }
+  const EXN_PIP_CSS = `
+    html,body{margin:0;height:100%;overflow:hidden;background:linear-gradient(165deg,#ffffff,#f5f3ff)}
+    body.exn-pipbody #exnScript{position:static;inset:auto;width:auto;height:100vh;box-shadow:none;border-right:none;animation:none;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none}
+    body.exn-pipbody #exnScript .exn-nb,body.exn-pipbody #exnScript .exn-psy{display:none}`;
+  async function exnPipOpen(){
+    if(!exnPipOk()){ alert("เบราว์เซอร์นี้แยกบทพูดเป็นหน้าต่างลอยไม่ได้\nใช้ Chrome หรือ Edge บนคอมพิวเตอร์ (ไอแพด/มือถือใช้ไม่ได้)"); return; }
+    const cur = exnPipWin(); if(cur){ try{ cur.focus(); }catch(e){} return; }
+    let w;
+    try{ w = await window.documentPictureInPicture.requestWindow({ width: 480, height: Math.max(420, Math.min(860, (screen.availHeight || 900) - 80)) }); }
+    catch(e){ alert("เปิดหน้าต่างลอยไม่สำเร็จ: " + (e && e.message || e)); return; }
+    const d = w.document;
+    d.title = "บทพูด · " + (document.title || "");
+    document.querySelectorAll('style, link[rel="stylesheet"]').forEach(n => { const c = n.cloneNode(true); if(n.href) c.href = n.href; d.head.appendChild(c); });   // href เต็ม — หน้าต่างลอยเป็น about:blank
+    const st = d.createElement("style"); st.textContent = EXN_PIP_CSS; d.head.appendChild(st);
+    d.body.classList.add("exn-pipbody");
+    exnPipBind(w);
+    window._exnPip = w; window._exnPipEmpty = false;
+    w.addEventListener("pagehide", () => {
+      if(window._exnPip === w) window._exnPip = null;
+      document.body.classList.remove("exn-pip"); exnLaserOff();
+      exnRenderScript(); exnRenderFab(); exnPsyPush();
+    });
+    exnScSet(true); exnCloseMenu(); exnClosePop();
+    document.body.classList.add("exn-pip");
+    exnRenderScript(); exnRenderFab();
+    if(window._exnScActive) exnScriptActivate(window._exnScActive, true);
+  }
+  function exnPipClose(){ const w = exnPipWin(); if(w) w.close(); }
+  /* จุดแดงตามเมาส์ + วงกระเพื่อมตอนคลิก — เฉพาะตอนแยกหน้าต่างลอย (แชร์แท็บใน Meet ไม่ติดเมาส์) */
+  function exnLaserAt(x, y){
+    let l = document.getElementById("exnLaser");
+    if(!l){ l = document.createElement("div"); l.id = "exnLaser"; document.body.appendChild(l); }
+    l.style.transform = "translate(" + x + "px," + y + "px)";
+    l.classList.add("on");
+    clearTimeout(window._exnLaserT); window._exnLaserT = setTimeout(() => l.classList.remove("on"), 2500);
+  }
+  function exnLaserOff(){ const l = document.getElementById("exnLaser"); if(l) l.remove(); }
   function exnPsyPush(){ try{ if(window.Psy && window.Psy.push) window.Psy.push(); }catch(e){} }
   function exnFindFrame(key){ return EXN.scope ? EXN.scope.querySelector(`[data-exn~="${key}"]`) : null; }
   function exnRelayout(){ setTimeout(() => { try{ window.dispatchEvent(new Event("resize")); }catch(e){} }, 80); }   // กราฟวาดตามความกว้างใหม่
@@ -1578,6 +1638,7 @@
   function exnScModeSet(v){ try{ localStorage.setItem("bio-exn-scmode", EXN_SC_MODES.includes(v) ? v : "both"); }catch(e){} exnRenderScript(); exnScriptActivate(window._exnScActive, true); }
   function exnScriptToggle(v){
     exnScSet(v == null ? !exnScGet() : !!v);
+    if(!exnScGet()) exnPipClose();
     exnCloseMenu(); exnClosePop();
     exnRenderScript(); exnRenderFab(); exnRelayout();
     exnPsyPush();   // แคสหน้าจอ: เปิด/ปิดแผง = กรอบที่กำลังพูดบนทีวีเปลี่ยน
@@ -1614,7 +1675,10 @@
     // ป้ายแคส: present_sync.js ระบายเอง (Psy.paintStatus) — ถือจอ = "กำลังแคส" · ไม่ได้ถือ = "แคสจากเครื่องนี้" (กดรับจอ) · ส่งไม่สำเร็จ
     const psy = cast ? `<span id="exnPsyTag" class="exn-psy ok">📡 กำลังแคส</span>` : "";
     const modes = [["split", "🎤 พูด + ✦ วิเคราะห์", "บทพูดกับบทวิเคราะห์ แยกเป็น 2 กรอบ"], ["ana", "✦ วิเคราะห์อย่างเดียว", "บทวิเคราะห์อย่างเดียว"], ["both", "🎤 พูดรวมวิเคราะห์", "บทพูดพร้อมวิเคราะห์ เป็นข้อความเดียว"]];
-    return `<div class="exn-shd"><span class="exn-badge">✦ บทพูดทั้งหน้า</span><span class="exn-sc">${esc2(C.scopeLbl)}</span>${psy}<button type="button" class="exn-x" onclick="Exn.exnScriptToggle(false)" title="ปิดแผง">×</button></div>
+    const pip = exnPipWin();
+    const pipBtn = exnPipOk() ? (pip ? `<button type="button" class="exn-pipb" onclick="Exn.exnPipClose()" title="ย้ายบทพูดกลับเข้าหน้าเว็บ">⤺ กลับเข้าหน้าเว็บ</button>`
+      : `<button type="button" class="exn-pipb" onclick="Exn.exnPipOpen()" title="แยกบทพูดเป็นหน้าต่างลอย · แชร์แท็บใน Meet แล้วผู้ฟังไม่เห็นบทพูด">⧉ แยกหน้าต่าง</button>`) : "";
+    return `<div class="exn-shd"><span class="exn-badge">✦ บทพูดทั้งหน้า</span><span class="exn-sc">${esc2(C.scopeLbl)}</span>${psy}${pipBtn}${pip ? "" : `<button type="button" class="exn-x" onclick="Exn.exnScriptToggle(false)" title="ปิดแผง">×</button>`}</div>
       <div class="exn-mode">${modes.map(([v, l, t]) => `<button type="button" class="${mode === v ? "on" : ""}" title="${t}" onclick="Exn.exnScModeSet('${v}')">${l}</button>`).join("")}</div>
       <div class="exn-sbar"><label class="exn-one"><input type="checkbox" ${one ? "checked" : ""} onchange="Exn.exnOneToggle(this.checked)"> ทีละเรื่อง</label><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบบนจอ = ไปที่บทพูดของกรอบนั้น</span></div>
       ${S.err ? `<div class="exn-err" style="margin:8px 12px 0">${esc2(S.err)}</div>` : ""}
@@ -1623,15 +1687,27 @@
   }
   function exnRenderScript(){
     const root = document.getElementById("exnRoot");
-    let p = document.getElementById("exnScript");
-    const C = (root && exnIsPresenter() && exnScGet()) ? exnContext() : null;
-    if(!C){ if(p) p.remove(); document.body.classList.remove("exn-sc-open"); return; }
-    const old = document.getElementById("exnScList");
+    const pip = exnPipWin(), D = pip ? pip.document : document;
+    let p = D.getElementById("exnScript");
+    const C = (root && exnIsPresenter() && (pip || exnScGet())) ? exnContext() : null;
+    if(pip){   // หน้าต่างลอย: แผงอยู่ในหน้าต่างนั้น · หน้าเว็บไม่มีแผง คืนเมนูซ้ายของแอป
+      const inPage = document.getElementById("exnScript"); if(inPage) inPage.remove();
+      if(document.body.classList.contains("exn-sc-open")){ document.body.classList.remove("exn-sc-open"); exnRelayout(); }
+      if(!p){ p = D.createElement("aside"); p.id = "exnScript"; D.body.appendChild(p); }
+      if(!C){
+        p.innerHTML = `<div class="exn-shd"><span class="exn-badge">✦ บทพูด</span><button type="button" class="exn-pipb" onclick="Exn.exnPipClose()">⤺ กลับเข้าหน้าเว็บ</button></div>
+          <div class="exn-msg" style="margin:12px 14px">หน้านี้ไม่มีบทพูด · เปิดหน้างบกระแสเงินสด งบกำไรขาดทุน หรืองบแสดงฐานะการเงิน แล้วบทพูดจะขึ้นที่นี่เอง</div>`;
+        window._exnPipEmpty = true;
+        return;
+      }
+      window._exnPipEmpty = false;
+    } else if(!C){ if(p) p.remove(); document.body.classList.remove("exn-sc-open"); return; }
+    const old = D.getElementById("exnScList");
     const keep = old ? old.scrollTop : (window._exnScScroll || 0);
-    if(!p || !root.contains(p)){ if(p) p.remove(); p = document.createElement("aside"); p.id = "exnScript"; root.appendChild(p); }
+    if(!pip && (!p || !root.contains(p))){ if(p) p.remove(); p = document.createElement("aside"); p.id = "exnScript"; root.appendChild(p); }
     p.innerHTML = exnScriptHtml(C);
-    if(!document.body.classList.contains("exn-sc-open")){ document.body.classList.add("exn-sc-open"); exnRelayout(); }
-    const list = document.getElementById("exnScList");
+    if(!pip && !document.body.classList.contains("exn-sc-open")){ document.body.classList.add("exn-sc-open"); exnRelayout(); }
+    const list = D.getElementById("exnScList");
     if(list){ list.scrollTop = keep; list.onscroll = () => { window._exnScScroll = list.scrollTop; }; }
     if(window.Psy && window.Psy.paintStatus) window.Psy.paintStatus();
   }
@@ -1642,8 +1718,8 @@
     const changed = window._exnScActive !== key;
     window._exnScActive = key;
     if(exnOneGet() && (changed || force)) exnRenderScript();
-    else document.querySelectorAll("#exnScript .exn-ss").forEach(s => s.classList.toggle("act", s.getAttribute("data-key") === key));
-    const list = document.getElementById("exnScList"), sec = list && list.querySelector(`.exn-ss[data-key="${key}"]`);
+    else exnScDoc().querySelectorAll("#exnScript .exn-ss").forEach(s => s.classList.toggle("act", s.getAttribute("data-key") === key));
+    const list = exnScDoc().getElementById("exnScList"), sec = list && list.querySelector(`.exn-ss[data-key="${key}"]`);
     if(sec) list.scrollTo({ top: Math.max(0, sec.offsetTop - 8), behavior: "smooth" });
     exnPaintNav();
   }
@@ -1720,7 +1796,7 @@
     return `<div class="exn-nav"><button type="button" class="pv" ${pv ? "" : "disabled"} onclick="Exn.exnDeckStep(-1)" title="${pv ? esc2(pv.tool !== curT ? "กลับหน้า" + pageName(pv.tool) : pv.title) : ""}">‹ ก่อน</button>
       <button type="button" class="nx" ${nx ? "" : "disabled"} onclick="Exn.exnDeckStep(1)"><b>ถัดไป ›</b><small>${esc2(lbl)}</small></button></div>`;
   }
-  function exnPaintNav(){ const old = document.querySelector("#exnScript .exn-nav"); if(old) old.outerHTML = exnDeckNavHtml(); }
+  function exnPaintNav(){ const old = exnScDoc().querySelector("#exnScript .exn-nav"); if(old) old.outerHTML = exnDeckNavHtml(); }
   function exnDeckStep(dir){
     const t = exnDeckTarget(dir); if(!t) return;
     if(t.tool === exnCtxRoute()){ exnScriptGo(t.key); return; }
@@ -1753,14 +1829,22 @@
     if(window._exnClickInstalled) return;
     window._exnClickInstalled = true;
     document.addEventListener("keydown", e => { if(e.key === "Escape" && document.getElementById("exnPop")) exnClosePop(); });
+    /* หน้าต่างลอยเปิดอยู่: จุดแดงตามเมาส์ + วงกระเพื่อมตอนคลิกบนหน้าเว็บที่แชร์ */
+    document.addEventListener("mousemove", e => { if(document.body.classList.contains("exn-pip")) exnLaserAt(e.clientX, e.clientY); }, { passive:true });
+    document.addEventListener("pointerdown", e => {
+      if(!document.body.classList.contains("exn-pip")) return;
+      const r = document.createElement("div"); r.className = "exn-ripple";
+      r.style.left = e.clientX + "px"; r.style.top = e.clientY + "px";
+      document.body.appendChild(r); setTimeout(() => r.remove(), 950);
+    }, true);
     /* ชี้ค้าง (เฉพาะอุปกรณ์ที่มีเมาส์) */
     document.addEventListener("mouseover", e => {
       if(!exnHoverDev() || !exnIsPresenter() || !exnTapGet() || !document.getElementById("exnRoot")) return;
       const t = e.target, pop = document.getElementById("exnPop"), menu = document.getElementById("exnMenu"), fab = document.getElementById("exnFab");
       if(pop && pop.contains(t)){ clearTimeout(_exnCloseT); clearTimeout(_exnOpenT); return; }
       if((menu && menu.contains(t)) || (fab && fab.contains(t))) return;
-      const sc = document.getElementById("exnScript");
-      if(sc){   // แผงบทพูดเปิดอยู่ → ชี้กรอบ = ไปที่บทพูดในแผง (ไม่เด้งกล่อง)
+      const sc = exnScDoc().getElementById("exnScript");
+      if(sc){   // แผงบทพูดเปิดอยู่ (ในหน้าเว็บหรือหน้าต่างลอย) → ชี้กรอบ = ไปที่บทพูดในแผง (ไม่เด้งกล่อง)
         if(pop || sc.contains(t)) return;
         const el = exnFrameAt(t);
         if(el === window._exnScHl) return;
@@ -1801,8 +1885,8 @@
       const pop = document.getElementById("exnPop"), menu = document.getElementById("exnMenu"), fab = document.getElementById("exnFab");
       if(pop && pop.contains(t)){ window._exnPin = true; return; }
       if((menu && menu.contains(t)) || (fab && fab.contains(t))) return;
-      const sc = document.getElementById("exnScript");
-      if(sc){   // แผงบทพูดเปิดอยู่ → แตะกรอบ = ไปที่บทพูดในแผง
+      const sc = exnScDoc().getElementById("exnScript");
+      if(sc){   // แผงบทพูดเปิดอยู่ (ในหน้าเว็บหรือหน้าต่างลอย) → แตะกรอบ = ไปที่บทพูดในแผง
         if(sc.contains(t)){ if(pop) exnClosePop(); if(menu) exnCloseMenu(); return; }
         if(!pop && !exnHoverDev() && exnTapGet() && !t.closest(EXN_SKIP)){
           const el = exnFrameAt(t);
@@ -1832,6 +1916,7 @@
   /* ปุ่ม/ช่องในกล่องเรียกผ่าน window.Exn.<ชื่อ> · หน้าเรียก window.exnMount / exnMountFin / exnUnmount */
   window.Exn = { exnClosePop, exnEditNote, exnInput, exnOpenFromMenu, exnSave, exnSetTap, exnPsyToggle,
     exnScriptToggle, exnOneToggle, exnScriptGo, exnScriptEdit, exnDeckStep, exnScModeSet,   // แผงบทพูดทั้งหน้า (+ ปุ่มเลือก 3 แบบ)
+    exnPipOpen, exnPipClose, exnPipWin, exnScDoc, exnScOpen,   // แยกบทพูดเป็นหน้าต่างลอย (present_sync.js หาแผง/ป้ายแคสผ่าน exnScDoc)
     exnContext, exnTalk,   // ทดสอบ: Exn.exnContext().drafts = บทพูดของหน้าที่เปิดอยู่ · Exn.exnTalk(drafts[key], key) = ข้อความแบบ "พูดรวมวิเคราะห์"
     exnBindTargets, exnRenderFab, exnRenderScript };   // ↑ 3 ตัวท้ายให้ present_sync.js (ติดป้ายกรอบบนจอทีวี · ปุ่ม ✦ · ป้ายแคสในแผงบทพูด)
   window.exnMount = exnMount; window.exnMountFin = exnMountFin; window.exnUnmount = exnUnmount;

@@ -140,7 +140,7 @@
   /* กรอบที่กำลังพูด: เรื่องที่เลือกในแผงบทพูด → ไม่งั้นกล่องบทวิเคราะห์ที่เปิดอยู่ */
   function psyFocusKey() {
     if (!psyOnCastPage()) return null;
-    if (document.getElementById('exnScript') && window._exnScActive) return window._exnScActive;
+    if ((psyExn().exnScOpen ? psyExn().exnScOpen() : document.getElementById('exnScript')) && window._exnScActive) return window._exnScActive;   // แผงบทพูดในหน้าเว็บ หรือในหน้าต่างลอย
     const k = window._exnPopKeys;
     return (document.getElementById('exnPop') && k && k.keys && k.keys.length) ? k.keys[0] : null;
   }
@@ -304,7 +304,7 @@
   function psyCloseMeMenu() { const m = document.getElementById('psyMeMenu'); if (m) m.remove(); document.removeEventListener('click', psyMeOutside, true); }
   /* ป้ายสถานะในหัวแผงบทพูด (exec_notes.js วาด <span id="exnPsyTag">) — ไม่ได้ถือจอ = กดป้ายเพื่อรับจอ */
   function psyPaintStatus() {
-    const el = document.getElementById('exnPsyTag'); if (!el) return;
+    const el = (psyExn().exnScDoc ? psyExn().exnScDoc() : document).getElementById('exnPsyTag'); if (!el) return;   // แผงอาจอยู่ในหน้าต่างลอย
     const s = _psyStatus, own = psyIsOwner();
     el.className = 'exn-psy ' + (s.ok === false ? 'bad' : own ? 'ok' : 'idle');
     el.textContent = s.ok === false ? '📡 แคสไม่สำเร็จ' : own ? '📡 กำลังแคส' : '📡 แคสจากเครื่องนี้';
