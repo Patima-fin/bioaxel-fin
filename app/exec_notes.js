@@ -7,7 +7,8 @@
    ★ วิธีใช้: คอมพิวเตอร์ = ชี้กรอบค้าง · ไอแพด = แตะกรอบ → กล่องบทวิเคราะห์ (กระจกโปร่ง) ขึ้นข้างกรอบ ไม่บังกรอบ
      (กรอบ = element ที่มี data-exn="<key>") · ปุ่ม ✦ มุมขวาล่าง = เปิด/ปิด + รายชื่อกรอบทั้งหมด
    แต่ละกรอบมี 2 ส่วน:
-     1) บทวิเคราะห์ — ร่างใหม่ทุกครั้งจากข้อมูลบนหน้า (ไม่บันทึก) · ข้อสั้น ๆ ไม่ทวนตัวเลขบนจอ
+     1) บทวิเคราะห์ — ร่างใหม่ทุกครั้งจากข้อมูลบนหน้า (ไม่บันทึก) · กรอบละ 3–5 ข้อ อ่านต่อกันเป็นบทพูดได้
+        (★ 2026-11-26 ผู้ใช้บอก "น้อยไป" → ข้อแรกเปิดเรื่อง + ตัวเลขหลักแบบพูด แล้วค่อยความหมาย/สาเหตุ/ข้อสรุป · ไม่เยิ่นเย้อ)
         ตัวเลขแบบพูด (2.7 ล้านบาท) · **เน้นเสียง** = ไฮไลต์ม่วง · !!ต้องระวัง!! = ไฮไลต์แดง
      2) โน้ตของฉัน — พิมพ์เอง (✎) บันทึกลงตาราง Supabase execNotes (id = '<period>|<frameKey>')
         ★ ต้องรัน supabase/exec-notes.sql ครั้งเดียว (สร้างตาราง + RLS: อ่าน=ทุกคนที่ล็อกอิน · เขียน=presenter/staff/manager)
@@ -17,6 +18,9 @@
    ★ BIO ต่างจาก POG: งบกำไรขาดทุนเขียนตามกล่องของหน้า BIO (Pareto/กราฟรายเดือน/คะแนนสุขภาพ/CFO Insight ·
      ไม่มีงบประมาณ · ต้นทุนขาย ไม่ใช่ต้นทุนงานก่อสร้าง) · ส่วนงบกระแสเงินสด/งบฐานะใช้ชุดเดียวกับ POG
      — ถ้าแก้คำพูดสองส่วนนั้น ให้แก้คู่กับ frontend/app/exec_notes.js ของ waterpog-fin
+   ★ กล่อง/แผงแบบ Benya ล่าสุด (2026-11-26 ผู้ใช้ขอ "แก้ไขกรอบข้อความ…เหมือนเบญญา"): กล่องไม่มีแถบเลื่อน (ยาว = ขยายกว้าง · exnPlace)
+     + แผง "บทพูดทั้งหน้า" ด้านซ้าย (สวิตช์ในเมนู ✦ · ทีละเรื่อง · ปุ่ม ‹ ก่อน / ถัดไป › ข้ามหน้า งบกระแสเงินสด → P&L → งบฐานะ)
+     โหมดแคสหน้าจอ (app/present_sync.js) ต่อผ่าน window.Psy เหมือน POG — แผงบทพูดส่งตำแหน่งให้จอใหญ่ทุกครั้งที่ไปกรอบใหม่
    =====================================================================*/
 (function () {
   /* ── ตัวเชื่อมไปหน้า #cashflow_present (โค้ด ed* อยู่ใน IIFE ของหน้า — ส่งออกผ่าน window.CfpEd) ── */
@@ -103,6 +107,7 @@
   function exnMonTh(k){ return EXN_MON_ABBR[(+String(k).slice(5))-1] || k; }
   function exnMonFull(k){ return EXN_MON_FULL[(+String(k).slice(5))-1] || k; }
   function exnMonYrFull(k){ return exnMonFull(k) + " " + (+String(k).slice(0,4) + 543); }
+  function exnMonExpand(s){ let o = String(s || ""); EXN_MON_ABBR.forEach((a, i) => { o = o.split(a).join(EXN_MON_FULL[i]); }); return o; }   // "30 มิ.ย. 2568" → "30 มิถุนายน 2568"
   function exnPayee(t){ const s = String(t.note||""); const p = s.split("/").pop().trim(); return (p || s).slice(0,45); }
   function exnStrip(s){ return String(s||"").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(); }
   function exnAnd(arr){ arr = arr.filter(Boolean); if(arr.length <= 1) return arr.join(""); const z = arr[arr.length-1]; return arr.slice(0,-1).join(" ") + " และ" + (/^[A-Za-z0-9]/.test(z) ? " " : "") + z; }
@@ -279,24 +284,36 @@
     })();
     const up = drivers.filter(x => x.d > 0);
 
+    /* ★ (2026-11-26 ผู้ใช้: "ข้อมูลที่ขึ้นให้สำหรับพูด…น้อยไป ช่วยเพิ่มให้การพูดดูลื่นไหลกว่านี้ แต่ไม่เยิ่นเย้อ")
+       ทุกกรอบอ่านต่อกันเป็นบทพูดได้: ข้อแรก = เปิดเรื่อง (กำลังดูอะไร + ตัวเลขหลักแบบพูด) → ความหมาย · เทียบช่วงก่อน · สาเหตุ
+       → ข้อสรุป/ส่งต่อหัวข้อถัดไป (บางกรอบ) · กรอบละ 3–5 ข้อ ข้อละประโยคเดียว
+       · "เงินสดปลายงวด" ยังไม่เกิน 3 ข้อ (ผู้ใช้ขอ 2026-11-25) */
+    const per = S.kind === "month" ? "เดือนนี้" : "ช่วงนี้";
+    const avgM = v => n > 1 ? ` หรือเฉลี่ยเดือนละ ${exnAmt(v / n)}` : "";
+
     /* 1) พูดเปิด */
-    F["summary.brief"] = { say: [
-      `${S.kind === "all" ? "" : "สำหรับ"}${S.name} ภาพรวมเงินสดของบริษัท${A.closing >= A.opening ? "เพิ่มขึ้น" : "ลดลง"} เนื่องจาก${A.net < 0 ? "เงินจ่ายสูงกว่าเงินรับ" : "เงินรับสูงกว่าเงินจ่าย"}`,
-      op < 0 && finIn > 0 ? "ประเด็นหลักที่อยากให้เห็นวันนี้คือ **การดำเนินงานยังใช้เงินมากกว่าที่หาได้** และ!!บริษัทยังใช้เงินกู้เป็นแหล่งเงินหลัก!!"
-        : op < 0 ? "ประเด็นหลักที่อยากให้เห็นวันนี้คือ **การดำเนินงานยังใช้เงินมากกว่าที่หาได้** เงินสดจึงลดลง"
-        : "ประเด็นหลักที่อยากให้เห็นวันนี้คือ **การดำเนินงานสร้างเงินสดได้เอง**",
-    ] };
+    {
+      const d = (A.opening != null && A.closing != null) ? A.closing - A.opening : null;
+      const s = [`วันนี้ขอสรุปกระแสเงินสดของบริษัท${S.kind === "all" ? "" : "สำหรับ"}${S.name} โดยเริ่มจากภาพรวมรับ–จ่าย แล้วค่อยลงรายละเอียดว่าเงินมาจากไหน จ่ายไปที่ใด และเงินที่มีอยู่พอใช้ถึงเมื่อไร`];
+      if(d != null) s.push(`ภาพรวม${per} เงินสดของบริษัท${d >= 0 ? `**เพิ่มขึ้นราว ${exnAmt(d)}**` : `!!ลดลงราว ${exnAmt(d)}!!`} จาก ${exnAmt(A.opening)} ตอนต้นงวด เป็น ${exnAmt(A.closing)} ตอนปลายงวด` +
+        ((d < 0) === (A.net < 0) ? (A.net < 0 ? " เพราะเงินจ่ายสูงกว่าเงินรับ" : " เพราะเงินรับสูงกว่าเงินจ่าย") : ""));
+      s.push(op < 0 && finIn > 0 ? "ประเด็นหลักที่อยากให้เห็นวันนี้มีสองเรื่อง คือ **การดำเนินงานยังใช้เงินมากกว่าที่หาได้** และ!!บริษัทยังพึ่งเงินกู้เป็นแหล่งเงินหลัก!!"
+        : op < 0 ? "ประเด็นหลักที่อยากให้เห็นวันนี้คือ **การดำเนินงานยังใช้เงินมากกว่าที่หาได้**" + (d != null && d < 0 ? " เงินสดจึงลดลง" : " แต่มีเงินจากแหล่งอื่นเข้ามาชดเชย")
+        : "ประเด็นหลักที่อยากให้เห็นวันนี้คือ **การดำเนินงานสร้างเงินสดได้เอง**" + (finIn > 0 ? " และมีเงินกู้เข้ามาเสริมสภาพคล่อง" : ""));
+      F["summary.brief"] = { say: s };
+    }
 
     /* 2) ภาพรวมรับ–จ่าย — พูดได้แค่ เงินรับรวม · เงินจ่ายรวม · กระแสเงินสดสุทธิ */
     {
-      const s = [];
+      const s = [`เริ่มจากภาพรวมรับ–จ่าย ${per}บริษัทมีเงินรับเข้ามารวม **${exnAmt(A.totalIn)}** และจ่ายออกไป **${exnAmt(A.totalOut)}** กระแสเงินสดสุทธิจึง${A.net >= 0 ? "เป็นบวก" : "ติดลบ"}ราว ${exnAmt(A.net)}${avgM(A.net)}`];
       const a = ch(x => x.in), b = ch(x => x.out), pi = pv(x => x.in), po = pv(x => x.out);
       if(a && b){
         const gi = pi.c/pi.p, go = po.c/po.p;
         s.push(`${vs} เงินรับ${a} ขณะที่เงินจ่าย${b}` + (gi < 1 && go > 1 ? " สรุปคือ !!เงินรับลดลงแต่เงินจ่ายเพิ่มขึ้น!!" : go - gi > 0.05 ? " หมายความว่า !!เงินจ่ายโตเร็วกว่าเงินรับ!!" : gi - go > 0.05 ? " หมายความว่า **เงินรับโตเร็วกว่าเงินจ่าย**" : ""));
       }
-      if(A.totalIn > 0){ const r = Math.round(A.totalOut / A.totalIn * 100); s.push(`ถ้ามองในภาพรวม ทุก 100 บาทที่รับเข้ามา บริษัท${r > 100 ? `!!จ่ายออกไป ${r} บาท!! เงินสดจึงลดลง` : `**จ่ายออกไป ${r} บาท** ยังมีเงินเหลือ`}`); }
-      if(finIn > 0) s.push("ทั้งนี้ เงินรับรวมตัวนี้นับรวมทุกแหล่ง **ยังไม่ได้แยกว่ามาจากการขายหรือแหล่งอื่น** ซึ่งจะแยกให้ดูในหัวข้อกิจกรรมถัดไป");
+      if(A.totalIn > 0){ const r = Math.round(A.totalOut / A.totalIn * 100); s.push(`ถ้ามองในภาพรวม ทุก 100 บาทที่รับเข้ามา บริษัท${r > 100 ? `!!จ่ายออกไป ${r} บาท!! เงินสดจึงลดลง` : `**จ่ายออกไป ${r} บาท** ยังมีเงินเหลือ ${100 - r} บาท`}`); }
+      s.push(finIn > 0 ? "ทั้งนี้ เงินรับรวมตัวนี้นับรวมทุกแหล่ง **ยังไม่ได้แยกว่ามาจากการขายหรือเงินกู้** ซึ่งจะแยกให้ดูในหัวข้อกระแสเงินสดแยกตามกิจกรรม"
+        : "ต่อไปจะดูว่าผลรับ–จ่ายนี้ ทำให้เงินสดปลายงวดเหลือเท่าไร และพอใช้ได้อีกนานแค่ไหน");
       F["summary.overview"] = { say: s };
     }
 
@@ -306,18 +323,18 @@
       const d = A.closing - A.opening, pct = A.opening > 0 ? d / A.opening * 100 : null;
       const UC = exnUsableCash(data, mf, A.closing), U = UC.U, cashUse = UC.cash;
       const avgOut = A.totalOut / n, cover = avgOut > 0 ? cashUse / avgOut : null;
-      const s = [];
-      if(pct != null && Math.abs(pct) < 1000) s.push(`เมื่อเทียบกับต้นงวด เงินสดปลายงวด${d >= 0 ? "เพิ่มขึ้น" : "ลดลง"} **${exnP(pct)}**`);
+      const s = [`มาที่เงินสดปลายงวด ตอนนี้บริษัทมีเงินสดรวมราว **${exnAmt(A.closing)}**` + (pct != null && Math.abs(pct) < 1000 ? ` ${d >= 0 ? "เพิ่มขึ้น" : "ลดลง"} ${exnP(pct)} เมื่อเทียบกับต้นงวด` : "")];
       if(UC.part){
         const rs = U.types.filter(t => t.key !== "usable" && t.amount > 0).sort((a,b) => b.amount - a.amount).map(t => t.label.replace(/\s*\(.*\)$/, ""));
-        s.push(`แต่ในเงินสด ${exnAmt(U.total)} นี้ **ใช้ได้จริงราว ${exnAmt(U.usable)}** หรือ ${exnP(U.total > 0 ? U.usable / U.total * 100 : 0)}` +
+        const same = Math.abs(U.total - A.closing) <= Math.max(1, Math.abs(A.closing) * 0.005);
+        s.push(`แต่${same ? "ในเงินก้อนนี้" : `ถ้าดูตามยอดรายบัญชีรวม ${exnAmt(U.total)}`} **ใช้ได้จริงราว ${exnAmt(U.usable)}** หรือ ${exnP(U.total > 0 ? U.usable / U.total * 100 : 0)}` +
           (rs.length ? ` ที่เหลือเป็น${exnAnd(rs.slice(0, 2))} ซึ่งหยิบมาจ่ายไม่ได้` : ""));
       }
       if(cover != null){
         if(cashUse <= 0) s.push("!!เงินที่ใช้ได้จริงไม่เหลือแล้ว!! รายจ่ายถัดไปต้องรอเงินเข้าใหม่ หรือโอนจากบัญชีอื่น");
         else {
           const t = cover < 1 ? `${Math.max(1, Math.round(cover * 30))} วัน` : `${cover.toFixed(1)} เดือน`;
-          s.push(`ถ้าใช้เงินในอัตราเฉลี่ยเท่าที่ผ่านมา ${UC.part ? "เงินที่ใช้ได้จริง" : "เงินสดที่มีอยู่"}` + (cover < 1 ? `!!พอจ่ายได้ราว ${t}!! จึงควรติดตามเงินสดเป็นรายสัปดาห์` : cover < 3 ? `พอจ่ายได้ราว ${t} ซึ่ง!!ถือว่าค่อนข้างตึงตัว!!` : `**พอจ่ายได้ราว ${t}** ถือว่ายังรองรับได้`));
+          s.push(`ถ้าใช้เงินในอัตราเฉลี่ยเท่าที่ผ่านมา คือเดือนละราว ${exnAmt(avgOut)} ${UC.part ? "เงินที่ใช้ได้จริง" : "เงินสดที่มีอยู่"}` + (cover < 1 ? `!!พอจ่ายได้ราว ${t}!! จึงควรติดตามเงินสดเป็นรายสัปดาห์` : cover < 3 ? `พอจ่ายได้ราว ${t} ซึ่ง!!ถือว่าค่อนข้างตึงตัว!!` : `**พอจ่ายได้ราว ${t}** ถือว่ายังรองรับได้`));
         }
       }
       if(P && S.kind === "year" && P.closing != null){ const dd = A.closing - P.closing; s.push(`และเมื่อเทียบกับสิ้น${exnMonFull(S.prev[S.prev.length-1])}ปีก่อน เงินสดตอนนี้${dd >= 0 ? "**สูงกว่า**" : "!!ต่ำกว่า!!"}ราว ${exnAmt(dd)}`); }
@@ -329,8 +346,8 @@
     const invCats = Object.entries(exnCatNet(TX, "investing")).map(([k,v]) => [k, v.out - v.in]).filter(x => x[1] > 0).sort((a,b) => b[1] - a[1]);
     {
       const s = [];
-      if(op < 0 && opOut > 0) s.push(`เริ่มจากกิจกรรมดำเนินงาน ทุก 100 บาทที่จ่ายออกไป บริษัท**ได้เงินกลับมาเพียง ${Math.round(opIn / opOut * 100)} บาท**`);
-      else if(op >= 0) s.push("เริ่มจากกิจกรรมดำเนินงาน **รับสุทธิเป็นบวก** เงินรับครอบคลุมเงินจ่ายได้ทั้งหมด");
+      if(op < 0) s.push(`ถ้าแยกตามกิจกรรม เริ่มจาก**กิจกรรมดำเนินงาน**ซึ่งเป็นธุรกิจหลัก ${per}ใช้เงินสุทธิราว ${exnAmt(op)}${avgM(op)}` + (opOut > 0 ? ` หรือทุก 100 บาทที่จ่ายออกไป **ได้เงินกลับมาเพียง ${Math.round(opIn / opOut * 100)} บาท**` : ""));
+      else s.push(`ถ้าแยกตามกิจกรรม เริ่มจาก**กิจกรรมดำเนินงาน**ซึ่งเป็นธุรกิจหลัก ${per}**สร้างเงินสดสุทธิราว ${exnAmt(op)}**${avgM(op)} เงินรับจากการดำเนินงานจึงครอบคลุมเงินจ่ายได้ทั้งหมด`);
       const a = ch(x => x.op.in), b = ch(x => x.op.out), pn = pv(x => x.op.out - x.op.in);
       if(a && b){
         let t = `${vs} เงินรับจากการดำเนินงาน${a} ขณะที่เงินจ่าย${b}`;
@@ -338,11 +355,13 @@
         s.push(t);
       }
       if(up.length) s.push(`ตัวที่ทำให้เงินจ่ายเพิ่มขึ้นมากที่สุดคือ **${sh(up[0].k)}** เพิ่มขึ้นราว ${exnAmt(up[0].d)}${perM}` + (up[1] ? ` รองลงมาคือ${sh(up[1].k)} ราว ${exnAmt(up[1].d)}${perM}` : ""));
-      if(A.byAct.investing.out > A.totalOut * 0.02 && invCats[0]) s.push(`ส่วนกิจกรรมลงทุน ส่วนใหญ่เป็น**${sh(invCats[0][0])}** ราว ${exnAmt(invCats[0][1])}`);
-      if(finIn > 0){
+      if(A.byAct.investing.out > A.totalOut * 0.02 && invCats[0]) s.push(`ด้านกิจกรรมลงทุน ${per}${inv < 0 ? "ใช้เงินสุทธิ" : "รับเงินสุทธิ"}ราว ${exnAmt(inv)} ส่วนใหญ่เป็น**${sh(invCats[0][0])}** ราว ${exnAmt(invCats[0][1])}`);
+      const src = finSrc.length ? "จาก" + exnAnd(finSrc.map(x => x.name)) : "";
+      if(finIn > 0 && op + inv < 0){
         const noLoan = A.closing - fin;
-        s.push(`ส่วนที่ขาดทั้งหมดนี้ บริษัท**เติมด้วยเงินกู้**${finSrc.length ? "จาก" + exnAnd(finSrc.map(x => x.name)) : ""} ` + (noLoan < 0 ? `ซึ่งถ้าไม่มีเงินกู้ !!เงินสดปลายงวดจะติดลบราว ${exnAmt(noLoan)}!!` : `ซึ่งถ้าไม่มีเงินกู้ เงินสดปลายงวดจะเหลือเพียง ${exnAmt(noLoan)}`));
-      }
+        s.push(`ส่วนที่ขาดทั้งหมดนี้ บริษัท**เติมด้วยเงินกู้**${src} ` + (noLoan < 0 ? `ซึ่งถ้าไม่มีเงินกู้ !!เงินสดปลายงวดจะติดลบราว ${exnAmt(noLoan)}!!` : `ซึ่งถ้าไม่มีเงินกู้ เงินสดปลายงวดจะเหลือเพียง ${exnAmt(noLoan)}`));
+      } else if(finIn > 0) s.push(`ด้านกิจกรรมจัดหาเงิน ${per}มีเงินกู้เข้ามาราว ${exnAmt(finIn)}${src ? " " + src : ""} ทำให้เงินสดเพิ่มขึ้นมากกว่าที่ธุรกิจหาได้เอง`);
+      else if(fin < -1000) s.push(`ด้านกิจกรรมจัดหาเงิน ${per}ไม่มีเงินกู้ใหม่เข้ามา และบริษัทจ่ายชำระเงินกู้สุทธิราว ${exnAmt(fin)}`);
       F["summary.acts"] = { say: s };
     }
 
@@ -351,12 +370,18 @@
       const ms = S.kind === "year" ? S.keys : S.all.filter(k => k <= S.last);
       const opM = ms.map(k => net(MA[k].byAct.operating)), finM = ms.map(k => MA[k].byAct.financing.in);
       const pos = ms.filter((k,i) => opM[i] > 0);
-      const s = [`จากกราฟรายเดือน กระแสเงินสดจากการดำเนินงาน` + (pos.length === 0 ? "!!ติดลบทุกเดือน!!" : pos.length === ms.length ? "**เป็นบวกทุกเดือน**" : `เป็นบวก**เพียง ${pos.length} จาก ${ms.length} เดือน** คือ${exnAnd(pos.slice(0,4).map(k => exnMonFull(k)))}`)];
+      const neg = ms.filter((k,i) => opM[i] < 0);
+      const mList = ks => exnAnd(ks.slice(0, 4).map(k => exnMonFull(k))) + (ks.length > 4 ? " เป็นต้น" : "");
+      const s = [`ต่อมาเป็นกราฟรายเดือน ซึ่งช่วยให้เห็นจังหวะเงินเข้าออกแต่ละเดือน จะเห็นว่ากระแสเงินสดจากการดำเนินงาน` + (pos.length === 0 ? "!!ติดลบทุกเดือน!!" : pos.length === ms.length ? "**เป็นบวกทุกเดือน**"
+        : pos.length * 2 > ms.length ? `**เป็นบวก ${pos.length} จาก ${ms.length} เดือน** ติดลบ${neg.length === 1 ? "เฉพาะ" : ""}${mList(neg)}`
+        : `เป็นบวก**เพียง ${pos.length} จาก ${ms.length} เดือน** คือ${mList(pos)}`)];
       if(ms.length > 1){
         const wI = opM.reduce((b,v,i) => v < opM[b] ? i : b, 0), wk = ms[wI];
+        const bI = opM.reduce((b,v,i) => v > opM[b] ? i : b, 0);
         const cw = exnCatNet(txOf([wk]), "operating"), ca = exnCatNet(txOf(ms), "operating");
         const dev = Object.keys(cw).filter(k => !EXN_INCAT.test(k)).map(k => ({ k, d: (cw[k].out - cw[k].in) - ((ca[k] ? ca[k].out - ca[k].in : 0) / ms.length) })).sort((x,y) => y.d - x.d)[0];
-        if(opM[wI] < 0) s.push(`เดือนที่หนักที่สุดคือ**${mon(wk)}**` + (dev && dev.d > 5000 ? ` สาเหตุหลักมาจาก${sh(dev.k)} ที่สูงกว่าปกติราว ${exnAmt(dev.d)}` : ""));
+        if(opM[wI] < 0) s.push(`เดือนที่หนักที่สุดคือ**${mon(wk)}** ใช้เงินสุทธิราว ${exnAmt(opM[wI])}` + (dev && dev.d > 5000 ? ` สาเหตุหลักมาจาก${sh(dev.k)} ที่สูงกว่าปกติราว ${exnAmt(dev.d)}` : "") +
+          (opM[bI] > 0 && bI !== wI ? ` ส่วนเดือนที่ดีที่สุดคือ${mon(ms[bI])} รับสุทธิราว ${exnAmt(opM[bI])}` : ""));
       }
       if(ms.length >= 6){
         const r3 = ms.slice(-3), e = ms.slice(0, -3);
@@ -371,26 +396,28 @@
 
     /* 6) KPI ทางการเงิน */
     {
-      const sumCat = re => Object.entries(A.byCat || {}).reduce((s,[k,v]) => re.test(k) ? s + v.out : s, 0);
       const emp = Object.entries(A.byCat || {}).reduce((s,[k,v]) => exnIsPay(k) ? s + v.out : s, 0);   // ★ POG: ไม่มี KPI ค่าโฆษณา (ผู้ใช้ตัดออก)
       const K = [
         { n:"ค่าใช้จ่ายต่อยอดขาย", v: opIn ? opOut / opIn * 100 : null, th:80 },
         { n:"ค่าใช้จ่ายพนักงาน", v: opIn ? emp / opIn * 100 : null, th:30 },
       ].filter(x => x.v != null);
       const over = K.filter(x => x.v > x.th).sort((a,b) => b.v / b.th - a.v / a.th);
-      const s = [];
-      if(over.length) s.push(`ในส่วนตัวชี้วัด มีตัวที่เกินเกณฑ์ ${over.length} ตัว โดยตัวที่เกินมากที่สุดคือ**${over[0].n}** อยู่ที่ ${exnP(over[0].v)} จากเกณฑ์ ${over[0].th}%`);
-      else s.push("ในส่วนตัวชี้วัด **ด้านค่าใช้จ่ายอยู่ในเกณฑ์ทั้งหมด**");
+      const s = [`ต่อมาเป็นตัวชี้วัดทางการเงิน ซึ่งเทียบเงินจ่ายกับเงินรับจากการดำเนินงาน` + (over.length ? ` ${per}มีตัวที่เกินเกณฑ์ ${over.length} ตัว โดยตัวที่เกินมากที่สุดคือ**${over[0].n}** อยู่ที่ ${exnP(over[0].v)} จากเกณฑ์ ${over[0].th}%` : K.length ? " **ด้านค่าใช้จ่ายยังอยู่ในเกณฑ์ทั้งหมด**" : "")];
       const opEx = K[0] && K[0].n === "ค่าใช้จ่ายต่อยอดขาย" ? K[0].v : null;
       if(opEx != null && opEx > 100){
         let t = `ค่าใช้จ่ายต่อยอดขาย ${exnP(opEx)} หมายความว่า!!บริษัทจ่ายเพื่อดำเนินงานมากกว่ายอดขาย ${(opEx/100).toFixed(1)} เท่า!!`;
         if(P && P.op.in > 0){ const p0 = P.op.out / P.op.in * 100; if(Math.abs(opEx - p0) >= 1) t += opEx < p0 ? ` แต่ก็**ดีขึ้น**จาก ${exnP(p0)} ใน${cmpS}` : ` และ!!แย่ลง!!จาก ${exnP(p0)} ใน${cmpS}`; }
         s.push(t);
+      } else if(opEx != null){
+        const left = 100 - Math.round(opEx);
+        s.push(`ค่าใช้จ่ายต่อยอดขาย ${exnP(opEx)} หมายความว่ารับเงินจากการดำเนินงาน 100 บาท ใช้จ่ายไป ${Math.round(opEx)} บาท ` + (opEx > 80 ? `!!เหลือเป็นเงินสดเพียง ${left} บาท!!` : `**เหลือเป็นเงินสด ${left} บาท**`));
       }
+      const pay = K.find(x => x.n === "ค่าใช้จ่ายพนักงาน");
+      if(pay && !(over[0] && over[0].n === pay.n)) s.push(`ส่วนค่าใช้จ่ายพนักงานคิดเป็น ${exnP(pay.v)} ของเงินรับจากการดำเนินงาน ` + (pay.v > pay.th ? `ซึ่ง!!สูงกว่าเกณฑ์ ${pay.th}%!!` : `ซึ่ง**ยังอยู่ในเกณฑ์ ${pay.th}%**`));
       if(opEx != null && opEx > 80) s.push(`ถ้าจะให้กลับเข้าเกณฑ์ 80% บริษัทต้อง**เพิ่มยอดขายเป็นราว ${exnAmt(opOut / 0.8 / n)}ต่อเดือน** หรือ**ลดเงินจ่ายลงราว ${exnAmt((opOut - opIn * 0.8) / n)}ต่อเดือน**`);
       const cash = A.totalIn ? A.net / A.totalIn * 100 : null;
-      if(finIn > 0 && cash != null && cash > 0) s.push("ข้อสังเกตคือ !!อัตรากำไรเงินสดที่เป็นบวกมาจากเงินกู้ ไม่ใช่กำไรจากการดำเนินงาน!!");
-      F["summary.kpi"] = { say: s };
+      if(finIn > 0 && cash != null && cash > 0 && op < 0) s.push("ข้อสังเกตคือ !!อัตรากำไรเงินสดที่เป็นบวกมาจากเงินกู้ ไม่ใช่กำไรจากการดำเนินงาน!!");
+      F["summary.kpi"] = { say: s.slice(0, 5) };
     }
 
     /* 7) Category: Top 5 แยกตามกิจกรรม */
@@ -401,13 +428,14 @@
       const sales = Object.entries(opNet).filter(([k]) => EXN_SALES.test(k)).map(([k,v]) => [k, v.in - v.out]).filter(x => x[1] > 0).sort((a,b) => b[1] - a[1]);
       const salesTot = sales.reduce((t,x) => t + x[1], 0);
       const s = [];
-      if(outs.length >= 3) s.push(`ในฝั่งรายจ่าย 3 หมวดแรก คือ${exnList(outs.slice(0,3).map(x => sh(x[0])))} รวมกันคิดเป็น**${exnP(outs.slice(0,3).reduce((t,x) => t + x[1], 0) / outTot * 100)} ของรายจ่ายดำเนินงาน**`);
+      if(outs.length) s.push(`ขอพาเข้ามาดูตามหมวด ฝั่งรายจ่ายดำเนินงาน หมวดที่ใหญ่ที่สุดคือ**${sh(outs[0][0])}** ราว ${exnAmt(outs[0][1])}` +
+        (outs.length >= 3 ? ` เมื่อรวมกับ${exnList(outs.slice(1,3).map(x => sh(x[0])))} สามหมวดนี้คิดเป็น**${exnP(outs.slice(0,3).reduce((t,x) => t + x[1], 0) / outTot * 100)} ของรายจ่ายดำเนินงาน**` : ""));
       if(P){
         const pc = exnCatNet(txOf(S.prev), "operating"), cc = S.avg ? exnCatNet(txOf(S.cur), "operating") : opNet;
         const g = outs.slice(0,3).map(([k]) => { const c = cc[k] ? (cc[k].out - cc[k].in) * (S.avg ? 1/CU.n : 1) : 0, p = pc[k] ? (pc[k].out - pc[k].in) * (S.avg ? 1/P.n : 1) : 0; return { k, w: exnChgS(c, p), r: p > 0 ? c / p : 0 }; }).filter(x => x.w && x.w !== "ใกล้เคียงเดิม");
         if(g.length){ const top = g.slice().sort((a,b) => b.r - a.r)[0]; s.push(`${vs} ` + exnList(g.map(x => x === top && x.r > 1.2 ? `!!${sh(x.k)}${x.w}!!` : `${sh(x.k)}${x.w}`))); }
       }
-      if(sales.length){ const p = sales[0][1] / Math.max(1, salesTot) * 100; s.push(`ฝั่งรายรับ ยอดขายมาจาก**${sh(sales[0][0])} ถึง ${exnP(p)}**` + (p >= 90 ? " ซึ่ง!!พึ่งช่องทางเดียวเกือบทั้งหมด!!" : "")); }
+      if(sales.length){ const p = sales[0][1] / Math.max(1, salesTot) * 100; s.push(`ฝั่งรายรับ ยอดขายราว ${exnAmt(salesTot)} มาจาก**${sh(sales[0][0])} ถึง ${exnP(p)}**` + (p >= 90 ? " ซึ่ง!!พึ่งช่องทางเดียวเกือบทั้งหมด!!" : "")); }
       if(P){
         const pAll = exnCatNet(txOf(S.prev)), cAll = exnCatNet(TX);
         const fresh = Object.entries(cAll).map(([k,v]) => [k, v.out - v.in]).filter(([k,v]) => v >= Math.max(100000, A.totalOut * 0.03) && !(pAll[k] && pAll[k].out > 0)).sort((a,b) => b[1] - a[1]);
@@ -420,22 +448,26 @@
     {
       const an = (typeof edAnomalyData === "function") ? edAnomalyData(data, mf) : null;
       const rows = (an && an.rows) || [];
-      if(!an) F["category.anomaly"] = { say: ["ช่วงนี้ยังไม่มีเดือนก่อนหน้าให้เทียบ"] };
+      if(!an) F["category.anomaly"] = { say: ["ส่วนนี้ใช้หาค่าใช้จ่ายที่สูงผิดปกติ แต่ช่วงนี้ยังไม่มีเดือนก่อนหน้าให้เทียบ"] };
       else {
         const tk = an.target;
-        const intro = S.kind === "month" ? "เดือนนี้" : `ถ้าดูเดือนล่าสุดคือ${exnMonFull(tk)}`;
+        const tgt = S.kind === "month" ? "เดือนนี้" : `เดือน${exnMonFull(tk)}ซึ่งเป็นเดือนล่าสุด`;
+        const intro = `เมื่อเทียบเงินจ่ายแต่ละหมวดของ${tgt} กับค่าเฉลี่ย 6 เดือนก่อนหน้า จะพบว่า`;
         const tTx = txOf([tk]);
         const pay = cat => exnPayeesOf(tTx.filter(t => t.category === cat), "out");
-        const dTot = an.curTotal - an.baseAvgTotal;
-        if(!rows.length) F["category.anomaly"] = { say: [`${intro} **ไม่มีหมวดที่สูงผิดปกติ** เมื่อเทียบกับค่าเฉลี่ย 6 เดือนก่อนหน้า`] };
+        const dTot = an.curTotal - an.baseAvgTotal, mo = S.kind === "month" ? "เดือนนี้" : "เดือน" + exnMonFull(tk);
+        const small = an.baseAvgTotal > 0 && Math.abs(dTot) < an.baseAvgTotal * 0.05;
+        if(!rows.length) F["category.anomaly"] = { say: [`${intro}**ไม่มีหมวดที่สูงผิดปกติ**`,
+          small ? `ภาพรวมเงินจ่าย${mo}จึง**ใกล้เคียงค่าเฉลี่ย** ต่างกันเพียงราว ${exnAmt(dTot)}` : `ภาพรวมเงินจ่าย${mo}${dTot >= 0 ? "สูงกว่า" : "ต่ำกว่า"}ค่าเฉลี่ยราว ${exnAmt(dTot)} โดยกระจายอยู่หลายหมวด ไม่มีหมวดใดโดดขึ้นมา`] };
         else {
           const r0 = rows[0], p0 = pay(r0.cat)[0], r1 = rows[1];
-          const s = [`${intro} หมวดที่สูงผิดปกติที่สุดคือ!!${sh(r0.cat)}!! ซึ่งเกินค่าเฉลี่ยราว ${exnAmt(r0.cur - r0.avg)}` + (p0 ? ` โดยจ่ายให้${p0.name}` : "")];
+          const totS = `ภาพรวมเงินจ่าย${mo}จึง${small ? "ใกล้เคียงค่าเฉลี่ย ต่างกันราว " : dTot >= 0 ? "!!สูงกว่า!!ค่าเฉลี่ยราว " : "**ต่ำกว่า**ค่าเฉลี่ยราว "}${exnAmt(dTot)}`;
+          const s = [`${intro}หมวดที่สูงผิดปกติที่สุดคือ!!${sh(r0.cat)}!! ซึ่งเกินค่าเฉลี่ยราว ${exnAmt(r0.cur - r0.avg)}` + (p0 ? ` โดยจ่ายให้${p0.name}` : "")];
           s.push(r0.kind === "new" ? "เป็นรายการใหม่ที่ไม่เคยมีใน 6 เดือนก่อน **จึงควรยืนยันว่าเป็นรายการครั้งเดียว**"
             : r0.kind === "irregular" ? `รายการนี้จ่ายเพียง ${r0.seen} จาก ${r0.months} เดือน **จึงอาจเป็นแค่รอบการจ่าย** ไม่ใช่ค่าใช้จ่ายที่เพิ่มขึ้นจริง`
             : "เป็นรายการที่จ่ายทุกเดือน แต่เดือนนี้สูงขึ้น **จึงควรเช็กว่าเป็นการปรับขึ้นถาวรหรือไม่**");
           if(r1) s.push(`รองลงมาคือ${sh(r1.cat)} ซึ่งเกินค่าเฉลี่ยราว ${exnAmt(r1.cur - r1.avg)}`);
-          s.push(`ภาพรวมเงินจ่าย${S.kind === "month" ? "เดือนนี้" : "เดือน" + exnMonFull(tk)}จึง${dTot >= 0 ? "!!สูงกว่า!!" : "**ต่ำกว่า**"}ค่าเฉลี่ยราว ${exnAmt(dTot)}`);
+          s.push(totS);
           F["category.anomaly"] = { say: s, prompts: rows.slice(0,3).map(r => `เหตุผลที่${sh(r.cat)}สูงขึ้น`) };
         }
       }
@@ -449,10 +481,11 @@
       const flows = Object.values(A.byAcct || {}).sort((a,b) => b.out - a.out);
       const tiny = accts.filter(a => tot > 0 && a.close < tot * 0.01);
       const s = [];
-      if(accts.length <= 1) s.push("เงินสดทั้งหมดของบริษัท**อยู่ในบัญชีเดียว** รายการรับและจ่ายทั้งหมดผ่านบัญชีนี้");
+      if(accts.length <= 1) s.push(`ณ สิ้น${exnMonYrFull(S.last)} เงินสดทั้งหมดของบริษัท**อยู่ในบัญชีเดียว** รายการรับและจ่ายทั้งหมดผ่านบัญชีนี้`);
       else {
-        s.push(`เงินสดส่วนใหญ่ **${exnP(accts[0].close / Math.max(1, tot) * 100)} อยู่ในบัญชี ${accts[0].name}**`);
-        if(flows.length && A.totalOut > 0){ const same = String(flows[0].no || "") === accts[0].no; s.push(same ? `และเงินจ่าย ${exnP(flows[0].out / A.totalOut * 100)} ก็ออกจากบัญชีนี้` : `ส่วนเงินจ่าย ${exnP(flows[0].out / A.totalOut * 100)} ออกจากบัญชี ${flows[0].bank} ${flows[0].no}`); }
+        s.push(`ต่อมาเป็นยอดเงินแยกตามบัญชี ณ สิ้น${exnMonYrFull(S.last)} เงินสดกระจายอยู่ใน ${accts.length} บัญชี โดยส่วนใหญ่ **${exnP(accts[0].close / Math.max(1, tot) * 100)} อยู่ในบัญชี ${accts[0].name}**`);
+        if(accts[1] && accts[1].close > 0) s.push(`รองลงมาคือบัญชี ${accts[1].name} ราว ${exnAmt(accts[1].close)}`);
+        if(flows.length && A.totalOut > 0){ const same = String(flows[0].no || "") === accts[0].no; s.push(same ? `และเงินจ่าย ${exnP(flows[0].out / A.totalOut * 100)} ก็ออกจากบัญชีหลักนี้` : `ส่วนเงินจ่าย ${exnP(flows[0].out / A.totalOut * 100)} ออกจากบัญชี ${flows[0].bank} ${flows[0].no}`); }
       }
       if(tiny.length) s.push(`ข้อควรระวังคือ !!อีก ${tiny.length} บัญชีมียอดเหลือน้อย!! ถ้ามีรายการตัดจ่ายจากบัญชีเหล่านี้ ต้องโอนเงินเข้าก่อน`);
       F["banks.accounts"] = { say: s };
@@ -461,23 +494,31 @@
     /* 10) Transaction Explorer */
     {
       const big = TX.filter(t => t.out > 0).sort((a,b) => b.out - a.out).slice(0, 3);
+      const bigIn = TX.filter(t => t.in > 0).sort((a,b) => b.in - a.in)[0];
+      const inWho = bigIn ? exnPayeeName(bigIn) : "";
+      // รายการชื่อเดียวกันรวมเป็นก้อนเดียว ("ค่าสินค้า 3 รายการ ราว …") ไม่พูดชื่อซ้ำ 3 ครั้ง
+      const nm = (w, x) => w + (/^[A-Za-z0-9]/.test(x) ? " " : "") + x;   // "ให้" + "Supplier" → "ให้ Supplier"
+      const bigG = [];
+      big.forEach(t => { const who = exnPayeeName(t), lb = (exnTxDesc(t) || sh(t.category)) + (who && !(exnTxDesc(t) || "").includes(who) ? nm("ให้", who) : ""); const g = bigG.find(x => x.lb === lb); if(g) g.v.push(t.out); else bigG.push({ lb, v:[t.out] }); });
       F["explorer.note"] = big.length ? { say: [
-        `ในช่วงนี้ รายการจ่ายที่ใหญ่ที่สุด 3 รายการรวมกันคิดเป็น**${exnP(big.reduce((t,x) => t + x.out, 0) / Math.max(1, A.totalOut) * 100)} ของเงินจ่ายทั้งหมด**`,
-        `ได้แก่${exnList(big.map(t => `${exnTxDesc(t) || sh(t.category)} ราว ${exnAmt(t.out)}`))}`,
-      ] } : { say: [] };
+        "ส่วนนี้เป็นรายการเดินบัญชีทั้งหมด ซึ่งค้นหาและกรองดูได้ทุกรายการ ขอยกเฉพาะรายการใหญ่ที่ควรรู้",
+        `ฝั่งเงินจ่าย รายการใหญ่ที่สุด ${big.length} รายการรวมกันคิดเป็น**${exnP(big.reduce((t,x) => t + x.out, 0) / Math.max(1, A.totalOut) * 100)} ของเงินจ่ายทั้งหมด**`,
+        `ได้แก่${exnList(bigG.map(g => g.v.length > 1 ? `${g.lb} ${g.v.length} รายการ ราว ${exnAnd(g.v.map(exnAmt))}` : `${g.lb} ราว ${exnAmt(g.v[0])}`))}`,
+        bigIn ? `ส่วนฝั่งเงินรับ รายการใหญ่ที่สุดคือ${exnTxDesc(bigIn) || sh(bigIn.category)}${inWho ? nm("จาก", inWho) : ""} ราว ${exnAmt(bigIn.in)}` : "",
+      ].filter(Boolean) } : { say: [] };
     }
 
     /* 11) งบกระแสเงินสดรายเดือน */
     {
-      const s = [];
+      const s = ["ต่อไปเป็นงบกระแสเงินสดรายเดือน ซึ่งเรียงเงินรับ–จ่ายแต่ละหมวดไว้ทีละเดือน ช่วยให้เห็นว่ารายการไหนจ่ายประจำ และรายการไหนขึ้นลงตามรอบ"];
       if(n >= 3){
-        const per = S.keys.map(k => exnCatNet(txOf([k]), "operating"));
-        const cats = [...new Set(per.flatMap(o => Object.keys(o)))].filter(k => !EXN_INCAT.test(k));
-        const rows = cats.map(k => { const v = per.map(o => o[k] ? o[k].out - o[k].in : 0); return { k, avg: v.reduce((a,b) => a + b, 0) / n, min: Math.min(...v), max: Math.max(...v) }; });
+        const per2 = S.keys.map(k => exnCatNet(txOf([k]), "operating"));
+        const cats = [...new Set(per2.flatMap(o => Object.keys(o)))].filter(k => !EXN_INCAT.test(k));
+        const rows = cats.map(k => { const v = per2.map(o => o[k] ? o[k].out - o[k].in : 0); return { k, avg: v.reduce((a,b) => a + b, 0) / n, min: Math.min(...v), max: Math.max(...v) }; });
         const every = rows.filter(x => x.min > 0).sort((a,b) => b.avg - a.avg);
         const fixed = every.reduce((t,x) => t + x.avg, 0), inM = opIn / n;
         if(every.length){
-          s.push(`จากงบกระแสเงินสดรายเดือน ค่าใช้จ่ายที่ต้องจ่ายทุกเดือน เช่น ${exnList(every.slice(0,3).map(x => sh(x.k)))} รวมแล้วราว **${exnAmt(fixed)}ต่อเดือน**`);
+          s.push(`ค่าใช้จ่ายที่ต้องจ่ายทุกเดือน เช่น ${exnList(every.slice(0,3).map(x => sh(x.k)))} รวมแล้วราว **${exnAmt(fixed)}ต่อเดือน**`);
           s.push(inM < fixed ? `ขณะที่ยอดรับจากการดำเนินงานเฉลี่ยเดือนละ ${exnAmt(inM)} แปลว่า!!ยอดรับยังไม่พอจ่ายแม้แต่ค่าใช้จ่ายประจำ!!` : `ยอดรับจากการดำเนินงานครอบคลุมค่าใช้จ่ายประจำได้ **${exnP(inM / Math.max(1, fixed) * 100)}**`);
         }
         const vol = rows.sort((a,b) => (b.max - b.min) - (a.max - a.min))[0];
@@ -487,7 +528,7 @@
         if(ups.length) s.push(`${vs} หมวดที่จ่ายเพิ่มขึ้นมากที่สุดคือ` + exnList(ups.map((x,i) => i === 0 ? `!!${sh(x.k)} ราว ${exnAmt(x.d)}!!` : `${sh(x.k)} ราว ${exnAmt(x.d)}`)));
         if(downs.length) s.push("ส่วนหมวดที่จ่ายลดลงคือ" + exnList(downs.map(x => `${sh(x.k)} ราว ${exnAmt(x.d)}`)));
       }
-      F["stmt.trend"] = { say: s };
+      F["stmt.trend"] = { say: s.length > 1 ? s : [] };
     }
 
     /* 12) ปิดท้าย: เงินสดเพียงพอถึงเมื่อไหร่ (คิด ณ สิ้นช่วงที่เลือก) */
@@ -503,10 +544,14 @@
       if(burn > 0){
         s.push(`สุดท้ายเรื่องความเพียงพอของเงินสด ช่วง 6 เดือนล่าสุด การดำเนินงานรวมการลงทุนใช้เงินเฉลี่ยราว ${exnAmt(burn)}ต่อเดือน`);
         if(cash <= 0) s.push("!!เงินที่ใช้ได้จริงไม่เหลือแล้ว!! รายจ่ายช่วงถัดไปต้องพึ่งเงินเข้าใหม่หรือเงินกู้ทั้งหมด");
-        else s.push(`ด้วย${UC.part ? `เงินที่ใช้ได้จริงราว ${exnAmt(cash)}` : "เงินสดที่มีอยู่"} ${runway < 3 ? `!!จะใช้ได้ราว ${runTxt}!!` : `**จะใช้ได้ราว ${runTxt}**`} หรือถึงประมาณ${runOut} ถ้าไม่มีเงินกู้เข้ามาเพิ่ม`);
+        else s.push(`ด้วย${UC.part ? `เงินที่ใช้ได้จริงราว ${exnAmt(cash)}` : `เงินสดที่มีอยู่ราว ${exnAmt(cash)}`} ${runway < 3 ? `!!จะใช้ได้ราว ${runTxt}!!` : `**จะใช้ได้ราว ${runTxt}**`} หรือถึงประมาณ${runOut} ถ้าไม่มีเงินกู้เข้ามาเพิ่ม`);
         if(need > 0) s.push(`ถ้าต้องการสำรองเงินไว้ ${EXN_BUFFER_MONTHS} เดือน บริษัท!!ต้องหาเงินเพิ่มอีกราว ${exnAmt(need)}!!`);
         s.push(`จึงขอให้ผู้บริหารพิจารณา **แหล่งเงินสำหรับช่วงถัดไป**` + (up[0] ? ` และ**แนวทางควบคุม${sh(up[0].k)}** ซึ่งเป็นรายการที่เพิ่มขึ้นมากที่สุด` : ""));
-      } else s.push(`สุดท้ายเรื่องความเพียงพอของเงินสด **การดำเนินงานรวมการลงทุนสร้างเงินสดได้เองราว ${exnAmt(-burn)}ต่อเดือน** จึงไม่ต้องพึ่งเงินกู้`);
+      } else {
+        s.push(`สุดท้ายเรื่องความเพียงพอของเงินสด **การดำเนินงานรวมการลงทุนสร้างเงินสดได้เองราว ${exnAmt(-burn)}ต่อเดือน** จึงไม่ต้องพึ่งเงินกู้`);
+        if(cash > 0) s.push(`ตอนนี้มี${UC.part ? "เงินที่ใช้ได้จริง" : "เงินสด"}ราว ${exnAmt(cash)} เพียงพอสำหรับรายจ่ายช่วงถัดไป และวางแผนใช้เงินส่วนเกินได้`);
+      }
+      s.push("ขอจบส่วนของกระแสเงินสดไว้เท่านี้");
       F["stmt.close"] = { say: s, prompts: ["เรื่องที่ขอให้ผู้บริหารพิจารณา"] };
     }
     return F;
@@ -521,7 +566,8 @@
     if (which === "pnl") {
       /* ★ BIO: เขียนตามกล่องบนหน้า P&L ของ BIO (Pareto แหล่งรายได้/ค่าใช้จ่าย · กราฟรายเดือน · โดนัท · คะแนนสุขภาพ ·
          CFO Insight · ไม่มีงบประมาณ) — % ทุกตัวคิดจาก "รายได้รวม" (ขาย + รายได้อื่น) แบบเดียวกับหน้า (PL_compute)
-         ตัวเลขทุกตัวมาจากค่าที่หน้าคิดแล้วส่งมา (comp / groups / accounts / k / health / recs) → ตรงกับบนจอเสมอ */
+         ตัวเลขทุกตัวมาจากค่าที่หน้าคิดแล้วส่งมา (comp / groups / accounts / k / health / recs) → ตรงกับบนจอเสมอ
+         ★ (2026-11-26) บทพูดลื่นขึ้น — ข้อแรกของแต่ละกรอบเปิดเรื่อง + ตัวเลขหลักแบบพูด แล้วค่อยความหมาย/สาเหตุ/ข้อสรุป */
       if (!d || !d.comp || !d.groups || !d.lastMonth || d.isSample) return null;
       const n = d.lastMonth, G = d.groups, C = d.comp, K = d.k || {};
       const MF = (d.monthsFull && d.monthsFull.length === 12) ? d.monthsFull : EXN_MON_FULL;
@@ -546,23 +592,28 @@
       const pct = v => rev ? v / rev * 100 : 0;
       const profitMonths = idxAll.filter(i => (Number(C.netProfit[i]) || 0) > 0).map(mName);
       const span = n > 1 ? `ตั้งแต่${mName(0)}ถึง${mName(n - 1)} ${yr}` : `เดือน${mName(0)} ${yr}`;
+      const perP = n > 1 ? "ช่วงนี้" : "เดือนนี้";
       const isStock = nm => /ต้นงวด|ปลายงวด|คงเหลือ|สำเร็จรูป|ระหว่างผลิต|ระหว่างทำ|สต็อก|stock|inventory/i.test(String(nm || ""));   // = PL_isStock ของหน้า
       const accts = g => ((d.accounts && d.accounts[g]) || []).filter(a => !isStock(a.name)).map(a => ({ name: String(a.name || a.code || "").trim(), arr: a.arr || [], total: sum(a.arr || []) }));
       const revName = nm => String(nm || "").replace(/^รายได้\s*(จาก)?\s*/, "").trim() || nm;   // "รายได้จากการขาย…" → "การขาย…"
       const isPay = nm => /เงินเดือน|ค่าจ้าง|สวัสดิการ|บุคลากร|พนักงาน/.test(nm) && !/จ้างเหมา/.test(nm);
 
       F["pnl.brief"] = { say: [
-        `สำหรับงบกำไรขาดทุน${span} ภาพรวมบริษัท${net < 0 ? "ยังขาดทุน" : "มีกำไร"}`,
+        `ต่อไปเป็นงบกำไรขาดทุน${span} ซึ่งดูผลประกอบการตามหลักบัญชี คือรายได้ที่รับรู้ หักต้นทุนและค่าใช้จ่ายของช่วงเดียวกัน`,
+        `${perP}บริษัทมีรายได้รวมราว **${exnAmt(rev)}** และ${net < 0 ? `!!ขาดทุนสุทธิราว ${exnAmt(net)}!!` : `**มีกำไรสุทธิราว ${exnAmt(net)}**`}` + (rev > 0 ? ` หรือ${net < 0 ? "ขาดทุน" : "กำไร"} ${exnP(pct(net))} ของรายได้` : ""),
         net < 0 ? `ประเด็นหลักที่อยากให้เห็นคือ ${revUp ? "**รายได้โตต่อเนื่อง** แต่" : ""}!!ค่าใช้จ่ายขายและบริหารรวมดอกเบี้ยยังสูงกว่ากำไรขั้นต้น!! บริษัทจึงยังไม่ถึงจุดคุ้มทุน`
           : `ประเด็นหลักที่อยากให้เห็นคือ **บริษัทมีกำไรจากการดำเนินงาน**${revUp ? " และ**รายได้โตต่อเนื่อง**" : ""}`,
       ] };
 
       {
-        const s = [`เริ่มจากอัตรากำไรขั้นต้น **${exnP(gm)}** หมายความว่าขายได้ 100 บาท เหลือ ${Math.round(gm)} บาทหลังหักต้นทุนขาย`];
+        const s = [`เริ่มจากรายได้ลงไปถึงกำไร รายได้รวมหักต้นทุนขายแล้ว เหลือกำไรขั้นต้นราว **${exnAmt(gp)}**`];
+        s.push(`คิดเป็นอัตรากำไรขั้นต้น **${exnP(gm)}** หมายความว่าขายได้ 100 บาท เหลือ ${Math.round(gm)} บาทหลังหักต้นทุนขาย`);
         s.push(`แต่ค่าใช้จ่ายขายและบริหารรวมดอกเบี้ยสูงถึง **${exnP(pct(opex + fin))} ของรายได้รวม**` + (gp > 0 && opex + fin > gp ? ` หรือ !!${((opex + fin) / gp).toFixed(1)} เท่าของกำไรขั้นต้น!!` : ""));
         if (other < -1000) s.push(`และ!!รายได้อื่นติดลบราว ${exnAmt(other)}!! ซึ่งกดกำไรสุทธิลงอีก`);
         if (net < 0 && gp > 0 && opex + fin > gp) s.push("ข้อสรุปจึงเป็นว่า **ปัญหาอยู่ที่ค่าใช้จ่าย ไม่ใช่ต้นทุนขาย**");
-        F["pnl.kpi"] = { say: s };
+        else if (net < 0 && gp <= 0) s.push("ข้อสรุปจึงเป็นว่า !!ต้นทุนขายสูงจนไม่เหลือกำไรขั้นต้น!! ต้องทบทวนราคาขายและต้นทุนสินค้าก่อน");
+        else if (net >= 0) s.push(`สรุปคือ **กำไรขั้นต้นพอครอบคลุมค่าใช้จ่ายทั้งหมด** เหลือเป็นกำไรสุทธิราว ${exnAmt(net)}`);
+        F["pnl.kpi"] = { say: s.slice(0, 5) };
       }
 
       {
@@ -570,9 +621,10 @@
         if (!(gmR > 0)) F["pnl.breakeven"] = { say: ["ช่วงนี้!!คำนวณจุดคุ้มทุนไม่ได้!! เพราะกำไรขั้นต้นไม่เป็นบวก"] };
         else {
           const beM = fixed / gmR / n, revM = rev / n, gap = beM - revM;
-          const s = [`จุดคุ้มทุนอยู่ที่รายได้ราว **${exnAmt(beM)}ต่อเดือน** ตอนนี้บริษัททำได้ ${exnP(revM / beM * 100)}` + (n >= 2 && revL > 0 ? ` และช่วง${lL}ขยับมาเป็น **${exnP(revL / beM * 100)}**` : "")];
+          const s = [`จุดคุ้มทุนคือระดับรายได้ที่กำไรขั้นต้นพอดีกับค่าใช้จ่ายทั้งหมด ซึ่งตอนนี้อยู่ที่รายได้ราว **${exnAmt(beM)}ต่อเดือน**`];
+          s.push(`เทียบกับที่ทำได้จริงเฉลี่ยเดือนละ ${exnAmt(revM)} หรือ ${exnP(revM / beM * 100)} ของจุดคุ้มทุน` + (n >= 2 && revL > 0 ? ` และช่วง${lL}ขยับมาเป็น **${exnP(revL / beM * 100)}**` : ""));
           if (gap > 0) s.push(`ทางที่จะไปถึงจุดคุ้มทุนมีสองทาง คือ**เพิ่มยอดขายอีกราว ${exnAmt(gap)}ต่อเดือน** หรือ**ลดค่าใช้จ่ายลงราว ${exnAmt((fixed - gp) / n)}ต่อเดือน** หรือทำทั้งสองทางควบคู่กัน`);
-          else s.push("ตอนนี้**รายได้สูงกว่าจุดคุ้มทุนแล้ว**");
+          else s.push(`ตอนนี้**รายได้สูงกว่าจุดคุ้มทุนแล้ว** ราว ${exnAmt(-gap)}ต่อเดือน ส่วนเกินนี้คือส่วนที่กลายเป็นกำไร`);
           F["pnl.breakeven"] = { say: s, prompts: ["แนวทางเพิ่มรายได้ / ลดค่าใช้จ่าย"] };
         }
       }
@@ -590,18 +642,24 @@
           else if (netL < netE) s.push(`ผลคือผลประกอบการต่อเดือน!!แย่ลง!!จาก${netE < 0 ? "ขาดทุน" : "กำไร"} ${exnAmt(netE)} เป็น${netL < 0 ? "ขาดทุน" : "กำไร"} ${exnAmt(netL)}`);
         }
         s.push(profitMonths.length === 0 ? `และตลอดช่วงนี้ !!ขาดทุนทุกเดือน!!` : profitMonths.length === n ? `และตลอดช่วงนี้ **มีกำไรทุกเดือน**` : `และตลอดช่วงนี้มีกำไร **${profitMonths.length === 1 ? "เพียงเดือนเดียว" : profitMonths.length + " จาก " + n + " เดือน"}** คือ${exnAnd(profitMonths.slice(0, 6))}`);
-        F["pnl.table"] = { say: s };
+        if (n >= 3) {
+          const nv = idxAll.map(i => Number(C.netProfit[i]) || 0);
+          const hi = nv.indexOf(Math.max(...nv)), lo = nv.indexOf(Math.min(...nv));
+          if (nv[lo] < 0 && hi !== lo) s.push(`เดือนที่ผลประกอบการดีที่สุดคือ**${mName(hi)}** ${nv[hi] < 0 ? "ขาดทุนเพียง" : "กำไร"}ราว ${exnAmt(nv[hi])} ส่วนเดือนที่หนักที่สุดคือ${mName(lo)} ขาดทุนราว ${exnAmt(nv[lo])}`);
+        }
+        F["pnl.table"] = { say: s.slice(0, 5) };
       }
 
       {
         const s = [];
         const revAcc = ["saleGoods", "otherIncome"].flatMap(accts).filter(a => a.total > 0).sort((a, b) => b.total - a.total);
         const revSum = revAcc.reduce((t, a) => t + a.total, 0) || 1;
+        if (rev > 0) s.push(`ด้านแหล่งรายได้ ${perP}มีรายได้รวมราว **${exnAmt(rev)}**` + (n > 1 ? ` หรือเฉลี่ยเดือนละ ${exnAmt(rev / n)}` : ""));
         if (revAcc.length) {
           let t = `รายได้หลักมาจาก**${revName(revAcc[0].name)} ถึง ${exnP(revAcc[0].total / revSum * 100)}**`;
           if (n >= 2) { const w2 = exnChgS(avg(revAcc[0].arr, lI), avg(revAcc[0].arr, eI)); if (w2 && w2 !== "ใกล้เคียงเดิม") t += ` และ${w2} จากช่วง${eL}`; }
           s.push(t);
-          if (revAcc[1]) s.push(`รองลงมาคือ${revName(revAcc[1].name)} ${exnP(revAcc[1].total / revSum * 100)}` + (revAcc[0].total / revSum >= 0.7 ? " — !!รายได้กระจุกอยู่ที่แหล่งเดียว!!" : ""));
+          if (revAcc[1]) s.push(`รองลงมาคือ${revName(revAcc[1].name)} ${exnP(revAcc[1].total / revSum * 100)}` + (revAcc[0].total / revSum >= 0.7 ? " ซึ่งแปลว่า!!รายได้ยังกระจุกอยู่ที่แหล่งเดียว!!" : ""));
         }
         F["pnl.revenue"] = { say: s };
       }
@@ -611,10 +669,11 @@
         if (n >= 3) {
           const rv = idxAll.map(i => Number(revArr[i]) || 0);
           const hi = rv.indexOf(Math.max(...rv)), lo = rv.indexOf(Math.min(...rv));
-          s.push(`รายได้แต่ละเดือนไม่เท่ากัน เดือนที่สูงที่สุดคือ**${mName(hi)}** ราว ${exnAmt(rv[hi])} ส่วนเดือนที่ต่ำที่สุดคือ${mName(lo)} ราว ${exnAmt(rv[lo])}`);
+          s.push(`จากกราฟรายเดือน รายได้แต่ละเดือนไม่เท่ากัน เดือนที่สูงที่สุดคือ**${mName(hi)}** ราว ${exnAmt(rv[hi])} ส่วนเดือนที่ต่ำที่สุดคือ${mName(lo)} ราว ${exnAmt(rv[lo])}`);
         }
         const lossM = idxAll.filter(i => (Number(C.netProfit[i]) || 0) < 0).length;
         if (n >= 2) s.push(lossM === 0 ? "เส้นกำไรสุทธิ**อยู่เหนือศูนย์ทุกเดือน**" : lossM === n ? "เส้นกำไรสุทธิ!!อยู่ใต้ศูนย์ทุกเดือน!! คือรายได้แต่ละเดือนยังไม่พอค่าใช้จ่าย" : `เส้นกำไรสุทธิอยู่ใต้ศูนย์ ${lossM} จาก ${n} เดือน`);
+        if (n >= 2 && opxE > 0) { const ow = exnChgS(opxL, opxE); if (ow && ow !== "ใกล้เคียงเดิม") s.push(`ส่วนเส้นค่าใช้จ่ายขายและบริหาร ช่วง${lL}${ow} จากช่วง${eL}` + (opxL > opxE && !revUp ? " ขณะที่!!รายได้ไม่ได้โตตาม!!" : "")); }
         F["pnl.trend"] = { say: s };
       }
 
@@ -627,7 +686,7 @@
         ].filter(c => c.total > 0.005).sort((a, b) => b.total - a.total);
         const grand = cats.reduce((t, c) => t + c.total, 0) || 1;
         const s = [];
-        if (cats.length) s.push(`ค่าใช้จ่ายส่วนใหญ่คือ**${cats[0].name} ${exnP(cats[0].total / grand * 100)}**` + (cats[1] ? ` รองลงมาคือ${cats[1].name} ${exnP(cats[1].total / grand * 100)}` : ""));
+        if (cats.length) s.push(`ต่อมาดูว่าเงินถูกใช้ไปกับอะไร ค่าใช้จ่ายส่วนใหญ่คือ**${cats[0].name} ${exnP(cats[0].total / grand * 100)}**` + (cats[1] ? ` รองลงมาคือ${cats[1].name} ${exnP(cats[1].total / grand * 100)}` : ""));
         const hr = ["admin", "selling"].flatMap(accts).filter(a => isPay(a.name)).reduce((t, a) => t + a.total, 0);
         if (hr > 0) s.push(`ส่วนเงินเดือนและบุคลากรราว ${exnAmt(hr / n)}ต่อเดือน เป็น**ต้นทุนคงที่** ที่ไม่ลดตามยอดขาย`);
         if (fin > 0 && rev > 0) s.push(`ดอกเบี้ยจ่ายคิดเป็น ${fin / rev > 0.03 ? "!!" : "**"}${exnP(fin / rev * 100)} ของรายได้รวม${fin / rev > 0.03 ? "!!" : "**"} หรือราว ${exnAmt(fin / n)}ต่อเดือน`);
@@ -638,7 +697,7 @@
         if (rev > 0) s.push(net < 0
           ? `ถ้าดูว่ารายได้ไปไหน รายได้ทุก 100 บาท บริษัท!!จ่ายออกไป ${Math.round(100 + Math.abs(pct(net)))} บาท!! คือต้นทุนขาย ${Math.round(pct(cost))} บาท ค่าใช้จ่ายขายและบริหาร ${Math.round(pct(opex))} บาท และดอกเบี้ย ${Math.round(pct(fin))} บาท`
           : `ถ้าดูว่ารายได้ไปไหน รายได้ทุก 100 บาท เป็นต้นทุนขาย ${Math.round(pct(cost))} บาท ค่าใช้จ่ายขายและบริหาร ${Math.round(pct(opex))} บาท ดอกเบี้ย ${Math.round(pct(fin))} บาท และ**เหลือเป็นกำไร ${Math.round(pct(net))} บาท**`);
-        F["pnl.expense"] = { say: s, prompts: cats.slice(0, 2).map(c => `แผนควบคุม${c.name}`) };
+        F["pnl.expense"] = { say: s.slice(0, 5), prompts: cats.slice(0, 2).map(c => `แผนควบคุม${c.name}`) };
       }
 
       {
@@ -646,16 +705,21 @@
         const subs = ((H && H.subs) || []).filter(x => x && x.score != null).slice().sort((a, b) => a.score - b.score);
         if (H && H.overall != null && subs.length) {
           F["pnl.health"] = { say: [
-            `คะแนนสุขภาพทางการเงินรวมอยู่ที่ ${H.overall} คะแนน ซึ่งอยู่ในระดับ${H.overall >= 70 ? "**ดี**" : H.overall >= 45 ? "เฝ้าระวัง" : "!!ต้องดำเนินการ!!"}`,
+            `เมื่อรวมตัวชี้วัดหลักเป็นคะแนนเดียว คะแนนสุขภาพทางการเงินอยู่ที่ ${H.overall} คะแนน ซึ่งอยู่ในระดับ${H.overall >= 70 ? "**ดี**" : H.overall >= 45 ? "เฝ้าระวัง" : "!!ต้องดำเนินการ!!"}`,
             `ด้านที่ฉุดคะแนนคือ!!${exnShortName(subs[0].name)}!!` + (subs[1] && subs[1].score < 70 ? ` และ!!${exnShortName(subs[1].name)}!!` : ""),
-            `ส่วนจุดแข็งคือด้าน**${exnShortName(subs[subs.length - 1].name)}**`,
+            subs[subs.length - 1].score >= 60 ? `ส่วนจุดแข็งคือด้าน**${exnShortName(subs[subs.length - 1].name)}** ซึ่งควรรักษาไว้`
+              : `ด้านที่ดีที่สุดตอนนี้คือ${exnShortName(subs[subs.length - 1].name)} แต่ก็ยังอยู่ใน${subs[subs.length - 1].score >= 45 ? "ระดับเฝ้าระวัง" : "!!ระดับที่ต้องดำเนินการ!!"}`,
           ] };
         }
       }
 
+      const good = [], bad = [];   // ข้อสรุป: เรื่องดีรวมกันก่อน แล้ว "แต่" เรื่องที่ต้องระวัง
+      if (revUp) good.push("ยอดขายดีขึ้น");
+      (net < 0 ? bad : good).push(net < 0 ? "ค่าใช้จ่ายยังสูงเกินกว่าที่รายได้รับไหว" : "บริษัทมีกำไร");
       F["pnl.insight"] = { say: [
-        `โดยสรุป ${revUp ? "**ยอดขายดีขึ้น** และ" : ""}อัตรากำไรขั้นต้น ${exnP(gm)} แต่${net < 0 ? "!!ค่าใช้จ่ายยังสูงเกินกว่าที่รายได้รับไหว!!" : "**บริษัทมีกำไร**"}`,
+        "โดยสรุป " + (good.length ? `**${exnAnd(good)}**` : `อัตรากำไรขั้นต้นอยู่ที่ ${exnP(gm)}`) + (bad.length ? ` แต่!!${exnAnd(bad)}!!` : ""),
         ...((d.recs || []).slice(0, 2).map((r, i) => exnRecPt(r, i))),
+        "ขอจบส่วนงบกำไรขาดทุนไว้เท่านี้",
       ], prompts: ["เรื่องที่ขอให้ผู้บริหารพิจารณา"] };
     } else {
       const b = d && d.bs, rows = (d && d.rows) || [];
@@ -669,7 +733,7 @@
       const eqNeg = T.eq != null && T.eq < 0;
       // แยกบรรทัดตามหมวดของงบ (section → group → line)
       let sec = "", grp = "";
-      const CA = [], NCL = [], EQL = [];
+      const CA = [], CL = [], NCL = [], EQL = [];
       rows.forEach(r => {
         const lb = String(r.label || "").trim();
         if (r.kind === "section") { sec = lb; grp = ""; return; }
@@ -677,6 +741,7 @@
         if (r.kind !== "line" || r.cur == null || Math.abs(r.cur) <= 0.5) return;
         if (/ส่วนของ(ผู้ถือหุ้น|เจ้าของ)/.test(grp)) EQL.push({ name: lb, v: r.cur });
         else if (/หนี้สิน/.test(sec) && /ไม่หมุนเวียน/.test(grp)) NCL.push({ name: lb, v: r.cur });
+        else if (/หนี้สิน/.test(sec) && /หมุนเวียน/.test(grp)) CL.push({ name: lb, v: r.cur });
         else if (sec === "สินทรัพย์" && /หมุนเวียน/.test(grp) && !/ไม่หมุนเวียน/.test(grp)) CA.push({ name: lb, v: r.cur });
       });
       NCL.sort((x, y) => Math.abs(y.v) - Math.abs(x.v));
@@ -690,19 +755,40 @@
       const recvTop = comp.length && /^ลูกหนี้/.test(comp[0].name);
       const liqOkTxt = cr != null && cr >= 1;
 
+      /* ★ (2026-11-26) บทพูดลื่นขึ้น — เปิดเรื่อง + ตัวเลขหลักแบบพูด → ความหมาย → เทียบช่วงก่อน (ถ้าไฟล์มีคอลัมน์ปีก่อน) */
+      const chg = x => (x && x.cur != null && x.prev != null && isFinite(x.cur) && isFinite(x.prev)) ? Number(x.cur) - Number(x.prev) : null;
+      // คอลัมน์เปรียบเทียบ: POG = "ปี 2568" → "สิ้นปี 2568" · BIO = "ณ 30 มิ.ย. 2568" → "วันที่ 30 มิถุนายน 2568"
+      const pl0 = exnMonExpand(exnStrip(b.prevLabel || "").replace(/^ณ\s*(วันที่\s*)?/, "").trim());
+      const prevL = !pl0 ? "" : /^ปี/.test(pl0) ? "สิ้น" + pl0 : /^\d/.test(pl0) ? "วันที่ " + pl0 : pl0;
+      const owner = EQ.replace(/^ส่วนของ/, "");
       F["bal.brief"] = { say: [
-        `ต่อไปเป็นงบแสดงฐานะการเงิน ณ ${asof}`,
+        `ต่อไปเป็นงบแสดงฐานะการเงิน ณ ${asof} ซึ่งบอกว่าบริษัทมีสินทรัพย์อะไรบ้าง มีหนี้สินเท่าไร และเหลือเป็นทุนของ${owner}เท่าไร`,
         eqNeg ? `ประเด็นหลักคือ !!หนี้สินมากกว่าสินทรัพย์ ทำให้${EQ}ติดลบ!! ขณะที่สภาพคล่องระยะสั้น${liqOkTxt ? "**ยังพอไหว**" : "!!ค่อนข้างตึงตัว!!"}`
           : `ประเด็นหลักคือ **สินทรัพย์มากกว่าหนี้สิน ${EQ}เป็นบวก** และสภาพคล่องระยะสั้น${liqOkTxt ? "**ยังพอไหว**" : "!!ค่อนข้างตึงตัว!!"}`,
       ] };
-      F["bal.hero"] = { say: T.ta ? (eqNeg ? [
-        `ถ้านำสินทรัพย์ทั้งหมดไปชำระหนี้ บริษัท!!ยังขาดอยู่ราว ${exnAmt(T.eq)}!!`,
-        `หรือพูดอีกแบบคือ หนี้สินเป็น **${(T.tl / Math.max(1, T.ta)).toFixed(1)} เท่าของสินทรัพย์ที่มีอยู่**`,
-      ] : [`หนี้สินคิดเป็น **${exnP(T.tl / Math.max(1, T.ta) * 100)} ของสินทรัพย์** ส่วนที่เหลือเป็นเงินทุนของ${EQ.replace(/^ส่วนของ/, "")}`]) : [] };
       {
         const s = [];
-        if (cashL && T.cl > 0) s.push(`ในตารางงบ เงินสดครอบคลุมหนี้สินหมุนเวียนได้ **${exnP(cash / T.cl * 100)}**` + (cash < T.cl ? (recvTop ? " ส่วนที่เหลือต้องพึ่ง**การเก็บเงินจากลูกหนี้**" : " ส่วนที่เหลือ!!ต้องพึ่งสินทรัพย์อื่นมาจ่ายหนี้ระยะสั้น!!") : " ถือว่า**เพียงพอ**"));
-        if (NCL.length) s.push(`หนี้ก้อนใหญ่ของหนี้สินไม่หมุนเวียนคือ**${NCL[0].name}** ราว ${exnAmt(NCL[0].v)} ซึ่งไม่ต้องคืนภายใน 1 ปี` + (/กู้/.test(NCL[0].name) ? " แต่!!มีภาระดอกเบี้ยต่อเนื่อง!!" : ""));
+        if (T.ta) {
+          s.push(`เริ่มจากตัวเลขหลัก บริษัทมีสินทรัพย์รวมราว **${exnAmt(T.ta)}** หนี้สินรวมราว ${exnAmt(T.tl)} ${EQ}จึง${eqNeg ? `!!ติดลบราว ${exnAmt(T.eq)}!!` : `เป็นบวกราว **${exnAmt(T.eq)}**`}`);
+          if (eqNeg) {
+            s.push("หมายความว่าถ้านำสินทรัพย์ทั้งหมดไปชำระหนี้ บริษัท!!ยังขาดอยู่เท่ากับส่วนที่ติดลบนี้!!");
+            s.push(`หรือพูดอีกแบบคือ หนี้สินเป็น **${(T.tl / Math.max(1, T.ta)).toFixed(1)} เท่าของสินทรัพย์ที่มีอยู่**`);
+          } else s.push(`หนี้สินคิดเป็น **${exnP(T.tl / Math.max(1, T.ta) * 100)} ของสินทรัพย์** ส่วนที่เหลือเป็นเงินทุนของ${owner}`);
+          const dA = chg(m.totalAssets), dL = chg(m.totalLiab), dE = chg(m.equity);
+          if (prevL && dA != null && dL != null && (Math.abs(dA) > 1000 || Math.abs(dL) > 1000))
+            s.push(`เมื่อเทียบกับ${prevL} สินทรัพย์${dA >= 0 ? "เพิ่มขึ้น" : "ลดลง"}ราว ${exnAmt(dA)} หนี้สิน${dL >= 0 ? "เพิ่มขึ้น" : "ลดลง"}ราว ${exnAmt(dL)}` +
+              (dE != null && Math.abs(dE) > 1000 ? ` ${EQ}จึง${dE >= 0 ? "**เพิ่มขึ้น" : "!!ลดลง"}ราว ${exnAmt(dE)}${dE >= 0 ? "**" : "!!"}` : ""));
+        }
+        F["bal.hero"] = { say: s };
+      }
+      {
+        const s = [];
+        const caTop = CA.slice().sort((x, y) => y.v - x.v)[0];
+        if (caTop && !/^เงินสด/.test(caTop.name) && T.ca > 0) s.push(`ในตารางงบ สินทรัพย์หมุนเวียนก้อนใหญ่ที่สุดคือ**${caTop.name}** ราว ${exnAmt(caTop.v)} หรือ ${exnP(caTop.v / T.ca * 100)} ของสินทรัพย์หมุนเวียน`);
+        if (cashL && T.cl > 0) s.push(`${s.length ? "ส่วน" : "ในตารางงบ "}เงินสดครอบคลุมหนี้สินหมุนเวียนได้ **${exnP(cash / T.cl * 100)}**` + (cash < T.cl ? (recvTop ? " ส่วนที่เหลือต้องพึ่ง**การเก็บเงินจากลูกหนี้**" : " ส่วนที่เหลือ!!ต้องพึ่งสินทรัพย์อื่นมาจ่ายหนี้ระยะสั้น!!") : " ถือว่า**เพียงพอ**"));
+        const clTop = CL.slice().sort((x, y) => Math.abs(y.v) - Math.abs(x.v))[0], nclTop = NCL[0];
+        if (clTop && (!nclTop || Math.abs(clTop.v) > Math.abs(nclTop.v))) s.push(`หนี้ก้อนใหญ่ที่สุดคือ**${clTop.name}** ราว ${exnAmt(clTop.v)} ซึ่ง!!เป็นหนี้ระยะสั้นที่ต้องจ่ายภายใน 1 ปี!!` + (/กู้/.test(clTop.name) ? " และมีภาระดอกเบี้ย" : ""));
+        else if (nclTop && Math.abs(nclTop.v) >= Math.max(1, T.tl || 0) * 0.05) s.push(`หนี้ก้อนใหญ่ของหนี้สินไม่หมุนเวียนคือ**${nclTop.name}** ราว ${exnAmt(nclTop.v)} ซึ่งไม่ต้องคืนภายใน 1 ปี` + (/กู้/.test(nclTop.name) ? " แต่!!มีภาระดอกเบี้ยต่อเนื่อง!!" : ""));
         if (cap > 0 && loss < 0) s.push(`และ!!ขาดทุนสะสมสูงกว่าทุนที่ชำระแล้วถึง ${(Math.abs(loss) / cap).toFixed(1)} เท่า!!`);
         F["bal.table"] = { say: s };
       }
@@ -710,39 +796,52 @@
         const s = [];
         if (comp.length) {
           const top = comp[0].name;
-          s.push(`สินทรัพย์ **${exnP(comp[0].pct * 100)} เป็น${top}**` + (/^ลูกหนี้/.test(top) ? " สภาพคล่องจึงขึ้นอยู่กับ**การเก็บเงินลูกหนี้ให้ตรงเวลา**" : /^เงินสด/.test(top) ? " ซึ่ง**เป็นเงินสดที่นำไปใช้ได้ทันที**" : /สินค้า|งานระหว่างทำ|ต้นทุนงาน/.test(top) ? " ซึ่ง!!เงินจมอยู่กับงานที่ยังไม่ได้วางบิล!!" : ""));
-          const nca = (T.ta && v(rows.find(r => /^รวมสินทรัพย์ไม่หมุนเวียน$/.test(String(r.label || "").trim())))) ? v(rows.find(r => /^รวมสินทรัพย์ไม่หมุนเวียน$/.test(String(r.label || "").trim()))) / T.ta : 0;
-          if (nca > 0.2) s.push(`อีกราว ${exnP(nca * 100)} เป็นสินทรัพย์ไม่หมุนเวียน ซึ่ง!!เปลี่ยนเป็นเงินสดได้ช้า!!`);
+          s.push(`ถ้าดูโครงสร้างสินทรัพย์ **${exnP(comp[0].pct * 100)} เป็น${top}**` + (/^ลูกหนี้/.test(top) ? " สภาพคล่องจึงขึ้นอยู่กับ**การเก็บเงินลูกหนี้ให้ตรงเวลา**" : /^เงินสด/.test(top) ? " ซึ่ง**เป็นเงินสดที่นำไปใช้ได้ทันที**" : /สินค้า|งานระหว่างทำ|ต้นทุนงาน/.test(top) ? " ซึ่ง!!เงินจมอยู่กับงานที่ยังไม่ได้วางบิล!!" : ""));
+          if (comp[1] && comp[1].pct >= 0.05) s.push(`รองลงมาคือ${comp[1].name} ${exnP(comp[1].pct * 100)}` + (comp[2] && comp[2].pct >= 0.05 ? ` และ${comp[2].name} ${exnP(comp[2].pct * 100)}` : ""));
+          const ncaRow = rows.find(r => /^รวมสินทรัพย์ไม่หมุนเวียน$/.test(String(r.label || "").trim()));
+          const nca = (T.ta && v(ncaRow)) ? v(ncaRow) / T.ta : 0;
+          if (nca > 0.2) s.push(`เมื่อรวมแล้ว สินทรัพย์ไม่หมุนเวียนคิดเป็นราว ${exnP(nca * 100)} ของสินทรัพย์ทั้งหมด ซึ่ง!!เปลี่ยนเป็นเงินสดได้ช้า!!`);
         }
         F["bal.assets"] = { say: s };
       }
-      F["bal.funding"] = { say: T.tl > 0 ? [
-        T.ncl != null ? `หนี้สิน **${exnP(T.ncl / T.tl * 100)} เป็นหนี้สินไม่หมุนเวียน**` + (T.ncl / T.tl >= 0.5 ? " แรงกดดันในระยะสั้นจึงยังต่ำ" : " ที่เหลือเป็น!!หนี้ระยะสั้นที่ต้องจ่ายภายใน 1 ปี!!") : "",
-        eqNeg ? `แต่!!${EQ}ติดลบ!! แปลว่าสินทรัพย์ทั้งหมดของบริษัทได้เงินทุนมาจากหนี้` : "",
-      ].filter(Boolean) : [] };
+      {
+        const s = [];
+        if (T.tl > 0 && T.ta) {
+          s.push(eqNeg ? `ด้านแหล่งเงินทุน !!สินทรัพย์ทั้งหมดได้เงินมาจากหนี้!! เพราะ${EQ}ติดลบ`
+            : `ด้านแหล่งเงินทุน สินทรัพย์ทุก 100 บาท มาจากหนี้สิน ${Math.round(T.tl / T.ta * 100)} บาท และจากเงินทุนของ${owner} ${100 - Math.round(T.tl / T.ta * 100)} บาท`);
+          if (T.ncl != null) s.push(`ในหนี้สินทั้งหมด **${exnP(T.ncl / T.tl * 100)} เป็นหนี้สินไม่หมุนเวียน**` + (T.ncl / T.tl >= 0.5 ? " แรงกดดันในระยะสั้นจึงยังต่ำ" : ` ที่เหลือราว ${exnAmt(T.tl - T.ncl)} เป็น!!หนี้ระยะสั้นที่ต้องจ่ายภายใน 1 ปี!!`));
+          const dL = chg(m.totalLiab);
+          if (prevL && dL != null && Math.abs(dL) > Math.max(1000, T.tl * 0.05)) s.push(`เมื่อเทียบกับ${prevL} หนี้สินรวม${dL > 0 ? "!!เพิ่มขึ้น" : "**ลดลง"}ราว ${exnAmt(dL)}${dL > 0 ? "!!" : "**"}`);
+        }
+        F["bal.funding"] = { say: s };
+      }
       {
         const R = d.ratios || [];
         const liq = R.filter(r => /สภาพคล่อง|เงินทุนหมุนเวียน/.test(r.name)), cap2 = R.filter(r => /หนี้สิน|ส่วนของ/.test(r.name));
         const liqOk = liq.length && liq.every(r => r.status !== "bad"), capBad = cap2.length && cap2.every(r => r.status === "bad");
         const s = [];
-        if (cr != null) s.push(`ด้านสภาพคล่อง หนี้ระยะสั้นทุก 1 บาท มีสินทรัพย์หมุนเวียนรองรับ ${cr.toFixed(2)} บาท ซึ่ง${cr >= 1 ? "**ผ่านเกณฑ์**" : "!!ยังไม่ผ่านเกณฑ์!!"}`);
+        if (cr != null) s.push(`ต่อมาเป็นอัตราส่วนทางการเงิน ด้านสภาพคล่อง หนี้ระยะสั้นทุก 1 บาท มีสินทรัพย์หมุนเวียนรองรับ ${cr.toFixed(2)} บาท ซึ่ง${cr >= 1 ? "**ผ่านเกณฑ์**" : "!!ยังไม่ผ่านเกณฑ์!!"}`);
+        if (T.ca != null && T.cl != null && cr != null) { const wc = T.ca - T.cl; s.push(`หรือมีเงินทุนหมุนเวียนสุทธิ${wc >= 0 ? `เป็นบวกราว **${exnAmt(wc)}**` : `!!ติดลบราว ${exnAmt(wc)}!!`}`); }
         if (capBad) s.push(`${cr != null && cr >= 1 ? "แต่" : "และ"}อัตราส่วนด้านโครงสร้างทุน!!ไม่ผ่านทุกตัว!!` + (eqNeg ? ` เพราะ${EQ}ติดลบ` : ""));
         if (liqOk && capBad) s.push("สรุปคือ **ระยะสั้นยังไม่เร่งด่วน แต่โครงสร้างทุนในระยะยาวต้องแก้ไข**");
         else if (!liqOk && capBad) s.push("สรุปคือ !!ต้องดูแลทั้งการชำระหนี้ระยะสั้นและโครงสร้างทุนไปพร้อมกัน!!");
+        else if (liqOk && !capBad && cr != null) s.push("สรุปคือ **อัตราส่วนหลักยังอยู่ในระดับที่รับได้**");
         F["bal.ratios"] = { say: s };
         const subs = R.filter(r => r.score != null).map(r => ({ name: r.name, score: r.score })).sort((a, b) => a.score - b.score);
         if (d.overallScore != null && subs.length) {
           const H = d.overallScore;
           F["bal.health"] = { say: [
-            `คะแนนฐานะการเงินรวมอยู่ที่ ${H} คะแนน ซึ่งอยู่ในระดับ${H >= 70 ? "**ดี**" : H >= 45 ? "ปานกลาง" : "!!ต้องปรับปรุง!!"}`,
+            `เมื่อรวมทุกอัตราส่วนเป็นคะแนนเดียว ฐานะการเงินรวมอยู่ที่ ${H} คะแนน ซึ่งอยู่ในระดับ${H >= 70 ? "**ดี**" : H >= 45 ? "ปานกลาง" : "!!ต้องปรับปรุง!!"}`,
             `ด้านที่ฉุดคะแนนคือ!!${exnShortName(subs[0].name)}!!` + (subs[1] ? ` และ!!${exnShortName(subs[1].name)}!!` : ""),
-            `ส่วนจุดแข็งคือด้าน**${exnShortName(subs[subs.length - 1].name)}**`,
+            subs[subs.length - 1].score >= 60 ? `ส่วนจุดแข็งคือด้าน**${exnShortName(subs[subs.length - 1].name)}** ซึ่งควรรักษาไว้`
+              : `ด้านที่ดีที่สุดตอนนี้คือ${exnShortName(subs[subs.length - 1].name)} แต่ก็ยังอยู่ใน${subs[subs.length - 1].score >= 45 ? "ระดับปานกลาง" : "!!ระดับที่ต้องปรับปรุง!!"}`,
           ] };
         }
       }
       F["bal.insight"] = { say: [
-        eqNeg ? `โดยสรุป สภาพคล่องระยะสั้น${liqOkTxt ? "**ยังพอไหว** แต่" : "!!ตึงตัว!! และ"}!!ทุนติดลบจากขาดทุนสะสม โดยเงินทุนส่วนใหญ่มาจากหนี้!!` : `โดยสรุป **ฐานะการเงินมั่นคง ${EQ}เป็นบวก**`,
+        eqNeg ? `โดยสรุป สภาพคล่องระยะสั้น${liqOkTxt ? "**ยังพอไหว** แต่" : "!!ตึงตัว!! และ"}!!ทุนติดลบจากขาดทุนสะสม โดยเงินทุนส่วนใหญ่มาจากหนี้!!` : `โดยสรุป **ฐานะการเงินมั่นคง ${EQ}เป็นบวก**` + (liqOkTxt ? " และสภาพคล่องยังพอไหว" : " แต่!!สภาพคล่องระยะสั้นยังตึงตัว!!"),
         ...((d.recs || []).slice(0, 2).map((r, i) => exnRecPt(r, i))),
+        "ขอจบส่วนงบแสดงฐานะการเงินไว้เท่านี้",
       ], prompts: ["เรื่องที่ขอให้ผู้บริหารพิจารณา"] };
     }
     return F;
@@ -775,6 +874,7 @@
     }
     exnRefreshPop();
     exnRenderFab();
+    if (exnScOpen()) exnRenderScript();
   }
 
   const _exnTimers = {};
@@ -806,6 +906,7 @@
       const st2 = document.getElementById("exnSt_" + key.replace(/\./g, "_"));   // ป๊อปอัพอาจถูกวาดใหม่ระหว่างรอ
       if (st2) { st2.textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }); st2.style.color = "#047857"; }
       exnRenderFab();
+      if (exnScOpen()) exnRenderScript();
     } catch (e) {
       const st2 = document.getElementById("exnSt_" + key.replace(/\./g, "_"));
       if (st2) { st2.textContent = "บันทึกไม่สำเร็จ: " + ((e && e.message) || e); st2.style.color = "#b91c1c"; }
@@ -865,7 +966,7 @@
   /* ---------- ติดตั้ง/ถอด (★ POG: หน้าเป็น React — ปุ่ม/ป๊อปอัพวางใน <body> แล้วถอดเองตอนออกจากหน้า) ---------- */
   function exnEnsureRoot(scope) {
     const old = document.getElementById("exnRoot");
-    if (!exnIsPresenter() || !scope) { if (old) old.remove(); document.body.classList.remove("exn-tap"); return null; }
+    if (!exnIsPresenter() || !scope) { if (old) old.remove(); document.body.classList.remove("exn-tap", "exn-sc-open"); return null; }
     exnInjectCss();
     exnInstallClick();
     document.body.classList.toggle("exn-tap", exnTapGet());
@@ -889,6 +990,8 @@
     exnBindTargets();
     exnLoad();
     exnRenderFab();
+    exnRenderScript();
+    exnAfterMount();
     exnPsyMounted();   // เปลี่ยนแท็บ/ช่วงเวลา = หน้าวาดใหม่ → บอกจอใหญ่
   }
   /* หน้างบกำไรขาดทุน / งบแสดงฐานะการเงิน — เรียกจาก useEffect ของหน้า (ทุกครั้งที่ข้อมูลเปลี่ยน)
@@ -906,6 +1009,8 @@
     else exnRefreshPop();
     exnLoad();
     exnRenderFab();
+    exnRenderScript();
+    exnAfterMount();
     exnPsyMounted();
   }
   function exnUnmount(scope) {
@@ -915,7 +1020,7 @@
     const r = document.getElementById("exnRoot"); if (r) r.remove();
     if (EXN.scope) EXN.scope.classList.remove("exn-scope");
     EXN.scope = null; EXN.ctx = null;
-    document.body.classList.remove("exn-tap");
+    document.body.classList.remove("exn-tap", "exn-sc-open");   // แผงบทพูดหายไปกับ #exnRoot → คืนเมนูซ้ายของแอป
   }
 
   /* ═════ หน้าจอ (ยกจาก Benya exec-notes.js บรรทัด 815–1130 · แก้ ★ POG) ═════ */
@@ -939,7 +1044,7 @@
     #exnMenu .exn-it{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:left;border:none;background:none;font:inherit;font-size:13.5px;color:#0f172a;padding:8px 10px;border-radius:9px;cursor:pointer}
     #exnMenu .exn-it:hover{background:rgba(124,58,237,.08)} #exnMenu .exn-it small{color:#94a3b8;font-size:11.5px;white-space:nowrap}
     #exnMenu .exn-it.has b{color:#5b21b6}
-    #exnPop{position:fixed;z-index:960;width:min(390px,calc(100vw - 20px));max-height:min(74vh,640px);overflow-y:auto;-webkit-overflow-scrolling:touch;
+    #exnPop{position:fixed;z-index:960;width:min(390px,calc(100vw - 20px));max-width:calc(100vw - 20px);-webkit-overflow-scrolling:touch;
       background:linear-gradient(160deg,rgba(255,255,255,.80),rgba(248,245,255,.70));-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
       border:1px solid rgba(255,255,255,.85);border-radius:20px;box-shadow:0 24px 60px rgba(30,27,75,.22),0 2px 8px rgba(30,27,75,.08),inset 0 1px 0 rgba(255,255,255,.9);
       padding:12px 16px 12px;color:#0f172a;animation:exnIn .16s ease-out}
@@ -967,7 +1072,50 @@
     .exn-err{font-size:13px;color:#b91c1c;background:#fef2f2;border-radius:9px;padding:8px 10px;margin:6px 0}
     body.exn-tap .exn-scope [data-exn]{cursor:pointer}
     .exn-hl{outline:2px solid rgba(124,58,237,.7)!important;outline-offset:4px;border-radius:14px;box-shadow:0 0 0 7px rgba(124,58,237,.10)!important;transition:box-shadow .15s}
-    @media print{#exnFab,#exnMenu,#exnPop{display:none!important}}`;
+    #exnScript .exn-badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;letter-spacing:.2px;color:#fff;background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:4px 10px;border-radius:999px;box-shadow:0 4px 10px rgba(79,70,229,.25);white-space:nowrap}
+    #exnScript .exn-sc{font-size:11.5px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+    #exnScript .exn-x{margin-left:auto;border:none;background:rgba(15,23,42,.06);border-radius:999px;width:28px;height:28px;font-size:17px;line-height:1;cursor:pointer;color:#475569;flex:none}
+    #exnScript .exn-pts{list-style:none;margin:0;padding:0}
+    #exnScript .exn-pts li{position:relative;padding:5px 0 5px 16px;font-size:15px;line-height:1.6}
+    #exnScript .exn-pts li::before{content:"";position:absolute;left:3px;top:14px;width:7px;height:7px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#6366f1)}
+    #exnScript .exn-pts li + li{border-top:1px solid rgba(148,163,184,.18)}
+    #exnScript mark.exn-em{background:linear-gradient(180deg,transparent 52%,rgba(167,139,250,.42) 52%);color:#3b0764;font-weight:700;padding:0 2px;border-radius:2px}
+    #exnScript mark.exn-rk{background:linear-gradient(180deg,transparent 52%,rgba(248,113,113,.34) 52%);color:#991b1b;font-weight:700;padding:0 2px;border-radius:2px}
+    #exnScript .exn-note{font-size:14.5px;line-height:1.55;color:#1e1b4b;background:rgba(250,204,21,.16);border-left:3px solid #f59e0b;border-radius:8px;padding:6px 10px;margin:4px 0;white-space:pre-wrap}
+    #exnScript .exn-nb{border:none;background:none;color:#6d28d9;font:inherit;font-size:13px;font-weight:600;padding:4px 2px;cursor:pointer}
+    #exnScript .exn-msg{font-size:13px;color:#64748b;background:rgba(241,245,249,.7);border-radius:9px;padding:8px 10px;margin:6px 0}
+    :root{--exn-scw:min(380px,36vw)}
+    body.exn-sc-open .app,body.exn-sc-open .app.sb-collapsed{grid-template-columns:1fr!important}
+    body.exn-sc-open .sb,body.exn-sc-open .sb-scrim{display:none!important}
+    body.exn-sc-open .main{padding-left:var(--exn-scw)}
+    #exnScript{position:fixed;left:0;top:0;bottom:0;width:var(--exn-scw);z-index:940;display:flex;flex-direction:column;
+      background:linear-gradient(165deg,rgba(255,255,255,.88),rgba(245,243,255,.82));-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%);
+      border-right:1px solid rgba(124,58,237,.18);box-shadow:8px 0 30px rgba(30,27,75,.10);color:#0f172a;animation:exnIn .16s ease-out}
+    #exnScript .exn-shd{display:flex;align-items:center;gap:8px;padding:14px 14px 8px}
+    #exnScript .exn-sbar{display:flex;align-items:center;gap:10px;padding:0 14px 10px;font-size:12px;color:#64748b;border-bottom:1px solid rgba(124,58,237,.12)}
+    #exnScript .exn-one{display:inline-flex;align-items:center;gap:5px;font-weight:600;color:#5b21b6;cursor:pointer;white-space:nowrap;background:rgba(124,58,237,.08);border-radius:999px;padding:4px 10px}
+    #exnScript .exn-one input{margin:0;accent-color:#7c3aed}
+    #exnScript .exn-sl{flex:1;overflow-y:auto;padding:6px 12px 90px;position:relative;-webkit-overflow-scrolling:touch}
+    #exnScript .exn-sg{font-size:11.5px;font-weight:700;color:#94a3b8;letter-spacing:.3px;margin:14px 6px 6px}
+    #exnScript .exn-sg.cur{color:#6d28d9}
+    #exnScript .exn-ss{border-radius:14px;padding:8px 10px;margin:0 0 6px;border:1px solid transparent;transition:background .15s,border-color .15s,box-shadow .15s}
+    #exnScript .exn-ss.act{background:rgba(255,255,255,.95);border-color:rgba(124,58,237,.38);box-shadow:0 6px 18px rgba(124,58,237,.13)}
+    #exnScript .exn-ss.oth{opacity:.6}
+    #exnScript .exn-sh{display:flex;align-items:center;gap:8px;cursor:pointer}
+    #exnScript .exn-sn{flex:none;width:24px;height:24px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+    #exnScript .exn-ss.act .exn-sn{background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff}
+    #exnScript .exn-sttl{font-weight:700;font-size:14.5px;color:#1e1b4b;flex:1;min-width:0}
+    #exnScript .exn-sh small{color:#7c3aed;font-size:11.5px;white-space:nowrap}
+    #exnScript .exn-sb{padding:2px 0 2px 32px}
+    #exnScript .exn-psy{font-size:11.5px;font-weight:700;border-radius:999px;padding:3px 9px;white-space:nowrap;flex:none}
+    #exnScript .exn-psy.ok{color:#047857;background:#d1fae5}#exnScript .exn-psy.bad{color:#b91c1c;background:#fee2e2}
+    #exnScript .exn-nav{display:flex;gap:8px;padding:10px 12px 12px;border-top:1px solid rgba(124,58,237,.14);background:rgba(255,255,255,.7)}
+    #exnScript .exn-nav button{border:none;border-radius:14px;font:inherit;cursor:pointer;padding:12px 12px;line-height:1.25;text-align:left}
+    #exnScript .exn-nav .pv{flex:none;width:74px;background:#ede9fe;color:#5b21b6;font-weight:700;font-size:15px;text-align:center}
+    #exnScript .exn-nav .nx{flex:1;min-width:0;background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;box-shadow:0 8px 18px rgba(79,70,229,.28)}
+    #exnScript .exn-nav .nx b{display:block;font-size:16px}#exnScript .exn-nav .nx small{display:block;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #exnScript .exn-nav button:disabled{opacity:.35;cursor:default}
+    @media print{#exnFab,#exnMenu,#exnPop,#exnScript{display:none!important} body.exn-sc-open .main{padding-left:0}}`;
     document.head.appendChild(s);
   }
   function exnHoverDev(){ try{ return window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches; }catch(e){ return false; } }
@@ -985,7 +1133,8 @@
     const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
     const castBad = !!(cs && cs.ok === false);
     fab.title = "บทวิเคราะห์ผู้นำเสนอ (เห็นเฉพาะบัญชีนี้)" + (cast ? (castBad ? "\nแคสหน้าจอไม่สำเร็จ: " + (cs.msg || "") : "\nกำลังแคสหน้าจอ — จอที่เปิด \"โหมดแคสหน้าจอ\" แสดงตามหน้าจอนี้") : "");
-    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้กรอบเพื่อดูบทวิเคราะห์" : "แตะกรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "") + (cast ? (castBad ? " · 📡 แคสไม่สำเร็จ" : " · 📡 แคสอยู่") : "");
+    const sc = exnScGet();
+    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้" : "แตะ") + (sc ? "กรอบ = ไปที่บทพูดในแผงซ้าย" : "กรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "") + (cast ? (castBad ? " · 📡 แคสไม่สำเร็จ" : " · 📡 แคสอยู่") : "");
   }
   function exnCloseMenu(){ const m = document.getElementById("exnMenu"); if(m) m.remove(); }
   function exnToggleMenu(){
@@ -999,6 +1148,7 @@
     const m = document.createElement("div"); m.id = "exnMenu";
     const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
     m.innerHTML = `<div class="exn-mt">${esc2(C.scopeLbl)} · เห็นเฉพาะบัญชีนี้</div>
+      <div class="exn-sw ${exnScGet() ? "on" : ""}" onclick="Exn.exnScriptToggle()"><span>บทพูดทั้งหน้า (แผงด้านซ้าย)</span><i></i></div>
       ${P ? `<div class="exn-sw ${cast ? "on" : ""}" onclick="Exn.exnPsyToggle()"><span>📡 แคสหน้าจอไปจอใหญ่ (จอที่เปิด "โหมดแคสหน้าจอ" แสดงตาม)</span><i></i></div>` : ""}
       ${cs && cs.ok === false ? `<div class="exn-err">แคสหน้าจอไม่สำเร็จ: ${esc2(cs.msg || "")}</div>` : ""}
       <div class="exn-sw ${on ? "on" : ""}" onclick="Exn.exnSetTap(${on ? "false" : "true"})"><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบเพื่อดูบทวิเคราะห์</span><i></i></div>
@@ -1009,6 +1159,7 @@
   function exnSetTap(v){ exnTapSet(!!v); document.body.classList.toggle("exn-tap", !!v); exnRenderFab(); exnCloseMenu(); exnToggleMenu(); }
   function exnOpenFromMenu(key){
     exnCloseMenu();
+    if(exnScOpen()) return exnScriptGo(key);   // แผงบทพูดเปิดอยู่ → ไปที่กรอบ + บทพูดในแผง
     const S0 = exnState(), def = exnFrameDefs().find(f => f.key === key);
     if(S0.ctx && S0.ctx.kind === "exec" && def && def.tab && (edState().tab || "summary") !== def.tab){
       edSetTab(def.tab);
@@ -1073,46 +1224,61 @@
     exnPlace(p, k.el, k.x, k.y);
     const t = p.querySelector(`textarea[data-key="${key}"]`); if(t) t.focus();
   }
-  /* วางกล่องข้างกรอบ: เลือกตำแหน่งที่ทับกรอบน้อยที่สุด · ไม่ทับจุดที่ชี้ · ใกล้จุดที่ชี้ที่สุด */
+  /* วางกล่องข้างกรอบ: เลือกตำแหน่งที่ทับกรอบน้อยที่สุด · ไม่ทับจุดที่ชี้ · ใกล้จุดที่ชี้ที่สุด
+     ★ (2026-11-26 ยกจาก Benya — ผู้ใช้ขอ "แก้ไขกรอบข้อความ…เหมือนเบญญา") ไม่มีแถบเลื่อนในกล่อง (อ่านลำบาก)
+       บทวิเคราะห์ยาว = ขยายกล่องให้กว้างขึ้นจนข้อความพอดี: ลองกว้างทีละขั้น 390 → 470 → 560 → 660 → 780 → 900
+       ขั้นแรกที่วางข้าง/เหนือ/ใต้กรอบได้โดยไม่ทับกรอบ = ใช้ · ไม่มีขั้นไหนวางได้ = ขั้นที่แคบที่สุดที่ทั้งกล่องอยู่ในจอ
+       แล้ววางให้ทับกรอบน้อยสุด (ทับกรอบได้ ดีกว่าต้องเลื่อนอ่าน) · ยาวเกินจอแม้กว้างสุด = เลื่อนในกล่อง (กรณีสุดท้ายเท่านั้น) */
   function exnPlace(p, el, x, y){
     const vw = document.documentElement.clientWidth || window.innerWidth, vh = window.innerHeight;
-    const g = 14, pad = 10;
-    p.style.maxHeight = "";
-    const w = p.offsetWidth;
-    let h = p.offsetHeight;
-    const cx = v => Math.min(Math.max(pad, v), vw - w - pad), cy = v => Math.min(Math.max(pad, v), vh - h - pad);
+    const g = 14, pad = 10, fitH = vh - pad * 2;
+    // ★ แผงบทพูดทั้งหน้าเปิดอยู่ = พื้นที่ซ้ายเป็นของแผง → วางกล่องเฉพาะฝั่งเนื้อหา (ไม่บังบทพูดที่กำลังอ่าน)
+    const scEl = document.getElementById("exnScript"), x0 = scEl ? Math.max(0, scEl.getBoundingClientRect().right) : 0, lp = x0 + pad;
+    p.style.maxHeight = "none"; p.style.overflowY = "visible";
+    const maxW = vw - lp - pad;
+    const widths = [390, 470, 560, 660, 780, 900].filter(v => v < maxW);
+    if(!widths.length || widths[widths.length - 1] < Math.min(maxW, 900)) widths.push(Math.min(maxW, 900));
     const r = el ? el.getBoundingClientRect() : null;
-    const put = (L, T) => { p.style.left = L + "px"; p.style.top = T + "px"; };
-    if(r){
-      const vr = { l: Math.max(0, r.left), t: Math.max(0, r.top), r: Math.min(vw, r.right), b: Math.min(vh, r.bottom) };
-      // 1) ข้างกรอบ (ขวาก่อน แล้วซ้าย) — ไม่ทับกรอบเลย
-      if(vw - pad - (vr.r + g) >= w) return put(vr.r + g, cy(y - h / 2));
-      if((vr.l - g) - pad >= w) return put(vr.l - g - w, cy(y - h / 2));
-      // 2) กรอบกว้างเต็มแถว → วางเหนือ/ใต้กรอบฝั่งที่ว่างมากกว่า และจำกัดความสูงให้พอดีช่อง (เลื่อนอ่านในกล่อง)
-      const below = vh - pad - (vr.b + g), above = (vr.t - g) - pad, space = Math.max(below, above);
-      if(space >= 170){
-        if(h > space){ p.style.maxHeight = space + "px"; h = p.offsetHeight; }
-        return put(cx(x - w / 2), below >= above ? vr.b + g : vr.t - g - h);
+    const vr = r ? { l: Math.max(x0, r.left), t: Math.max(0, r.top), r: Math.min(vw, r.right), b: Math.min(vh, r.bottom) } : null;
+    const put = (L, T) => { p.style.left = Math.round(L) + "px"; p.style.top = Math.round(T) + "px"; };
+    const sizeAt = w => { p.style.width = w + "px"; return { w: p.offsetWidth, h: p.offsetHeight }; };
+    // 1) วางโดยไม่ทับกรอบ: ข้างขวา → ข้างซ้าย → ใต้/เหนือกรอบ (ฝั่งที่ว่างกว่าก่อน)
+    if(vr){
+      const right = vw - pad - (vr.r + g), left = (vr.l - g) - lp, below = vh - pad - (vr.b + g), above = (vr.t - g) - pad;
+      for(const w0 of widths){
+        const { w, h } = sizeAt(w0);
+        const cy = v => Math.min(Math.max(pad, v), vh - h - pad), cx = v => Math.min(Math.max(lp, v), vw - w - pad);
+        if(h <= fitH && right >= w) return put(vr.r + g, cy(y - h / 2));
+        if(h <= fitH && left >= w) return put(vr.l - g - w, cy(y - h / 2));
+        const order = below >= above ? [["b", below], ["a", above]] : [["a", above], ["b", below]];
+        for(const [side, space] of order){
+          if(h <= space) return put(cx(x - w / 2), side === "b" ? vr.b + g : vr.t - g - h);
+        }
       }
     }
+    // 2) วางไม่ทับไม่ได้ → ขั้นที่แคบที่สุดที่อยู่ในจอทั้งกล่อง แล้วเลือกตำแหน่งที่ทับกรอบน้อยสุด
+    let sz = null;
+    for(const w0 of widths){ sz = sizeAt(w0); if(sz.h <= fitH) break; }
+    let { w, h } = sz;
+    if(h > fitH){ p.style.maxHeight = fitH + "px"; p.style.overflowY = "auto"; h = p.offsetHeight; }   // ยาวเกินจอแม้กว้างสุด
+    const cx = v => Math.min(Math.max(lp, v), vw - w - pad), cy = v => Math.min(Math.max(pad, v), vh - h - pad);
     const cands = [];
     if(r){
       cands.push([r.right + g, y - h / 2], [r.left - g - w, y - h / 2], [x - w / 2, r.bottom + g], [x - w / 2, r.top - g - h]);
       cands.push([r.right + g, r.top], [r.left - g - w, r.top]);
     }
     cands.push([x + 24, y + 24], [x - w - 24, y + 24], [x + 24, y - h - 24], [x - w - 24, y - h - 24]);
-    cands.push([vw - w - pad, pad], [pad, pad], [vw - w - pad, vh - h - pad], [pad, vh - h - pad]);
-    const vis = r ? { l: Math.max(0, r.left), t: Math.max(0, r.top), r: Math.min(vw, r.right), b: Math.min(vh, r.bottom) } : null;
+    cands.push([vw - w - pad, pad], [lp, pad], [vw - w - pad, vh - h - pad], [lp, vh - h - pad]);
     let best = null;
     for(const [l0, t0] of cands){
       const L = cx(l0), T = cy(t0);
       let ov = 0;
-      if(vis){ const ox = Math.max(0, Math.min(L + w, vis.r) - Math.max(L, vis.l)), oy = Math.max(0, Math.min(T + h, vis.b) - Math.max(T, vis.t)); ov = ox * oy; }
+      if(vr){ const ox = Math.max(0, Math.min(L + w, vr.r) - Math.max(L, vr.l)), oy = Math.max(0, Math.min(T + h, vr.b) - Math.max(T, vr.t)); ov = ox * oy; }
       const onPtr = (x >= L - 20 && x <= L + w + 20 && y >= T - 20 && y <= T + h + 20) ? 1e9 : 0;
       const score = ov * 4 + onPtr + Math.hypot(L + w / 2 - x, T + h / 2 - y);
       if(!best || score < best.s) best = { s: score, L, T };
     }
-    p.style.left = best.L + "px"; p.style.top = best.T + "px";
+    put(best.L, best.T);
   }
   function exnOpenPop(keys, x, y, frameEl, opt){
     const C = exnContext(); if(!C) return false;
@@ -1140,7 +1306,177 @@
     if(!p || !k) return;
     if(p.contains(document.activeElement)) return;   // กำลังพิมพ์อยู่ — ไม่วาดทับ
     p.innerHTML = exnPopHtml(k.keys); exnAutosize(p);
+    const b = p.getBoundingClientRect();
+    if(b.bottom > window.innerHeight - 4 || b.top < 4) exnPlace(p, k.el, k.x, k.y);   // ยาวขึ้นจนล้นจอ → วางใหม่
   }
+
+  /* ---------- แผงบทพูดทั้งหน้า (ด้านซ้าย) — ยกจาก Benya (2026-11-26) ----------
+     เปิดจากเมนู ✦ ("บทพูดทั้งหน้า") · แสดงบทพูดทุกกรอบของหน้าเรียงตามลำดับบนจอ อ่านต่อกันได้ทั้งหน้า
+     ★ ตอนเปิดแผงอยู่ ชี้/แตะกรอบบนจอ = เลื่อนแผงไปที่บทพูดของกรอบนั้น (ไม่เด้งกล่องซ้ำ)
+     ★ คลิกหัวข้อในแผง = เลื่อนหน้าไปที่กรอบนั้น (กรอบอยู่แท็บอื่น = สลับแท็บให้)
+     ★ "ทีละเรื่อง" = กางเฉพาะเรื่องที่เลือก เรื่องอื่นเหลือแค่หัวข้อ
+     ★ body.exn-sc-open = ซ่อนเมนูซ้ายของแอป (.sb) แล้วเลื่อนเนื้อหา (.main) ไปทางขวา · ถอดตอนออกจากหน้า (exnUnmount)
+     ★ ปุ่ม ‹ ก่อน / ถัดไป › ท้ายแผง = ไปกรอบถัดไปตามลำดับการประชุม ข้ามหน้าให้เอง (EXN_DECK_PAGES) */
+  function exnScGet(){ try{ return localStorage.getItem("bio-exn-script") === "1"; }catch(e){ return false; } }
+  function exnScSet(v){ try{ localStorage.setItem("bio-exn-script", v ? "1" : "0"); }catch(e){} }
+  function exnOneGet(){ try{ return localStorage.getItem("bio-exn-one") === "1"; }catch(e){ return false; } }
+  function exnOneSet(v){ try{ localStorage.setItem("bio-exn-one", v ? "1" : "0"); }catch(e){} }
+  function exnScOpen(){ return !!document.getElementById("exnScript"); }
+  function exnPsyPush(){ try{ if(window.Psy && window.Psy.push) window.Psy.push(); }catch(e){} }
+  function exnFindFrame(key){ return EXN.scope ? EXN.scope.querySelector(`[data-exn~="${key}"]`) : null; }
+  function exnRelayout(){ setTimeout(() => { try{ window.dispatchEvent(new Event("resize")); }catch(e){} }, 80); }   // กราฟวาดตามความกว้างใหม่
+  function exnScriptToggle(v){
+    exnScSet(v == null ? !exnScGet() : !!v);
+    exnCloseMenu(); exnClosePop();
+    exnRenderScript(); exnRenderFab(); exnRelayout();
+  }
+  function exnOneToggle(v){ exnOneSet(!!v); exnRenderScript(); exnScriptActivate(window._exnScActive, true); }
+  function exnScriptHtml(C){
+    const S = exnState(), notes = S.notes[C.period] || {}, one = exnOneGet();
+    const esc2 = s => (typeof esc === "function" ? esc(s) : String(s));
+    const cur = C.tab;
+    let active = window._exnScActive;
+    if(!active || !C.defs.some(f => f.key === active)) active = (C.defs.find(f => !cur || f.tab === cur) || C.defs[0] || {}).key;
+    window._exnScActive = active;
+    let list = "", lastGrp = null, n = 0;
+    C.defs.forEach(f => {
+      if(cur && f.group !== lastGrp){ list += `<div class="exn-sg ${f.tab === cur ? "cur" : ""}">${esc2(f.group || "")}${f.tab === cur ? " · แท็บที่เปิดอยู่" : ""}</div>`; lastGrp = f.group; }
+      n++;
+      const dr = C.drafts ? C.drafts[f.key] : null;
+      const pts = dr && dr.say ? (Array.isArray(dr.say) ? dr.say : [dr.say]).filter(Boolean) : [];
+      const saved = (notes[f.key] && notes[f.key].note) || "";
+      const act = f.key === active, other = !!(cur && f.tab !== cur);
+      const body = (!one || act) ? `<div class="exn-sb">
+          ${pts.length ? `<ul class="exn-pts">${pts.map(s => `<li>${exnFmtSay(s)}</li>`).join("")}</ul>` : `<div class="exn-msg">${C.drafts ? "กรอบนี้ไม่มีบทวิเคราะห์สำหรับช่วงที่เลือก" : C.noDraftMsg}</div>`}
+          ${saved.trim() ? `<div class="exn-note">${esc2(saved)}</div>` : ""}
+          <button type="button" class="exn-nb" onclick="Exn.exnScriptEdit('${f.key}')">✎ ${saved.trim() ? "แก้โน้ตของฉัน" : "เพิ่มโน้ตของฉัน"}</button>
+        </div>` : "";
+      list += `<section class="exn-ss${act ? " act" : ""}${other ? " oth" : ""}" data-key="${f.key}">
+        <div class="exn-sh" onclick="Exn.exnScriptGo('${f.key}')"><span class="exn-sn">${n}</span><span class="exn-sttl">${esc2(f.title)}</span>${other ? "<small>ไปแท็บนี้ ›</small>" : ""}</div>${body}</section>`;
+    });
+    const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
+    const psy = cast ? (cs && cs.ok === false ? `<span class="exn-psy bad" title="${esc2(cs.msg || "")}">📡 แคสไม่สำเร็จ</span>` : `<span class="exn-psy ok">📡 กำลังแคส</span>`) : "";
+    return `<div class="exn-shd"><span class="exn-badge">✦ บทพูดทั้งหน้า</span><span class="exn-sc">${esc2(C.scopeLbl)}</span>${psy}<button type="button" class="exn-x" onclick="Exn.exnScriptToggle(false)" title="ปิดแผง">×</button></div>
+      <div class="exn-sbar"><label class="exn-one"><input type="checkbox" ${one ? "checked" : ""} onchange="Exn.exnOneToggle(this.checked)"> ทีละเรื่อง</label><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบบนจอ = ไปที่บทพูดของกรอบนั้น</span></div>
+      ${S.err ? `<div class="exn-err" style="margin:8px 12px 0">${esc2(S.err)}</div>` : ""}
+      <div class="exn-sl" id="exnScList">${list}</div>
+      ${exnDeckNavHtml()}`;
+  }
+  function exnRenderScript(){
+    const root = document.getElementById("exnRoot");
+    let p = document.getElementById("exnScript");
+    const C = (root && exnIsPresenter() && exnScGet()) ? exnContext() : null;
+    if(!C){ if(p) p.remove(); document.body.classList.remove("exn-sc-open"); return; }
+    const old = document.getElementById("exnScList");
+    const keep = old ? old.scrollTop : (window._exnScScroll || 0);
+    if(!p || !root.contains(p)){ if(p) p.remove(); p = document.createElement("aside"); p.id = "exnScript"; root.appendChild(p); }
+    p.innerHTML = exnScriptHtml(C);
+    if(!document.body.classList.contains("exn-sc-open")){ document.body.classList.add("exn-sc-open"); exnRelayout(); }
+    const list = document.getElementById("exnScList");
+    if(list){ list.scrollTop = keep; list.onscroll = () => { window._exnScScroll = list.scrollTop; }; }
+  }
+  /* เลือกเรื่องในแผง (จากการชี้/แตะกรอบ หรือคลิกหัวข้อ) แล้วเลื่อนแผงไปให้เห็น */
+  function exnScriptActivate(key, force){
+    if(key) exnPsyPush();   // แคสหน้าจอ: ส่งตำแหน่งปัจจุบัน (หน้าเลื่อนไปกรอบนี้ → ส่งตามการเลื่อน)
+    if(!key || !exnScOpen()) return;
+    const changed = window._exnScActive !== key;
+    window._exnScActive = key;
+    if(exnOneGet() && (changed || force)) exnRenderScript();
+    else document.querySelectorAll("#exnScript .exn-ss").forEach(s => s.classList.toggle("act", s.getAttribute("data-key") === key));
+    const list = document.getElementById("exnScList"), sec = list && list.querySelector(`.exn-ss[data-key="${key}"]`);
+    if(sec) list.scrollTo({ top: Math.max(0, sec.offsetTop - 8), behavior: "smooth" });
+    exnPaintNav();
+  }
+  function exnScHl(el){
+    document.querySelectorAll(".exn-hl").forEach(x => { if(x !== el) x.classList.remove("exn-hl"); });
+    if(el) el.classList.add("exn-hl");
+    window._exnScHl = el || null;
+  }
+  function exnScrollTo(el){
+    const tb = document.querySelector(".topbar"), cs = tb ? getComputedStyle(tb) : null;
+    const off = (cs && cs.display !== "none" && (cs.position === "sticky" || cs.position === "fixed") ? tb.offsetHeight : 0) + 16;
+    el.style.scrollMarginTop = off + "px";
+    el.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  /* คลิกหัวข้อในแผง → ไปที่กรอบนั้นบนหน้า */
+  function exnScriptGo(key, tries){
+    const def = exnFrameDefs().find(f => f.key === key);
+    window._exnScActive = key;
+    if(EXN.ctx && EXN.ctx.kind === "exec" && def && def.tab && (edState().tab || "summary") !== def.tab){
+      if((tries || 0) > 3) return;
+      edSetTab(def.tab);   // วาดหน้าใหม่ → exnMount วาดแผงใหม่ (เรื่องที่เลือกยังอยู่)
+      setTimeout(() => exnScriptGo(key, (tries || 0) + 1), 450);
+      return;
+    }
+    exnScriptActivate(key, true);
+    exnBindTargets();
+    const el = exnFindFrame(key);
+    exnScHl(el);
+    if(el) exnScrollTo(el);
+  }
+  /* แก้โน้ตจากแผง → เปิดกล่องแก้โน้ตข้างกรอบนั้น */
+  function exnScriptEdit(key){
+    exnBindTargets();
+    const el = exnFindFrame(key);
+    const r = el ? el.getBoundingClientRect() : null;
+    const x = r ? r.left + Math.min(r.width, 500) / 2 : window.innerWidth / 2, y = r ? Math.max(80, Math.min(r.top + 60, window.innerHeight - 80)) : window.innerHeight * 0.3;
+    if(exnOpenPop([key], x, y, el, { pin:true })) exnEditNote(key);
+  }
+
+  /* ---------- ปุ่ม ‹ ก่อน / ถัดไป › ในแผงบทพูด — ข้ามหน้าต่อกันทั้งการประชุม ----------
+     ★ POG: งบกระแสเงินสด (ทุกกรอบทุกแท็บ) → งบกำไรขาดทุน → งบแสดงฐานะการเงิน · เฉพาะหน้าที่บัญชีนี้เปิดได้ (WTPAuth)
+     ★ ข้ามหน้า = จำกรอบที่จะไปไว้ (_exnPendingGo) แล้ว exnAfterMount พาไปหลังหน้าใหม่วาดเสร็จ
+     ★ กรอบที่ไม่มีบนหน้า (เช่น ไม่มีงบประมาณ / ไม่มีคะแนน) ข้ามไปเอง */
+  const EXN_DECK_PAGES = [["cashflow_present", "งบกระแสเงินสด"], ["pnl", "งบกำไรขาดทุน"], ["balance_sheet", "งบแสดงฐานะการเงิน"]];
+  function exnCanPage(r){ try{ return !window.WTPAuth || typeof window.WTPAuth.canViewPage !== "function" || window.WTPAuth.canViewPage(r); }catch(e){ return true; } }
+  function exnCtxRoute(){ const k = EXN.ctx && EXN.ctx.kind; return k === "exec" ? "cashflow_present" : k === "pnl" ? "pnl" : k === "bal" ? "balance_sheet" : ""; }
+  function exnDeck(){
+    const out = [];
+    EXN_DECK_PAGES.forEach(([r]) => {
+      if(!exnCanPage(r)) return;
+      if(r === "cashflow_present") exnFrameDefs().forEach(f => out.push({ tool:r, key:f.key, tab:f.tab, title:f.title }));
+      else exnFinFrameDefs(r === "pnl" ? "pnl" : "balance").forEach(f => out.push({ tool:r, key:f.key, title:f.title }));
+    });
+    return out;
+  }
+  function exnDeckOk(t, curT){
+    if(t.tool !== curT) return true;
+    if(t.tab && EXN.ctx && EXN.ctx.kind === "exec" && (edState().tab || "summary") !== t.tab) return true;
+    return !!exnFindFrame(t.key);
+  }
+  function exnDeckTarget(dir){
+    const deck = exnDeck(), curT = exnCtxRoute(), cur = window._exnScActive;
+    let i = deck.findIndex(d => d.tool === curT && d.key === cur);
+    if(i < 0){ const first = deck.findIndex(d => d.tool === curT); if(first < 0) return null; i = dir > 0 ? first - 1 : first; }
+    exnBindTargets();
+    for(let j = i + dir; j >= 0 && j < deck.length; j += dir){ if(exnDeckOk(deck[j], curT)) return deck[j]; }
+    return null;
+  }
+  function exnDeckNavHtml(){
+    const nx = exnDeckTarget(1), pv = exnDeckTarget(-1), curT = exnCtxRoute();
+    const pageName = t => (EXN_DECK_PAGES.find(p => p[0] === t) || ["", ""])[1];
+    const esc2 = s => (typeof esc === "function" ? esc(s) : String(s));
+    const lbl = !nx ? "จบแล้ว" : (nx.tool !== curT ? "ไปหน้า" + pageName(nx.tool) : nx.title);
+    return `<div class="exn-nav"><button type="button" class="pv" ${pv ? "" : "disabled"} onclick="Exn.exnDeckStep(-1)" title="${pv ? esc2(pv.tool !== curT ? "กลับหน้า" + pageName(pv.tool) : pv.title) : ""}">‹ ก่อน</button>
+      <button type="button" class="nx" ${nx ? "" : "disabled"} onclick="Exn.exnDeckStep(1)"><b>ถัดไป ›</b><small>${esc2(lbl)}</small></button></div>`;
+  }
+  function exnPaintNav(){ const old = document.querySelector("#exnScript .exn-nav"); if(old) old.outerHTML = exnDeckNavHtml(); }
+  function exnDeckStep(dir){
+    const t = exnDeckTarget(dir); if(!t) return;
+    if(t.tool === exnCtxRoute()){ exnScriptGo(t.key); return; }
+    exnClosePop();
+    window._exnScActive = t.key; window._exnPendingGo = t.key; window._exnScScroll = 0;
+    if(t.tool === "cashflow_present"){ try{ const st = edState(); if(st){ st.tab = t.tab || "summary"; if(CE().edSave) CE().edSave(); } }catch(e){} }
+    window.location.hash = "#" + t.tool;
+  }
+  /* เรียกท้าย exnMount / exnMountFin (เฉพาะบัญชีผู้นำเสนอ) — ข้ามหน้ามาจากปุ่ม ถัดไป/ก่อน = พาไปกรอบที่จำไว้ */
+  function exnAfterMount(){
+    const pend = window._exnPendingGo; window._exnPendingGo = null;
+    if(!pend) return;
+    const C = exnContext();
+    if(C && C.defs.some(f => f.key === pend)) setTimeout(() => exnScriptGo(pend), 350);
+  }
+
 
   /* เปิดกล่อง: คอมพิวเตอร์ = ชี้ค้าง · ไอแพด = แตะ (ดักที่ document ช่วง capture ก่อน onclick เดิมของกรอบ)
      ★ ไม่ดักปุ่ม/ช่องกรอก/ลิงก์ในกรอบ — ปุ่มบนหน้ายังกดได้ตามปกติ · ปิดโหมดได้ที่ปุ่ม ✦ */
@@ -1163,6 +1499,20 @@
       const t = e.target, pop = document.getElementById("exnPop"), menu = document.getElementById("exnMenu"), fab = document.getElementById("exnFab");
       if(pop && pop.contains(t)){ clearTimeout(_exnCloseT); clearTimeout(_exnOpenT); return; }
       if((menu && menu.contains(t)) || (fab && fab.contains(t))) return;
+      const sc = document.getElementById("exnScript");
+      if(sc){   // แผงบทพูดเปิดอยู่ → ชี้กรอบ = ไปที่บทพูดในแผง (ไม่เด้งกล่อง)
+        if(pop || sc.contains(t)) return;
+        const el = exnFrameAt(t);
+        if(el === window._exnScHl) return;
+        clearTimeout(_exnOpenT);
+        exnScHl(el);
+        if(!el) return;
+        _exnOpenT = setTimeout(() => {
+          const keys = (el.getAttribute("data-exn") || "").split(/\s+/).filter(Boolean);
+          exnScriptActivate(keys.includes(window._exnScActive) ? window._exnScActive : keys[0]);
+        }, 150);
+        return;
+      }
       const el = exnFrameAt(t);
       if(!el){
         clearTimeout(_exnOpenT);
@@ -1191,6 +1541,22 @@
       const pop = document.getElementById("exnPop"), menu = document.getElementById("exnMenu"), fab = document.getElementById("exnFab");
       if(pop && pop.contains(t)){ window._exnPin = true; return; }
       if((menu && menu.contains(t)) || (fab && fab.contains(t))) return;
+      const sc = document.getElementById("exnScript");
+      if(sc){   // แผงบทพูดเปิดอยู่ → แตะกรอบ = ไปที่บทพูดในแผง
+        if(sc.contains(t)){ if(pop) exnClosePop(); if(menu) exnCloseMenu(); return; }
+        if(!pop && !exnHoverDev() && exnTapGet() && !t.closest(EXN_SKIP)){
+          const el = exnFrameAt(t);
+          if(el){
+            const keys = (el.getAttribute("data-exn") || "").split(/\s+/).filter(Boolean);
+            exnScHl(el);
+            exnScriptActivate(keys.includes(window._exnScActive) ? window._exnScActive : keys[0]);
+            e.preventDefault(); e.stopPropagation(); return;
+          }
+        }
+        if(pop) exnClosePop();
+        if(menu) exnCloseMenu();
+        return;
+      }
       if(!exnHoverDev() && exnTapGet() && !t.closest(EXN_SKIP)){
         const el = exnFrameAt(t);
         if(el){
@@ -1205,6 +1571,8 @@
 
   /* ปุ่ม/ช่องในกล่องเรียกผ่าน window.Exn.<ชื่อ> · หน้าเรียก window.exnMount / exnMountFin / exnUnmount */
   window.Exn = { exnClosePop, exnEditNote, exnInput, exnOpenFromMenu, exnSave, exnSetTap, exnPsyToggle,
+    exnScriptToggle, exnOneToggle, exnScriptGo, exnScriptEdit, exnDeckStep,   // แผงบทพูดทั้งหน้า
+    exnContext,   // ทดสอบ: Exn.exnContext().drafts = บทพูดของหน้าที่เปิดอยู่
     exnBindTargets, exnRenderFab };   // ↑ 2 ตัวท้ายให้ present_sync.js (ติดป้ายกรอบบนจอทีวี · ป้ายสถานะแคสบนปุ่ม ✦)
   window.exnMount = exnMount; window.exnMountFin = exnMountFin; window.exnUnmount = exnUnmount;
 })();
