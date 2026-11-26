@@ -716,11 +716,16 @@
       const good = [], bad = [];   // ข้อสรุป: เรื่องดีรวมกันก่อน แล้ว "แต่" เรื่องที่ต้องระวัง
       if (revUp) good.push("ยอดขายดีขึ้น");
       (net < 0 ? bad : good).push(net < 0 ? "ค่าใช้จ่ายยังสูงเกินกว่าที่รายได้รับไหว" : "บริษัทมีกำไร");
+      // ★ (2026-11-26) BIO ขายเครื่อง BA — สรุปด้วยกำไรรายเครื่อง (ชีต "ต้นทุน" ที่หน้าโชว์ในการ์ด "ต้นทุน/กำไร ต่อเครื่อง BA")
+      const ba = d.ba && d.ba.count > 0 ? d.ba : null;
+      // ข้อเสนอบนจอเขียนตัวเลขเต็ม ("530,820 บาท") → บทพูดอ่านแบบพูด ("5.3 แสนบาท") · กำไรต่อเครื่องพูดไปแล้วในข้อก่อน ไม่ซ้ำ
+      const recSay = r => String(r).replace(/\s*\(กำไรเฉลี่ยเครื่องละ[^)]*\)/, ba ? "" : "$&").replace(/(\d[\d,]*(?:\.\d+)?)\s*บาท/g, (m0, x) => exnAmt(Number(x.replace(/,/g, ""))));
       F["pnl.insight"] = { say: [
         "โดยสรุป " + (good.length ? `**${exnAnd(good)}**` : `อัตรากำไรขั้นต้นอยู่ที่ ${exnP(gm)}`) + (bad.length ? ` แต่!!${exnAnd(bad)}!!` : ""),
-        ...((d.recs || []).slice(0, 2).map((r, i) => exnRecPt(r, i))),
+        ba ? `ถ้าดูรายเครื่อง จากข้อมูลต้นทุนขายเครื่อง BA ไป ${ba.count} เครื่อง ${ba.profit >= 0 ? `กำไรเฉลี่ยเครื่องละ **${exnAmt(ba.profit / ba.count)}**` : `!!ขาดทุนเฉลี่ยเครื่องละ ${exnAmt(ba.profit / ba.count)}!!`}` + (ba.price > 0 ? ` หรือ ${exnP(ba.profit / ba.price * 100)} ของราคาขาย` : "") : "",
+        ...((d.recs || []).slice(0, 2).map((r, i) => exnRecPt(recSay(r), i))),
         "ขอจบส่วนงบกำไรขาดทุนไว้เท่านี้",
-      ], prompts: ["เรื่องที่ขอให้ผู้บริหารพิจารณา"] };
+      ].filter(Boolean), prompts: ["เรื่องที่ขอให้ผู้บริหารพิจารณา"] };
     } else {
       const b = d && d.bs, rows = (d && d.rows) || [];
       if (!b || !rows.length || !d.m) return null;

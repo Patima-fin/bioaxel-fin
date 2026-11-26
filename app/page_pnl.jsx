@@ -496,10 +496,34 @@ function PLHealthCard({ overall, subs, gcol, gstat }) {
 
 // ข้อเสนอแนะเชิงบริหารของกล่อง CFO Insight — ใช้ร่วมกับบทวิเคราะห์ผู้นำเสนอ (exec_notes.js · pnl.insight)
 //   ให้เป็นชุดเดียวกับบนจอเสมอ (2026-11-25 · แยกออกมาจาก PLAnalytics)
-function PL_cfoRecs({ opexRatio, net, eqNeg, curRatio }) {
-  const Rc = [];
-  if (opexRatio > 0.5) Rc.push('คุมค่าใช้จ่ายขายและบริหาร — ปัจจุบัน ' + (opexRatio * 100).toFixed(0) + '% ของรายได้ · ตั้งเพดานค่าโฆษณาไม่เกิน ~25% ของยอดขาย');
-  if (net < 0) Rc.push('เร่งหาจุดคุ้มทุน — เพิ่มรายได้หรือลดค่าใช้จ่ายให้กำไรก่อนต้นทุนการเงินเป็นบวก');
+//   ★ (2026-11-26 ผู้ใช้: "เพดาน 25% ของไบโอไม่เหมือนเบญญา งานคนละอย่างกัน") เดิมยกกติกาของเว็บต้นแบบมาทั้งชุด
+//     (Benya ขายของออนไลน์: "ตั้งเพดานค่าโฆษณาไม่เกิน ~25% ของยอดขาย" · เกณฑ์ค่าใช้จ่าย > 50% ของรายได้)
+//     BIO ขายเครื่อง BA → ข้อเสนอคิดจากตัวเลขของ BIO เองเท่านั้น ไม่ใช้เกณฑ์ตัวเลขของเว็บอื่น:
+//     · ขาดทุน = ขาดเดือนละเท่าไร → เท่ากับต้องขายเครื่อง BA เพิ่มกี่เครื่อง (กำไรเฉลี่ยต่อเครื่องจากชีต "ต้นทุน" · ไม่มีชีต = บอกเป็นบาท)
+//     · ค่าใช้จ่ายขาย+บริหาร สูงกว่ากำไรขั้นต้น → ชี้ 2 บัญชีที่ใหญ่ที่สุดจริง (เดือนละเท่าไร)
+//     · กำไรจากการดำเนินงานยังบวก แต่ดอกเบี้ยทำให้ขาดทุน → ลดภาระดอกเบี้ย
+//     ห้ามใส่ "·" "/" "~" ในข้อความ — บทพูด (exnRec) แปลงเป็น "และ" / "หรือ" / "ประมาณ"
+function PL_topOpex(accts, nMon) {
+  const isStock = (n) => /ต้นงวด|ปลายงวด|คงเหลือ|สำเร็จรูป|ระหว่างผลิต|ระหว่างทำ|สต็อก|stock|inventory/i.test(String(n || ''));
+  const out = [];
+  ['selling', 'admin'].forEach(g => ((accts && accts[g]) || []).forEach(x => { if (isStock(x.name)) return; const v = PL_sum(x.arr || [], nMon); if (v > 0.5) out.push({ name: String(x.name || x.code || '').trim(), value: v }); }));
+  return out.sort((p, q) => q.value - p.value).slice(0, 2);
+}
+function PL_cfoRecs({ opexRatio, net, eqNeg, curRatio, gross, opex, fin, nMon, topOpex, ba }) {
+  const Rc = [], n = Math.max(1, nMon || 1), f0 = (v) => PL_fmt(Math.round(Math.abs(v)), { dec: 0 });
+  if (net < 0) {
+    const gap = -net / n, per = (ba && ba.count > 0 && ba.profit > 0) ? ba.profit / ba.count : 0;
+    Rc.push('เร่งหาจุดคุ้มทุน — ยังขาดทุนเฉลี่ยเดือนละ ' + f0(gap) + ' บาท ' + (per > 0
+      ? 'เท่ากับต้องขายเครื่อง BA เพิ่มราว ' + Math.max(1, Math.ceil(gap / per)) + ' เครื่องต่อเดือน (กำไรเฉลี่ยเครื่องละ ' + f0(per) + ' บาท) หรือลดค่าใช้จ่ายลงเท่ากัน'
+      : 'ต้องเพิ่มยอดขายหรือลดค่าใช้จ่ายให้ครอบคลุมส่วนนี้'));
+  }
+  if (opex > 0 && gross > 0 && opex > gross) {
+    const top = (topOpex || []).slice(0, 2);
+    Rc.push('คุมค่าใช้จ่ายขายและบริหาร — ตอนนี้ ' + (opexRatio * 100).toFixed(0) + '% ของรายได้ ซึ่งสูงกว่ากำไรขั้นต้น'
+      + (top.length ? ' ก้อนใหญ่คือ' + top.map(x => x.name + ' (เดือนละ ' + f0(x.value / n) + ' บาท)').join(' กับ') : '') + ' ควรตั้งงบรายเดือนและติดตามทุกเดือน');
+  } else if (net < 0 && fin > 0 && gross > opex && gross - opex < fin) {
+    Rc.push('ลดภาระดอกเบี้ย — กำไรจากการดำเนินงานยังเป็นบวก แต่ดอกเบี้ยเดือนละ ' + f0(fin / n) + ' บาท ทำให้ขาดทุน ควรทยอยคืนเงินกู้ดอกเบี้ยสูงหรือรีไฟแนนซ์');
+  }
   if (eqNeg) Rc.push('ปรับโครงสร้างทุน — พิจารณาแปลงเงินกู้กรรมการ/ในเครือเป็นทุน (debt-to-equity) เพื่อแก้ส่วนผู้ถือหุ้นติดลบ');
   if (curRatio != null && curRatio < 1.2) Rc.push('ดูแลสภาพคล่อง — สินทรัพย์หมุนเวียนต่อหนี้สินหมุนเวียน ' + curRatio.toFixed(2) + ' เท่า · เร่งเก็บลูกหนี้');
   if (!Rc.length) Rc.push('รักษาโมเมนตัม — คุมต้นทุนและขยายรายได้ต่อเนื่อง');
@@ -508,7 +532,7 @@ function PL_cfoRecs({ opexRatio, net, eqNeg, curRatio }) {
 
 // กล่องวิเคราะห์ P&L ทั้งหมด: 4 ชาร์ต + คะแนนสุขภาพ + CFO Insight
 //   data-exn = กรอบของบทวิเคราะห์ผู้นำเสนอ (exec_notes.js) — ชื่อ key ห้ามเปลี่ยน (เป็นกุญแจของโน้ตที่บันทึก)
-function PLAnalytics({ c, groups, model, lastMonth, bal }) {
+function PLAnalytics({ c, groups, model, lastMonth, bal, ba }) {
   const cardBox = { background: 'white', borderRadius: 12, border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(15,23,42,0.05)', padding: 16 };
   const cardH = { fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 };
   const nMon = lastMonth || 1;
@@ -557,7 +581,7 @@ function PLAnalytics({ c, groups, model, lastMonth, bal }) {
   B.push({ t: net < 0 ? 'bad' : 'good', x: (net < 0 ? 'ขาดทุน' : 'กำไร') + 'สุทธิ ' + f(net) + ' บาท อัตรา ' + pc(netMargin) });
   if (eqNeg) B.push({ t: 'bad', x: 'ส่วนของผู้ถือหุ้นติดลบ ' + f(eq) + ' บาท' + (debtRatio ? ' · Debt Ratio ' + debtRatio.toFixed(2) + ' เท่า' : '') });
   if (fin > 0.01) B.push({ t: 'warn', x: 'ต้นทุนทางการเงิน (ดอกเบี้ยจ่าย) ' + f(fin) + ' บาท กดดันกระแสเงินสด' });
-  const Rc = PL_cfoRecs({ opexRatio, net, eqNeg, curRatio });
+  const Rc = PL_cfoRecs({ opexRatio, net, eqNeg, curRatio, gross, opex, fin, nMon, topOpex: PL_topOpex(accts, nMon), ba });
   let summary = 'บริษัทมีรายได้รวม ' + f(rev) + ' บาท '
     + (growth > 0.05 ? 'เติบโต ' + (growth * 100).toFixed(0) + '% จากต้นงวด ' : growth < -0.05 ? 'ลดลง ' + (Math.abs(growth) * 100).toFixed(0) + '% จากต้นงวด ' : '')
     + 'และกำไรขั้นต้นที่ ' + (grossMargin * 100).toFixed(0) + '% ';
@@ -1032,16 +1056,18 @@ function PnLPage({ data, setData, toast }) {
       const rev = PL_sum(comp.totalRevenue, nMon), net = PL_sum(comp.netProfit, nMon), gross = PL_sum(comp.grossProfit, nMon);
       const opex = PL_sum(groups.selling, nMon) + PL_sum(groups.admin, nMon);
       const health = PL_buildHealth({ rev, net, gross, opex, revA: comp.totalRevenue.slice(0, nMon), bal });
+      const fin = PL_sum(groups.finance, nMon), ba = cb.count ? { count: cb.count, profit: cb.profit, price: cb.price } : null;
       const recs = PL_cfoRecs({ opexRatio: opex / (rev || 1), net, eqNeg: bal.eq != null && bal.eq < 0,
-        curRatio: (bal.ca != null && bal.cl) ? bal.ca / bal.cl : null });
+        curRatio: (bal.ca != null && bal.cl) ? bal.ca / bal.cl : null, gross, opex, fin, nMon,
+        topOpex: PL_topOpex(model && model.accounts, nMon), ba });
       window.exnMountFin('pnl', {
         root: pageRef.current,
         period: plYear + '-' + String(nMon).padStart(2, '0'),
         label: 'งบกำไรขาดทุน · ถึง' + (PL_MONTHS_TH_FULL[Math.max(0, nMon - 1)] || '') + ' ' + plYear,
-        data: { isSample, year: plYear, lastMonth: nMon, groups, accounts: model && model.accounts, comp, k, bal, health, recs, monthsFull: PL_MONTHS_TH_FULL },
+        data: { isSample, year: plYear, lastMonth: nMon, groups, accounts: model && model.accounts, comp, k, bal, health, recs, ba, monthsFull: PL_MONTHS_TH_FULL },
       });
     } catch (e) { console.warn('[P&L] notes', e); }
-  }, [loading, model, comp, k, bal, isSample, lastMonth, plYear]);
+  }, [loading, model, comp, k, bal, isSample, lastMonth, plYear, cb]);
   plEffect(() => () => { if (window.exnUnmount) window.exnUnmount(); }, []);
   // ★ โหมดแคสหน้าจอ (present_sync.js · แบบเว็บ Benya / Water POG) — จอทีวีสลับตารางรายเดือน/รายไตรมาสตามไอแพด
   plEffect(() => {
@@ -1520,7 +1546,7 @@ function PnLPage({ data, setData, toast }) {
       </>)}
 
       {/* ── วิเคราะห์ผลประกอบการ: ชาร์ต + คะแนนสุขภาพ + CFO Insight (แบบ finance-tools) ── */}
-      <PLAnalytics c={c} groups={groups} model={model} lastMonth={lastMonth} bal={bal} />
+      <PLAnalytics c={c} groups={groups} model={model} lastMonth={lastMonth} bal={bal} ba={cb.count ? cb : null} />
 
       {/* UPLOAD MODAL — เปิดจากปุ่ม "อัปโหลดข้อมูล" บน hero banner */}
       <Modal open={uploadOpen} onClose={() => { setUploadOpen(false); setFile(null); }} wide
