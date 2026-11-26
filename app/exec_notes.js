@@ -1114,6 +1114,7 @@
     #exnScript .exn-sb{padding:2px 0 2px 32px}
     #exnScript .exn-psy{font-size:11.5px;font-weight:700;border-radius:999px;padding:3px 9px;white-space:nowrap;flex:none}
     #exnScript .exn-psy.ok{color:#047857;background:#d1fae5}#exnScript .exn-psy.bad{color:#b91c1c;background:#fee2e2}
+    #exnScript .exn-psy.idle{color:#fff;background:linear-gradient(135deg,#7c3aed,#4f46e5);box-shadow:0 4px 10px rgba(79,70,229,.25)}
     #exnScript .exn-nav{display:flex;gap:8px;padding:10px 12px 12px;border-top:1px solid rgba(124,58,237,.14);background:rgba(255,255,255,.7)}
     #exnScript .exn-nav button{border:none;border-radius:14px;font:inherit;cursor:pointer;padding:12px 12px;line-height:1.25;text-align:left}
     #exnScript .exn-nav .pv{flex:none;width:74px;background:#ede9fe;color:#5b21b6;font-weight:700;font-size:15px;text-align:center}
@@ -1134,12 +1135,12 @@
     const notes = ctx ? (S.notes[ctx.period] || {}) : {};
     const n = Object.values(notes).filter(x => x.note && x.note.trim()).length;
     fab.className = on ? "" : "off";
-    // แคสหน้าจอ (present_sync.js): ป้ายสถานะท้ายปุ่ม — แบบ Benya "📡 กำลังแคส" / "📡 แคสไม่สำเร็จ" (Benya วางในแผงบทพูด)
+    // แคสหน้าจอ (present_sync.js): สถานะอยู่ที่ปุ่ม 📡 เหนือปุ่มนี้ / ป้ายในแผงบทพูด (หลายเครื่องผู้นำเสนอ = เครื่องนี้อาจไม่ได้ถือจอ)
     const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
     const castBad = !!(cs && cs.ok === false);
     fab.title = "บทวิเคราะห์ผู้นำเสนอ (เห็นเฉพาะบัญชีนี้)" + (cast ? (castBad ? "\nแคสหน้าจอไม่สำเร็จ: " + (cs.msg || "") : "\nกำลังแคสหน้าจอ — จอที่เปิด \"โหมดแคสหน้าจอ\" แสดงตามหน้าจอนี้") : "");
     const sc = exnScGet();
-    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้" : "แตะ") + (sc ? "กรอบ = ไปที่บทพูดในแผงซ้าย" : "กรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "") + (cast ? (castBad ? " · 📡 แคสไม่สำเร็จ" : " · 📡 แคสอยู่") : "");
+    fab.textContent = "✦ " + (on ? (exnHoverDev() ? "ชี้" : "แตะ") + (sc ? "กรอบ = ไปที่บทพูดในแผงซ้าย" : "กรอบเพื่อดูบทวิเคราะห์") : "บทวิเคราะห์ (ปิดอยู่)") + (n ? " · โน้ต " + n : "");
   }
   function exnCloseMenu(){ const m = document.getElementById("exnMenu"); if(m) m.remove(); }
   function exnToggleMenu(){
@@ -1189,6 +1190,7 @@
     }
     document.querySelectorAll(".exn-hl").forEach(el => el.classList.remove("exn-hl"));
     window._exnPopKeys = null; window._exnPin = false; window._exnEdit = {}; window._exnHoverEl = null;
+    exnPsyPush();   // แคสหน้าจอ: ทีวีเอาขอบไฮไลต์ของกล่องที่ปิดออก
   }
   function exnPopHtml(keys){
     const C = exnContext(); if(!C) return "";
@@ -1334,6 +1336,7 @@
     exnScSet(v == null ? !exnScGet() : !!v);
     exnCloseMenu(); exnClosePop();
     exnRenderScript(); exnRenderFab(); exnRelayout();
+    exnPsyPush();   // แคสหน้าจอ: เปิด/ปิดแผง = กรอบที่กำลังพูดบนทีวีเปลี่ยน
   }
   function exnOneToggle(v){ exnOneSet(!!v); exnRenderScript(); exnScriptActivate(window._exnScActive, true); }
   function exnScriptHtml(C){
@@ -1359,8 +1362,9 @@
       list += `<section class="exn-ss${act ? " act" : ""}${other ? " oth" : ""}" data-key="${f.key}">
         <div class="exn-sh" onclick="Exn.exnScriptGo('${f.key}')"><span class="exn-sn">${n}</span><span class="exn-sttl">${esc2(f.title)}</span>${other ? "<small>ไปแท็บนี้ ›</small>" : ""}</div>${body}</section>`;
     });
-    const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn()), cs = cast && P.status ? P.status() : null;
-    const psy = cast ? (cs && cs.ok === false ? `<span class="exn-psy bad" title="${esc2(cs.msg || "")}">📡 แคสไม่สำเร็จ</span>` : `<span class="exn-psy ok">📡 กำลังแคส</span>`) : "";
+    const P = window.Psy, cast = !!(P && P.remoteOn && P.remoteOn());
+    // ป้ายแคส: present_sync.js ระบายเอง (Psy.paintStatus) — ถือจอ = "กำลังแคส" · ไม่ได้ถือ = "แคสจากเครื่องนี้" (กดรับจอ) · ส่งไม่สำเร็จ
+    const psy = cast ? `<span id="exnPsyTag" class="exn-psy ok">📡 กำลังแคส</span>` : "";
     return `<div class="exn-shd"><span class="exn-badge">✦ บทพูดทั้งหน้า</span><span class="exn-sc">${esc2(C.scopeLbl)}</span>${psy}<button type="button" class="exn-x" onclick="Exn.exnScriptToggle(false)" title="ปิดแผง">×</button></div>
       <div class="exn-sbar"><label class="exn-one"><input type="checkbox" ${one ? "checked" : ""} onchange="Exn.exnOneToggle(this.checked)"> ทีละเรื่อง</label><span>${exnHoverDev() ? "ชี้" : "แตะ"}กรอบบนจอ = ไปที่บทพูดของกรอบนั้น</span></div>
       ${S.err ? `<div class="exn-err" style="margin:8px 12px 0">${esc2(S.err)}</div>` : ""}
@@ -1379,6 +1383,7 @@
     if(!document.body.classList.contains("exn-sc-open")){ document.body.classList.add("exn-sc-open"); exnRelayout(); }
     const list = document.getElementById("exnScList");
     if(list){ list.scrollTop = keep; list.onscroll = () => { window._exnScScroll = list.scrollTop; }; }
+    if(window.Psy && window.Psy.paintStatus) window.Psy.paintStatus();
   }
   /* เลือกเรื่องในแผง (จากการชี้/แตะกรอบ หรือคลิกหัวข้อ) แล้วเลื่อนแผงไปให้เห็น */
   function exnScriptActivate(key, force){
@@ -1578,6 +1583,6 @@
   window.Exn = { exnClosePop, exnEditNote, exnInput, exnOpenFromMenu, exnSave, exnSetTap, exnPsyToggle,
     exnScriptToggle, exnOneToggle, exnScriptGo, exnScriptEdit, exnDeckStep,   // แผงบทพูดทั้งหน้า
     exnContext,   // ทดสอบ: Exn.exnContext().drafts = บทพูดของหน้าที่เปิดอยู่
-    exnBindTargets, exnRenderFab };   // ↑ 2 ตัวท้ายให้ present_sync.js (ติดป้ายกรอบบนจอทีวี · ป้ายสถานะแคสบนปุ่ม ✦)
+    exnBindTargets, exnRenderFab, exnRenderScript };   // ↑ 3 ตัวท้ายให้ present_sync.js (ติดป้ายกรอบบนจอทีวี · ปุ่ม ✦ · ป้ายแคสในแผงบทพูด)
   window.exnMount = exnMount; window.exnMountFin = exnMountFin; window.exnUnmount = exnUnmount;
 })();

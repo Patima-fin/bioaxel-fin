@@ -623,32 +623,36 @@
   };
 
   /* ── โหมดแคสหน้าจอ (app/present_sync.js · แบบเว็บ Benya present_sync / Water POG /api/present-sync) ──
-   *   กระดานกลางแถวเดียว presentSync id='main' · ไอแพดผู้นำเสนอเขียน ~5 ครั้ง/วิ ระหว่างเลื่อน → ไม่ลง audit_log
+   *   กระดานกลาง presentSync · ไอแพดผู้นำเสนอเขียน ~5 ครั้ง/วิ ระหว่างเลื่อน → ไม่ลง audit_log
+   *   หลายเครื่องผู้นำเสนอ (2026-11-26): แถว 'd:<รหัสเครื่อง>' = หน้าจอของแต่ละเครื่อง · แถว 'main' = { owner: เครื่องที่กำลังแคส }
    *   RLS (supabase/present-sync.sql): อ่าน = ทุกคนที่ล็อกอิน · เขียน = presenter เท่านั้น
-   *   seq = updated_at (เวลาของ server ที่ trigger ตั้ง — เปลี่ยนทุกครั้งที่เขียน) · ageMs = อายุของสถานะ */
+   *   ageMs = อายุของแถวตาม updated_at (เวลาของ server) · seq ของแต่ละเครื่องอยู่ใน state (present_sync.js ตั้งเอง) */
   function _psyErr(e) {
     var code = e && e.code, msg = String((e && e.message) || e || '');
     if (code === '42501' || /row-level security/i.test(msg)) return new Error('ไม่มีสิทธิ์ส่ง (ต้องเป็นบัญชีผู้นำเสนอ)');
     if (code === 'PGRST205' || code === '42P01' || /presentSync/.test(msg)) return new Error('ยังไม่มีตาราง presentSync — รัน supabase/present-sync.sql');
     return e instanceof Error ? e : new Error(msg);
   }
-  WTPData.presentSyncPut = function (state) {
+  WTPData.presentSyncPut = function (state, id) {
     if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
-    return sb.from('presentSync').upsert({ id: 'main', data: state }).select('id').then(function (r) {
+    return sb.from('presentSync').upsert({ id: String(id || 'main'), data: state }).select('id').then(function (r) {
       if (r && r.error) throw _psyErr(r.error);
       if (!r || !r.data || !r.data.length) throw new Error('ไม่มีสิทธิ์ส่ง (ต้องเป็นบัญชีผู้นำเสนอ)');
       return { ok: true };
     });
   };
-  WTPData.presentSyncGet = function () {
+  /* ทุกแถวที่ยังใช้อยู่: 'main' + เครื่องที่ขยับใน 6 ชม. (แถวเครื่องเก่าค้างในตารางได้ ไม่ต้องลบ) */
+  WTPData.presentSyncList = function () {
     if (!_hasValidSession()) return Promise.reject(new Error('ต้องเข้าสู่ระบบก่อน'));
-    return sb.from('presentSync').select('data,updated_at').eq('id', 'main').limit(1).then(function (r) {
-      if (r && r.error) throw _psyErr(r.error);
-      var row = r && r.data && r.data[0];
-      if (!row || !row.data) return { state: null, seq: 0 };
-      var at = Date.parse(row.updated_at) || 0;
-      return { state: row.data, seq: row.updated_at || 0, ageMs: at ? Date.now() - at : Infinity };
-    });
+    var since = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+    return sb.from('presentSync').select('id,data,updated_at').or('id.eq.main,updated_at.gt."' + since + '"')
+      .order('updated_at', { ascending: false }).limit(60).then(function (r) {
+        if (r && r.error) throw _psyErr(r.error);
+        return ((r && r.data) || []).map(function (row) {
+          var at = Date.parse(row.updated_at) || 0;
+          return { id: String(row.id), state: row.data || null, seq: row.updated_at || 0, ageMs: at ? Math.max(0, Date.now() - at) : Infinity };
+        });
+      });
   };
 
   /* ── subscribe (React) ─────────────────────────────────────────────── */
